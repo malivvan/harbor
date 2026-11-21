@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/codec/gob"
+	"github.com/malivvan/storm/db/codec/binco"
 	"github.com/malivvan/storm/db/codec/json"
 	"github.com/malivvan/storm/db/q"
 	"github.com/stretchr/testify/require"
@@ -56,7 +56,7 @@ func TestInitMetadata(t *testing.T) {
 
 	err := db.Init(ctx, new(User))
 	require.NoError(t, err)
-	n := db.WithCodec(gob.Codec)
+	n := db.WithCodec(binco.Codec)
 	err = n.Init(ctx, new(User))
 	require.ErrorIs(t, err, ErrDifferentCodec)
 }
@@ -482,7 +482,7 @@ func TestSaveMetadata(t *testing.T) {
 	w := User{ID: 10, Name: "John"}
 	err := db.Save(ctx, &w)
 	require.NoError(t, err)
-	n := db.WithCodec(gob.Codec)
+	n := db.WithCodec(binco.Codec)
 	err = n.Save(ctx, &w)
 	require.ErrorIs(t, err, ErrDifferentCodec)
 }

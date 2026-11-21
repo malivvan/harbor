@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/codec/gob"
 	storm "github.com/malivvan/storm/db"
+	"github.com/malivvan/storm/db/codec/binco"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -100,7 +100,7 @@ func ExampleStore_Save() {
 		}
 	}()
 
-	db, err := storm.Open(ctx, bdb, nil, gob.Codec)
+	db, err := storm.Open(ctx, bdb, nil, binco.Codec)
 	if err != nil {
 		log.Fatal(err)
 	}

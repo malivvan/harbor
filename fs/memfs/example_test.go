@@ -629,21 +629,21 @@ func BenchmarkStatOperations(b *testing.B) {
 
 // BenchmarkWalk measures file tree walking performance.
 func BenchmarkWalk(b *testing.B) {
-	fs, _ := memfs.NewFS()
+	mfs, _ := memfs.NewFS()
 
 	// Setup: create a directory tree
-	fs.MkdirAll("/project/src/main", 0755)
-	fs.MkdirAll("/project/src/utils", 0755)
-	fs.MkdirAll("/project/test", 0755)
+	mfs.MkdirAll("/project/src/main", 0755)
+	mfs.MkdirAll("/project/src/utils", 0755)
+	mfs.MkdirAll("/project/test", 0755)
 	for i := 0; i < 20; i++ {
 		filename := fmt.Sprintf("/project/src/file%d.go", i)
-		file, _ := fs.Create(filename)
+		file, _ := mfs.Create(filename)
 		file.Close()
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fstools.Walk(fs, "/project", func(path string, info os.FileInfo, err error) error {
+		fs.Walk(mfs, "/project", func(path string, info os.FileInfo, err error) error {
 			return nil
 		})
 	}

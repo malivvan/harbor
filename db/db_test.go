@@ -45,7 +45,7 @@ func TestNewStorm(t *testing.T) {
 	require.Equal(t, defaultCodec, db.Codec())
 
 	var v string
-	err = db.Get(context.Background(), dbinfo, "version", &v)
+	err = db.Get(context.Background(), databaseInfo, "version", &v)
 	require.NoError(t, err)
 	require.Equal(t, Version, v)
 }
@@ -226,7 +226,7 @@ func TestCheckVersion_EmptyVersionIsInitialized(t *testing.T) {
 
 	db, err := Open(ctx, bDB, nil, nil)
 	require.NoError(t, err)
-	require.NoError(t, db.Set(ctx, dbinfo, "version", ""))
+	require.NoError(t, db.Set(ctx, databaseInfo, "version", ""))
 	require.NoError(t, db.Close())
 
 	db, err = Open(ctx, bDB, nil, nil)
@@ -234,7 +234,7 @@ func TestCheckVersion_EmptyVersionIsInitialized(t *testing.T) {
 	defer func() { require.NoError(t, db.Close()) }()
 
 	var version string
-	require.NoError(t, db.Get(ctx, dbinfo, "version", &version))
+	require.NoError(t, db.Get(ctx, databaseInfo, "version", &version))
 	require.Equal(t, Version, version)
 }
 
@@ -250,7 +250,7 @@ func TestCheckVersion_ErrorChainPreservation(t *testing.T) {
 	defer bDB.Close()
 
 	// Create a database with the default JSON codec. This writes
-	// __storm_db/version using the JSON codec.
+	// __database/version using the JSON codec.
 	seedDB, err := Open(context.Background(), bDB, nil, nil)
 	require.NoError(t, err, "create seed Store")
 	require.NoError(t, seedDB.Close(), "close seed Store")
@@ -317,7 +317,7 @@ func TestInitFailureDoesNotClose(t *testing.T) {
 
 	// Pre-seed with a conflicting codec to trigger initialization failure.
 	err = bDB.Update(func(tx *bolt.Tx) error {
-		top, err := tx.CreateBucketIfNotExists([]byte(dbinfo))
+		top, err := tx.CreateBucketIfNotExists([]byte(databaseInfo))
 		if err != nil {
 			return err
 		}

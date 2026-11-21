@@ -3,11 +3,13 @@ package db
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/malivvan/storm/db/codec"
-	"github.com/malivvan/storm/db/codec/gob"
+	"github.com/malivvan/storm/db/codec/binco"
 	"github.com/malivvan/storm/db/codec/json"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
@@ -60,11 +62,11 @@ func TestNodeWithCodec(t *testing.T) {
 		require.Equal(t, json.Codec, n.codec)
 		n = n.From("b", "c", "d").(*node)
 		require.Equal(t, json.Codec, n.codec)
-		n = db.WithCodec(gob.Codec).(*node)
+		n = db.WithCodec(binco.Codec).(*node)
 		n = n.From("e").(*node)
-		require.Equal(t, gob.Codec, n.codec)
+		require.Equal(t, binco.Codec, n.codec)
 		o := n.From("f").WithCodec(json.Codec).(*node)
-		require.Equal(t, gob.Codec, n.codec)
+		require.Equal(t, binco.Codec, n.codec)
 		require.Equal(t, json.Codec, o.codec)
 	})
 
@@ -81,12 +83,12 @@ func TestNodeWithCodec(t *testing.T) {
 
 		requireBytesEqual := func(raw []byte, expected interface{}) {
 			var u User
-			err := gob.Codec.Unmarshal(raw, &u)
+			err := binco.Codec.Unmarshal(raw, &u)
 			require.NoError(t, err)
 			require.Equal(t, expected, u)
 		}
 
-		n := db.From("a").WithCodec(gob.Codec)
+		n := db.From("a").WithCodec(binco.Codec)
 		err := n.Set(ctx, "gobBucket", "key", &User{ID: 10, Name: "John"})
 		require.NoError(t, err)
 		b, err := n.GetBytes(ctx, "gobBucket", "key")
@@ -191,7 +193,7 @@ type testUser struct {
 }
 
 // TestNode_ConsumerCanUseNode verifies that an external consumer can declare
-// and use a storm.Node.
+// and use a Node.
 func TestNode_ConsumerCanUseNode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "storm.db")
 	bDB, err := bolt.Open(path, 0600, nil)
@@ -200,7 +202,7 @@ func TestNode_ConsumerCanUseNode(t *testing.T) {
 		require.NoError(t, bDB.Close())
 	})
 
-	db, err := storm.Open(context.Background(), bDB, nil, gob.Codec)
+	db, err := Open(context.Background(), bDB, nil, binco.Codec)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, db.Close())
@@ -209,16 +211,16 @@ func TestNode_ConsumerCanUseNode(t *testing.T) {
 	ctx := context.Background()
 
 	// Exercise Node interface: From, Bucket, Codec, WithCodec.
-	var n storm.Node = db.From("tenant", "ns")
+	var n Node = db.From("tenant", "ns")
 	require.Equal(t, []string{"tenant", "ns"}, n.Bucket())
 
 	n2 := n.From("child")
 	require.Equal(t, []string{"tenant", "ns", "child"}, n2.Bucket())
 
-	require.Equal(t, gob.Codec, n.Codec())
+	require.Equal(t, binco.Codec, n.Codec())
 
-	nWithCodec := n.WithCodec(gob.Codec)
-	require.Equal(t, gob.Codec, nWithCodec.Codec())
+	nWithCodec := n.WithCodec(binco.Codec)
+	require.Equal(t, binco.Codec, nWithCodec.Codec())
 
 	// Perform a public operation through the Node.
 	err = n.Save(ctx, &testUser{ID: 1, Name: "test"})
@@ -284,7 +286,7 @@ func containsBboltType(typ reflect.Type, bboltPkg string) bool {
 // TestNodeInterface_NoBboltExposure uses reflection on the public Node interface
 // to prove that no method parameter or return type exposes a bbolt type.
 func TestNodeInterface_NoBboltExposure(t *testing.T) {
-	iface := reflect.TypeOf((*storm.Node)(nil)).Elem()
+	iface := reflect.TypeOf((*Node)(nil)).Elem()
 
 	bboltPkg := "go.etcd.io/bbolt"
 
@@ -325,8 +327,8 @@ func TestNodeInterface_NoBboltExposure(t *testing.T) {
 // - Store has no exported field recursively containing a bbolt type;
 // - NativeDB is the only method returning a bbolt type.
 func TestDBInterface_NoBboltExposure(t *testing.T) {
-	dbType := reflect.TypeOf((*storm.Store)(nil)).Elem()
-	dbPtrType := reflect.TypeOf((*storm.Store)(nil))
+	dbType := reflect.TypeOf((*Store)(nil)).Elem()
+	dbPtrType := reflect.TypeOf((*Store)(nil))
 	bboltPkg := "go.etcd.io/bbolt"
 
 	// Store has no exported field named Bolt.

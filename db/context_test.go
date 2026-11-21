@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/codec/gob"
+	"github.com/malivvan/storm/db/codec"
+	"github.com/malivvan/storm/db/codec/binco"
+	"github.com/malivvan/storm/db/codec/json"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -45,7 +48,7 @@ func TestOpen_CancelledContextDoesNotInitializeDatabase(t *testing.T) {
 
 	// No initialization work must have been performed.
 	err = bDB.View(func(tx *bolt.Tx) error {
-		require.Nil(t, tx.Bucket([]byte(dbinfo)))
+		require.Nil(t, tx.Bucket([]byte(databaseInfo)))
 		return nil
 	})
 	require.NoError(t, err)
@@ -56,31 +59,31 @@ func TestOpen_InitializationErrorDoesNotCloseBorrowedDatabase(t *testing.T) {
 
 	bDBPath := filepath.Join(dir, "borrowed.db")
 
-	// Step 1: use a non-default codec (gob) to open the borrowed Store so that the
-	// __storm_db metadata records gob as the codec.
+	// Step 1: use a non-default codec (binc) to open the borrowed Store so that the
+	// __database metadata records binc as the codec.
 	bDB, err := bolt.Open(bDBPath, 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
 
-	// Pre-seed the version bucket with the gob codec marker so the default
+	// Pre-seed the version bucket with the binc codec marker so the default
 	// (json) codec used by the second Open will conflict during checkVersion.
 	err = bDB.Update(func(tx *bolt.Tx) error {
-		top, err := tx.CreateBucketIfNotExists([]byte(dbinfo))
+		top, err := tx.CreateBucketIfNotExists([]byte(databaseInfo))
 		if err != nil {
 			return err
 		}
 		// Mirror what newMeta writes: a nested metadata bucket carrying the
-		// codec name. Set via gob's codec name to force ErrDifferentCodec.
+		// codec name. Set via binc's codec name to force ErrDifferentCodec.
 		_, err = top.CreateBucket([]byte(metadataBucket))
 		if err != nil {
 			return err
 		}
 		mb := top.Bucket([]byte(metadataBucket))
-		return mb.Put([]byte(metaCodec), []byte(gob.Codec.Name()))
+		return mb.Put([]byte(metaCodec), []byte(binco.Codec.Name()))
 	})
 	require.NoError(t, err)
 
 	// Step 2: hand the borrowed Store to Storm with the default (json) codec.
-	// checkVersion will call Set on __storm_db, which builds the data
+	// checkVersion will call Set on __database, which builds the data
 	// bucket via setBytes -> newMeta, and newMeta will compare codec names and
 	// return ErrDifferentCodec. That is our deterministic initialization error.
 	db, err := Open(context.Background(), bDB, nil, nil)

@@ -121,7 +121,7 @@ func TestWalk(t *testing.T) {
 
 		visited := make(map[string]bool)
 		x := sync.Mutex{}
-		err = fstools.FastWalk(mfs, testpath, func(walkPath string, d iofs.DirEntry, err error) error {
+		err = fs.FastWalk(mfs, testpath, func(walkPath string, d iofs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -149,34 +149,34 @@ func TestWalk(t *testing.T) {
 }
 
 func TestMemFS(t *testing.T) {
-	fs, err := memfs.NewFS()
+	mfs, err := memfs.NewFS()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if fs.TempDir() != "/tmp" {
-		t.Fatalf("wrong TempDir output: %q != %q", fs.TempDir(), "/tmp")
+	if mfs.TempDir() != "/tmp" {
+		t.Fatalf("wrong TempDir output: %q != %q", mfs.TempDir(), "/tmp")
 	}
-	fs.Tempdir = os.TempDir()
-	if fs.TempDir() != os.TempDir() {
-		t.Fatalf("wrong TempDir output: %q != %q", fs.TempDir(), os.TempDir())
+	mfs.Tempdir = os.TempDir()
+	if mfs.TempDir() != os.TempDir() {
+		t.Fatalf("wrong TempDir output: %q != %q", mfs.TempDir(), os.TempDir())
 	}
 
-	testdir := fs.TempDir()
+	testdir := mfs.TempDir()
 	timestr := time.Now().Format(time.RFC3339)
 	testdir = path.Join(testdir, fmt.Sprintf("fstesting%s", timestr))
 
-	err = fs.MkdirAll(testdir, 0777)
+	err = mfs.MkdirAll(testdir, 0777)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fs.RemoveAll(fs.TempDir())
+	defer mfs.RemoveAll(mfs.TempDir())
 
-	cwd, err := fs.Getwd()
+	cwd, err := mfs.Getwd()
 	if cwd != "/" {
 		t.Fatalf("incorrect cwd %q", cwd)
 	}
-	err = fs.Chdir(testdir)
+	err = mfs.Chdir(testdir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,24 +187,24 @@ func TestMemFS(t *testing.T) {
 
 func TestMkdir(t *testing.T) {
 
-	fs, err := memfs.NewFS()
+	mfs, err := memfs.NewFS()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if fs.TempDir() != "/tmp" {
-		t.Fatalf("wrong TempDir output: %q != %q", fs.TempDir(), "/tmp")
+	if mfs.TempDir() != "/tmp" {
+		t.Fatalf("wrong TempDir output: %q != %q", mfs.TempDir(), "/tmp")
 	}
 
-	fs.Tempdir = os.TempDir()
-	if fs.TempDir() != os.TempDir() {
-		t.Fatalf("wrong TempDir output: %q != %q", fs.TempDir(), os.TempDir())
+	mfs.Tempdir = os.TempDir()
+	if mfs.TempDir() != os.TempDir() {
+		t.Fatalf("wrong TempDir output: %q != %q", mfs.TempDir(), os.TempDir())
 	}
 
-	testdir := fs.TempDir()
+	testdir := mfs.TempDir()
 
 	t.Logf("Test path: %q", testdir)
-	err = fs.MkdirAll(testdir, 0777)
+	err = mfs.MkdirAll(testdir, 0777)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ outer:
 		if name == "" {
 			continue
 		}
-		f, err := fs.Open(currentPath)
+		f, err := mfs.Open(currentPath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -237,12 +237,12 @@ outer:
 }
 
 func TestOpenWrite(t *testing.T) {
-	fs, err := memfs.NewFS()
+	mfs, err := memfs.NewFS()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	f, err := fs.Create("/test_file.txt")
+	f, err := mfs.Create("/test_file.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestOpenWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f, err = fs.Open("/test_file.txt")
+	f, err = mfs.Open("/test_file.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,19 +283,19 @@ func TestOpenWrite(t *testing.T) {
 // TestRemoveEmptyDirectory verifies that Remove works on empty directories.
 // This tests that the internal "." and ".." entries don't prevent removal.
 func TestRemoveEmptyDirectory(t *testing.T) {
-	fs, err := memfs.NewFS()
+	mfs, err := memfs.NewFS()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Create an empty directory
-	err = fs.Mkdir("/emptydir", 0755)
+	err = mfs.Mkdir("/emptydir", 0755)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Verify Readdir returns 0 entries (matching os behavior - no . or ..)
-	f, err := fs.Open("/emptydir")
+	f, err := mfs.Open("/emptydir")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,13 +309,13 @@ func TestRemoveEmptyDirectory(t *testing.T) {
 	}
 
 	// Remove should succeed on empty directory
-	err = fs.Remove("/emptydir")
+	err = mfs.Remove("/emptydir")
 	if err != nil {
 		t.Errorf("Remove on empty directory failed: %v", err)
 	}
 
 	// Verify directory is gone
-	_, err = fs.Stat("/emptydir")
+	_, err = mfs.Stat("/emptydir")
 	if !os.IsNotExist(err) {
 		t.Errorf("Directory should not exist after Remove, got err: %v", err)
 	}
@@ -323,30 +323,30 @@ func TestRemoveEmptyDirectory(t *testing.T) {
 
 // TestRemoveNonEmptyDirectory verifies that Remove fails on non-empty directories.
 func TestRemoveNonEmptyDirectory(t *testing.T) {
-	fs, err := memfs.NewFS()
+	mfs, err := memfs.NewFS()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Create a directory with a file
-	err = fs.Mkdir("/nonempty", 0755)
+	err = mfs.Mkdir("/nonempty", 0755)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := fs.Create("/nonempty/file.txt")
+	f, err := mfs.Create("/nonempty/file.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.Close()
 
 	// Remove should fail
-	err = fs.Remove("/nonempty")
+	err = mfs.Remove("/nonempty")
 	if err == nil {
 		t.Error("Remove on non-empty directory should fail")
 	}
 
 	// Directory should still exist
-	_, err = fs.Stat("/nonempty")
+	_, err = mfs.Stat("/nonempty")
 	if err != nil {
 		t.Errorf("Directory should still exist: %v", err)
 	}
@@ -355,13 +355,13 @@ func TestRemoveNonEmptyDirectory(t *testing.T) {
 // TestOpenFileAppend verifies that O_APPEND works correctly.
 // Writes to files opened with O_APPEND should always append to the end.
 func TestOpenFileAppend(t *testing.T) {
-	fs, err := memfs.NewFS()
+	mfs, err := memfs.NewFS()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Create initial file with content
-	f, err := fs.Create("/append.txt")
+	f, err := mfs.Create("/append.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestOpenFileAppend(t *testing.T) {
 	f.Close()
 
 	// Open for append
-	f, err = fs.OpenFile("/append.txt", os.O_WRONLY|os.O_APPEND, 0)
+	f, err = mfs.OpenFile("/append.txt", os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
 		t.Fatalf("failed to open for append: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestOpenFileAppend(t *testing.T) {
 	f.Close()
 
 	// Read back and verify
-	f, _ = fs.Open("/append.txt")
+	f, _ = mfs.Open("/append.txt")
 	data := make([]byte, 100)
 	n, _ := f.Read(data)
 	f.Close()
@@ -396,13 +396,13 @@ func TestOpenFileAppend(t *testing.T) {
 
 // TestOpenFileAppendMultipleWrites verifies multiple appends work correctly.
 func TestOpenFileAppendMultipleWrites(t *testing.T) {
-	fs, err := memfs.NewFS()
+	mfs, err := memfs.NewFS()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Create file and open for append
-	f, err := fs.OpenFile("/multi.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := mfs.OpenFile("/multi.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +414,7 @@ func TestOpenFileAppendMultipleWrites(t *testing.T) {
 	f.Close()
 
 	// Verify
-	f, _ = fs.Open("/multi.txt")
+	f, _ = mfs.Open("/multi.txt")
 	data := make([]byte, 100)
 	n, _ := f.Read(data)
 	f.Close()

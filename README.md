@@ -513,7 +513,7 @@ personalNotes := notes.From("private", "personal")
 A node can be further configured with `WithCodec`:
 
 ```go
-node := db.From("data").WithCodec(gob.Codec)
+node := db.From("data").WithCodec(binco.Codec)
 ```
 
 The `Bucket()` method returns the bucket path as a `[]string`. The `BucketScanner` interface provides `PrefixScan` and `RangeScan` for discovering sub-buckets.
@@ -723,9 +723,9 @@ Storm marshals data to BoltDB using a codec. The default is JSON. Pass a codec a
 the fourth argument to `Open`:
 
 ```go
-import "github.com/malivvan/storm/db/codec/gob"
+import "github.com/malivvan/storm/db/codec/binco"
 
-db, err := storm.Open(ctx, bDB, nil, gob.Codec)
+db, err := storm.Open(ctx, bDB, nil, binco.Codec)
 ```
 
 ### Built-in codecs
@@ -733,10 +733,12 @@ db, err := storm.Open(ctx, bDB, nil, gob.Codec)
 | Package | Import path | Codec variable |
 |---------|-------------|----------------|
 | JSON (default) | `storm/db/codec/json` | `json.Codec` |
-| Gob | `storm/db/codec/gob` | `gob.Codec` |
-| AES | `storm/db/codec/aes` | `NewAES(subCodec, key)` |
+| Binco | `storm/db/codec/binco` | `binco.Codec` |
+| AEAD | `storm/db/codec/aead` | `New(subCodec, key, opts...)` |
 
-AES wraps another codec with AES-GCM encryption.
+AEAD wraps another codec with authenticated encryption using a raw 32-byte key.
+The default cipher is AES-256-GCM; pass `aead.WithCipher(aead.CipherXChaCha20Poly1305)`
+to use XChaCha20-Poly1305 instead.
 
 ### Custom codecs
 

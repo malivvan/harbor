@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/codec/gob"
+	"github.com/malivvan/storm/db/codec/binco"
 	"github.com/malivvan/storm/db/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
@@ -105,7 +105,7 @@ func TestWrap_OpenBorrowedInitFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	err = bDB.Update(func(tx *bolt.Tx) error {
-		top, cerr := tx.CreateBucketIfNotExists([]byte(dbinfo))
+		top, cerr := tx.CreateBucketIfNotExists([]byte(databaseInfo))
 		if cerr != nil {
 			return cerr
 		}
@@ -682,7 +682,7 @@ func TestWrap_OpenNestedWrapping(t *testing.T) {
 	require.NoError(t, err)
 
 	err = bDB.Update(func(tx *bolt.Tx) error {
-		top, cerr := tx.CreateBucketIfNotExists([]byte(dbinfo))
+		top, cerr := tx.CreateBucketIfNotExists([]byte(databaseInfo))
 		if cerr != nil {
 			return cerr
 		}
@@ -691,7 +691,7 @@ func TestWrap_OpenNestedWrapping(t *testing.T) {
 			return cerr
 		}
 		mb := top.Bucket([]byte(metadataBucket))
-		return mb.Put([]byte(metaCodec), []byte(gob.Codec.Name()))
+		return mb.Put([]byte(metaCodec), []byte(binco.Codec.Name()))
 	})
 	require.NoError(t, err)
 

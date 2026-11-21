@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	dbinfo         = "__storm_db"
-	metadataBucket = "__storm_metadata"
+	databaseInfo   = "__database"
+	metadataBucket = "__metadata"
 )
 
 // BucketNamer is an interface that can be implemented by structs to provide
@@ -116,10 +116,10 @@ func (s *Store) Close() error {
 func (s *Store) checkVersion(ctx context.Context) error {
 	// Read the encoded value separately so a decode failure can be classified
 	// as an incompatible codec while preserving the underlying codec error.
-	raw, err := s.GetBytes(ctx, dbinfo, "version")
+	raw, err := s.GetBytes(ctx, databaseInfo, "version")
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			return s.Set(ctx, dbinfo, "version", Version)
+			return s.Set(ctx, databaseInfo, "version", Version)
 		}
 		return err
 	}
@@ -130,7 +130,7 @@ func (s *Store) checkVersion(ctx context.Context) error {
 		return errors.Join(ErrDifferentCodec, err)
 	}
 	if v == "" {
-		return s.Set(ctx, dbinfo, "version", Version)
+		return s.Set(ctx, databaseInfo, "version", Version)
 	}
 
 	return nil

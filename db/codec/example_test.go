@@ -9,7 +9,7 @@ import (
 
 	storm "github.com/malivvan/storm/db"
 	"github.com/malivvan/storm/db/codec"
-	"github.com/malivvan/storm/db/codec/gob"
+	"github.com/malivvan/storm/db/codec/binco"
 	"github.com/malivvan/storm/db/codec/json"
 	bolt "go.etcd.io/bbolt"
 )
@@ -30,7 +30,7 @@ func Example() {
 		name  string
 		codec codec.MarshalUnmarshaler
 	}{
-		{name: "gob", codec: gob.Codec},
+		{name: "binc", codec: binco.Codec},
 		{name: "json", codec: json.Codec},
 	}
 
@@ -55,6 +55,6 @@ func Example() {
 	}
 
 	// Output:
-	// *gob.gobCodec
+	// *binco.bincCodec
 	// *json.jsonCodec
 }

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/codec/gob"
+	"github.com/malivvan/storm/db/codec/binco"
 	"github.com/malivvan/storm/db/codec/json"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
@@ -136,7 +136,7 @@ func TestSetMetadata(t *testing.T) {
 	w := User{ID: 10, Name: "John"}
 	err := db.Set(ctx, "User", 10, &w)
 	require.NoError(t, err)
-	n := db.WithCodec(gob.Codec)
+	n := db.WithCodec(binco.Codec)
 	err = n.Set(ctx, "User", 10, &w)
 	require.ErrorIs(t, err, ErrDifferentCodec)
 }

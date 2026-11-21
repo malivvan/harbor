@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"encoding/gob"
 	"reflect"
 	"testing"
 
@@ -37,8 +36,4 @@ func RoundtripTester(t *testing.T, c codec.MarshalUnmarshaler, vals ...interface
 	if !reflect.DeepEqual(val, to) {
 		t.Fatalf("Roundtrip codec mismatch, expected\n%#v\ngot\n%#v", val, to)
 	}
-}
-
-func init() {
-	gob.Register(&testStruct{})
 }

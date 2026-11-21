@@ -323,38 +323,38 @@ func TestIDIndexRange(t *testing.T) {
 		require.NoError(t, err)
 
 		for i := 0; i < 10; i++ {
-			val, _ := gob.Codec.Marshal(i)
+			val, _ := binco.Codec.Marshal(i)
 			err = idx.Add(ctx, val, val)
 			require.NoError(t, err)
 		}
 
-		min, _ := gob.Codec.Marshal(3)
-		max, _ := gob.Codec.Marshal(5)
+		min, _ := binco.Codec.Marshal(3)
+		max, _ := binco.Codec.Marshal(5)
 		list, err := idx.Range(ctx, min, max, nil)
 		require.Len(t, list, 3)
 		require.NoError(t, err)
 		assertEncodedIntListEqual(t, []int{3, 4, 5}, list)
 
-		min, _ = gob.Codec.Marshal(11)
-		max, _ = gob.Codec.Marshal(20)
+		min, _ = binco.Codec.Marshal(11)
+		max, _ = binco.Codec.Marshal(20)
 		list, err = idx.Range(ctx, min, max, nil)
 		require.Len(t, list, 0)
 		require.NoError(t, err)
 
-		min, _ = gob.Codec.Marshal(7)
-		max, _ = gob.Codec.Marshal(2)
+		min, _ = binco.Codec.Marshal(7)
+		max, _ = binco.Codec.Marshal(2)
 		list, err = idx.Range(ctx, min, max, nil)
 		require.Len(t, list, 0)
 		require.NoError(t, err)
 
-		min, _ = gob.Codec.Marshal(-5)
-		max, _ = gob.Codec.Marshal(2)
+		min, _ = binco.Codec.Marshal(-5)
+		max, _ = binco.Codec.Marshal(2)
 		list, err = idx.Range(ctx, min, max, nil)
 		require.Len(t, list, 0)
 		require.NoError(t, err)
 
-		min, _ = gob.Codec.Marshal(3)
-		max, _ = gob.Codec.Marshal(7)
+		min, _ = binco.Codec.Marshal(3)
+		max, _ = binco.Codec.Marshal(7)
 		opts := index.NewOptions()
 		opts.Skip = 2
 		list, err = idx.Range(ctx, min, max, opts)
@@ -457,7 +457,7 @@ func assertEncodedIntListEqual(t *testing.T, expected []int, actual [][]byte) {
 	ints := make([]int, len(actual))
 
 	for i, e := range actual {
-		err := gob.Codec.Unmarshal(e, &ints[i])
+		err := binco.Codec.Unmarshal(e, &ints[i])
 		require.NoError(t, err)
 	}
 
