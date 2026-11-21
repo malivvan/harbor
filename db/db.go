@@ -10,8 +10,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/malivvan/storm/db/codec"
-	"github.com/malivvan/storm/db/codec/json"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -28,8 +26,8 @@ type BucketNamer interface {
 	StormBucketName() string
 }
 
-// Defaults to json
-var defaultCodec = json.Codec
+// defaultCodec is the codec used when none is supplied.
+var defaultCodec = JSONCodec
 
 // Open initializes Storm on an already-open bbolt database.
 //
@@ -40,7 +38,7 @@ var defaultCodec = json.Codec
 //
 // Open always creates a plaintext store. Use OpenWithConfig to enable optional
 // encryption.
-func Open(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarshaler) (*Store, error) {
+func Open(ctx context.Context, db *bolt.DB, root []byte, c Codec) (*Store, error) {
 	return OpenWithConfig(ctx, db, root, c, nil)
 }
 
@@ -60,7 +58,7 @@ func Open(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarsha
 //
 // Migrating an existing plaintext store to an encrypted one is not supported
 // yet; export and re-import instead.
-func OpenWithConfig(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarshaler, cfg *Config) (*Store, error) {
+func OpenWithConfig(ctx context.Context, db *bolt.DB, root []byte, c Codec, cfg *Config) (*Store, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, wrapError("open", err)
 	}
@@ -227,7 +225,7 @@ func (s *Store) checkMode(ctx context.Context) error {
 }
 
 // toBytes turns an interface into a slice of bytes
-func toBytes(key interface{}, codec codec.MarshalUnmarshaler) ([]byte, error) {
+func toBytes(key interface{}, c Codec) ([]byte, error) {
 	if key == nil {
 		return nil, nil
 	}
@@ -243,7 +241,7 @@ func toBytes(key interface{}, codec codec.MarshalUnmarshaler) ([]byte, error) {
 	case int8, int16, int32, int64, uint8, uint16, uint32, uint64:
 		return numbertob(t)
 	default:
-		return codec.Marshal(key)
+		return c.Marshal(key)
 	}
 }
 

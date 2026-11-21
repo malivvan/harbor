@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/malivvan/storm/db/codec/binco"
 	"github.com/malivvan/storm/db/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
@@ -345,38 +344,38 @@ func TestListIndexRange(t *testing.T) {
 		require.NoError(t, err)
 
 		for i := 0; i < 10; i++ {
-			val, _ := binco.Codec.Marshal(i)
+			val, _ := encodeTestInt(i)
 			err = idx.Add(context.Background(), val, val)
 			require.NoError(t, err)
 		}
 
-		min, _ := binco.Codec.Marshal(3)
-		max, _ := binco.Codec.Marshal(5)
+		min, _ := encodeTestInt(3)
+		max, _ := encodeTestInt(5)
 		list, err := idx.Range(context.Background(), min, max, nil)
 		require.Len(t, list, 3)
 		require.NoError(t, err)
 		assertEncodedIntListEqual(t, []int{3, 4, 5}, list)
 
-		min, _ = binco.Codec.Marshal(11)
-		max, _ = binco.Codec.Marshal(20)
+		min, _ = encodeTestInt(11)
+		max, _ = encodeTestInt(20)
 		list, err = idx.Range(context.Background(), min, max, nil)
 		require.Len(t, list, 0)
 		require.NoError(t, err)
 
-		min, _ = binco.Codec.Marshal(7)
-		max, _ = binco.Codec.Marshal(2)
+		min, _ = encodeTestInt(7)
+		max, _ = encodeTestInt(2)
 		list, err = idx.Range(context.Background(), min, max, nil)
 		require.Len(t, list, 0)
 		require.NoError(t, err)
 
-		min, _ = binco.Codec.Marshal(-5)
-		max, _ = binco.Codec.Marshal(2)
+		min, _ = encodeTestInt(-5)
+		max, _ = encodeTestInt(2)
 		list, err = idx.Range(context.Background(), min, max, nil)
 		require.Len(t, list, 0)
 		require.NoError(t, err)
 
-		min, _ = binco.Codec.Marshal(3)
-		max, _ = binco.Codec.Marshal(7)
+		min, _ = encodeTestInt(3)
+		max, _ = encodeTestInt(7)
 		opts := index.NewOptions()
 		opts.Skip = 2
 		list, err = idx.Range(context.Background(), min, max, opts)
@@ -401,21 +400,21 @@ func TestListIndexRange(t *testing.T) {
 		assertEncodedIntListEqual(t, []int{5, 4}, list)
 
 		// issue #218
-		val, _ := binco.Codec.Marshal(8)
+		val, _ := encodeTestInt(8)
 		err = idx.Remove(context.Background(), val)
 		require.NoError(t, err)
 
 		// normal with gaps
-		min, _ = binco.Codec.Marshal(6)
-		max, _ = binco.Codec.Marshal(8)
+		min, _ = encodeTestInt(6)
+		max, _ = encodeTestInt(8)
 		list, err = idx.Range(context.Background(), min, max, nil)
 		require.Len(t, list, 2)
 		require.NoError(t, err)
 		assertEncodedIntListEqual(t, []int{6, 7}, list)
 
 		// reverse with gaps
-		min, _ = binco.Codec.Marshal(6)
-		max, _ = binco.Codec.Marshal(8)
+		min, _ = encodeTestInt(6)
+		max, _ = encodeTestInt(8)
 		opts = index.NewOptions()
 		opts.Reverse = true
 		list, err = idx.Range(context.Background(), min, max, opts)

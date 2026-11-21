@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/codec/json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
@@ -124,7 +123,7 @@ func TestToBytes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("a string"), b)
 
-	b, err = toBytes(&SimpleUser{ID: 10, Name: "John", age: 100}, json.Codec)
+	b, err = toBytes(&SimpleUser{ID: 10, Name: "John", age: 100}, JSONCodec)
 	require.NoError(t, err)
 	require.Equal(t, `{"ID":10,"Name":"John"}`, string(b))
 

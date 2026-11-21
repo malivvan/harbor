@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/codec"
-	"github.com/malivvan/storm/db/codec/json"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -99,7 +97,7 @@ func (c *cancelAtCallerContext) Hits() int {
 var errMarshalForced = errors.New("forced marshal error")
 
 type marshalErrorCancelingCodec struct {
-	delegate codec.MarshalUnmarshaler
+	delegate Codec
 	cancel   context.CancelFunc
 }
 
@@ -626,7 +624,7 @@ func TestReIndex_NonContextErrorPrecedence(t *testing.T) {
 	// Use a codec that cancels the context AND returns a non-context error
 	// during Marshal.
 	opCtx, cancel := context.WithCancel(context.Background())
-	cc := &marshalErrorCancelingCodec{delegate: json.Codec, cancel: cancel}
+	cc := &marshalErrorCancelingCodec{delegate: JSONCodec, cancel: cancel}
 	n := db.WithCodec(cc).(*node)
 
 	err := n.ReIndex(opCtx, &reindexUser{})

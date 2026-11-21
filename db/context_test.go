@@ -8,9 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/codec"
-	"github.com/malivvan/storm/db/codec/binco"
-	"github.com/malivvan/storm/db/codec/json"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -59,12 +56,10 @@ func TestOpen_InitializationErrorDoesNotCloseBorrowedDatabase(t *testing.T) {
 
 	bDBPath := filepath.Join(dir, "borrowed.db")
 
-	// Step 1: use a non-default codec (binc) to open the borrowed Store so that the
-	// __database metadata records binc as the codec.
 	bDB, err := bolt.Open(bDBPath, 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
 
-	// Pre-seed the version bucket with the binc codec marker so the default
+	// Pre-seed the version bucket with a non-default codec marker so the default
 	// (json) codec used by the second Open will conflict during checkVersion.
 	err = bDB.Update(func(tx *bolt.Tx) error {
 		top, err := tx.CreateBucketIfNotExists([]byte(databaseInfo))
@@ -72,13 +67,13 @@ func TestOpen_InitializationErrorDoesNotCloseBorrowedDatabase(t *testing.T) {
 			return err
 		}
 		// Mirror what newMeta writes: a nested metadata bucket carrying the
-		// codec name. Set via binc's codec name to force ErrDifferentCodec.
+		// codec name. Set via a non-default codec name to force ErrDifferentCodec.
 		_, err = top.CreateBucket([]byte(metadataBucket))
 		if err != nil {
 			return err
 		}
 		mb := top.Bucket([]byte(metadataBucket))
-		return mb.Put([]byte(metaCodec), []byte(binco.Codec.Name()))
+		return mb.Put([]byte(metaCodec), []byte(altCodec.Name()))
 	})
 	require.NoError(t, err)
 
@@ -412,7 +407,7 @@ func TestScanner_CancelledContextReturnsErrorAndNoResults(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type cancellationCodec struct {
-	delegate    codec.MarshalUnmarshaler
+	delegate    Codec
 	mu          sync.Mutex
 	onMarshal   func()
 	onUnmarshal func()
@@ -464,7 +459,7 @@ func TestSave_IndexCancellationRollsBackTransaction(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	cc := &cancellationCodec{delegate: json.Codec}
+	cc := &cancellationCodec{delegate: JSONCodec}
 	cc.setOnMarshal(func() { cancel() })
 
 	n := db.WithCodec(cc).(*node)
@@ -505,7 +500,7 @@ func TestUpdate_CancellationDuringMarshalPreservesRecordAndIndexes(t *testing.T)
 
 	// Update with cancellation during marshal.
 	updateCtx, cancel := context.WithCancel(context.Background())
-	cc := &cancellationCodec{delegate: json.Codec}
+	cc := &cancellationCodec{delegate: JSONCodec}
 	cc.setOnMarshal(func() { cancel() })
 
 	n := db.WithCodec(cc).(*node)
@@ -548,7 +543,7 @@ func TestUpdateField_CancellationDuringMarshalPreservesStoredValue(t *testing.T)
 	require.NoError(t, err)
 
 	updateCtx, cancel := context.WithCancel(context.Background())
-	cc := &cancellationCodec{delegate: json.Codec}
+	cc := &cancellationCodec{delegate: JSONCodec}
 	cc.setOnMarshal(func() { cancel() })
 
 	n := db.WithCodec(cc).(*node)
@@ -572,7 +567,7 @@ func TestSet_CancellationDuringMarshalDoesNotPersist(t *testing.T) {
 	defer cleanup()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cc := &cancellationCodec{delegate: json.Codec}
+	cc := &cancellationCodec{delegate: JSONCodec}
 	cc.setOnMarshal(func() { cancel() })
 
 	n := db.WithCodec(cc).(*node)
@@ -602,7 +597,7 @@ func TestGet_CancellationDuringUnmarshalPreservesDestination(t *testing.T) {
 
 	// Now read with a codec that cancels during unmarshal.
 	getCtx, cancel := context.WithCancel(context.Background())
-	cc := &cancellationCodec{delegate: json.Codec}
+	cc := &cancellationCodec{delegate: JSONCodec}
 	cc.setOnUnmarshal(func() { cancel() })
 
 	n := db.WithCodec(cc).(*node)

@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/codec/binco"
-	"github.com/malivvan/storm/db/codec/json"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -97,7 +95,7 @@ func TestSet(t *testing.T) {
 		b2 := tx.Bucket([]byte("b2"))
 		require.NotNil(t, b2)
 
-		k1, err := toBytes(10, json.Codec)
+		k1, err := toBytes(10, JSONCodec)
 		require.NoError(t, err)
 		val := b1.Get(k1)
 		require.NotNil(t, val)
@@ -106,7 +104,7 @@ func TestSet(t *testing.T) {
 		val = b1.Get(k2)
 		require.NotNil(t, val)
 
-		k3, err := toBytes(0, json.Codec)
+		k3, err := toBytes(0, JSONCodec)
 		require.NoError(t, err)
 		val = b1.Get(k3)
 		require.NotNil(t, val)
@@ -136,7 +134,7 @@ func TestSetMetadata(t *testing.T) {
 	w := User{ID: 10, Name: "John"}
 	err := db.Set(ctx, "User", 10, &w)
 	require.NoError(t, err)
-	n := db.WithCodec(binco.Codec)
+	n := db.WithCodec(altCodec)
 	err = n.Set(ctx, "User", 10, &w)
 	require.ErrorIs(t, err, ErrDifferentCodec)
 }

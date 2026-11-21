@@ -7,7 +7,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/malivvan/storm/db/codec/binco"
 	"github.com/stretchr/testify/require"
 	bolterrors "go.etcd.io/bbolt/errors"
 )
@@ -327,12 +326,12 @@ func TestWriteTransaction_RollbackRemovesUncommittedWrites(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestManagedTransaction_PreservesRootAndCodec(t *testing.T) {
-	db, cleanup := createDB(t, testRoot("tenant", "ns"), testCodec(binco.Codec))
+	db, cleanup := createDB(t, testRoot("tenant", "ns"), testCodec(altCodec))
 	defer cleanup()
 
 	err := db.WriteTransaction(context.Background(), func(txNode Node) error {
 		require.Equal(t, []string{"tenant", "ns"}, txNode.Bucket())
-		require.Equal(t, binco.Codec, txNode.Codec())
+		require.Equal(t, altCodec, txNode.Codec())
 		return nil
 	})
 	require.NoError(t, err)

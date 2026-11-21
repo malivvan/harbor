@@ -9,7 +9,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/malivvan/storm/db/codec/json"
 	"github.com/malivvan/storm/db/q"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
@@ -519,7 +518,7 @@ func TestSelectCount(t *testing.T) {
 }
 
 func TestSelectRaw(t *testing.T) {
-	db, cleanup := createDB(t, testCodec(json.Codec))
+	db, cleanup := createDB(t, testCodec(JSONCodec))
 	defer cleanup()
 
 	ctx := context.Background()
@@ -549,7 +548,7 @@ func TestSelectRaw(t *testing.T) {
 }
 
 func TestSelectEach(t *testing.T) {
-	db, cleanup := createDB(t, testCodec(json.Codec))
+	db, cleanup := createDB(t, testCodec(JSONCodec))
 	defer cleanup()
 
 	ctx := context.Background()

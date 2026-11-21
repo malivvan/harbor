@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/codec/json"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -203,7 +202,7 @@ func TestAEADOptionalityKeepsPlaintextFormat(t *testing.T) {
 
 	rawID, err := toBytes(7, nil)
 	require.NoError(t, err)
-	rawUser, err := json.Codec.Marshal(u)
+	rawUser, err := JSONCodec.Marshal(u)
 	require.NoError(t, err)
 
 	records := aeadRawEntries(t, bdb, "aeadUser")
@@ -211,14 +210,14 @@ func TestAEADOptionalityKeepsPlaintextFormat(t *testing.T) {
 	require.Equal(t, rawUser, records[string(rawID)])
 
 	settings := aeadRawEntries(t, bdb, "aeadsettings")
-	rawTheme, err := json.Codec.Marshal("dark")
+	rawTheme, err := JSONCodec.Marshal("dark")
 	require.NoError(t, err)
 	require.Equal(t, rawTheme, settings["theme"])
 	require.Equal(t, []byte{1, 2, 3}, settings["blob"])
 
 	info := aeadRawEntries(t, bdb, databaseInfo)
 	require.NotContains(t, info, markerKey, "a plaintext store must not write an encryption marker")
-	rawVersion, err := json.Codec.Marshal(Version)
+	rawVersion, err := JSONCodec.Marshal(Version)
 	require.NoError(t, err)
 	require.Equal(t, rawVersion, info[versionKey])
 	require.NoError(t, bdb.Close())
@@ -463,7 +462,7 @@ func TestAEADEmptyPlaintextStoreAdoptsEncryption(t *testing.T) {
 
 	info := aeadRawEntries(t, bdb, databaseInfo)
 	require.Contains(t, info, markerKey)
-	rawVersion, err := json.Codec.Marshal(Version)
+	rawVersion, err := JSONCodec.Marshal(Version)
 	require.NoError(t, err)
 	require.NotEqual(t, rawVersion, info[versionKey], "the version record must be re-encoded under encryption")
 

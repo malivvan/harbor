@@ -12,7 +12,6 @@ import (
 	"time"
 
 	storm "github.com/malivvan/storm/db"
-	"github.com/malivvan/storm/db/codec/binco"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -89,7 +88,8 @@ func ExampleStore_Save() {
 		CreatedAt time.Time `storm:"index"`
 	}
 
-	// Open the underlying bbolt database, then wrap it with a custom codec.
+	// Open the underlying bbolt database, then wrap it with a codec. JSON is
+	// the default; passing it explicitly documents the parameter.
 	bdb, err := bolt.Open(filepath.Join(dir, "storm.db"), 0600, nil)
 	if err != nil {
 		log.Fatal(err)
@@ -100,7 +100,7 @@ func ExampleStore_Save() {
 		}
 	}()
 
-	db, err := storm.Open(ctx, bdb, nil, binco.Codec)
+	db, err := storm.Open(ctx, bdb, nil, storm.JSONCodec)
 	if err != nil {
 		log.Fatal(err)
 	}

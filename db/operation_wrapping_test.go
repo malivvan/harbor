@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/codec/binco"
 	"github.com/malivvan/storm/db/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
@@ -691,7 +690,7 @@ func TestWrap_OpenNestedWrapping(t *testing.T) {
 			return cerr
 		}
 		mb := top.Bucket([]byte(metadataBucket))
-		return mb.Put([]byte(metaCodec), []byte(binco.Codec.Name()))
+		return mb.Put([]byte(metaCodec), []byte(altCodec.Name()))
 	})
 	require.NoError(t, err)
 

@@ -209,7 +209,7 @@ Use the same reconstructed runtime type and explicit node path for subsequent re
 `Open` wraps an already-open bbolt database:
 
 ```go
-func Open(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarshaler) (*DB, error)
+func Open(ctx context.Context, db *bolt.DB, root []byte, c db.Codec) (*DB, error)
 ```
 
 The parameters are:
@@ -513,7 +513,7 @@ personalNotes := notes.From("private", "personal")
 A node can be further configured with `WithCodec`:
 
 ```go
-node := db.From("data").WithCodec(binco.Codec)
+node := db.From("data").WithCodec(db.JSONCodec)
 ```
 
 The `Bucket()` method returns the bucket path as a `[]string`. The `BucketScanner` interface provides `PrefixScan` and `RangeScan` for discovering sub-buckets.
@@ -719,21 +719,21 @@ Normal application code should prefer the managed Storm APIs.
 
 ## Codecs
 
-Storm marshals data to BoltDB using a codec. The default is JSON. Pass a codec as
-the fourth argument to `Open`:
+Storm marshals data to BoltDB using a codec. The default is JSON, exposed as
+`db.JSONCodec`. Pass a codec as the fourth argument to `Open` to override it:
 
 ```go
-import "github.com/malivvan/storm/db/codec/binco"
+import stormdb "github.com/malivvan/storm/db"
 
-db, err := storm.Open(ctx, bDB, nil, binco.Codec)
+store, err := storm.Open(ctx, bDB, nil, nil)               // JSON, the default
+store, err = storm.Open(ctx, bDB, nil, stormdb.JSONCodec)  // explicit
 ```
 
-### Built-in codecs
+### Built-in codec
 
 | Package | Import path | Codec variable |
 |---------|-------------|----------------|
-| JSON (default) | `storm/db/codec/json` | `json.Codec` |
-| Binco | `storm/db/codec/binco` | `binco.Codec` |
+| JSON (default) | `storm/db` | `db.JSONCodec` |
 
 Encryption is not a codec. Use `OpenWithConfig` with a `Config` to enable native,
 optional AEAD encryption for a store; `Open` keeps creating plaintext stores.
@@ -755,10 +755,10 @@ confirm everything decrypts.
 
 ### Custom codecs
 
-Implement the `codec.MarshalUnmarshaler` interface:
+Implement the `db.Codec` interface:
 
 ```go
-type MarshalUnmarshaler interface {
+type Codec interface {
 	Marshal(v any) ([]byte, error)
 	Unmarshal(b []byte, v any) error
 	Name() string

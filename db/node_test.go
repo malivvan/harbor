@@ -8,9 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/codec"
-	"github.com/malivvan/storm/db/codec/binco"
-	"github.com/malivvan/storm/db/codec/json"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -59,15 +56,15 @@ func TestNodeWithCodec(t *testing.T) {
 		defer cleanup()
 
 		n := db.From("a").(*node)
-		require.Equal(t, json.Codec, n.codec)
+		require.Equal(t, JSONCodec, n.codec)
 		n = n.From("b", "c", "d").(*node)
-		require.Equal(t, json.Codec, n.codec)
-		n = db.WithCodec(binco.Codec).(*node)
+		require.Equal(t, JSONCodec, n.codec)
+		n = db.WithCodec(altCodec).(*node)
 		n = n.From("e").(*node)
-		require.Equal(t, binco.Codec, n.codec)
-		o := n.From("f").WithCodec(json.Codec).(*node)
-		require.Equal(t, binco.Codec, n.codec)
-		require.Equal(t, json.Codec, o.codec)
+		require.Equal(t, altCodec, n.codec)
+		o := n.From("f").WithCodec(JSONCodec).(*node)
+		require.Equal(t, altCodec, n.codec)
+		require.Equal(t, JSONCodec, o.codec)
 	})
 
 	t.Run("CodecCall", func(t *testing.T) {
@@ -83,12 +80,12 @@ func TestNodeWithCodec(t *testing.T) {
 
 		requireBytesEqual := func(raw []byte, expected interface{}) {
 			var u User
-			err := binco.Codec.Unmarshal(raw, &u)
+			err := altCodec.Unmarshal(raw, &u)
 			require.NoError(t, err)
 			require.Equal(t, expected, u)
 		}
 
-		n := db.From("a").WithCodec(binco.Codec)
+		n := db.From("a").WithCodec(altCodec)
 		err := n.Set(ctx, "gobBucket", "key", &User{ID: 10, Name: "John"})
 		require.NoError(t, err)
 		b, err := n.GetBytes(ctx, "gobBucket", "key")
@@ -150,7 +147,7 @@ type testOpenOption func(*testOpenOptions)
 
 type testOpenOptions struct {
 	root        []string
-	codec       codec.MarshalUnmarshaler
+	codec       Codec
 	mode        os.FileMode
 	boltOptions *bolt.Options
 }
@@ -165,7 +162,7 @@ func testRoot(root ...string) testOpenOption {
 }
 
 // testCodec selects the codec for tests.
-func testCodec(c codec.MarshalUnmarshaler) testOpenOption {
+func testCodec(c Codec) testOpenOption {
 	return func(opts *testOpenOptions) {
 		opts.codec = c
 	}
@@ -202,7 +199,7 @@ func TestNode_ConsumerCanUseNode(t *testing.T) {
 		require.NoError(t, bDB.Close())
 	})
 
-	db, err := Open(context.Background(), bDB, nil, binco.Codec)
+	db, err := Open(context.Background(), bDB, nil, altCodec)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, db.Close())
@@ -217,10 +214,10 @@ func TestNode_ConsumerCanUseNode(t *testing.T) {
 	n2 := n.From("child")
 	require.Equal(t, []string{"tenant", "ns", "child"}, n2.Bucket())
 
-	require.Equal(t, binco.Codec, n.Codec())
+	require.Equal(t, altCodec, n.Codec())
 
-	nWithCodec := n.WithCodec(binco.Codec)
-	require.Equal(t, binco.Codec, nWithCodec.Codec())
+	nWithCodec := n.WithCodec(altCodec)
+	require.Equal(t, altCodec, nWithCodec.Codec())
 
 	// Perform a public operation through the Node.
 	err = n.Save(ctx, &testUser{ID: 1, Name: "test"})

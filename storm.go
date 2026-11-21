@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
-	"github.com/malivvan/storm/db/codec/json"
 	"github.com/malivvan/storm/fs"
 	"github.com/malivvan/storm/ts"
 	"github.com/malivvan/storm/vec"
@@ -71,12 +70,15 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Opti
 		return nil
 	})
 
-	s.db, err = db.Open(ctx, s.b, []byte{2}, json.Codec)
-	if err != nil {
+	if s.db, err = db.OpenWithConfig(ctx, s.b, []byte{2}, db.JSONCodec, &db.Config{
+		EncryptKeys:     true,
+		EncryptValues:   true,
+		EncryptMetadata: true,
+	}); err != nil {
 		return nil, err
 	}
 
-	s.vec, err = vec.Open(ctx, s.b, []byte{3}, false, nil)
+	s.vec, err = vec.OpenWithConfig(ctx, s.b, []byte{3}, false, nil, &vec.Config{})
 	if err != nil {
 		return nil, err
 	}

@@ -12,8 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/codec"
-	"github.com/malivvan/storm/db/codec/json"
 	"github.com/malivvan/storm/db/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
@@ -784,7 +782,7 @@ func (c *finderStepContext) Calls() int {
 var errCodec = errors.New("codec error sentinel")
 
 type codecErrorCodec struct {
-	delegate codec.MarshalUnmarshaler
+	delegate Codec
 }
 
 func (c *codecErrorCodec) Name() string { return c.delegate.Name() }
@@ -814,7 +812,7 @@ func TestOne_IndexedCancellationDuringUnmarshalPreservesDestination(t *testing.T
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cc := &cancellationCodec{delegate: json.Codec}
+	cc := &cancellationCodec{delegate: JSONCodec}
 	cc.setOnUnmarshal(func() { cancel() })
 
 	n := db.WithCodec(cc).(*node)
@@ -834,7 +832,7 @@ func TestOne_IndexedCodecErrorPreservesDestination(t *testing.T) {
 	require.NoError(t, err)
 
 	// Use the error codec so Unmarshal writes then returns an error.
-	n := db.WithCodec(&codecErrorCodec{delegate: json.Codec}).(*node)
+	n := db.WithCodec(&codecErrorCodec{delegate: JSONCodec}).(*node)
 	dest := UniqueNameUser{ID: 999, Name: "SENTINEL", Age: 999}
 	err = n.One(context.Background(), "Name", "john", &dest)
 	require.True(t, errors.Is(err, errCodec), "expected errCodec, got %v", err)
@@ -854,7 +852,7 @@ func TestOne_ByIDCancellationDuringUnmarshalPreservesDestination(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cc := &cancellationCodec{delegate: json.Codec}
+	cc := &cancellationCodec{delegate: JSONCodec}
 	cc.setOnUnmarshal(func() { cancel() })
 
 	n := db.WithCodec(cc).(*node)
@@ -884,7 +882,7 @@ func TestFind_IndexedCancellationDuringMaterializationPreservesDestination(t *te
 	// Cancel on the second unmarshal during materialization.
 	ctx, cancel := context.WithCancel(context.Background())
 	var unmarshalCalls int
-	cc := &cancellationCodec{delegate: json.Codec}
+	cc := &cancellationCodec{delegate: JSONCodec}
 	cc.setOnUnmarshal(func() {
 		unmarshalCalls++
 		if unmarshalCalls >= 2 {
@@ -982,7 +980,7 @@ func TestAllByIndex_CancellationDuringDecodePreservesDestination(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var unmarshalCalls int
-	cc := &cancellationCodec{delegate: json.Codec}
+	cc := &cancellationCodec{delegate: JSONCodec}
 	cc.setOnUnmarshal(func() {
 		unmarshalCalls++
 		if unmarshalCalls >= 2 {
@@ -1046,7 +1044,7 @@ func TestAllByIndex_CodecErrorPreservesDestination(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	n := db.WithCodec(&codecErrorCodec{delegate: json.Codec}).(*node)
+	n := db.WithCodec(&codecErrorCodec{delegate: JSONCodec}).(*node)
 
 	sentinel := User{ID: 999, Name: "SENTINEL"}
 	dest := []User{sentinel}
@@ -1077,7 +1075,7 @@ func TestRange_IndexedCancellationDuringMaterializationPreservesDestination(t *t
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var unmarshalCalls int
-	cc := &cancellationCodec{delegate: json.Codec}
+	cc := &cancellationCodec{delegate: JSONCodec}
 	cc.setOnUnmarshal(func() {
 		unmarshalCalls++
 		if unmarshalCalls >= 2 {
@@ -1158,7 +1156,7 @@ func TestPrefix_IndexedCancellationDuringMaterializationPreservesDestination(t *
 
 	ctx, cancel := context.WithCancel(context.Background())
 	var unmarshalCalls int
-	cc := &cancellationCodec{delegate: json.Codec}
+	cc := &cancellationCodec{delegate: JSONCodec}
 	cc.setOnUnmarshal(func() {
 		unmarshalCalls++
 		if unmarshalCalls >= 2 {

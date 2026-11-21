@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 
-	"github.com/malivvan/storm/db/codec"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -22,10 +21,10 @@ type Node interface {
 	Bucket() []string
 
 	// Codec returns the codec selected for this node.
-	Codec() codec.MarshalUnmarshaler
+	Codec() Codec
 
 	// WithCodec returns a copy of the node configured to use the given codec.
-	WithCodec(codec codec.MarshalUnmarshaler) Node
+	WithCodec(codec Codec) Node
 }
 
 // Compile-time assertion that *node implements the final Node interface.
@@ -42,7 +41,7 @@ type node struct {
 	tx *bolt.Tx
 
 	// Codec of this node
-	codec codec.MarshalUnmarshaler
+	codec Codec
 }
 
 // cloneBucketPath returns a defensive copy of the given path slice.
@@ -74,7 +73,7 @@ func (n node) withTransaction(tx *bolt.Tx) *node {
 }
 
 // WithCodec returns a new Storm Node that will use the given Codec.
-func (n node) WithCodec(codec codec.MarshalUnmarshaler) Node {
+func (n node) WithCodec(codec Codec) Node {
 	n.codec = codec
 	return &n
 }
@@ -86,7 +85,7 @@ func (n *node) Bucket() []string {
 }
 
 // Codec returns the EncodeDecoder used by this instance of Storm
-func (n *node) Codec() codec.MarshalUnmarshaler {
+func (n *node) Codec() Codec {
 	return n.codec
 }
 

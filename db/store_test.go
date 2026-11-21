@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/codec/binco"
-	"github.com/malivvan/storm/db/codec/json"
 	"github.com/malivvan/storm/db/q"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
@@ -56,7 +54,7 @@ func TestInitMetadata(t *testing.T) {
 
 	err := db.Init(ctx, new(User))
 	require.NoError(t, err)
-	n := db.WithCodec(binco.Codec)
+	n := db.WithCodec(altCodec)
 	err = n.Init(ctx, new(User))
 	require.ErrorIs(t, err, ErrDifferentCodec)
 }
@@ -157,7 +155,7 @@ func TestSave(t *testing.T) {
 		bucket := tx.Bucket([]byte("UserWithIDField"))
 		require.NotNil(t, bucket)
 
-		i, err := toBytes(10, json.Codec)
+		i, err := toBytes(10, JSONCodec)
 		require.NoError(t, err)
 
 		val := bucket.Get(i)
@@ -197,7 +195,7 @@ func TestSaveUnique(t *testing.T) {
 		require.NotNil(t, uniqueBucket)
 
 		id := uniqueBucket.Get([]byte("Jake"))
-		i, err := toBytes(10, json.Codec)
+		i, err := toBytes(10, JSONCodec)
 		require.NoError(t, err)
 		require.Equal(t, i, id)
 
@@ -482,7 +480,7 @@ func TestSaveMetadata(t *testing.T) {
 	w := User{ID: 10, Name: "John"}
 	err := db.Save(ctx, &w)
 	require.NoError(t, err)
-	n := db.WithCodec(binco.Codec)
+	n := db.WithCodec(altCodec)
 	err = n.Save(ctx, &w)
 	require.ErrorIs(t, err, ErrDifferentCodec)
 }
