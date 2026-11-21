@@ -146,9 +146,9 @@ func (s *Store) Get(key string) string {
 	}
 	var val string
 	err := s.b.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(_null)
+		b := tx.Bucket(_zero)
 		if b == nil {
-			return errors.New("null bucket not found")
+			return errors.New("kv bucket not found")
 		}
 		v := b.Get([]byte(key))
 		if v == nil {
@@ -168,9 +168,9 @@ func (s *Store) Set(key, val string) error {
 		return errors.New("key is empty")
 	}
 	return s.b.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(_null)
+		b := tx.Bucket(_zero)
 		if b == nil {
-			return errors.New("null bucket not found")
+			return errors.New("kv bucket not found")
 		}
 		if val == "" {
 			return b.Delete([]byte(key))

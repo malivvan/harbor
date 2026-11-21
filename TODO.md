@@ -44,6 +44,7 @@ each entry lists a concrete location and a suggested fix. Severity is High / Med
   Fix: make `Get`/`Set` use the same bucket key that `Open` creates (e.g. `_zero`), or
   explicitly create a dedicated KV bucket and route both through it. Add a test for
   `Set`→`Get` round-trip.
+  **Status: FIXED** — both now address `_zero`, the bucket `Open` creates; round-trip test added.
 
 ### Medium
 

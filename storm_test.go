@@ -116,3 +116,22 @@ func TestOpenRejectsInvalidSecret(t *testing.T) {
 		}
 	}
 }
+
+func TestSetGetRoundTrip(t *testing.T) {
+	path := t.TempDir() + "/kv.db"
+	s, err := Open(context.Background(), path, 0600, nil, Config{Secret: bytes.Repeat([]byte{1}, 32)})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.Set("key", "value"); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if got := s.Get("key"); got != "value" {
+		t.Fatalf("get = %q, want %q", got, "value")
+	}
+	if err := s.Set("key", ""); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+}
