@@ -324,7 +324,7 @@ err = db.All(ctx, &users, storm.Limit(10), storm.Skip(5), storm.Reverse())
 For complex queries, use `Select` with matchers from the `q` package:
 
 ```go
-import "github.com/malivvan/storm/q"
+import "github.com/malivvan/storm/db/q"
 
 // Matchers
 q.Eq("Name", "John")

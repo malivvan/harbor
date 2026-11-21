@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"testing"
+	"time"
 
 	"github.com/malivvan/storm/vec"
 )
@@ -69,4 +70,34 @@ func TestStorm(t *testing.T) {
 	}
 
 	fmt.Printf("Best Match: %s (Score: %f)\n", results[0].ID, results[0].Score)
+
+	vfs, err := s.FS().Open("test_fs")
+	if err != nil {
+		log.Fatalf("FS open error: %v", err)
+	}
+	// append timestamp and newline to the file blob.txt
+	f, err := vfs.Create("blob.txt")
+	if err != nil {
+		log.Fatalf("FS Create error: %v", err)
+	}
+	defer f.Close()
+	_, err = f.Write([]byte(time.Now().Format(time.RFC3339) + "\n"))
+	if err != nil {
+		log.Fatalf("FS Write error: %v", err)
+	}
+	err = f.Sync()
+	if err != nil {
+		log.Fatalf("FS Sync error: %v", err)
+	}
+	err = f.Close()
+	if err != nil {
+		log.Fatalf("FS Close error: %v", err)
+	}
+
+	// read the current content of the file
+	content, err := vfs.ReadFile("blob.txt")
+	if err != nil {
+		log.Fatalf("FS ReadFile error: %v", err)
+	}
+	log.Printf("Current content of blob.txt: %s", string(content))
 }

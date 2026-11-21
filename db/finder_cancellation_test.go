@@ -11,7 +11,7 @@ import (
 
 	"github.com/malivvan/storm/codec"
 	"github.com/malivvan/storm/codec/json"
-	"github.com/malivvan/storm/index"
+	"github.com/malivvan/storm/db/index"
 	"github.com/stretchr/testify/require"
 )
 

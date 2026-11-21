@@ -771,6 +771,17 @@ func (fs *FileSystem) resolve(path string) (*iNode, error) {
 
 }
 
+const (
+	O_RDONLY = 0       // open the file read-only.
+	O_WRONLY = 1       // open the file write-only.
+	O_RDWR   = 2       // open the file read-write.
+	O_APPEND = 1024    // append data to the file when writing.
+	O_CREATE = 64      // create a new file if none exists.
+	O_EXCL   = 128     // used with O_CREATE, file must not exist.
+	O_SYNC   = 1052672 // open for synchronous I/O.
+	O_TRUNC  = 512     // truncate regular writable file when opened.
+)
+
 // OpenFile is the generalized open call; most users will use Open or Create
 // instead. It opens the named file with specified flag (O_RDONLY etc.) and
 // perm (before umask), if applicable. If successful, methods on the returned

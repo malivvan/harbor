@@ -9,7 +9,7 @@ import (
 
 	"github.com/malivvan/storm/codec/gob"
 	"github.com/malivvan/storm/codec/json"
-	"github.com/malivvan/storm/q"
+	"github.com/malivvan/storm/db/q"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )

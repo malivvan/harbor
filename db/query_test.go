@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/malivvan/storm/codec/json"
-	"github.com/malivvan/storm/q"
+	"github.com/malivvan/storm/db/q"
 	"github.com/stretchr/testify/require"
 )
 

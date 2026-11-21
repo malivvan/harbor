@@ -3,8 +3,8 @@ package db
 import (
 	"context"
 
+	"github.com/malivvan/storm/db/q"
 	"github.com/malivvan/storm/internal"
-	"github.com/malivvan/storm/q"
 	bolt "go.etcd.io/bbolt"
 )
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/q"
+	"github.com/malivvan/storm/db/q"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"

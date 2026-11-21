@@ -7,8 +7,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/malivvan/storm/index"
-	"github.com/malivvan/storm/q"
+	"github.com/malivvan/storm/db/index"
+	"github.com/malivvan/storm/db/q"
 	bolt "go.etcd.io/bbolt"
 )
 

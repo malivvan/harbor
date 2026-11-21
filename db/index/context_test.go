@@ -11,7 +11,7 @@ import (
 	"time"
 
 	storm "github.com/malivvan/storm/db"
-	"github.com/malivvan/storm/index"
+	"github.com/malivvan/storm/db/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )

@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	storm "github.com/malivvan/storm/db"
-	"github.com/malivvan/storm/q"
+	"github.com/malivvan/storm/db/q"
 	bolt "go.etcd.io/bbolt"
 )
 

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/malivvan/storm/index"
+	"github.com/malivvan/storm/db/index"
 )
 
 // Errors
