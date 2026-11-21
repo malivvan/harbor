@@ -184,12 +184,13 @@ func (s *sorter) compareValue(left reflect.Value, right reflect.Value) int {
 	case reflect.Struct:
 		if lt, lok := left.Interface().(time.Time); lok {
 			if rt, rok := right.Interface().(time.Time); rok {
-				if lok && rok {
-					if lt.Before(rt) {
-						return -1
-					}
-					return 1
+				if lt.Equal(rt) {
+					return 0
 				}
+				if lt.Before(rt) {
+					return -1
+				}
+				return 1
 			}
 		}
 	default:
@@ -401,7 +402,9 @@ func newListSink(node Node, to interface{}) (*listSink, error) {
 	// anonymous types when the caller provides the bucket later.
 	name := ""
 	proto := reflect.New(elemType)
-	if proto.Elem().CanInterface() {
+	if bn, ok := proto.Interface().(BucketNamer); ok {
+		name = bn.StormBucketName()
+	} else if proto.Elem().CanInterface() {
 		if bn, ok := proto.Elem().Interface().(BucketNamer); ok {
 			name = bn.StormBucketName()
 		}
@@ -521,13 +524,7 @@ func (f *firstSink) elem() reflect.Value {
 }
 
 func (f *firstSink) bucketName() string {
-	v := reflect.Indirect(f.ref)
-	if v.CanInterface() {
-		if bn, ok := v.Interface().(BucketNamer); ok {
-			return bn.StormBucketName()
-		}
-	}
-	return v.Type().Name()
+	return bucketName(f.ref.Interface())
 }
 
 func (f *firstSink) add(ctx context.Context, i *item) error {

@@ -710,9 +710,9 @@ func TestKeyExists_Behavior(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok)
 
-	// Missing bucket preserves the existing ErrNotFound behavior.
+	// A missing bucket simply means the key does not exist.
 	ok, err = db.KeyExists(ctx, "missing-bucket", "key")
-	require.ErrorIs(t, err, ErrNotFound)
+	require.NoError(t, err)
 	require.False(t, ok)
 
 	// Cancelled context returns false, error.

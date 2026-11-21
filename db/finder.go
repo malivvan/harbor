@@ -3,8 +3,8 @@ package db
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
+	"regexp"
 
 	"github.com/malivvan/storm/db/index"
 	"github.com/malivvan/storm/db/q"
@@ -672,7 +672,7 @@ func (n *node) Prefix(ctx context.Context, fieldName string, prefix string, to a
 
 	field, ok := cfg.Fields[fieldName]
 	if !ok || (!field.IsID && field.Index == "") {
-		query := newQuery(n, q.Re(fieldName, fmt.Sprintf("^%s", prefix)))
+		query := newQuery(n, q.Re(fieldName, "^"+regexp.QuoteMeta(prefix)))
 		query.Skip(opts.Skip).Limit(opts.Limit)
 
 		if opts.Reverse {

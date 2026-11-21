@@ -293,7 +293,7 @@ func (n *node) KeyExists(ctx context.Context, bucketName string, key any) (bool,
 
 		bucket := n.getBucket(tx, bucketName)
 		if bucket == nil {
-			return ErrNotFound
+			return nil
 		}
 
 		v := bucket.Get(id)

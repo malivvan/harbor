@@ -114,9 +114,13 @@ func (idx *IDIndex) Range(ctx context.Context, min []byte, max []byte, opts *Opt
 		},
 	}
 
-	for ident, _ := c.First(); ident != nil && c.Continue(ident); ident, _ = c.Next() {
+	for ident, value := c.First(); ident != nil && c.Continue(ident); ident, value = c.Next() {
 		if err := checkContext(ctx); err != nil {
 			return nil, wrapError("index range", err)
+		}
+
+		if value == nil {
+			continue
 		}
 
 		if opts != nil && opts.Skip > 0 {
@@ -156,9 +160,13 @@ func (idx *IDIndex) Prefix(ctx context.Context, prefix []byte, opts *Options) ([
 		Prefix:  prefix,
 	}
 
-	for ident, _ := c.First(); ident != nil && c.Continue(ident); ident, _ = c.Next() {
+	for ident, value := c.First(); ident != nil && c.Continue(ident); ident, value = c.Next() {
 		if err := checkContext(ctx); err != nil {
 			return nil, wrapError("index prefix", err)
+		}
+
+		if value == nil {
+			continue
 		}
 
 		if opts != nil && opts.Skip > 0 {

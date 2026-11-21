@@ -502,7 +502,7 @@ func TestWrap_KV_OperationPrefixes(t *testing.T) {
 		{
 			name:   "kv key exists",
 			prefix: "storm kv key exists:",
-			op:     func() error { _, err := db.KeyExists(ctx, "nonexistent", "key"); return err },
+			op:     func() error { _, err := db.KeyExists(nil, "bucket", "key"); return err },
 		},
 	}
 
@@ -560,10 +560,10 @@ func TestWrap_KV_Classification(t *testing.T) {
 		require.True(t, strings.HasPrefix(err.Error(), "storm kv set bytes:"))
 	})
 
-	t.Run("KeyExistsNotFound", func(t *testing.T) {
-		_, err := db.KeyExists(ctx, "nonexistent-b", "key")
-		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "storm kv key exists:"))
+	t.Run("KeyExistsMissingBucketIsFalse", func(t *testing.T) {
+		exists, err := db.KeyExists(ctx, "nonexistent-b", "key")
+		require.NoError(t, err)
+		require.False(t, exists)
 	})
 }
 
@@ -757,7 +757,7 @@ func TestWrap_AllOperationLabelsCovered(t *testing.T) {
 		{"kv delete", "storm kv delete:", func() error { return db.Delete(ctx, "nx", "k") }},
 		{"kv get bytes", "storm kv get bytes:", func() error { _, err := db.GetBytes(ctx, "b", 999); return err }},
 		{"kv set bytes", "storm kv set bytes:", func() error { return db.SetBytes(ctx, "b", nil, []byte{}) }},
-		{"kv key exists", "storm kv key exists:", func() error { _, err := db.KeyExists(ctx, "nx", "k"); return err }},
+		{"kv key exists", "storm kv key exists:", func() error { _, err := db.KeyExists(nilCtx, "nx", "k"); return err }},
 	}
 
 	for _, tc := range tests {

@@ -156,6 +156,7 @@ the encryption state (sections 4 and 6).
   Fix: in `bucketNameFromValue`, try both `v.Interface().(BucketNamer)` and, when addressable,
   `v.Addr().Interface().(BucketNamer)`.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(db): address remaining review findings`.
 - **`IDIndex.Range`/`Prefix` treat nested sub-bucket names as IDs**
   — `db/index/id.go:117` and `db/index/id.go:159`
   Problem: `IDIndex.IndexBucket` is the record bucket, whose cursor also yields `__metadata`
@@ -164,6 +165,7 @@ the encryption state (sections 4 and 6).
   does `bucket.Get(name)` → nil → `ErrNotFound` (reproduced with a string-ID `Range`).
   Fix: capture the value and `continue` when `value == nil` (as `ListIndex` already does).
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(db): address remaining review findings`.
 - **`ListIndex.Add` reuses a bbolt-returned byte slice as a scratch buffer**
   — `db/index/list.go:90-96`
   Problem: `key` comes from `idx.IDs.Get(ctx, targetID)` and may point into bbolt-owned memory
@@ -172,6 +174,7 @@ the encryption state (sections 4 and 6).
   bucket). The current `save` call order hides it, but `ListIndex` is public.
   Fix: never mutate the returned slice; build the new key into a freshly allocated buffer.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(db): address remaining review findings`.
 - **`ListIndex.Remove` leaves orphaned entries in the nested `storm__ids` bucket**
   — `db/index/list.go:126-157` (line 153)
   Problem: `Remove` deletes the `value + "__" + id` entries from `IndexBucket` but then calls
@@ -181,6 +184,7 @@ the encryption state (sections 4 and 6).
   Fix: while collecting keys in the cursor loop, extract `id := k[len(prefix):]` per entry and
   remove by id, instead of `idx.IDs.RemoveID(ctx, value)`.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(db): address remaining review findings`.
 - **`q.compare` nil-comparison condition has a typo and is asymmetric**
   — `db/q/compare.go:18-21`
   Problem: the second parenthesized condition uses `ak == reflect.Slice` and
@@ -189,6 +193,7 @@ the encryption state (sections 4 and 6).
   false — `q.Eq` gives inconsistent results depending on argument order.
   Fix: correct to `(bk == reflect.Ptr || bk == reflect.Slice || ak == reflect.Interface || bk == reflect.Invalid)`.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(db): address remaining review findings`.
 - **`q.compare` mixed signed/unsigned integer comparisons overflow**
   — `db/q/compare.go:27-28` and `db/q/compare.go:48-49`
   Problem: `int64(valb.Uint())` wraps values above `MaxInt64`, and `uint64(valb.Int())` wraps
@@ -197,6 +202,7 @@ the encryption state (sections 4 and 6).
   Fix: promote both operands to a common signed representation (or `math/big`/`go/constant`)
   with correct sign handling instead of casting through fixed-width types.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(db): address remaining review findings`.
 - **`Prefix` fallback interpolates the prefix into a regex without escaping**
   — `db/finder.go:675`
   Problem: for unindexed fields `Prefix` builds `q.Re(field, fmt.Sprintf("^%s", prefix))`.
@@ -204,6 +210,7 @@ the encryption state (sections 4 and 6).
   regexes that error. Users expect literal prefix semantics.
   Fix: use `regexp.QuoteMeta(prefix)` or a dedicated literal prefix matcher.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(db): address remaining review findings`.
 - **Reverse range scan uses `bytes.HasPrefix` instead of an upper-bound comparison**
   — `internal/internal.go:50-52` (reached via `db/index/list.go:328` and `db/index/unique.go:183`)
   Problem: `RangeCursor.First` in reverse mode steps back only when `!bytes.HasPrefix(k, c.Max)`.
@@ -214,6 +221,7 @@ the encryption state (sections 4 and 6).
   Fix: compare with the same `CompareFn` used by `Continue`, e.g.
   `if k != nil && CompareFn(k, c.Max) > 0 { k, v = c.C.Prev() }`.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(db): address remaining review findings`.
 - **`sorter.compareValue` returns `1` for equal `time.Time` values, breaking reverse `OrderBy`**
   — `db/sink.go:184-193`
   Problem: the `time.Time` branch returns `-1` only when `lt.Before(rt)` and `1` in every
@@ -222,6 +230,7 @@ the encryption state (sections 4 and 6).
   Fix: add `if lt.Equal(rt) { return 0 }` before the `Before` check, then return `1` only for
   strictly greater.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(db): address remaining review findings`.
 ### Low
 
 - **`KeyExists` returns `ErrNotFound` when the bucket is absent instead of `(false, nil)`**
@@ -230,6 +239,7 @@ the encryption state (sections 4 and 6).
   missing; returning `ErrNotFound` forces callers to special-case normal absence.
   Fix: return `(false, nil)` when `getBucket` returns nil.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(db): address remaining review findings`.
 - **`q.compare` treats nil `*time.Time` as true for every comparison token**
   — `db/q/compare.go:91-103`
   Problem: when either operand is a nil `*time.Time`, the function returns `true`
@@ -239,6 +249,7 @@ the encryption state (sections 4 and 6).
 
 ---
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(db): address remaining review findings`.
 ## 4. Package `fs` (incl. `absfs`, `inode`, `s3fs`)
 
 ### High

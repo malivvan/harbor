@@ -44,12 +44,15 @@ type RangeCursor struct {
 // First element
 func (c *RangeCursor) First() ([]byte, []byte) {
 	if c.Reverse {
+		if len(c.Max) == 0 {
+			return c.C.Last()
+		}
 		k, v := c.C.Seek(c.Max)
 
-		// If Seek doesn't find a key it goes to the next.
-		// If so, we need to get the previous one to avoid
-		// including bigger values. #218
-		if !bytes.HasPrefix(k, c.Max) && k != nil {
+		// If Seek lands beyond the upper bound, step back so values whose
+		// prefix merely starts with max (e.g. "abcd" for max "abc") are not
+		// included.
+		if k != nil && c.CompareFn(k, c.Max) > 0 {
 			k, v = c.C.Prev()
 		}
 
@@ -71,9 +74,15 @@ func (c *RangeCursor) Next() ([]byte, []byte) {
 // Continue tells if the loop needs to continue
 func (c *RangeCursor) Continue(val []byte) bool {
 	if c.Reverse {
+		if len(c.Min) == 0 {
+			return val != nil
+		}
 		return val != nil && c.CompareFn(val, c.Min) >= 0
 	}
 
+	if len(c.Max) == 0 {
+		return val != nil
+	}
 	return val != nil && c.CompareFn(val, c.Max) <= 0
 }
 

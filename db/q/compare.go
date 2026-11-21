@@ -16,16 +16,16 @@ func compare(a, b interface{}, tok token.Token) bool {
 	switch {
 	// comparing nil values
 	case (ak == reflect.Ptr || ak == reflect.Slice || ak == reflect.Interface || ak == reflect.Invalid) &&
-		(bk == reflect.Ptr || ak == reflect.Slice || bk == reflect.Interface || bk == reflect.Invalid) &&
+		(bk == reflect.Ptr || bk == reflect.Slice || bk == reflect.Interface || bk == reflect.Invalid) &&
 		(!vala.IsValid() || vala.IsNil()) && (!valb.IsValid() || valb.IsNil()):
-		return true
+		return tok == token.EQL || tok == token.NEQ
 	case ak >= reflect.Int && ak <= reflect.Int64:
 		if bk >= reflect.Int && bk <= reflect.Int64 {
 			return constant.Compare(constant.MakeInt64(vala.Int()), tok, constant.MakeInt64(valb.Int()))
 		}
 
 		if bk >= reflect.Uint && bk <= reflect.Uint64 {
-			return constant.Compare(constant.MakeInt64(vala.Int()), tok, constant.MakeInt64(int64(valb.Uint())))
+			return constant.Compare(constant.MakeInt64(vala.Int()), tok, constant.MakeUint64(valb.Uint()))
 		}
 
 		if bk == reflect.Float32 || bk == reflect.Float64 {
@@ -46,7 +46,7 @@ func compare(a, b interface{}, tok token.Token) bool {
 		}
 
 		if bk >= reflect.Int && bk <= reflect.Int64 {
-			return constant.Compare(constant.MakeUint64(vala.Uint()), tok, constant.MakeUint64(uint64(valb.Int())))
+			return constant.Compare(constant.MakeUint64(vala.Uint()), tok, constant.MakeInt64(valb.Int()))
 		}
 
 		if bk == reflect.Float32 || bk == reflect.Float64 {
@@ -93,14 +93,19 @@ func compare(a, b interface{}, tok token.Token) bool {
 	if typea != nil && (typea.String() == "time.Time" || typea.String() == "*time.Time") &&
 		typeb != nil && (typeb.String() == "time.Time" || typeb.String() == "*time.Time") {
 
-		if typea.String() == "*time.Time" && vala.IsNil() {
-			return true
+		aNil := typea.String() == "*time.Time" && vala.IsNil()
+		bNil := typeb.String() == "*time.Time" && valb.IsNil()
+		switch {
+		case aNil && bNil:
+			return tok == token.EQL
+		case aNil || bNil:
+			return tok == token.NEQ
 		}
 
+		if typea.String() == "*time.Time" {
+			vala = vala.Elem()
+		}
 		if typeb.String() == "*time.Time" {
-			if valb.IsNil() {
-				return true
-			}
 			valb = valb.Elem()
 		}
 

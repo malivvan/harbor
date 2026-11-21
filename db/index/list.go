@@ -87,9 +87,12 @@ func (idx *ListIndex) Add(ctx context.Context, newValue []byte, targetID []byte)
 			return wrapError("index add", err)
 		}
 
-		key = key[:0]
+		// Never reuse the slice returned by bbolt: it may alias database
+		// memory. Build the new key in a fresh buffer.
+		key = nil
 	}
 
+	key = make([]byte, 0, len(newValue)+2+len(targetID))
 	key = append(key, newValue...)
 	key = append(key, '_')
 	key = append(key, '_')
@@ -144,15 +147,14 @@ func (idx *ListIndex) Remove(ctx context.Context, value []byte) error {
 		if err := checkContext(ctx); err != nil {
 			return wrapError("index remove", err)
 		}
-	}
 
-	if err := checkContext(ctx); err != nil {
-		return wrapError("index remove", err)
-	}
-
-	err = idx.IDs.RemoveID(ctx, value)
-	if err != nil {
-		return wrapError("index remove", err)
+		// The IDs bucket is keyed by the target ID, which is the suffix after
+		// the "<value>__" prefix, not the bare field value.
+		id := k[len(prefix):]
+		err = idx.IDs.RemoveID(ctx, id)
+		if err != nil {
+			return wrapError("index remove", err)
+		}
 	}
 
 	return wrapError("index remove", checkContext(ctx))

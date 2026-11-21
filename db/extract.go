@@ -43,15 +43,26 @@ type structConfig struct {
 // If the value implements BucketNamer, that name is returned.
 // Otherwise the type's static name is used.
 func bucketName(data interface{}) string {
-	if bn, ok := data.(BucketNamer); ok {
-		return bn.StormBucketName()
+	v := reflect.ValueOf(data)
+	if v.IsValid() {
+		if bn, ok := data.(BucketNamer); ok {
+			return bn.StormBucketName()
+		}
+		if v.Kind() == reflect.Ptr && !v.IsNil() {
+			return bucketNameFromValue(&v)
+		}
 	}
-	return reflect.Indirect(reflect.ValueOf(data)).Type().Name()
+	return reflect.Indirect(v).Type().Name()
 }
 
 // bucketNameFromValue resolves the bucket name from a reflect.Value.
 func bucketNameFromValue(v *reflect.Value) string {
 	if v.Kind() == reflect.Ptr {
+		if !v.IsNil() && v.CanInterface() {
+			if bn, ok := v.Interface().(BucketNamer); ok {
+				return bn.StormBucketName()
+			}
+		}
 		e := v.Elem()
 		v = &e
 	}
@@ -60,10 +71,16 @@ func bucketNameFromValue(v *reflect.Value) string {
 			return bn.StormBucketName()
 		}
 	}
+	if v.CanAddr() {
+		if bn, ok := v.Addr().Interface().(BucketNamer); ok {
+			return bn.StormBucketName()
+		}
+	}
 	return v.Type().Name()
 }
 
 func extract(s *reflect.Value, mi ...*structConfig) (*structConfig, error) {
+	nameSrc := *s
 	if s.Kind() == reflect.Ptr {
 		e := s.Elem()
 		s = &e
@@ -86,7 +103,7 @@ func extract(s *reflect.Value, mi ...*structConfig) (*structConfig, error) {
 	}
 
 	if m.Name == "" {
-		m.Name = bucketNameFromValue(s)
+		m.Name = bucketNameFromValue(&nameSrc)
 	}
 
 	numFields := s.NumField()
