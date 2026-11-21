@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm"
+	storm "github.com/malivvan/storm/db"
 	"github.com/malivvan/storm/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"

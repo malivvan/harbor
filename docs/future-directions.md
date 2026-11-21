@@ -2,13 +2,13 @@
 
 Status: exploratory, non-normative
 
-This document preserves architectural ideas for possible work after Storm v6 is stable in real applications. It is not a roadmap, release commitment, or justification for expanding the v6 scope.
+This document preserves architectural ideas for possible work after Storm is stable in real applications. It is not a roadmap, release commitment, or justification for expanding the current scope.
 
 The decision to pursue any item requires production evidence, benchmarks, compatibility analysis, and a separate normative design.
 
 ## Decision principle
 
-Storm v6 is an evolutionary refactor focused on context propagation, safe transaction boundaries, encapsulation, compatibility, quality, and documentation. A larger redesign is not currently required.
+Storm's current design is focused on context propagation, safe transaction boundaries, encapsulation, quality, and documentation. A larger redesign is not currently required.
 
 A future redesign should be considered only if measured limitations cannot be addressed safely through incremental changes. Relevant signals include:
 
@@ -251,7 +251,7 @@ A permanent bbolt fork is a last resort because it transfers responsibility for 
 
 ## 11. Evaluation process
 
-After Storm v6 is stable in production use:
+After Storm is stable in production use:
 
 1. collect production traces and benchmarks;
 2. identify concrete bottlenecks or maintenance hazards;
@@ -260,4 +260,4 @@ After Storm v6 is stable in production use:
 5. decide independently for each subsystem whether to retain, refactor, or replace it;
 6. avoid a full rewrite unless evidence shows that staged replacement is insufficient.
 
-A possible future document may be titled `Storm v7 feasibility report`, but its existence and conclusions are intentionally undecided.
+A possible future document may be titled `Storm future-version feasibility report`, but its existence and conclusions are intentionally undecided.

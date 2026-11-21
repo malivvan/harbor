@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/malivvan/storm"
+	storm "github.com/malivvan/storm/db"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )

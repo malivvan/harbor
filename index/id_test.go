@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/malivvan/storm"
+	storm "github.com/malivvan/storm/db"
 	"github.com/malivvan/storm/index"
 	"github.com/malivvan/storm/q"
 	"github.com/stretchr/testify/require"

@@ -1,6 +1,6 @@
 # Storm
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/storm.svg)](https://pkg.go.dev/github.com/malivvan/storm)
+[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/storm/db.svg)](https://pkg.go.dev/github.com/malivvan/storm/db)
 [![CI](https://github.com/malivvan/storm/actions/workflows/main.yml/badge.svg)](https://github.com/malivvan/storm/actions/workflows/main.yml)
 
 Storm is a simple and powerful toolkit for [BoltDB](https://github.com/etcd-io/bbolt), forked from [Storm](https://github.com/asdine/storm). It provides indexes, a wide range of methods to store and fetch data, an advanced query system, and much more.
@@ -30,23 +30,23 @@ Storm is a simple and powerful toolkit for [BoltDB](https://github.com/etcd-io/b
 - [Database lifecycle](#database-lifecycle)
 - [Native BoltDB access](#native-boltdb-access)
 - [Codecs](#codecs)
-- [Compatibility with v5](#compatibility-with-v5)
-- [Performance](#performance)
 - [Testing and CI](#testing-and-ci)
 - [License](#license)
 - [Credits](#credits)
 
 ## Installation
 
-Storm v6 requires **Go 1.24** or later.
+Storm requires **Go 1.24** or later.
 
 ```sh
 go get github.com/malivvan/storm
 ```
 
 ```go
-import "github.com/malivvan/storm"
+import storm "github.com/malivvan/storm/db"
 ```
+
+The public API lives in the `db` package.
 
 ## Quick start
 
@@ -59,7 +59,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/malivvan/storm"
+	storm "github.com/malivvan/storm/db"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -400,7 +400,7 @@ err = db.ReIndex(ctx, &User{})
 
 ## Managed transactions
 
-Storm v6 provides callback-managed transactions only. Manual `Begin`/`Commit`/`Rollback` APIs do not exist.
+Storm provides callback-managed transactions only. Manual `Begin`/`Commit`/`Rollback` APIs do not exist.
 
 ### ReadTransaction
 
@@ -644,9 +644,9 @@ db, err := storm.Open(ctx, bDB, nil, gob.Codec)
 
 | Package | Import path | Codec variable |
 |---------|-------------|----------------|
-| JSON (default) | `storm/v6/codec/json` | `json.Codec` |
-| Gob | `storm/v6/codec/gob` | `gob.Codec` |
-| AES | `storm/v6/codec/aes` | `NewAES(subCodec, key)` |
+| JSON (default) | `storm/codec/json` | `json.Codec` |
+| Gob | `storm/codec/gob` | `gob.Codec` |
+| AES | `storm/codec/aes` | `NewAES(subCodec, key)` |
 
 AES wraps another codec with AES-GCM encryption.
 
@@ -666,40 +666,6 @@ type MarshalUnmarshaler interface {
 
 Storm records codec metadata for record/KV leaf buckets and an encoded database-version value used during `Open`. An incompatible root codec is classified with `ErrDifferentCodec`; metadata-validating initialization and write operations also classify a mismatched node codec this way. Read paths may instead return the underlying decode error, so nodes configured with `WithCodec` must continue using their matching codec.
 
-## Compatibility with v5
-
-Storm v6 reads and mutates databases created by Storm v5.3.0 without migration for the tested codecs:
-
-| Codec | Fixture | Read | Mutate | Reopen |
-|-------|---------|------|--------|--------|
-| JSON (default) | baseline.db | ✓ | ✓ | ✓ |
-| Gob | gob.db | ✓ | ✓ | ✓ |
-| AES-JSON | aes.db | ✓ | ✓ | ✓ |
-
-IDs, ordinary indexes, unique indexes, nested buckets, KV operations, `BucketNamer`, and `reflect.StructOf` are all covered. Same-process v5→v6→v5→v6 roundtrip is verified.
-
-**Limitations:**
-
-- Process-isolated roundtrip testing is deferred.
-- Compatibility evidence is behavioural, not byte-level (raw bbolt bytes are not deterministic).
-
-See [`testdata/compatibility/README.md`](testdata/compatibility/README.md) for the full matrix.
-
-See [`MIGRATION_V6.md`](MIGRATION_V6.md) for the complete v5.3.0 → v6 migration guide.
-
-See [`docs/release-notes-v6.md`](docs/release-notes-v6.md) for the v6 release summary.
-
-## Performance
-
-Storm v6 adds context propagation, operation wrapping, managed transactions, and destination safety on top of v5's foundation. Measured paired workloads under equivalent configurations (Apple M4, darwin/arm64, default JSON codec, `NoSync`) show:
-
-- Point reads: approximately 2–3% higher ns/op.
-- Bulk reads: approximately 0.4–1.3% higher ns/op.
-- Save: approximately 18% higher ns/op (largest observed difference).
-- KVGet: approximately 12% higher ns/op.
-
-No paired benchmark exceeded the predefined 25% investigation threshold. These are manual medians from five samples in a same-process comparison with a shared dependency graph; no confidence interval or statistical-significance analysis was performed. Performance architecture work is deferred to a future version. See [`testdata/compatibility/benchmark/results/comparison.md`](testdata/compatibility/benchmark/results/comparison.md) for the full methodology and results.
-
 ## Testing and CI
 
 ```sh
@@ -718,13 +684,6 @@ go run honnef.co/go/tools/cmd/staticcheck@2026.1 ./...
 # Coverage
 go test -count=1 -timeout 180s -covermode=atomic -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out > coverage.txt
-```
-
-Nested compatibility modules:
-
-```sh
-go -C testdata/compatibility/roundtrip test -count=1 -timeout 180s ./...
-go -C testdata/compatibility/benchmark test -count=1 ./...
 ```
 
 ## License

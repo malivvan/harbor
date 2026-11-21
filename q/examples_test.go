@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/malivvan/storm"
+	storm "github.com/malivvan/storm/db"
 	"github.com/malivvan/storm/q"
 	bolt "go.etcd.io/bbolt"
 )
