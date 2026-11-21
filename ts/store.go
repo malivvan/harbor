@@ -127,7 +127,10 @@ func (s *Store) DeleteSeries(ctx context.Context, name string) error {
 			parent = tx.Bucket(s.root)
 		}
 
-		key := s.bucketKey(name)
+		key, err := s.bucketKey(name)
+		if err != nil {
+			return err
+		}
 		if parent == nil {
 			if tx.Bucket(key) != nil {
 				if err := tx.DeleteBucket(key); err != nil {
@@ -146,7 +149,10 @@ func (s *Store) DeleteSeries(ctx context.Context, name string) error {
 		if err != nil {
 			return err
 		}
-		metaKey := s.bucketKey(name)
+		metaKey, err := s.bucketKey(name)
+		if err != nil {
+			return err
+		}
 		if meta != nil && meta.Get(metaKey) != nil {
 			if err := meta.Delete(metaKey); err != nil {
 				return err
@@ -178,11 +184,11 @@ func (s *Store) DeleteSeries(ctx context.Context, name string) error {
 
 // bucketKey returns the physical key for a series bucket and its metadata.
 // Names are encrypted with deterministic AES-SIV when EncryptSeriesNames is on.
-func (s *Store) bucketKey(name string) []byte {
+func (s *Store) bucketKey(name string) ([]byte, error) {
 	if s == nil || s.enc == nil || !s.enc.encNames || s.enc.siv == nil {
-		return []byte(name)
+		return []byte(name), nil
 	}
-	return s.enc.siv.EncryptName(name)
+	return s.enc.siv.SealName([]byte(name))
 }
 
 // logicalName maps a physical bucket/meta key back to the series name.
@@ -190,7 +196,11 @@ func (s *Store) logicalName(physical []byte) (string, error) {
 	if s == nil || s.enc == nil || !s.enc.encNames || s.enc.siv == nil {
 		return string(physical), nil
 	}
-	return s.enc.siv.DecryptName(physical)
+	name, err := s.enc.siv.OpenName(physical)
+	if err != nil {
+		return "", err
+	}
+	return string(name), nil
 }
 
 func (s *Store) rootBucket(tx *bolt.Tx) *bolt.Bucket {
@@ -200,21 +210,27 @@ func (s *Store) rootBucket(tx *bolt.Tx) *bolt.Bucket {
 	return tx.Bucket(s.root)
 }
 
-func (s *Store) seriesBucket(tx *bolt.Tx, name string) *bolt.Bucket {
-	key := s.bucketKey(name)
+func (s *Store) seriesBucket(tx *bolt.Tx, name string) (*bolt.Bucket, error) {
+	key, err := s.bucketKey(name)
+	if err != nil {
+		return nil, err
+	}
 	if len(s.root) == 0 {
-		return tx.Bucket(key)
+		return tx.Bucket(key), nil
 	}
 
 	root := s.rootBucket(tx)
 	if root == nil {
-		return nil
+		return nil, nil
 	}
-	return root.Bucket(key)
+	return root.Bucket(key), nil
 }
 
 func (s *Store) createSeriesBucket(tx *bolt.Tx, name string) (*bolt.Bucket, error) {
-	key := s.bucketKey(name)
+	key, err := s.bucketKey(name)
+	if err != nil {
+		return nil, err
+	}
 	if len(s.root) == 0 {
 		return tx.CreateBucketIfNotExists(key)
 	}

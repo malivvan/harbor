@@ -272,29 +272,29 @@ func (s *Store) rootBucket(tx *bbolt.Tx) *bbolt.Bucket {
 
 // collectionBucket returns the bucket for a collection under the configured
 // root, or nil when either the root or collection bucket does not exist.
-func (s *Store) collectionBucket(tx *bbolt.Tx, name string) *bbolt.Bucket {
-	key := s.bucketKey(name)
-	if len(key) == 0 {
-		return nil
+func (s *Store) collectionBucket(tx *bbolt.Tx, name string) (*bbolt.Bucket, error) {
+	key, err := s.bucketKey(name)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(s.root) == 0 {
-		return tx.Bucket(key)
+		return tx.Bucket(key), nil
 	}
 
 	root := s.rootBucket(tx)
 	if root == nil {
-		return nil
+		return nil, nil
 	}
-	return root.Bucket(key)
+	return root.Bucket(key), nil
 }
 
 // createCollectionBucket creates the collection bucket under the configured
 // root, creating the root bucket when necessary.
 func (s *Store) createCollectionBucket(tx *bbolt.Tx, name string) (*bbolt.Bucket, error) {
-	key := s.bucketKey(name)
-	if len(key) == 0 {
-		return nil, fmt.Errorf("%w: failed to derive the bucket key for collection %q", ErrInvalidConfig, name)
+	key, err := s.bucketKey(name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive the bucket key for collection %q: %w", name, err)
 	}
 
 	if len(s.root) == 0 {
@@ -376,7 +376,10 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 	}
 
 	return s.db.Update(func(tx *bbolt.Tx) error {
-		b := s.collectionBucket(tx, colName)
+		b, err := s.collectionBucket(tx, colName)
+		if err != nil {
+			return err
+		}
 		if b == nil {
 			return fmt.Errorf("collection bucket %s not found", colName)
 		}
@@ -405,9 +408,9 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 				return fmt.Errorf("failed to encrypt point %s: %w", p.ID, err)
 			}
 
-			key := s.keyBytes(p.ID)
-			if len(key) == 0 {
-				return fmt.Errorf("%w: failed to derive the key for point %q", ErrInvalidConfig, p.ID)
+			key, err := s.keyBytes(p.ID)
+			if err != nil {
+				return fmt.Errorf("failed to derive the key for point %q: %w", p.ID, err)
 			}
 
 			if err := b.Put(key, sealed); err != nil {
@@ -430,7 +433,10 @@ func (s *Store) LoadCollection(colName string) (map[string]*PointStruct, error) 
 	points := make(map[string]*PointStruct)
 
 	err := s.db.View(func(tx *bbolt.Tx) error {
-		b := s.collectionBucket(tx, colName)
+		b, err := s.collectionBucket(tx, colName)
+		if err != nil {
+			return err
+		}
 		if b == nil {
 			log.Printf("Bucket %s doesn't exist yet, starting empty", colName)
 			return nil
@@ -539,9 +545,9 @@ func (s *Store) SaveCollectionMeta(name string, meta CollectionMeta) error {
 			return fmt.Errorf("failed to encrypt metadata for %s: %w", name, err)
 		}
 
-		key := s.bucketKey(name)
-		if len(key) == 0 {
-			return fmt.Errorf("%w: failed to derive the metadata key for %q", ErrInvalidConfig, name)
+		key, err := s.bucketKey(name)
+		if err != nil {
+			return fmt.Errorf("failed to derive the metadata key for %q: %w", name, err)
 		}
 
 		return b.Put(key, sealed)
@@ -564,7 +570,12 @@ func (s *Store) LoadCollectionMeta(name string) (*CollectionMeta, error) {
 			return fmt.Errorf("metadata bucket not found")
 		}
 
-		data := b.Get(s.bucketKey(name))
+		key, err := s.bucketKey(name)
+		if err != nil {
+			return fmt.Errorf("failed to derive the metadata key for %q: %w", name, err)
+		}
+
+		data := b.Get(key)
 		if data == nil {
 			return fmt.Errorf("metadata for collection %s not found", name)
 		}
@@ -633,15 +644,18 @@ func (s *Store) DeletePoints(colName string, ids []string) error {
 	}
 
 	return s.db.Update(func(tx *bbolt.Tx) error {
-		b := s.collectionBucket(tx, colName)
+		b, err := s.collectionBucket(tx, colName)
+		if err != nil {
+			return err
+		}
 		if b == nil {
 			return nil // Bucket doesn't exist, nothing to delete
 		}
 
 		for _, id := range ids {
-			key := s.keyBytes(id)
-			if len(key) == 0 {
-				return fmt.Errorf("%w: failed to derive the key for point %q", ErrInvalidConfig, id)
+			key, err := s.keyBytes(id)
+			if err != nil {
+				return fmt.Errorf("failed to derive the key for point %q: %w", id, err)
 			}
 			if err := b.Delete(key); err != nil {
 				return fmt.Errorf("failed to delete point %s from bbolt: %w", id, err)
@@ -657,9 +671,9 @@ func (s *Store) DropCollection(name string) error {
 		return fmt.Errorf("storage is closed")
 	}
 
-	key := s.bucketKey(name)
-	if len(key) == 0 {
-		return fmt.Errorf("%w: failed to derive the bucket key for collection %q", ErrInvalidConfig, name)
+	key, err := s.bucketKey(name)
+	if err != nil {
+		return fmt.Errorf("failed to derive the bucket key for collection %q: %w", name, err)
 	}
 
 	return s.db.Update(func(tx *bbolt.Tx) error {

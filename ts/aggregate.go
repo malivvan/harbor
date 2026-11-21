@@ -142,7 +142,10 @@ func (se *Series) Aggregate(ctx context.Context, start, end int64, step int64, f
 			return err
 		}
 
-		bucket := se.store.seriesBucket(tx, se.name)
+		bucket, err := se.store.seriesBucket(tx, se.name)
+		if err != nil {
+			return err
+		}
 		if bucket == nil {
 			return nil
 		}

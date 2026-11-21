@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/malivvan/storm/internal/encryption"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -35,7 +36,7 @@ func (s *Store) withKey(newKey []byte) (*Store, error) {
 		},
 	}
 	if s.enc.encNames {
-		next.enc.siv, err = newSIVEngine(newKey)
+		next.enc.siv, err = encryption.NewSIVNameCipher(newKey, sivInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -124,7 +125,10 @@ func (s *Store) reEncryptSeries(ctx context.Context, name string, next *Store) e
 			return err
 		}
 
-		oldBucket := s.seriesBucket(tx, name)
+		oldBucket, err := s.seriesBucket(tx, name)
+		if err != nil {
+			return err
+		}
 		points, err := s.readAllPoints(ctx, oldBucket)
 		if err != nil {
 			return err
@@ -134,7 +138,10 @@ func (s *Store) reEncryptSeries(ctx context.Context, name string, next *Store) e
 		if err != nil {
 			return err
 		}
-		oldMetaKey := s.bucketKey(name)
+		oldMetaKey, err := s.bucketKey(name)
+		if err != nil {
+			return err
+		}
 		hasMeta := metaBucket != nil && metaBucket.Get(oldMetaKey) != nil
 		if oldBucket == nil && !hasMeta {
 			return ErrNotFound
@@ -291,7 +298,11 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 			if _, err := s.readMeta(tx, name); err != nil {
 				return err
 			}
-			_, err := s.readAllPoints(ctx, s.seriesBucket(tx, name))
+			bucket, err := s.seriesBucket(tx, name)
+			if err != nil {
+				return err
+			}
+			_, err = s.readAllPoints(ctx, bucket)
 			return err
 		}); err != nil {
 			return err

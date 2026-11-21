@@ -3,9 +3,14 @@ package encryption
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+	"io"
+
+	"golang.org/x/crypto/hkdf"
 )
 
 // SIVEngine implements AES-SIV (Synthetic Initialization Vector) mode
@@ -231,4 +236,79 @@ func (e *SIVEngine) NonceSize() int {
 // Overhead returns the SIV size (16 bytes)
 func (e *SIVEngine) Overhead() int {
 	return 16
+}
+
+// sivKeySize is the AES-SIV key length: two AES-256 keys.
+const sivKeySize = 64
+
+// DeriveSIV derives an AES-SIV engine from masterKey for a purpose-specific
+// info string with HKDF-SHA256. Each caller passes its own info so keys derived
+// for different domains are independent.
+func DeriveSIV(masterKey []byte, info string) (*SIVEngine, error) {
+	if len(masterKey) != KeySize {
+		return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, KeySize, len(masterKey))
+	}
+
+	key := make([]byte, sivKeySize)
+	if _, err := io.ReadFull(hkdf.New(sha256.New, masterKey, nil, []byte(info)), key); err != nil {
+		return nil, fmt.Errorf("deriving SIV key for %q: %w", info, err)
+	}
+
+	return NewSIVEngine(key)
+}
+
+// SIVNameCipher deterministically encrypts names and keys with AES-SIV.
+//
+// The ciphertext is encoded with base64 RawStdEncoding rather than RawURLEncoding:
+// its alphabet has no '_', so an encoded name can never contain the "__"
+// separator that composite index keys use. The same logical name always maps to
+// the same encoded key, which is what makes exact lookups work.
+//
+// A nil *SIVNameCipher is a plaintext cipher: SealName and OpenName are exact
+// passthroughs.
+type SIVNameCipher struct {
+	engine *SIVEngine
+}
+
+// NewSIVNameCipher derives a name cipher from masterKey for the given info.
+func NewSIVNameCipher(masterKey []byte, info string) (*SIVNameCipher, error) {
+	engine, err := DeriveSIV(masterKey, info)
+	if err != nil {
+		return nil, err
+	}
+	return &SIVNameCipher{engine: engine}, nil
+}
+
+// SealName returns the deterministic encoding of name.
+//
+// AES-SIV encryption cannot fail for a cipher built by NewSIVNameCipher, so the
+// error return exists for forward compatibility; callers should still propagate
+// it instead of storing a nil key.
+func (c *SIVNameCipher) SealName(name []byte) ([]byte, error) {
+	if c == nil {
+		return name, nil
+	}
+
+	ciphertext, err := c.engine.Encrypt(name)
+	if err != nil {
+		return nil, fmt.Errorf("encrypting name: %w", err)
+	}
+
+	out := make([]byte, base64.RawStdEncoding.EncodedLen(len(ciphertext)))
+	base64.RawStdEncoding.Encode(out, ciphertext)
+	return out, nil
+}
+
+// OpenName reverses SealName. A malformed or tampered name yields ErrAuthFailed.
+func (c *SIVNameCipher) OpenName(encoded []byte) ([]byte, error) {
+	if c == nil {
+		return encoded, nil
+	}
+
+	ciphertext := make([]byte, base64.RawStdEncoding.DecodedLen(len(encoded)))
+	n, err := base64.RawStdEncoding.Decode(ciphertext, encoded)
+	if err != nil {
+		return nil, fmt.Errorf("%w: malformed encrypted name: %v", ErrAuthFailed, err)
+	}
+	return c.engine.Decrypt(ciphertext[:n])
 }

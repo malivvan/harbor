@@ -309,7 +309,8 @@ func TestAEADVerifyAllDetectsTampering(t *testing.T) {
 		require.NoError(t, store.UpsertPoints("invoices", aeadTestPoints()))
 		require.NoError(t, store.VerifyAll(ctx))
 
-		key := store.keyBytes("p1")
+		key, err := store.keyBytes("p1")
+		require.NoError(t, err)
 		require.NotEmpty(t, key)
 		require.NoError(t, bdb.Update(func(tx *bbolt.Tx) error {
 			b := tx.Bucket([]byte("invoices"))

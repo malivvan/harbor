@@ -2,14 +2,10 @@ package db
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
-	"io"
 
 	"github.com/malivvan/storm/internal/encryption"
 	bolt "go.etcd.io/bbolt"
-	"golang.org/x/crypto/hkdf"
 )
 
 // CipherSuite selects the AEAD cipher used by an encrypted store.
@@ -101,10 +97,8 @@ const (
 	keyDomainKV    = "kv"
 )
 
-const (
-	sivKeySize    = 64
-	sivInfoPrefix = "storm/db/keys/"
-)
+// sivInfoPrefix domain-separates the deterministic key ciphers.
+const sivInfoPrefix = "storm/db/keys/"
 
 // encState is the shared encryption configuration of a Store. Reachable from
 // every node through its Store pointer. A nil encState means plaintext: every
@@ -118,9 +112,9 @@ type encState struct {
 	encMetadata bool
 	encKeys     bool
 
-	// sivs holds the per-domain deterministic engines, derived from the
+	// sivs holds the per-domain deterministic name ciphers, derived from the
 	// primary key. Read-only after construction.
-	sivs map[string]*encryption.SIVEngine
+	sivs map[string]*encryption.SIVNameCipher
 }
 
 // enabled reports whether the state encrypts anything.
@@ -185,23 +179,17 @@ func (e *encState) openMetadata(raw []byte) ([]byte, error) {
 }
 
 // sealKey deterministically encrypts a key component for the given domain when
-// EncryptKeys is enabled. The output is base64url encoded so encrypted keys
-// stay safe to use as bbolt keys and to concatenate with index separators.
+// EncryptKeys is enabled. The encoding has no '_' in its alphabet, so an
+// encrypted key can never contain the "__" separator of composite index keys.
 func (e *encState) sealKey(plain []byte, domain string) ([]byte, error) {
 	if e == nil || !e.encKeys || len(plain) == 0 {
 		return plain, nil
 	}
-	engine, ok := e.sivs[domain]
+	cipher, ok := e.sivs[domain]
 	if !ok {
 		return nil, fmt.Errorf("%w: unknown key domain %q", ErrInvalidConfig, domain)
 	}
-	sealed, err := engine.Encrypt(plain)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]byte, base64.RawURLEncoding.EncodedLen(len(sealed)))
-	base64.RawURLEncoding.Encode(out, sealed)
-	return out, nil
+	return cipher.SealName(plain)
 }
 
 // openKey reverses sealKey. It is only needed to re-key a store during
@@ -210,16 +198,11 @@ func (e *encState) openKey(cipherKey []byte, domain string) ([]byte, error) {
 	if e == nil || !e.encKeys || len(cipherKey) == 0 {
 		return cipherKey, nil
 	}
-	engine, ok := e.sivs[domain]
+	cipher, ok := e.sivs[domain]
 	if !ok {
 		return nil, fmt.Errorf("%w: unknown key domain %q", ErrInvalidConfig, domain)
 	}
-	sealed := make([]byte, base64.RawURLEncoding.DecodedLen(len(cipherKey)))
-	n, err := base64.RawURLEncoding.Decode(sealed, cipherKey)
-	if err != nil {
-		return nil, fmt.Errorf("%w: malformed encrypted key: %v", ErrAuthFailed, err)
-	}
-	return engine.Decrypt(sealed[:n])
+	return cipher.OpenName(cipherKey)
 }
 
 // Marker constants. The marker is stored unencrypted in the __database bucket
@@ -461,31 +444,22 @@ func resolveConfig(cfg *Config) (*encState, error) {
 		if err := encryption.RequireSingleKey(keys); err != nil {
 			return nil, fmt.Errorf("%w; use Store.ReEncrypt to rotate keys", err)
 		}
-		state.sivs = make(map[string]*encryption.SIVEngine, 3)
+		state.sivs = make(map[string]*encryption.SIVNameCipher, 3)
 		for _, domain := range []string{keyDomainID, keyDomainIndex, keyDomainKV} {
-			engine, err := deriveSIV(keys[0], domain)
+			cipher, err := newNameCipher(keys[0], domain)
 			if err != nil {
 				return nil, err
 			}
-			state.sivs[domain] = engine
+			state.sivs[domain] = cipher
 		}
 	}
 
 	return state, nil
 }
 
-// deriveSIV derives a 64-byte AES-SIV key for one domain with HKDF-SHA256.
-func deriveSIV(masterKey []byte, domain string) (*encryption.SIVEngine, error) {
-	if len(masterKey) != KeySize {
-		return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, KeySize, len(masterKey))
-	}
-
-	key := make([]byte, sivKeySize)
-	info := []byte(sivInfoPrefix + domain + "/v1")
-	if _, err := io.ReadFull(hkdf.New(sha256.New, masterKey, nil, info), key); err != nil {
-		return nil, fmt.Errorf("db: deriving SIV key for %q: %w", domain, err)
-	}
-	return encryption.NewSIVEngine(key)
+// newNameCipher derives the deterministic key cipher for one domain.
+func newNameCipher(masterKey []byte, domain string) (*encryption.SIVNameCipher, error) {
+	return encryption.NewSIVNameCipher(masterKey, sivInfoPrefix+domain+"/v1")
 }
 
 // encFromNode returns the encryption state of the Store that owns n, or nil

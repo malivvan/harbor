@@ -1,14 +1,10 @@
 package vec
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
-	"io"
 
 	"github.com/malivvan/storm/internal/encryption"
 	"go.etcd.io/bbolt"
-	"golang.org/x/crypto/hkdf"
 )
 
 // CipherSuite selects the AEAD cipher used by an encrypted store.
@@ -98,10 +94,8 @@ const (
 	keyDomainName = "name"
 )
 
-const (
-	sivKeySize    = 64
-	sivInfoPrefix = "storm/vec/keys/"
-)
+// sivInfoPrefix domain-separates the deterministic name ciphers.
+const sivInfoPrefix = "storm/vec/keys/"
 
 // encState is the shared encryption configuration of a Store. A nil encState
 // means plaintext: every helper is then an exact passthrough to the binco,
@@ -115,9 +109,9 @@ type encState struct {
 	encIDs    bool
 	encNames  bool
 
-	// sivs holds the per-domain deterministic engines derived from the primary
-	// key. Read-only after construction.
-	sivs map[string]*encryption.SIVEngine
+	// sivs holds the per-domain deterministic name ciphers derived from the
+	// primary key. Read-only after construction.
+	sivs map[string]*encryption.SIVNameCipher
 }
 
 // enabled reports whether the state encrypts anything.
@@ -167,7 +161,8 @@ func (e *encState) openPoints(raw []byte) ([]byte, error) {
 }
 
 // sealName deterministically encrypts a point ID or collection name for the
-// given domain, base64url encoded so encrypted names stay usable as bbolt keys.
+// given domain. The encoding has no '_' in its alphabet, so encrypted names
+// stay usable both as bbolt keys and inside composite keys.
 func (e *encState) sealName(plain string, domain string) ([]byte, error) {
 	if e == nil {
 		return []byte(plain), nil
@@ -175,17 +170,11 @@ func (e *encState) sealName(plain string, domain string) ([]byte, error) {
 	if (domain == keyDomainID && !e.encIDs) || (domain == keyDomainName && !e.encNames) {
 		return []byte(plain), nil
 	}
-	engine, ok := e.sivs[domain]
+	cipher, ok := e.sivs[domain]
 	if !ok {
 		return nil, fmt.Errorf("%w: unknown key domain %q", ErrInvalidConfig, domain)
 	}
-	sealed, err := engine.Encrypt([]byte(plain))
-	if err != nil {
-		return nil, err
-	}
-	out := make([]byte, base64.RawURLEncoding.EncodedLen(len(sealed)))
-	base64.RawURLEncoding.Encode(out, sealed)
-	return out, nil
+	return cipher.SealName([]byte(plain))
 }
 
 // openName reverses sealName.
@@ -196,16 +185,11 @@ func (e *encState) openName(cipherName []byte, domain string) (string, error) {
 	if (domain == keyDomainID && !e.encIDs) || (domain == keyDomainName && !e.encNames) {
 		return string(cipherName), nil
 	}
-	engine, ok := e.sivs[domain]
+	cipher, ok := e.sivs[domain]
 	if !ok {
 		return "", fmt.Errorf("%w: unknown key domain %q", ErrInvalidConfig, domain)
 	}
-	sealed := make([]byte, base64.RawURLEncoding.DecodedLen(len(cipherName)))
-	n, err := base64.RawURLEncoding.Decode(sealed, cipherName)
-	if err != nil {
-		return "", fmt.Errorf("%w: malformed encrypted name: %v", ErrAuthFailed, err)
-	}
-	plain, err := engine.Decrypt(sealed[:n])
+	plain, err := cipher.OpenName(cipherName)
 	if err != nil {
 		return "", err
 	}
@@ -450,31 +434,22 @@ func resolveConfig(cfg *Config) (*encState, error) {
 		if err := encryption.RequireSingleKey(keys); err != nil {
 			return nil, fmt.Errorf("%w; use ReEncryptCollection or RotateAll to rotate", err)
 		}
-		state.sivs = make(map[string]*encryption.SIVEngine, 2)
+		state.sivs = make(map[string]*encryption.SIVNameCipher, 2)
 		for _, domain := range []string{keyDomainID, keyDomainName} {
-			engine, err := deriveSIV(keys[0], domain)
+			cipher, err := newNameCipher(keys[0], domain)
 			if err != nil {
 				return nil, err
 			}
-			state.sivs[domain] = engine
+			state.sivs[domain] = cipher
 		}
 	}
 
 	return state, nil
 }
 
-// deriveSIV derives a 64-byte AES-SIV key for one domain with HKDF-SHA256.
-func deriveSIV(masterKey []byte, domain string) (*encryption.SIVEngine, error) {
-	if len(masterKey) != KeySize {
-		return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, KeySize, len(masterKey))
-	}
-
-	key := make([]byte, sivKeySize)
-	info := []byte(sivInfoPrefix + domain + "/v1")
-	if _, err := io.ReadFull(hkdf.New(sha256.New, masterKey, nil, info), key); err != nil {
-		return nil, fmt.Errorf("vec: deriving SIV key for %q: %w", domain, err)
-	}
-	return encryption.NewSIVEngine(key)
+// newNameCipher derives the deterministic name cipher for one domain.
+func newNameCipher(masterKey []byte, domain string) (*encryption.SIVNameCipher, error) {
+	return encryption.NewSIVNameCipher(masterKey, sivInfoPrefix+domain+"/v1")
 }
 
 // sealBytes seals a point blob or metadata payload. With no encryption
@@ -490,25 +465,14 @@ func (s *Store) openBytes(c []byte) ([]byte, error) {
 
 // keyBytes returns the stored key for a point ID: the SIV-encrypted ID when
 // point IDs are encrypted, the raw ID otherwise.
-//
-// AES-SIV encryption cannot fail with a valid key, so a nil result is
-// unreachable; callers that write guard against it anyway.
-func (s *Store) keyBytes(id string) []byte {
-	out, err := s.enc.sealName(id, keyDomainID)
-	if err != nil {
-		return nil
-	}
-	return out
+func (s *Store) keyBytes(id string) ([]byte, error) {
+	return s.enc.sealName(id, keyDomainID)
 }
 
 // bucketKey returns the stored name for a collection: the SIV-encrypted name
 // when collection names are encrypted, the raw name otherwise.
-func (s *Store) bucketKey(name string) []byte {
-	out, err := s.enc.sealName(name, keyDomainName)
-	if err != nil {
-		return nil
-	}
-	return out
+func (s *Store) bucketKey(name string) ([]byte, error) {
+	return s.enc.sealName(name, keyDomainName)
 }
 
 // logicalName turns a stored collection name back into the name the caller

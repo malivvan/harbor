@@ -7,34 +7,38 @@ import (
 	"testing"
 	"time"
 
+	"github.com/malivvan/storm/internal/encryption"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
 
 func TestSIVNameEncryption(t *testing.T) {
-	engine, err := newSIVEngine(testKey(1))
+	engine, err := encryption.NewSIVNameCipher(testKey(1), sivInfo)
 	require.NoError(t, err)
 
-	first := engine.EncryptName("cpu")
-	second := engine.EncryptName("cpu")
-	other := engine.EncryptName("mem")
+	first, err := engine.SealName([]byte("cpu"))
+	require.NoError(t, err)
+	second, err := engine.SealName([]byte("cpu"))
+	require.NoError(t, err)
+	other, err := engine.SealName([]byte("mem"))
+	require.NoError(t, err)
 
 	require.Equal(t, first, second, "SIV must be deterministic")
 	require.NotEqual(t, first, other)
 	require.NotContains(t, string(first), "cpu")
-	require.False(t, strings.ContainsAny(string(first), "+/="), "must be raw base64url")
+	require.False(t, strings.Contains(string(first), "_"), "the encoding must avoid composite-key separators")
 
-	name, err := engine.DecryptName(first)
+	name, err := engine.OpenName(first)
 	require.NoError(t, err)
-	require.Equal(t, "cpu", name)
+	require.Equal(t, "cpu", string(name))
 
-	_, err = newSIVEngine(make([]byte, 16))
+	_, err = encryption.NewSIVNameCipher(make([]byte, 16), sivInfo)
 	require.ErrorIs(t, err, ErrInvalidKey)
 
 	bad := append([]byte(nil), first...)
 	bad[len(bad)-1] ^= 0xFF
-	_, err = engine.DecryptName(bad)
-	require.Error(t, err)
+	_, err = engine.OpenName(bad)
+	require.ErrorIs(t, err, ErrAuthFailed)
 }
 
 // bucketValues returns the raw value bytes of a physical series bucket.
@@ -111,7 +115,7 @@ func TestEncryptSeriesNamesStore(t *testing.T) {
 	require.Len(t, metaKeys, 1)
 	for _, physical := range append(buckets, metaKeys...) {
 		require.NotContains(t, string(physical), "secret-series")
-		require.False(t, strings.ContainsAny(string(physical), "+/="))
+		require.False(t, strings.Contains(string(physical), "_"), "the encoding must avoid composite-key separators")
 	}
 
 	// Reopen with the same key and verify all data is readable.

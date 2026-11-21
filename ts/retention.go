@@ -97,7 +97,10 @@ func (se *Series) EnforceRetention(ctx context.Context, now int64) (int, error) 
 			return err
 		}
 
-		bucket := se.store.seriesBucket(tx, se.name)
+		bucket, err := se.store.seriesBucket(tx, se.name)
+		if err != nil {
+			return err
+		}
 		if bucket == nil {
 			return nil
 		}
@@ -157,7 +160,10 @@ func (s *Store) EnforceRetention(ctx context.Context, now int64) (int, error) {
 			if err != nil {
 				return err
 			}
-			bucket := s.seriesBucket(tx, name)
+			bucket, err := s.seriesBucket(tx, name)
+			if err != nil {
+				return err
+			}
 			if bucket == nil {
 				return nil
 			}

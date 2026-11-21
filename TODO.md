@@ -166,8 +166,8 @@ Status of each item as the consolidation lands. Commits reference the section.
 | `KeyProvider`, `RawKeyProvider`, `EnvKeyProvider`, `MultiKeyProvider` | **done** — `internal/encryption/keys.go`; the four packages re-export type aliases + constructor wrappers, so `fs.NewRawKeyProvider`, `ts.MultiKeyProvider`, … keep working |
 | `resolveKeys` | **done** — `encryption.ResolveKeys(key, provider)`; the four copies deleted |
 | `seal`/`open` + fallback loop | **done** — `encryption.Keychain.Seal`/`Open` (fresh nonce, try-each-engine fallback); `internal/encryption/keychain.go` + tests |
-| `deriveSIV` | pending |
-| base64 + SIV name/key seal/open | pending (`SIVNameCipher`) |
+| `deriveSIV` | **done** — `encryption.DeriveSIV(masterKey, info)`; each package passes its own info string |
+| base64 + SIV name/key seal/open | **done** — `encryption.SIVNameCipher` (`SealName`/`OpenName`); `db`, `vec` and `ts` share it, and their local base64/SIV wrappers are gone |
 | `verifyCanary` | pending |
 | marker encode/decode/matches | pending |
 | `withKey`/`adoptEnc` | **partly done** — `Keychain.WithKey` / `WithKeyKeepingFallbacks` exist and every package rebuilds its state through them; the per-entity rotation semantics follow in I2 |
@@ -179,8 +179,8 @@ Status of each item as the consolidation lands. Commits reference the section.
 - **B1 — done.** `ts.resolveConfig` now calls `encryption.RequireSingleKey` when
   `EncryptSeriesNames` is set, rejecting a `MultiKeyProvider` combination with
   `ErrInvalidConfig` exactly like `db`/`vec` do.
-- **B2 — pending** (moves with `SIVNameCipher`).
-- **B3 — pending** (decision: base64 `RawStdEncoding`, whose alphabet has no `_`).
+- **B2 — done.** `SIVNameCipher.SealName/OpenName` return errors, and the packages propagate them: `db` already did, `vec.keyBytes`/`bucketKey`/`collectionBucket` and `ts.bucketKey`/`seriesBucket` now return `error` instead of a nil key, and every call site handles it. No key can silently become `nil` any more.
+- **B3 — done.** The shared cipher encodes with base64 `RawStdEncoding`, whose alphabet has no `_`, so an encrypted key or name can never contain the `__` separator used by `db` list-index keys. The format change only affects stores written by the pre-consolidation build (the feature is unreleased); plaintext stores are untouched.
 
 ### Issues (section 3)
 

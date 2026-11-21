@@ -40,7 +40,11 @@ func (s *Store) readMeta(tx *bolt.Tx, name string) (seriesMeta, error) {
 	if bucket == nil {
 		return meta, nil
 	}
-	raw := bucket.Get(s.bucketKey(name))
+	key, err := s.bucketKey(name)
+	if err != nil {
+		return meta, err
+	}
+	raw := bucket.Get(key)
 	if raw == nil {
 		return meta, nil
 	}
@@ -82,7 +86,11 @@ func (s *Store) writeMeta(tx *bolt.Tx, name string, meta seriesMeta) error {
 			return err
 		}
 	}
-	return bucket.Put(s.bucketKey(name), data)
+	key, err := s.bucketKey(name)
+	if err != nil {
+		return err
+	}
+	return bucket.Put(key, data)
 }
 
 // Name returns the series name.
@@ -239,7 +247,10 @@ func (se *Series) Get(ctx context.Context, ts int64) (Point, error) {
 			return err
 		}
 
-		bucket := se.store.seriesBucket(tx, se.name)
+		bucket, err := se.store.seriesBucket(tx, se.name)
+		if err != nil {
+			return err
+		}
 		if bucket == nil {
 			return ErrNotFound
 		}
@@ -296,7 +307,10 @@ func (se *Series) First(ctx context.Context) (Point, error) {
 			return err
 		}
 
-		bucket := se.store.seriesBucket(tx, se.name)
+		bucket, err := se.store.seriesBucket(tx, se.name)
+		if err != nil {
+			return err
+		}
 		if bucket == nil {
 			return ErrNotFound
 		}
@@ -347,7 +361,10 @@ func (se *Series) Last(ctx context.Context) (Point, error) {
 			return err
 		}
 
-		bucket := se.store.seriesBucket(tx, se.name)
+		bucket, err := se.store.seriesBucket(tx, se.name)
+		if err != nil {
+			return err
+		}
 		if bucket == nil {
 			return ErrNotFound
 		}
@@ -401,7 +418,10 @@ func (se *Series) Range(ctx context.Context, start, end int64) ([]Point, error) 
 			return err
 		}
 
-		bucket := se.store.seriesBucket(tx, se.name)
+		bucket, err := se.store.seriesBucket(tx, se.name)
+		if err != nil {
+			return err
+		}
 		if bucket == nil {
 			return nil
 		}
@@ -457,7 +477,10 @@ func (se *Series) RangeEach(ctx context.Context, start, end int64, fn func(Point
 			return err
 		}
 
-		bucket := se.store.seriesBucket(tx, se.name)
+		bucket, err := se.store.seriesBucket(tx, se.name)
+		if err != nil {
+			return err
+		}
 		if bucket == nil {
 			return nil
 		}
@@ -504,7 +527,10 @@ func (se *Series) Count(ctx context.Context) (int, error) {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
-		bucket := se.store.seriesBucket(tx, se.name)
+		bucket, err := se.store.seriesBucket(tx, se.name)
+		if err != nil {
+			return err
+		}
 		if bucket == nil {
 			return checkContext(ctx)
 		}
@@ -545,7 +571,10 @@ func (se *Series) DeleteRange(ctx context.Context, start, end int64) (int, error
 			return err
 		}
 
-		bucket := se.store.seriesBucket(tx, se.name)
+		bucket, err := se.store.seriesBucket(tx, se.name)
+		if err != nil {
+			return err
+		}
 		if bucket == nil {
 			return nil
 		}

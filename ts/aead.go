@@ -95,7 +95,7 @@ type encState struct {
 	encValues bool
 	encNames  bool
 	blockDur  int64
-	siv       *SIVEngine
+	siv       *encryption.SIVNameCipher
 }
 
 // cipher returns the resolved cipher suite.
@@ -161,7 +161,7 @@ func resolveConfig(cfg *Config) (*encState, error) {
 		blockDur:  cfg.BlockDuration,
 	}
 	if state.encNames {
-		state.siv, err = newSIVEngine(keys[0])
+		state.siv, err = encryption.NewSIVNameCipher(keys[0], sivInfo)
 		if err != nil {
 			return nil, err
 		}

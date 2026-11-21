@@ -60,9 +60,9 @@ func (s *Store) ReEncryptCollection(ctx context.Context, name string, newKey []b
 	err = s.db.Update(func(tx *bbolt.Tx) error {
 		r := &rotation{ctx: ctx, store: s, old: s.enc, next: next}
 
-		physical := s.bucketKey(name)
-		if len(physical) == 0 {
-			return fmt.Errorf("%w: failed to derive the bucket key for collection %q", ErrInvalidConfig, name)
+		physical, err := s.bucketKey(name)
+		if err != nil {
+			return fmt.Errorf("failed to derive the bucket key for collection %q: %w", name, err)
 		}
 		if !r.bucketExists(tx, physical) {
 			return fmt.Errorf("collection bucket %s not found", name)
