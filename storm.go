@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
-	"github.com/malivvan/storm/codec/json"
+	"github.com/malivvan/storm/db/codec/json"
 	"github.com/malivvan/storm/fs"
 	"github.com/malivvan/storm/ts"
 	"github.com/malivvan/storm/vec"

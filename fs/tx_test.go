@@ -2,6 +2,7 @@ package fs
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -33,10 +34,13 @@ func Test_newFsBucket(t *testing.T) {
 	}
 
 	// setup
-	db, err := bolt.Open("test.db", 0644, nil)
+	db, err := bolt.Open(filepath.Join(t.TempDir(), "test.db"), 0644, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
 
 	for _, tt := range tests {
 		bucketpath := tt.args.bucketpath

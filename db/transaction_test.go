@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/malivvan/storm/codec/gob"
+	"github.com/malivvan/storm/db/codec/gob"
 	"github.com/stretchr/testify/require"
 	bolterrors "go.etcd.io/bbolt/errors"
 )

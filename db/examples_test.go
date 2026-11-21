@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/codec/gob"
+	"github.com/malivvan/storm/db/codec/gob"
 	storm "github.com/malivvan/storm/db"
 	bolt "go.etcd.io/bbolt"
 )

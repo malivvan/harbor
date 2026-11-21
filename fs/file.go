@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/absfs/absfs"
+	"github.com/malivvan/storm/fs/absfs"
 )
 
 // dirWriteFlags represents the flag combination (07200 octal) for a directory

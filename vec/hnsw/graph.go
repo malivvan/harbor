@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/malivvan/storm/vec/hnsw/heap"
-	"golang.org/x/exp/maps"
 )
 
 type Vector = []float32
@@ -79,7 +78,7 @@ func (s searchCandidate[K]) Less(o searchCandidate[K]) bool {
 // search returns the layer node closest to the target node
 // within the same layer.
 func (n *layerNode[K]) search(
-	// k is the number of candidates in the result set.
+// k is the number of candidates in the result set.
 	k int,
 	efSearch int,
 	target Vector,
@@ -113,7 +112,7 @@ func (n *layerNode[K]) search(
 
 		// We iterate the map in a sorted, deterministic fashion for
 		// tests.
-		neighborKeys := maps.Keys(current.neighbors)
+		neighborKeys := mapsKeys(current.neighbors)
 		slices.Sort(neighborKeys)
 		for _, neighborID := range neighborKeys {
 			neighbor := current.neighbors[neighborID]

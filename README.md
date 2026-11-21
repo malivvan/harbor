@@ -723,7 +723,7 @@ Storm marshals data to BoltDB using a codec. The default is JSON. Pass a codec a
 the fourth argument to `Open`:
 
 ```go
-import "github.com/malivvan/storm/codec/gob"
+import "github.com/malivvan/storm/db/codec/gob"
 
 db, err := storm.Open(ctx, bDB, nil, gob.Codec)
 ```
@@ -732,9 +732,9 @@ db, err := storm.Open(ctx, bDB, nil, gob.Codec)
 
 | Package | Import path | Codec variable |
 |---------|-------------|----------------|
-| JSON (default) | `storm/codec/json` | `json.Codec` |
-| Gob | `storm/codec/gob` | `gob.Codec` |
-| AES | `storm/codec/aes` | `NewAES(subCodec, key)` |
+| JSON (default) | `storm/db/codec/json` | `json.Codec` |
+| Gob | `storm/db/codec/gob` | `gob.Codec` |
+| AES | `storm/db/codec/aes` | `NewAES(subCodec, key)` |
 
 AES wraps another codec with AES-GCM encryption.
 

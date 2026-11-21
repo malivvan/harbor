@@ -6,7 +6,7 @@ import (
 	"os"
 	"path"
 
-	"github.com/absfs/absfs"
+	"github.com/malivvan/storm/fs/absfs"
 	bolt "go.etcd.io/bbolt"
 )
 

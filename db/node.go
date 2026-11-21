@@ -3,7 +3,7 @@ package db
 import (
 	"context"
 
-	"github.com/malivvan/storm/codec"
+	"github.com/malivvan/storm/db/codec"
 	bolt "go.etcd.io/bbolt"
 )
 

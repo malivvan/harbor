@@ -9,8 +9,8 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/malivvan/storm/codec"
-	"github.com/malivvan/storm/codec/json"
+	"github.com/malivvan/storm/db/codec"
+	"github.com/malivvan/storm/db/codec/json"
 	bolt "go.etcd.io/bbolt"
 )
 

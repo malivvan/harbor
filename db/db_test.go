@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/codec/json"
+	"github.com/malivvan/storm/db/codec/json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"

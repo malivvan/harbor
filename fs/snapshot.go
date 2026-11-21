@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/absfs/absfs"
+	"github.com/malivvan/storm/fs/absfs"
 	bolt "go.etcd.io/bbolt"
 )
 

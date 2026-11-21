@@ -4,7 +4,7 @@ import (
 	"math"
 	"reflect"
 
-	"github.com/viterin/vek/vek32"
+	"github.com/malivvan/storm/vec/vek/vek32"
 )
 
 // DistanceFunc is a function that computes the distance between two vectors.
