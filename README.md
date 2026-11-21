@@ -607,6 +607,12 @@ err = cpu.SetLabels(ctx, map[string]string{"host": "web-1"})
 
 points, err := cpu.Range(ctx, now, now)
 samples, err := cpu.Aggregate(ctx, now, now, int64(time.Second), ts.AggAvg)
+
+// keep only the last 24h and at most 10_000 points
+err = cpu.SetRetention(ctx, ts.Retention{MaxAge: 24 * time.Hour, MaxPoints: 10_000})
+
+// explicit maintenance (also enforced automatically on insert)
+removed, err := cpu.EnforceRetention(ctx, time.Now().UnixNano())
 ```
 
 `ts.Open(ctx, db, root)` borrows the caller-owned bbolt database and never
@@ -614,6 +620,13 @@ closes it. Because keys are chronological, `Range` and `RangeEach` scan in time
 order without an in-memory index. Aggregations support `min`, `max`, `avg`,
 `sum`, `count`, `first`, and `last`; `DeleteRange`, `Drop`, and `DeleteSeries`
 remove points or entire series.
+
+Retention is configured per series. `MaxAge` drops points older than the
+reference time minus the age, and `MaxPoints` keeps only the most recent
+`MaxPoints` points. Policies persist in series metadata, are enforced
+automatically by `Insert`/`InsertMany`, and can be applied explicitly with
+`Series.EnforceRetention`. `Store.EnforceRetention` applies every persisted
+policy, and `Store.SetNow` injects a clock for deterministic tests.
 
 ## Context and cancellation
 

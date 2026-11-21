@@ -28,6 +28,8 @@ Initial release of Storm v1.
 - **Time series store (`ts`)**: a `Store` managing named series with
   order-preserving fixed-width point storage, labels, range and streaming
   reads, range deletion, and min/max/avg/sum/count/first/last aggregation.
+  Per-series retention supports `MaxAge` and `MaxPoints`, persists in metadata,
+  and is enforced automatically on insert or explicitly via `EnforceRetention`.
 - **Operation-wrapped errors** with `errors.Is`-compatible causes.
 - **Destination safety**: read operations decode before publishing to caller
   destinations.

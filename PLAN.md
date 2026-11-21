@@ -8,6 +8,8 @@ enforced automatically on writes and manually via an explicit prune. No other
 behavior changes; the only edits are inside `ts/` plus the minimal doc/test
 touches needed to describe and verify the feature.
 
+**Implementation status:** complete. See [Execution log](#execution-log).
+
 ## Scope / non-goals
 
 **In scope**
@@ -336,19 +338,52 @@ Acceptance criteria:
 
 ## Ordered task list
 
-1. **Errors + Retention type** — add `ErrInvalidRetention` to `ts/errors.go`;
+1. [x] **Errors + Retention type** — add `ErrInvalidRetention` to `ts/errors.go`;
    create `ts/retention.go` with the `Retention` struct and validation helper.
-2. **Metadata helpers** — extend `seriesMeta` in `ts/series.go`; add
+2. [x] **Metadata helpers** — extend `seriesMeta` in `ts/series.go`; add
    `readMeta`/`writeMeta`; rewrite `SetLabels` to read-modify-write.
-3. **Policy accessors** — implement `Series.SetRetention` and
+3. [x] **Policy accessors** — implement `Series.SetRetention` and
    `Series.Retention`.
-4. **Prune primitive** — implement `pruneBucket` and `retentionCutoff` in
+4. [x] **Prune primitive** — implement `pruneBucket` and `retentionCutoff` in
    `ts/retention.go`.
-5. **Enforcement** — implement `Series.EnforceRetention`.
-6. **Auto-enforcement** — hook `pruneBucket` into `InsertMany` using the store
+5. [x] **Enforcement** — implement `Series.EnforceRetention`.
+6. [x] **Auto-enforcement** — hook `pruneBucket` into `InsertMany` using the store
    clock.
-7. **Clock + store-wide enforcement** — add the `now` field and `SetNow` to
+7. [x] **Clock + store-wide enforcement** — add the `now` field and `SetNow` to
    `ts/store.go`; implement `Store.EnforceRetention` (iterate `__ts_meta__`).
-8. **Tests** — add the retention tests and (optionally) a benchmark.
-9. **Docs** — update `README.md` and `CHANGELOG.md`.
-10. **Verify** — run the checklist; fix any gofmt/vet/test issues.
+8. [x] **Tests** — add the retention tests and (optionally) a benchmark.
+9. [x] **Docs** — update `README.md` and `CHANGELOG.md`.
+10. [x] **Verify** — run the checklist; fix any gofmt/vet/test issues.
+
+## Execution log
+
+- `8888c06` — **feat(ts): add per-series retention**. Added retention policies,
+  metadata read-modify-write helpers, automatic write-time pruning, explicit
+  series/store enforcement, the injectable clock, tests, and the retention
+  benchmark.
+- Documentation commit — README retention example, CHANGELOG update, this plan
+  update, and `POST.md`.
+
+### Implementation notes
+
+- `pruneBucket` counts keys with a cursor rather than `Bucket.Stats().KeyN`.
+  `Stats()` does not include keys written earlier in the same uncommitted write
+  transaction, which made write-time `MaxPoints` enforcement a no-op. The cursor
+  count reflects pending `Put` calls and is required for correct auto-pruning.
+- `retentionCutoff` clamps underflow to `math.MinInt64`, matching the plan's code
+  sketch. This is safe but means such a cutoff removes no points; the test
+  asserts the clamp and the absence of panic rather than the plan bullet's
+  "all points removed" wording.
+- Metadata is written read-modify-write, so `SetLabels` preserves `Retention`
+  and `SetRetention` preserves `Labels`.
+- Auto-enforcement happens in the same transaction as `InsertMany`, so
+  just-inserted backfill older than `MaxAge` is never observable. Tests that
+  exercise explicit enforcement set policies after inserting fixtures.
+
+### Verification results
+
+- `gofmt -l ts`: clean.
+- `go vet ./...`: pass.
+- `go build ./...`: pass.
+- `go test -count=1 -timeout 180s ./...`: pass.
+- `go test -race -count=1 -timeout 300s ./ts/...`: pass.
