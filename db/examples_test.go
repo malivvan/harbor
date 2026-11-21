@@ -67,7 +67,7 @@ func ExampleOpen() {
 	// opened successfully
 }
 
-func ExampleDB_Save() {
+func ExampleStore_Save() {
 	dir, err := os.MkdirTemp(os.TempDir(), "storm")
 	if err != nil {
 		log.Fatal(err)
@@ -138,7 +138,7 @@ func ExampleDB_Save() {
 	// storm save: already exists
 }
 
-func ExampleDB_One() {
+func ExampleStore_One() {
 	dir, db := prepareDB()
 	defer os.RemoveAll(dir)
 	defer db.Close()
@@ -167,7 +167,7 @@ func ExampleDB_One() {
 	// storm one: not found
 }
 
-func ExampleDB_Find() {
+func ExampleStore_Find() {
 	dir, db := prepareDB()
 	defer os.RemoveAll(dir)
 	defer db.Close()
@@ -187,7 +187,7 @@ func ExampleDB_Find() {
 	// Found 3
 }
 
-func ExampleDB_All() {
+func ExampleStore_All() {
 	dir, db := prepareDB()
 	defer os.RemoveAll(dir)
 	defer db.Close()
@@ -207,7 +207,7 @@ func ExampleDB_All() {
 	// Found 3
 }
 
-func ExampleDB_AllByIndex() {
+func ExampleStore_AllByIndex() {
 	dir, db := prepareDB()
 	defer os.RemoveAll(dir)
 	defer db.Close()
@@ -227,7 +227,7 @@ func ExampleDB_AllByIndex() {
 	// Found 3
 }
 
-func ExampleDB_Range() {
+func ExampleStore_Range() {
 	dir, db := prepareDB()
 	defer os.RemoveAll(dir)
 	defer db.Close()
@@ -334,7 +334,7 @@ func ExampleOpen_existingDB() {
 	// <nil>
 }
 
-func ExampleDB_DeleteStruct() {
+func ExampleStore_DeleteStruct() {
 	dir, db := prepareDB()
 	defer os.RemoveAll(dir)
 	defer db.Close()
@@ -356,7 +356,7 @@ func ExampleDB_DeleteStruct() {
 	// <nil>
 }
 
-func ExampleDB_WriteTransaction() {
+func ExampleStore_WriteTransaction() {
 	dir, db := prepareDB()
 	defer os.RemoveAll(dir)
 	defer db.Close()
@@ -419,7 +419,7 @@ func ExampleDB_WriteTransaction() {
 	// Amount in account 2: 11000
 }
 
-func ExampleDB_ReadTransaction() {
+func ExampleStore_ReadTransaction() {
 	dir, db := prepareDB()
 	defer os.RemoveAll(dir)
 	defer db.Close()
@@ -466,7 +466,7 @@ func Example_errorsIs() {
 	// 1 John
 }
 
-func ExampleDB_From() {
+func ExampleStore_From() {
 	dir, db := prepareDB()
 	defer os.RemoveAll(dir)
 	defer db.Close()
@@ -534,7 +534,7 @@ func ExampleDB_From() {
 	// This is some very personal text.
 }
 
-func ExampleDB_Drop() {
+func ExampleStore_Drop() {
 	dir, db := prepareDB()
 	defer os.RemoveAll(dir)
 	defer db.Close()

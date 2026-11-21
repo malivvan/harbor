@@ -8,6 +8,7 @@ import (
 	"github.com/malivvan/storm/codec/json"
 	"github.com/malivvan/storm/fs"
 	"github.com/malivvan/storm/kv"
+	"github.com/malivvan/storm/ts"
 	"github.com/malivvan/storm/vec"
 
 	"os"
@@ -24,6 +25,7 @@ type Store struct {
 	db  *db.Store
 	kv  *kv.Store
 	fs  *fs.Store
+	ts  *ts.Store
 	vec *vec.Store
 	ctx context.Context
 }
@@ -91,6 +93,11 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Opti
 		return nil, err
 	}
 
+	s.ts, err = ts.Open(ctx, s.b, []byte{5})
+	if err != nil {
+		return nil, err
+	}
+
 	return s, nil
 }
 
@@ -112,6 +119,10 @@ func (s *Store) Vec() *vec.Store {
 
 func (s *Store) FS() *fs.Store {
 	return s.fs
+}
+
+func (s *Store) TS() *ts.Store {
+	return s.ts
 }
 
 func (s *Store) Get(key string) string {

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/malivvan/storm/ts"
 	"github.com/malivvan/storm/vec"
 )
 
@@ -70,6 +71,25 @@ func TestStorm(t *testing.T) {
 	}
 
 	fmt.Printf("Best Match: %s (Score: %f)\n", results[0].ID, results[0].Score)
+
+	// 3. Time series store
+	cpu := s.TS().Series("cpu")
+	now := time.Now().UnixNano()
+	if err := cpu.Insert(context.Background(), ts.Point{Timestamp: now, Value: 0.5}); err != nil {
+		t.Fatalf("TS insert error: %v", err)
+	}
+	points, err := cpu.Range(context.Background(), now, now)
+	if err != nil || len(points) != 1 {
+		t.Fatalf("TS range error: %v, points: %v", err, points)
+	}
+	if err := cpu.SetLabels(context.Background(), map[string]string{"host": "test"}); err != nil {
+		t.Fatalf("TS labels error: %v", err)
+	}
+	samples, err := cpu.Aggregate(context.Background(), now, now, 1, ts.AggAvg)
+	if err != nil || len(samples) != 1 {
+		t.Fatalf("TS aggregate error: %v, samples: %v", err, samples)
+	}
+	t.Log("Time series store operations successful")
 
 	vfs, err := s.FS().Open("test_fs")
 	if err != nil {
