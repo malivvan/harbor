@@ -286,5 +286,7 @@ verification + rotation).
 - [x] **Phase 2b — `BlockDuration` time blocks** — packed, per-block sealed
   records; insert merge, get/first/last/range/range-each/count/delete/aggregate
   and block-aware retention; tests in `ts/block_test.go`.
-- [ ] Phase 3 — key rotation (`ReEncryptSeries`, `RotateAll`, `VerifyAll`).
+- [x] **Phase 3 — key rotation** — `MultiKeyProvider` fallback reads,
+  `ReEncryptSeries`, `RotateAll`, `VerifyAll`; name re-keying and block
+  re-sealing included; tests in `ts/rotate_test.go`.
 - [ ] Final verification and `POST.md`.
