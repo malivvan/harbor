@@ -277,4 +277,21 @@ rotation); `fs/aeadfs` is removed.
   `ReEncryptFS`, `RotateAll`, `VerifyAll`; re-seals inodes, content, chunks,
   symlinks and the marker canary and updates every open FileSystem; tests in
   `fs/rotate_test.go`.
-- [ ] Merge `fs/aeadfs`, documentation and final verification.
+- [x] **Merge `fs/aeadfs` and final verification** — the wrapper package is
+  removed; `fs/README.md` and `fs/doc.go` document the native encryption
+  surface; build, vet, tests and race tests pass.
+
+### Implementation notes
+
+- The shared SIV engine was already present in `internal/encryption`; `fs`
+  deliberately does not use it because inode encryption hides file names and
+  inode numbers are the lookup keys.
+- Chunked content uses a lazily created `chunks` bucket keyed by inode + index,
+  matching the plan's "new chunks bucket" option rather than porting aeadfs's
+  file layout.
+- Empty plaintext filesystems are migrated by re-encoding their two system
+  inodes; filesystems with user data are rejected with `ErrWrongMode`.
+- Key rotation updates every `FileSystem` opened by the `Store` so existing
+  handles keep working after `ReEncryptFS`/`RotateAll`.
+- `openBucket` was fixed to avoid a typed-nil interface when a nested path is
+  missing (a latent bug surfaced by mode detection).

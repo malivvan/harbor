@@ -147,6 +147,37 @@ filesystem, _ := store.OpenWithContentFS("", osfs)
 - **Backward compatible**: Defaults to BoltDB storage
 - **Automatic cleanup**: Files deleted from external storage when removed
 
+## Optional encryption
+
+Encryption is opt-in and leaves the plaintext bbolt format untouched when it is
+not configured. Open a Store with `OpenWithConfig`:
+
+```go
+key := loadKey() // exactly fs.KeySize (32) bytes
+store, err := fs.OpenWithConfig(ctx, bdb, nil, &fs.Config{
+    Key:             key,
+    EncryptMetadata: true, // seal inode blobs: names, modes, sizes, times
+    EncryptContent:  true, // seal file content and symlink paths
+})
+filesystem, err := store.Open("vault")
+```
+
+- `EncryptMetadata` seals gob-encoded inodes; inode numbers and structural
+  bucket keys stay clear.
+- `EncryptContent` seals file content and symlink paths.
+- `ChunkSize` (bytes) stores content as independently sealed chunks, so random
+  reads, writes and truncation touch only the affected chunks.
+- A per-filesystem `FENC` marker records the mode, and a sealed canary verifies
+  the key at open time (wrong key returns `fs.ErrAuthFailed`).
+- Opening an encrypted filesystem without a key, changing the mode, or asking
+  for encryption on a filesystem that already holds plaintext data returns
+  `fs.ErrWrongMode`.
+- `RawKeyProvider`, `EnvKeyProvider` and `MultiKeyProvider` supply keys.
+- `ReEncryptFS`, `RotateAll` and `VerifyAll` rotate keys and verify data.
+
+External content filesystems configured with `SetContentFS` remain plaintext;
+encryption applies to content stored in the bbolt data/chunk buckets.
+
 ## Coming soon
 
 - Improved test coverage

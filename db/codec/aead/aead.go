@@ -11,7 +11,7 @@
 //
 // The cipher primitives (suite selection, engines, and nonce generation) are
 // implemented in the shared internal/encryption package, which is also used by
-// the fs/aeadfs filesystem.
+// the fs filesystem package.
 package aead
 
 import (
