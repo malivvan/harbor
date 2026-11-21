@@ -268,6 +268,12 @@ func (n *node) find(ctx context.Context, tx *bolt.Tx, bucketName, fieldName stri
 		return err
 	}
 
+	if opts != nil && opts.Reverse {
+		if err := n.errEncryptedOrdering(); err != nil {
+			return err
+		}
+	}
+
 	idx, err := getIndex(bucket, cfg.Fields[fieldName].Index, fieldName)
 	if err != nil {
 		return err
@@ -371,6 +377,10 @@ func (n *node) AllByIndex(ctx context.Context, fieldName string, to any, options
 
 func (n *node) allByIndex(ctx context.Context, tx *bolt.Tx, fieldName string, cfg *structConfig, ref *reflect.Value, opts *index.Options) error {
 	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	if err := n.errEncryptedOrdering(); err != nil {
 		return err
 	}
 
@@ -561,6 +571,10 @@ func (n *node) rnge(ctx context.Context, tx *bolt.Tx, bucketName, fieldName stri
 		return err
 	}
 
+	if err := n.errEncryptedOrdering(); err != nil {
+		return err
+	}
+
 	bucket := n.getBucket(tx, bucketName)
 	if bucket == nil {
 		if err := checkContext(ctx); err != nil {
@@ -692,6 +706,10 @@ func (n *node) Prefix(ctx context.Context, fieldName string, prefix string, to a
 
 func (n *node) prefix(ctx context.Context, tx *bolt.Tx, bucketName, fieldName string, cfg *structConfig, sink *listSink, prefix []byte, opts *index.Options) error {
 	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	if err := n.errEncryptedOrdering(); err != nil {
 		return err
 	}
 

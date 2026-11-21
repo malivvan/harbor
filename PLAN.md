@@ -269,3 +269,12 @@ records + indexed values via SIV, authenticated, fresh nonces, key verification
   plaintext-vs-encrypted round-trip, confidentiality, wrong key, tampering,
   fresh nonces, mode mismatch, empty plaintext store adoption, invalid config).
   `go vet ./db/` and `go test ./db/` pass.
+- [x] **Phase 2 — Tier 2 (`EncryptKeys`)** — `keyBytes` seals keys with
+  HKDF-derived per-domain AES-SIV engines (`id`, `index`, `kv`), and
+  `errEncryptedOrdering` guards the index-backed `Range`, `Prefix`,
+  `AllByIndex` and `Find(..., Reverse())` paths with `ErrEncryptedOrdering`.
+  Scan-based lookups (`All`, `Each`, `Count`, `Select`) and lookups on
+  non-indexed fields keep working, because they decode records instead of
+  trusting key order. `db/aead_keys_test.go` covers SIV determinism and domain
+  separation, hidden ids/keys, exact lookups, ordered-query rejection, reopen
+  stability and tampered-key authentication.
