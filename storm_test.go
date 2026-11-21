@@ -21,21 +21,6 @@ func TestStorm(t *testing.T) {
 	t.Log("Storm opened successfully")
 	t.Log("Store ID:", s.ID())
 
-	err = s.KV().Bucket("test").Set(context.Background(), "key", "value")
-	if err != nil {
-		t.Fatalf("failed to set key in KV store: %v", err)
-	}
-	var val string
-	err = s.KV().Bucket("test").Get(context.Background(), "key", &val)
-	if err != nil {
-		t.Fatalf("failed to get key from KV store: %v", err)
-	}
-	if val != "value" {
-		t.Fatalf("expected value 'value', got '%s'", val)
-	}
-
-	t.Log("KV store operations successful")
-
 	// 2. Create a Collection (Automatic Persistence)
 	col, _ := s.Vec().NewCollection("documents", 3, vec.Cosine, true)
 

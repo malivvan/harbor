@@ -7,7 +7,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/malivvan/storm/codec/json"
 	"github.com/malivvan/storm/fs"
-	"github.com/malivvan/storm/kv"
 	"github.com/malivvan/storm/ts"
 	"github.com/malivvan/storm/vec"
 
@@ -23,7 +22,6 @@ type Store struct {
 	mu  sync.RWMutex
 	id  uuid.UUID
 	db  *db.Store
-	kv  *kv.Store
 	fs  *fs.Store
 	ts  *ts.Store
 	vec *vec.Store
@@ -73,11 +71,6 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Opti
 		return nil
 	})
 
-	s.kv, err = kv.Open(ctx, s.b, []byte{1}, json.Codec)
-	if err != nil {
-		return nil, err
-	}
-
 	s.db, err = db.Open(ctx, s.b, []byte{2}, json.Codec)
 	if err != nil {
 		return nil, err
@@ -103,10 +96,6 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Opti
 
 func (s *Store) ID() uuid.UUID {
 	return s.id
-}
-
-func (s *Store) KV() *kv.Store {
-	return s.kv
 }
 
 func (s *Store) DB() *db.Store {
