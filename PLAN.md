@@ -305,3 +305,9 @@ records + indexed values via SIV, authenticated, fresh nonces, key verification
     `AllByIndex`, `Find` with `Reverse`). Scan-based lookups (`All`, `Each`,
     `Count`, `Select`, `Find` on a non-indexed field) keep working: they decode
     records instead of trusting key order.
+- [x] **Phase 4 — verification and docs** — `gofmt -l db internal/encryption` is
+  empty, `go vet ./...`, `go build ./...`, `go test -count=1 ./...` and
+  `go test -race -count=1 ./db/ .` all pass. `README.md` now documents
+  `OpenWithConfig` instead of the removed `db/codec/aead` codec and the
+  `internal/encryption` package comment no longer mentions it. Follow-ups (that
+  are deliberately out of scope here) are listed in `POST.md`.

@@ -1,5 +1,5 @@
 // Package encryption provides the authenticated-encryption primitives shared
-// by the fs filesystem package and the db/codec/aead codec.
+// by the ts time-series store, the fs filesystem package and the db store.
 //
 // It defines the cipher-suite selection, the CipherEngine abstraction and the
 // AES-256-GCM and XChaCha20-Poly1305 implementations, plus nonce generation.

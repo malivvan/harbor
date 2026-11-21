@@ -734,11 +734,25 @@ db, err := storm.Open(ctx, bDB, nil, binco.Codec)
 |---------|-------------|----------------|
 | JSON (default) | `storm/db/codec/json` | `json.Codec` |
 | Binco | `storm/db/codec/binco` | `binco.Codec` |
-| AEAD | `storm/db/codec/aead` | `New(subCodec, key, opts...)` |
 
-AEAD wraps another codec with authenticated encryption using a raw 32-byte key.
-The default cipher is AES-256-GCM; pass `aead.WithCipher(aead.CipherXChaCha20Poly1305)`
-to use XChaCha20-Poly1305 instead.
+Encryption is not a codec. Use `OpenWithConfig` with a `Config` to enable native,
+optional AEAD encryption for a store; `Open` keeps creating plaintext stores.
+
+```go
+store, err := storm.OpenWithConfig(ctx, bDB, nil, nil, &storm.Config{
+	Key:             key, // raw 32-byte key
+	EncryptValues:   true, // seal record and key/value values
+	EncryptMetadata: true, // seal auto-increment counters
+	EncryptKeys:     true, // SIV-encrypt primary keys, index values and kv keys
+})
+```
+
+The default cipher is AES-256-GCM; set `Cipher` to
+`storm.CipherXChaCha20Poly1305` to use XChaCha20-Poly1305 instead. Encrypted
+stores carry a marker, so opening one without a config (or with the wrong
+settings) fails with `ErrWrongMode` and a wrong key fails with `ErrAuthFailed`.
+`Store.ReEncrypt` rotates the key and `Store.VerifyAll` re-reads the store to
+confirm everything decrypts.
 
 ### Custom codecs
 
