@@ -245,5 +245,5 @@ func TestAEADMultipleKeysRejectedWithEncryptedNames(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, ok.enc)
-	require.Len(t, ok.enc.engines, 2)
+	require.Len(t, ok.enc.kc.Keys(), 2)
 }

@@ -110,18 +110,9 @@ const (
 // every node through its Store pointer. A nil encState means plaintext: every
 // helper is then an exact passthrough to the codec and toBytes.
 type encState struct {
-	// engine is the primary engine used for new writes.
-	engine CipherEngine
-
-	// engines holds the primary engine first, then any rotation fallbacks.
-	engines []CipherEngine
-
-	// cipher is the resolved cipher suite.
-	cipher CipherSuite
-
-	// keys holds the raw master keys, primary first. They are kept because key
-	// encryption derives per-domain SIV keys (and rotation re-derives them).
-	keys [][]byte
+	// kc holds the cipher engines: the primary key first, then rotation
+	// fallbacks. A nil keychain means plaintext.
+	kc *encryption.Keychain
 
 	encValues   bool
 	encMetadata bool
@@ -137,19 +128,20 @@ func (e *encState) enabled() bool {
 	return e != nil
 }
 
+// cipher returns the resolved cipher suite of an encrypted state.
+func (e *encState) cipher() CipherSuite {
+	if e == nil {
+		return CipherAuto
+	}
+	return e.kc.Cipher()
+}
+
 // seal encrypts plain with the primary engine, prefixing a fresh random nonce.
 func (e *encState) seal(plain []byte) ([]byte, error) {
-	nonce, err := encryption.GenerateNonce(e.cipher)
-	if err != nil {
-		return nil, err
+	if e == nil {
+		return plain, nil
 	}
-	sealed, err := e.engine.Encrypt(nonce, plain)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]byte, 0, len(nonce)+len(sealed))
-	out = append(out, nonce...)
-	return append(out, sealed...), nil
+	return e.kc.Seal(plain)
 }
 
 // open decrypts raw with the primary engine and any rotation fallbacks.
@@ -157,17 +149,7 @@ func (e *encState) open(raw []byte) ([]byte, error) {
 	if e == nil {
 		return raw, nil
 	}
-	for _, engine := range e.engines {
-		nonceSize := engine.NonceSize()
-		if len(raw) < nonceSize+engine.Overhead() {
-			continue
-		}
-		plain, err := engine.Decrypt(raw[:nonceSize], raw[nonceSize:])
-		if err == nil {
-			return plain, nil
-		}
-	}
-	return nil, ErrAuthFailed
+	return e.kc.Open(raw)
 }
 
 // sealValues seals a marshaled value when EncryptValues is enabled.
@@ -264,7 +246,7 @@ type marker struct {
 }
 
 func (m marker) matches(e *encState) bool {
-	return m.cipher == e.cipher &&
+	return m.cipher == e.cipher() &&
 		m.encValues == e.encValues &&
 		m.encMetadata == e.encMetadata &&
 		m.encKeys == e.encKeys
@@ -291,7 +273,7 @@ func encodeMarker(e *encState) ([]byte, error) {
 
 	raw := make([]byte, 0, 4+1+1+1+len(canary))
 	raw = append(raw, markerMagic...)
-	raw = append(raw, markerVersion, byte(e.cipher), flags)
+	raw = append(raw, markerVersion, byte(e.cipher()), flags)
 	raw = append(raw, canary...)
 	return raw, nil
 }
@@ -460,23 +442,17 @@ func resolveConfig(cfg *Config) (*encState, error) {
 		return nil, err
 	}
 
+	kc, err := encryption.NewKeychain(cipherSuite, keys)
+	if err != nil {
+		return nil, err
+	}
+
 	state := &encState{
-		cipher:      cipherSuite,
-		keys:        keys,
+		kc:          kc,
 		encValues:   cfg.EncryptValues,
 		encMetadata: cfg.EncryptMetadata,
 		encKeys:     cfg.EncryptKeys,
-		engines:     make([]CipherEngine, 0, len(keys)),
 	}
-
-	for _, key := range keys {
-		engine, err := encryption.NewCipherEngine(cipherSuite, key)
-		if err != nil {
-			return nil, err
-		}
-		state.engines = append(state.engines, engine)
-	}
-	state.engine = state.engines[0]
 
 	if state.encKeys {
 		// Deterministic key encryption is derived from a single master key: a

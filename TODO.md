@@ -165,12 +165,12 @@ Status of each item as the consolidation lands. Commits reference the section.
 |---|---|
 | `KeyProvider`, `RawKeyProvider`, `EnvKeyProvider`, `MultiKeyProvider` | **done** — `internal/encryption/keys.go`; the four packages re-export type aliases + constructor wrappers, so `fs.NewRawKeyProvider`, `ts.MultiKeyProvider`, … keep working |
 | `resolveKeys` | **done** — `encryption.ResolveKeys(key, provider)`; the four copies deleted |
-| `seal`/`open` + fallback loop | pending (`Keychain`) |
+| `seal`/`open` + fallback loop | **done** — `encryption.Keychain.Seal`/`Open` (fresh nonce, try-each-engine fallback); `internal/encryption/keychain.go` + tests |
 | `deriveSIV` | pending |
 | base64 + SIV name/key seal/open | pending (`SIVNameCipher`) |
 | `verifyCanary` | pending |
 | marker encode/decode/matches | pending |
-| `withKey`/`adoptEnc` | pending (`Keychain.WithKey`) |
+| `withKey`/`adoptEnc` | **partly done** — `Keychain.WithKey` / `WithKeyKeepingFallbacks` exist and every package rebuilds its state through them; the per-entity rotation semantics follow in I2 |
 | `pair` + `applyEntries`, `bucketKeys` | pending |
 | `ErrInvalidKey`/`ErrInvalidConfig`/`ErrWrongMode`/`ErrEncryptedOrdering` | **done** — shared sentinels in `internal/encryption/errors.go`, re-exported by `fs`/`db`/`vec`/`ts` (I6 for the sentinel’s home; the db-only API stays) |
 
@@ -184,10 +184,10 @@ Status of each item as the consolidation lands. Commits reference the section.
 
 ### Issues (section 3)
 
-- **I1** pending (`Keychain` + `encState` unification).
+- **I1 — done.** `ts` no longer keeps `engine`/`engines`/`cipher`/`encValues`/`encNames`/`blockDur`/`siv` on `Store`; all four packages now hold an `*encState` wrapping a `*encryption.Keychain`, and `ts` reads its flags through `blockDuration()`/`encryptsValues()` accessors.
 - **I2** pending — decision: per-entity rotation keeps the old key as a decryption
   fallback; only `RotateAll` drops it.
-- **I3** pending (moves with `Keychain`).
+- **I3 — done.** `Keychain.Seal`/`Open` pass empty payloads through on both sides, so `fs` now matches `db`/`vec` (an empty file blob stays empty instead of being sealed to a nonce-only payload).
 - **I4 — done** together with the shared sentinels.
 - **I5** pending (wrapping convention).
 - **I6 — done for the sentinel’s home** (`ErrEncryptedOrdering` now lives in

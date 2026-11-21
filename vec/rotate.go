@@ -19,7 +19,7 @@ func (s *Store) withKey(newKey []byte) (*encState, error) {
 	}
 
 	return resolveConfig(&Config{
-		Cipher:                 s.enc.cipher,
+		Cipher:                 s.enc.kc.Cipher(),
 		Key:                    append([]byte(nil), newKey...),
 		EncryptPoints:          s.enc.encPoints,
 		EncryptPointIDs:        s.enc.encIDs,

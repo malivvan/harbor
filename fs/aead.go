@@ -87,9 +87,7 @@ func NewMultiKeyProvider(providers ...KeyProvider) (*MultiKeyProvider, error) {
 // encState is the shared encryption configuration of a Store. A nil encState
 // means plaintext.
 type encState struct {
-	engine      CipherEngine
-	engines     []CipherEngine
-	cipher      CipherSuite
+	kc          *encryption.Keychain
 	encContent  bool
 	encMetadata bool
 	chunkSize   int
@@ -99,35 +97,26 @@ func (e *encState) enabled() bool {
 	return e != nil
 }
 
+// cipher returns the resolved cipher suite of an encrypted state.
+func (e *encState) cipher() CipherSuite {
+	if e == nil {
+		return CipherAuto
+	}
+	return e.kc.Cipher()
+}
+
 func (e *encState) seal(plain []byte) ([]byte, error) {
-	nonce, err := encryption.GenerateNonce(e.cipher)
-	if err != nil {
-		return nil, err
+	if e == nil {
+		return plain, nil
 	}
-	sealed, err := e.engine.Encrypt(nonce, plain)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]byte, 0, len(nonce)+len(sealed))
-	out = append(out, nonce...)
-	return append(out, sealed...), nil
+	return e.kc.Seal(plain)
 }
 
 func (e *encState) open(raw []byte) ([]byte, error) {
 	if e == nil {
 		return raw, nil
 	}
-	for _, engine := range e.engines {
-		nonceSize := engine.NonceSize()
-		if len(raw) < nonceSize+engine.Overhead() {
-			continue
-		}
-		plain, err := engine.Decrypt(raw[:nonceSize], raw[nonceSize:])
-		if err == nil {
-			return plain, nil
-		}
-	}
-	return nil, ErrAuthFailed
+	return e.kc.Open(raw)
 }
 
 func (e *encState) sealMetadata(plain []byte) ([]byte, error) {
@@ -181,7 +170,7 @@ type marker struct {
 }
 
 func (m marker) matches(e *encState) bool {
-	return m.cipher == e.cipher &&
+	return m.cipher == e.cipher() &&
 		m.encContent == e.encContent &&
 		m.encMetadata == e.encMetadata &&
 		m.chunkSize == e.chunkSize
@@ -206,7 +195,7 @@ func (e *encState) encodeMarker() ([]byte, error) {
 
 	raw := make([]byte, 0, 4+1+1+1+8+len(canary))
 	raw = append(raw, markerMagic...)
-	raw = append(raw, markerVersion, byte(e.cipher), flags)
+	raw = append(raw, markerVersion, byte(e.cipher()), flags)
 	var chunkSize [8]byte
 	binary.LittleEndian.PutUint64(chunkSize[:], uint64(e.chunkSize))
 	raw = append(raw, chunkSize[:]...)
@@ -266,20 +255,15 @@ func resolveConfig(cfg *Config) (*encState, error) {
 		return nil, err
 	}
 
-	state := &encState{
-		cipher:      cipherSuite,
+	kc, err := encryption.NewKeychain(cipherSuite, keys)
+	if err != nil {
+		return nil, err
+	}
+
+	return &encState{
+		kc:          kc,
 		encContent:  cfg.EncryptContent || cfg.ChunkSize > 0,
 		encMetadata: cfg.EncryptMetadata,
 		chunkSize:   cfg.ChunkSize,
-		engines:     make([]CipherEngine, 0, len(keys)),
-	}
-	for _, key := range keys {
-		engine, err := encryption.NewCipherEngine(cipherSuite, key)
-		if err != nil {
-			return nil, err
-		}
-		state.engines = append(state.engines, engine)
-	}
-	state.engine = state.engines[0]
-	return state, nil
+	}, nil
 }

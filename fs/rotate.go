@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/malivvan/storm/internal/encryption"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -19,15 +18,13 @@ func (s *Store) withKey(newKey []byte) (*encState, error) {
 		return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, KeySize, len(newKey))
 	}
 
-	engine, err := encryption.NewCipherEngine(s.enc.cipher, newKey)
+	kc, err := s.enc.kc.WithKey(newKey)
 	if err != nil {
 		return nil, err
 	}
 
 	return &encState{
-		engine:      engine,
-		engines:     []CipherEngine{engine},
-		cipher:      s.enc.cipher,
+		kc:          kc,
 		encContent:  s.enc.encContent,
 		encMetadata: s.enc.encMetadata,
 		chunkSize:   s.enc.chunkSize,
