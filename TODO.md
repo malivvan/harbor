@@ -88,6 +88,8 @@ each entry lists a concrete location and a suggested fix. Severity is High / Med
   `f.Close()`s the same file (double close).
   Fix: use `t.TempDir()` + `t.Cleanup`, assert all errors, remove the double close, and drop
   the `Println`/`Fatalf` noise.
+  **Status: FIXED** — the demo is now a self-contained test using `t.TempDir()`, checked
+  errors and a single `Close`; it also asserts vector search, time-series and fs results.
 
 ---
 

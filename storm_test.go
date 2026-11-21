@@ -4,31 +4,42 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
-	"log"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/malivvan/storm/ts"
 	"github.com/malivvan/storm/vec"
 )
 
+func testSecret() []byte { return bytes.Repeat([]byte{7}, 32) }
+
 func TestStorm(t *testing.T) {
-	s, err := Open(nil, "storm.db", 0600, nil, Config{Secret: bytes.Repeat([]byte{9}, 32)})
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "storm.db")
+
+	s, err := Open(ctx, path, 0600, nil, Config{Secret: testSecret()})
 	if err != nil {
-		t.Fatalf("failed to open storm: %v", err)
+		t.Fatalf("open: %v", err)
 	}
-	defer s.Close()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("close: %v", err)
+		}
+	})
 
-	t.Log("Storm opened successfully")
-	t.Log("Store ID:", s.ID())
+	if s.ID() == uuid.Nil {
+		t.Fatal("store ID was not assigned")
+	}
 
-	// 2. Create a Collection (Automatic Persistence)
-	col, _ := s.Vec().NewCollection("documents", 3, vec.Cosine, true)
-
-	err = col.Upsert([]vec.PointStruct{
+	col, err := s.Vec().NewCollection("documents", 3, vec.Cosine, true)
+	if err != nil {
+		t.Fatalf("new collection: %v", err)
+	}
+	if err := col.Upsert([]vec.PointStruct{
 		{
 			ID:      "user_101",
 			Vector:  []float32{0.5, 0.5, 0.5},
@@ -39,80 +50,78 @@ func TestStorm(t *testing.T) {
 			Vector:  []float32{0.8, 0.2, 0.0},
 			Payload: vec.Payload{"role": "guest", "age": 22},
 		},
-	})
-	if err != nil {
-		log.Fatalf("Upsert error: %v", err)
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
 	}
-
-	// 4. Perform a rich query using Go structs directly
-	fmt.Println("\nSearching for an admin closest to [1.0, 0.0, 0.0]...")
-	query := []float32{1.0, 0.0, 0.0}
 
 	filter := &vec.Filter{
 		Must: []vec.Condition{
 			{Key: "role", Match: vec.MatchValue{Value: "admin"}},
 		},
 	}
-
-	results, err := col.Search(query, filter, 1) // Get Top 1
+	results, err := col.Search([]float32{1.0, 0.0, 0.0}, filter, 1)
 	if err != nil {
-		log.Fatalf("Search error: %v", err)
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 || results[0].ID != "user_101" {
+		t.Fatalf("search results = %+v, want user_101", results)
 	}
 
-	fmt.Printf("Best Match: %s (Score: %f)\n", results[0].ID, results[0].Score)
-
-	// 3. Time series store
 	cpu := s.TS().Series("cpu")
 	now := time.Now().UnixNano()
-	if err := cpu.Insert(context.Background(), ts.Point{Timestamp: now, Value: 0.5}); err != nil {
-		t.Fatalf("TS insert error: %v", err)
+	if err := cpu.Insert(ctx, ts.Point{Timestamp: now, Value: 0.5}); err != nil {
+		t.Fatalf("ts insert: %v", err)
 	}
-	points, err := cpu.Range(context.Background(), now, now)
-	if err != nil || len(points) != 1 {
-		t.Fatalf("TS range error: %v, points: %v", err, points)
+	points, err := cpu.Range(ctx, now, now)
+	if err != nil {
+		t.Fatalf("ts range: %v", err)
 	}
-	if err := cpu.SetLabels(context.Background(), map[string]string{"host": "test"}); err != nil {
-		t.Fatalf("TS labels error: %v", err)
+	if len(points) != 1 {
+		t.Fatalf("ts range returned %d points, want 1", len(points))
 	}
-	samples, err := cpu.Aggregate(context.Background(), now, now, 1, ts.AggAvg)
-	if err != nil || len(samples) != 1 {
-		t.Fatalf("TS aggregate error: %v, samples: %v", err, samples)
+	if err := cpu.SetLabels(ctx, map[string]string{"host": "test"}); err != nil {
+		t.Fatalf("ts labels: %v", err)
 	}
-	t.Log("Time series store operations successful")
+	samples, err := cpu.Aggregate(ctx, now, now, 1, ts.AggAvg)
+	if err != nil {
+		t.Fatalf("ts aggregate: %v", err)
+	}
+	if len(samples) != 1 {
+		t.Fatalf("ts aggregate returned %d samples, want 1", len(samples))
+	}
 
 	vfs, err := s.FS().Open("test_fs")
 	if err != nil {
-		log.Fatalf("FS open error: %v", err)
+		t.Fatalf("fs open: %v", err)
 	}
-	// append timestamp and newline to the file blob.txt
 	f, err := vfs.Create("blob.txt")
 	if err != nil {
-		log.Fatalf("FS Create error: %v", err)
+		t.Fatalf("fs create: %v", err)
 	}
-	defer f.Close()
-	_, err = f.Write([]byte(time.Now().Format(time.RFC3339) + "\n"))
-	if err != nil {
-		log.Fatalf("FS Write error: %v", err)
+	want := time.Now().Format(time.RFC3339) + "\n"
+	if _, err := f.Write([]byte(want)); err != nil {
+		_ = f.Close()
+		t.Fatalf("fs write: %v", err)
 	}
-	err = f.Sync()
-	if err != nil {
-		log.Fatalf("FS Sync error: %v", err)
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		t.Fatalf("fs sync: %v", err)
 	}
-	err = f.Close()
-	if err != nil {
-		log.Fatalf("FS Close error: %v", err)
+	if err := f.Close(); err != nil {
+		t.Fatalf("fs close: %v", err)
 	}
 
-	// read the current content of the file
 	content, err := vfs.ReadFile("blob.txt")
 	if err != nil {
-		log.Fatalf("FS ReadFile error: %v", err)
+		t.Fatalf("fs read: %v", err)
 	}
-	log.Printf("Current content of blob.txt: %s", string(content))
+	if string(content) != want {
+		t.Fatalf("content = %q, want %q", content, want)
+	}
 }
 
 func TestOpenRejectsInvalidSecret(t *testing.T) {
-	path := t.TempDir() + "/invalid-key.db"
+	path := filepath.Join(t.TempDir(), "invalid-key.db")
 	for _, secret := range [][]byte{nil, make([]byte, 16), make([]byte, 33)} {
 		if _, err := Open(context.Background(), path, 0600, nil, Config{Secret: secret}); err == nil {
 			t.Fatalf("Open accepted a %d-byte secret", len(secret))
@@ -121,12 +130,12 @@ func TestOpenRejectsInvalidSecret(t *testing.T) {
 }
 
 func TestSetGetRoundTrip(t *testing.T) {
-	path := t.TempDir() + "/kv.db"
-	s, err := Open(context.Background(), path, 0600, nil, Config{Secret: bytes.Repeat([]byte{1}, 32)})
+	path := filepath.Join(t.TempDir(), "kv.db")
+	s, err := Open(context.Background(), path, 0600, nil, Config{Secret: testSecret()})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer s.Close()
+	t.Cleanup(func() { _ = s.Close() })
 
 	if err := s.Set("key", "value"); err != nil {
 		t.Fatalf("set: %v", err)
@@ -144,12 +153,12 @@ func TestSetGetRoundTrip(t *testing.T) {
 }
 
 func TestGetMissingKeyReturnsError(t *testing.T) {
-	path := t.TempDir() + "/kv.db"
-	s, err := Open(context.Background(), path, 0600, nil, Config{Secret: bytes.Repeat([]byte{2}, 32)})
+	path := filepath.Join(t.TempDir(), "kv.db")
+	s, err := Open(context.Background(), path, 0600, nil, Config{Secret: testSecret()})
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer s.Close()
+	t.Cleanup(func() { _ = s.Close() })
 
 	if _, err := s.Get("missing"); !errors.Is(err, ErrKeyNotFound) {
 		t.Fatalf("Get(missing) error = %v, want ErrKeyNotFound", err)
@@ -157,8 +166,8 @@ func TestGetMissingKeyReturnsError(t *testing.T) {
 }
 
 func TestOpenReleasesHandleOnSubStoreFailure(t *testing.T) {
-	path := t.TempDir() + "/leak.db"
-	key := bytes.Repeat([]byte{3}, 32)
+	path := filepath.Join(t.TempDir(), "leak.db")
+	key := testSecret()
 
 	s, err := Open(context.Background(), path, 0600, &bolt.Options{Timeout: time.Second}, Config{Secret: key})
 	if err != nil {
@@ -169,7 +178,7 @@ func TestOpenReleasesHandleOnSubStoreFailure(t *testing.T) {
 	}
 
 	// A wrong key makes db.Open fail after bolt.Open succeeded.
-	wrong := bytes.Repeat([]byte{4}, 32)
+	wrong := bytes.Repeat([]byte{8}, len(key))
 	if _, err := Open(context.Background(), path, 0600, &bolt.Options{Timeout: time.Second}, Config{Secret: wrong}); err == nil {
 		t.Fatal("Open with the wrong key succeeded")
 	}
