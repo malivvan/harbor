@@ -185,8 +185,16 @@ Status of each item as the consolidation lands. Commits reference the section.
 ### Issues (section 3)
 
 - **I1 — done.** `ts` no longer keeps `engine`/`engines`/`cipher`/`encValues`/`encNames`/`blockDur`/`siv` on `Store`; all four packages now hold an `*encState` wrapping a `*encryption.Keychain`, and `ts` reads its flags through `blockDuration()`/`encryptsValues()` accessors.
-- **I2** pending — decision: per-entity rotation keeps the old key as a decryption
-  fallback; only `RotateAll` drops it.
+- **I2 — done**, with one refinement. Per-entity rotation (`fs.ReEncryptFS`,
+  `vec.ReEncryptCollection`, `ts.ReEncryptSeries`) now keeps the previous key as
+  a decryption fallback through `Keychain.WithKeyKeepingFallbacks`, so the
+  entities that were not rewritten keep working; only `RotateAll` drops it.
+  Refinement: when the store encrypts deterministic keys (`vec` point IDs or
+  collection names, `ts` series names), a single-entity rotation is **rejected**
+  with `ErrInvalidConfig` pointing at `RotateAll`. Those keys derive from one
+  master key, so adopting the new key would leave the remaining entities
+  impossible to find or decrypt — unrecoverable, not merely orphaned. `db` is
+  unaffected: its rotation is whole-store.
 - **I3 — done.** `Keychain.Seal`/`Open` pass empty payloads through on both sides, so `fs` now matches `db`/`vec` (an empty file blob stays empty instead of being sealed to a nonce-only payload).
 - **I4 — done** together with the shared sentinels.
 - **I5** pending (wrapping convention).

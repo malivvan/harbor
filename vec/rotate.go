@@ -9,8 +9,26 @@ import (
 	"go.etcd.io/bbolt"
 )
 
+// withRotationKey returns the state a single-collection rotation moves onto: the
+// previous key stays available for decryption, so the collections that were not
+// rewritten keep working until RotateAll.
+func (s *Store) withRotationKey(newKey []byte) (*encState, error) {
+	if s.enc == nil {
+		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
+	}
+
+	kc, err := s.enc.kc.WithKeyKeepingFallbacks(newKey)
+	if err != nil {
+		return nil, err
+	}
+	return &encState{
+		kc:        kc,
+		encPoints: s.enc.encPoints,
+	}, nil
+}
+
 // withKey returns an encryption state that writes with newKey while keeping the
-// current cipher and flags.
+// current cipher and flags, dropping every current key.
 func (s *Store) withKey(newKey []byte) (*encState, error) {
 	if s.enc == nil {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
@@ -33,13 +51,18 @@ func (s *Store) adoptEnc(next *encState) {
 	s.enc = next
 }
 
-// ReEncryptCollection rewrites one collection and its metadata under newKey and
-// rewrites the marker canary, then adopts newKey for the store.
+// ReEncryptCollection rewrites one collection and its metadata under newKey,
+// rewrites the marker canary and installs newKey as the write key.
 //
-// Every collection shares one key. When the store holds several collections,
-// use RotateAll so all of them are re-encrypted before the old key is retired:
-// after ReEncryptCollection only the named collection is readable with the new
-// key.
+// The previous key stays available for decryption, so the collections that were
+// not rotated yet keep working; RotateAll rewrites all of them and drops the old
+// key once it is done.
+//
+// With EncryptPointIDs or EncryptCollectionNames it cannot run at all: those
+// deterministic keys are derived from one master key, so once the new key is
+// installed the collections that were not rewritten can neither be found nor
+// decrypted. Those stores must be rotated with RotateAll, and ReEncryptCollection
+// reports ErrInvalidConfig instead of leaving the database unrecoverable.
 //
 // Rotation must not run concurrently with other operations on the store.
 func (s *Store) ReEncryptCollection(ctx context.Context, name string, newKey []byte) error {
@@ -52,8 +75,11 @@ func (s *Store) ReEncryptCollection(ctx context.Context, name string, newKey []b
 	if name == "" {
 		return fmt.Errorf("%w: collection name is required", ErrInvalidConfig)
 	}
+	if s.enc != nil && (s.enc.encIDs || s.enc.encNames) {
+		return fmt.Errorf("%w: a single collection cannot be rotated when point IDs or collection names are encrypted; use RotateAll", ErrInvalidConfig)
+	}
 
-	next, err := s.withKey(newKey)
+	next, err := s.withRotationKey(newKey)
 	if err != nil {
 		return err
 	}
@@ -85,7 +111,7 @@ func (s *Store) ReEncryptCollection(ctx context.Context, name string, newKey []b
 }
 
 // RotateAll re-encrypts every collection, all collection metadata and the marker
-// canary under newKey, then adopts the new key.
+// canary under newKey, then adopts the new key and drops the previous one.
 func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("%w: store is not open", ErrInvalidConfig)

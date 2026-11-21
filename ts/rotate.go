@@ -9,8 +9,33 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+// withRotationKey returns the view a single-series rotation moves onto: the
+// previous key stays available for decryption, so the series that were not
+// rewritten keep working until RotateAll.
+func (s *Store) withRotationKey(newKey []byte) (*Store, error) {
+	if s.enc == nil {
+		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
+	}
+
+	kc, err := s.enc.kc.WithKeyKeepingFallbacks(newKey)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{
+		b:    s.b,
+		root: s.root,
+		now:  s.now,
+		enc: &encState{
+			kc:        kc,
+			encValues: s.enc.encValues,
+			blockDur:  s.enc.blockDur,
+		},
+	}, nil
+}
+
 // withKey returns a store view that writes with newKey while sharing the same
-// database. It is used internally to re-encrypt data.
+// database, dropping every current key. It is used internally to re-encrypt
+// data.
 func (s *Store) withKey(newKey []byte) (*Store, error) {
 	if s.enc == nil {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
@@ -195,7 +220,17 @@ func (s *Store) reEncryptSeries(ctx context.Context, name string, next *Store) e
 }
 
 // ReEncryptSeries rewrites every record and the metadata of one series under
-// newKey. The store adopts the new key on success.
+// newKey and installs newKey as the write key.
+//
+// The previous key stays available for decryption, so the series that were not
+// rewritten keep working; RotateAll rewrites all of them and drops the old key
+// once it is done.
+//
+// With EncryptSeriesNames it cannot run at all: the physical names are derived
+// from one master key, so once the new key is installed the remaining series can
+// neither be found nor decrypted. Those stores must be rotated with RotateAll,
+// and ReEncryptSeries reports ErrInvalidConfig instead of leaving the database
+// unrecoverable.
 func (s *Store) ReEncryptSeries(ctx context.Context, name string, newKey []byte) error {
 	if s == nil || s.b == nil {
 		return ErrNilParam
@@ -206,8 +241,11 @@ func (s *Store) ReEncryptSeries(ctx context.Context, name string, newKey []byte)
 	if name == "" {
 		return ErrNilParam
 	}
+	if s.enc != nil && s.enc.encNames {
+		return fmt.Errorf("%w: a single series cannot be rotated when series names are encrypted; use RotateAll", ErrInvalidConfig)
+	}
 
-	next, err := s.withKey(newKey)
+	next, err := s.withRotationKey(newKey)
 	if err != nil {
 		return err
 	}
@@ -218,7 +256,8 @@ func (s *Store) ReEncryptSeries(ctx context.Context, name string, newKey []byte)
 	return nil
 }
 
-// RotateAll re-encrypts every known series under newKey and adopts it.
+// RotateAll re-encrypts every known series under newKey, adopts it and drops
+// the previous key.
 func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 	if s == nil || s.b == nil {
 		return ErrNilParam

@@ -162,10 +162,11 @@ func TestAEADRotatePointsOnly(t *testing.T) {
 	require.Equal(t, []string{"p1", "p2", "p3"}, aeadPointIDs(loaded))
 }
 
-// TestAEADReEncryptCollectionMatchesRotateAll proves a single collection can be
-// rotated on its own, and documents that the other collections then still need
-// the old key.
-func TestAEADReEncryptCollectionMatchesRotateAll(t *testing.T) {
+// TestAEADReEncryptCollectionKeepsOthersReadable proves a single collection can
+// be rotated on its own: the previous key stays available for decryption, so the
+// collections that were not rewritten keep working, and RotateAll finishes the
+// job and drops it.
+func TestAEADReEncryptCollectionKeepsOthersReadable(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "enc.db")
 	keyA, keyB := aeadKey(35), aeadKey(36)
@@ -187,45 +188,24 @@ func TestAEADReEncryptCollectionMatchesRotateAll(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "invoices", loadedMeta.Name)
 
-	// The collection that was not rotated is no longer readable with the new
-	// key alone.
-	_, err = store.LoadCollection("receipts")
-	require.ErrorIs(t, err, ErrAuthFailed)
+	// The collection that was not rotated yet keeps working through the
+	// retained fallback key.
+	receipts, err := store.LoadCollection("receipts")
+	require.NoError(t, err)
+	require.Equal(t, []string{"p1"}, aeadPointIDs(receipts))
+	require.NoError(t, store.VerifyAll(ctx))
+
+	// RotateAll rewrites everything and drops the old key.
+	require.NoError(t, store.RotateAll(ctx, keyB))
+	require.NoError(t, store.VerifyAll(ctx))
 	require.NoError(t, store.Close())
 
-	// Keeping both keys readable and rotating again finishes the job.
-	provA, err := NewRawKeyProvider(keyA)
-	require.NoError(t, err)
-	provB, err := NewRawKeyProvider(keyB)
-	require.NoError(t, err)
-	multi, err := NewMultiKeyProvider(provB, provA)
-	require.NoError(t, err)
-
+	// Reopening with the new key alone reads both collections.
 	bdb, err := bbolt.Open(path, 0600, &bbolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	defer bdb.Close()
 
-	store, err = OpenWithConfig(ctx, bdb, nil, false, nil, &Config{
-		KeyProvider:   multi,
-		EncryptPoints: true,
-	})
-	require.NoError(t, err)
-
-	// The fallback key reads the not-yet-rotated collection.
-	loaded, err = store.LoadCollection("receipts")
-	require.NoError(t, err)
-	require.Equal(t, []string{"p1"}, aeadPointIDs(loaded))
-
-	require.NoError(t, store.RotateAll(ctx, keyB))
-	require.NoError(t, store.VerifyAll(ctx))
-
-	// After the full rotation only the new key is needed.
-	require.NoError(t, store.Close())
-	bdb2, err := bbolt.Open(path, 0600, &bbolt.Options{Timeout: time.Second})
-	require.NoError(t, err)
-	defer bdb2.Close()
-
-	store, err = OpenWithConfig(ctx, bdb2, nil, false, nil, &Config{Key: keyB, EncryptPoints: true})
+	store, err = OpenWithConfig(ctx, bdb, nil, false, nil, &Config{Key: keyB, EncryptPoints: true})
 	require.NoError(t, err)
 	require.NoError(t, store.VerifyAll(ctx))
 
@@ -233,6 +213,37 @@ func TestAEADReEncryptCollectionMatchesRotateAll(t *testing.T) {
 		loaded, err := store.LoadCollection(name)
 		require.NoError(t, err)
 		require.NotEmpty(t, loaded)
+	}
+}
+
+// TestAEADReEncryptCollectionRejectedWithEncryptedKeys proves a single
+// collection cannot be rotated when deterministic keys are encrypted: the new
+// key could neither find nor decrypt the remaining collections, so the call is
+// rejected instead of leaving the store unrecoverable.
+func TestAEADReEncryptCollectionRejectedWithEncryptedKeys(t *testing.T) {
+	for name, cfg := range map[string]*Config{
+		"point ids":        {Key: aeadKey(47), EncryptPoints: true, EncryptPointIDs: true},
+		"collection names": {Key: aeadKey(48), EncryptPoints: true, EncryptCollectionNames: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			path := filepath.Join(t.TempDir(), "enc.db")
+
+			store, _ := aeadOpenStore(t, path, false, cfg)
+			defer store.Close()
+			require.NoError(t, store.EnsureCollection("invoices"))
+			require.NoError(t, store.UpsertPoints("invoices", aeadTestPoints()[:1]))
+
+			err := store.ReEncryptCollection(ctx, "invoices", aeadKey(49))
+			require.ErrorIs(t, err, ErrInvalidConfig)
+			require.Contains(t, err.Error(), "RotateAll")
+
+			// The store is untouched and still readable.
+			loaded, err := store.LoadCollection("invoices")
+			require.NoError(t, err)
+			require.Equal(t, []string{"p1"}, aeadPointIDs(loaded))
+			require.NoError(t, store.VerifyAll(ctx))
+		})
 	}
 }
 

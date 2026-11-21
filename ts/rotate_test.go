@@ -44,8 +44,15 @@ func TestReEncryptSeries(t *testing.T) {
 			require.NoError(t, se.InsertMany(ctx, []Point{{Timestamp: 1, Value: 1}, {Timestamp: 5, Value: 5}, {Timestamp: 12, Value: 12}}))
 			require.NoError(t, se.SetLabels(ctx, map[string]string{"host": "a"}))
 			require.NoError(t, se.SetRetention(ctx, Retention{MaxPoints: 10}))
+			require.NoError(t, store.Series("mem").Insert(ctx, Point{Timestamp: 1, Value: 42}))
 
 			require.NoError(t, store.ReEncryptSeries(ctx, "cpu", key2))
+
+			// The series that was not rotated yet keeps working through the
+			// retained fallback key.
+			memPoints, err := store.Series("mem").Range(ctx, 0, 10)
+			require.NoError(t, err)
+			require.Equal(t, []Point{{1, 42}}, memPoints)
 
 			points, err := se.Range(ctx, 0, 20)
 			require.NoError(t, err)
@@ -163,7 +170,15 @@ func TestRotationWithEncryptedNames(t *testing.T) {
 	before, _ := physicalKeys(t, db, root)
 	require.Len(t, before, 1)
 
-	require.NoError(t, store.ReEncryptSeries(ctx, "cpu", key2))
+	// A single series cannot be rotated when the names are encrypted: the new
+	// key could neither find nor decrypt the remaining series.
+	err := store.ReEncryptSeries(ctx, "cpu", key2)
+	require.ErrorIs(t, err, ErrInvalidConfig)
+	require.Contains(t, err.Error(), "RotateAll")
+
+	// RotateAll re-derives every name and keeps the data readable.
+	require.NoError(t, store.RotateAll(ctx, key2))
+	require.NoError(t, store.VerifyAll(ctx))
 
 	points, err := se.Range(ctx, 0, 20)
 	require.NoError(t, err)
@@ -180,6 +195,7 @@ func TestRotationWithEncryptedNames(t *testing.T) {
 	require.NoError(t, store.Close())
 	require.NoError(t, db.Close())
 
+	// The old key can no longer open the store; the new key reads it.
 	_, _, err = tryOpenStoreAtPath(t, path, root, cfg)
 	require.ErrorIs(t, err, ErrAuthFailed)
 
@@ -252,4 +268,31 @@ func TestRotationErrors(t *testing.T) {
 	require.ErrorIs(t, store.ReEncryptSeries(canceled, "cpu", testKey(44)), context.Canceled)
 	require.ErrorIs(t, store.RotateAll(canceled, testKey(44)), context.Canceled)
 	require.ErrorIs(t, store.VerifyAll(canceled), context.Canceled)
+}
+
+// TestReEncryptSeriesRejectedWithEncryptedNames proves a single series cannot be
+// rotated when the deterministic series names are encrypted: the new key could
+// neither find nor decrypt the remaining series, so the call is rejected.
+func TestReEncryptSeriesRejectedWithEncryptedNames(t *testing.T) {
+	ctx := context.Background()
+	root := []byte("ts")
+	key1, key2 := testKey(50), testKey(51)
+	path := filepath.Join(t.TempDir(), "rotate-names.db")
+
+	cfg := &Config{Key: key1, EncryptValues: true, EncryptSeriesNames: true}
+	store, db := openStoreAtPath(t, path, root, cfg)
+	defer db.Close()
+	defer store.Close()
+
+	require.NoError(t, store.Series("cpu").InsertMany(ctx, []Point{{Timestamp: 1, Value: 1}}))
+
+	err := store.ReEncryptSeries(ctx, "cpu", key2)
+	require.ErrorIs(t, err, ErrInvalidConfig)
+	require.Contains(t, err.Error(), "RotateAll")
+
+	// The store is untouched and still readable.
+	points, err := store.Series("cpu").Range(ctx, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, points, 1)
+	require.NoError(t, store.VerifyAll(ctx))
 }

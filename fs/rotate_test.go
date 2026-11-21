@@ -307,3 +307,65 @@ func TestReEncryptEmptyFS(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "after empty rotation", string(got))
 }
+
+func TestReEncryptFSKeepsOtherFileSystemsReadable(t *testing.T) {
+	ctx := context.Background()
+	var root []byte
+	key1, key2 := testEncKey(70), testEncKey(71)
+	dbPath := filepath.Join(t.TempDir(), "rotate-fallback.db")
+	cfg := &Config{Key: key1, EncryptContent: true, EncryptMetadata: true}
+
+	store, db, err := openEncStoreAt(t, dbPath, root, cfg)
+	require.NoError(t, err)
+
+	fsA, err := store.Open("a")
+	require.NoError(t, err)
+	require.NoError(t, fsA.MkdirAll("/dir", 0755))
+	writeTestFile(t, fsA, "/dir/a.txt", "series a")
+
+	fsB, err := store.Open("b")
+	require.NoError(t, err)
+	require.NoError(t, fsB.MkdirAll("/dir", 0755))
+	writeTestFile(t, fsB, "/dir/b.txt", "series b")
+
+	require.NoError(t, store.ReEncryptFS(ctx, "a", key2))
+
+	// The rotated filesystem reads with the new key...
+	got, err := fsA.ReadFile("/dir/a.txt")
+	require.NoError(t, err)
+	require.Equal(t, "series a", string(got))
+
+	// ...and the one that was not rotated yet keeps working through the
+	// retained fallback key.
+	got, err = fsB.ReadFile("/dir/b.txt")
+	require.NoError(t, err)
+	require.Equal(t, "series b", string(got))
+	require.NoError(t, store.VerifyAll(ctx))
+
+	// RotateAll rewrites the rest and drops the previous key.
+	require.NoError(t, store.RotateAll(ctx, key2))
+	require.NoError(t, store.VerifyAll(ctx))
+	require.NoError(t, store.Close())
+	require.NoError(t, db.Close())
+
+	// The new key alone opens both filesystems.
+	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Key: key2, EncryptContent: true, EncryptMetadata: true})
+	require.NoError(t, err)
+	for name, want := range map[string]string{"a": "series a", "b": "series b"} {
+		fsys, err := store.Open(name)
+		require.NoError(t, err)
+		got, err := fsys.ReadFile("/dir/" + name + ".txt")
+		require.NoError(t, err)
+		require.Equal(t, want, string(got))
+	}
+	require.NoError(t, store.Close())
+	require.NoError(t, db.Close())
+
+	// The old key can no longer open either filesystem.
+	oldStore, oldDB, err := openEncStoreAt(t, dbPath, root, cfg)
+	require.NoError(t, err)
+	_, err = oldStore.Open("a")
+	require.ErrorIs(t, err, ErrAuthFailed)
+	require.NoError(t, oldStore.Close())
+	require.NoError(t, oldDB.Close())
+}

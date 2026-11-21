@@ -10,8 +10,20 @@ import (
 )
 
 // withKey returns an encryption state that writes with newKey while keeping the
-// current encryption flags and cipher.
+// current encryption flags and cipher, dropping every current key.
 func (s *Store) withKey(newKey []byte) (*encState, error) {
+	return s.newKeyState(newKey, false)
+}
+
+// withKeyKeepingFallbacks returns an encryption state that writes with newKey
+// and can still decrypt with the current keys. Per-filesystem rotation uses it
+// so the filesystems that were not rotated yet stay readable; RotateAll drops
+// the old keys once every filesystem is rewritten.
+func (s *Store) withKeyKeepingFallbacks(newKey []byte) (*encState, error) {
+	return s.newKeyState(newKey, true)
+}
+
+func (s *Store) newKeyState(newKey []byte, keepFallbacks bool) (*encState, error) {
 	if s.enc == nil {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
@@ -19,7 +31,15 @@ func (s *Store) withKey(newKey []byte) (*encState, error) {
 		return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, KeySize, len(newKey))
 	}
 
-	kc, err := s.enc.kc.WithKey(newKey)
+	var (
+		kc  *encryption.Keychain
+		err error
+	)
+	if keepFallbacks {
+		kc, err = s.enc.kc.WithKeyKeepingFallbacks(newKey)
+	} else {
+		kc, err = s.enc.kc.WithKey(newKey)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -136,10 +156,11 @@ func (s *Store) reEncryptFS(ctx context.Context, name string, next *encState) er
 }
 
 // ReEncryptFS rewrites one filesystem's inodes, content, chunks, symlinks and
-// marker under newKey, then adopts the new key for the Store.
+// marker under newKey, then installs newKey as the write key.
 //
-// When the Store manages several filesystems they all share one key; use
-// RotateAll so every filesystem is re-encrypted before the old key is retired.
+// The previous key stays available for decryption, so the filesystems that were
+// not rotated yet keep working. RotateAll rewrites all of them and drops the old
+// key once it is done.
 func (s *Store) ReEncryptFS(ctx context.Context, name string, newKey []byte) error {
 	if s == nil || s.db == nil {
 		return ErrNilParam
@@ -151,7 +172,7 @@ func (s *Store) ReEncryptFS(ctx context.Context, name string, newKey []byte) err
 		return ErrNilParam
 	}
 
-	next, err := s.withKey(newKey)
+	next, err := s.withKeyKeepingFallbacks(newKey)
 	if err != nil {
 		return err
 	}
@@ -162,7 +183,8 @@ func (s *Store) ReEncryptFS(ctx context.Context, name string, newKey []byte) err
 	return nil
 }
 
-// RotateAll re-encrypts every filesystem managed by the Store under newKey.
+// RotateAll re-encrypts every filesystem managed by the Store under newKey and
+// drops the previous key once all of them are rewritten.
 func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 	if s == nil || s.db == nil {
 		return ErrNilParam
