@@ -482,6 +482,7 @@ the encryption state (sections 4 and 6).
   stage-then-apply approach the repo uses elsewhere (`encryption.ApplyEntries`, `DeleteRange`).
   Fix: collect the keys to delete first, then delete them after the cursor loop.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(ts): address review findings`.
 - **`Store.SetNow` / `Store.now` is unsynchronized**
   — `ts/store.go:16, 187-195` and `ts/retention.go:197-202`
   Problem: `SetNow` writes `s.now` while `nowNanos()` (invoked from `InsertMany` → retention
@@ -490,6 +491,7 @@ the encryption state (sections 4 and 6).
   Fix: guard `now` with an `atomic.Pointer`/`atomic.Value`, or document and enforce that it must
   be set once before any concurrent use.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(ts): address review findings`.
 ### Low
 
 - **`unpackBlock` has a dead `count < 0` check**
@@ -499,6 +501,7 @@ the encryption state (sections 4 and 6).
   size check covers it).
   Fix: drop the redundant clause or use an explicit `uint32`→`int` overflow guard.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(ts): address review findings`.
 - **`Aggregate` (block mode) materializes the whole range before aggregating**
   — `ts/aggregate.go:131-137`
   Problem: when block mode is on, `Aggregate` calls `se.Range` (collecting every point into a
@@ -508,6 +511,7 @@ the encryption state (sections 4 and 6).
 
 ---
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(ts): address review findings`.
 ## 6. Package `vec` (incl. `hnsw`, `vek`)
 
 ### High

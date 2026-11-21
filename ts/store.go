@@ -3,17 +3,24 @@ package ts
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	bolt "go.etcd.io/bbolt"
 )
 
 const metaBucketName = "__ts_meta__"
 
+// nowProvider wraps the pluggable clock so it can be stored in an atomic
+// pointer.
+type nowProvider struct {
+	fn func() int64
+}
+
 // Store manages named time series backed by a bbolt database.
 type Store struct {
 	b      *bolt.DB
 	root   []byte
-	now    func() int64
+	now    atomic.Pointer[nowProvider]
 	mu     sync.RWMutex
 	series map[string]*Series
 	order  []string

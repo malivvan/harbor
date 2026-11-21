@@ -38,8 +38,10 @@ func unpackBlock(data []byte) ([]Point, error) {
 	if len(data) < blockHeaderSize {
 		return nil, errCorruptPoint
 	}
-	count := int(binary.LittleEndian.Uint32(data[:blockHeaderSize]))
-	if count < 0 || len(data) != blockHeaderSize+count*16 {
+	count := binary.LittleEndian.Uint32(data[:blockHeaderSize])
+	// Compare in uint64 so a 32-bit int overflow of count*16 cannot wrap into a
+	// bogus "valid" size.
+	if uint64(len(data)) != uint64(blockHeaderSize)+uint64(count)*16 {
 		return nil, errCorruptPoint
 	}
 

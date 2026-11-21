@@ -274,9 +274,9 @@ func Open(ctx context.Context, bdb *bolt.DB, key []byte, cfg Config) (*Store, er
 	s := &Store{
 		b:      bdb,
 		root:   append([]byte(nil), key...),
-		now:    defaultNow,
 		series: make(map[string]*Series),
 	}
+	s.now.Store(&nowProvider{fn: defaultNow})
 
 	s.enc = settings
 

@@ -21,16 +21,17 @@ func (s *Store) withRotationKey(newKey []byte) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{
+	next := &Store{
 		b:    s.b,
 		root: s.root,
-		now:  s.now,
 		enc: &encState{
 			kc:        kc,
 			encValues: s.enc.encValues,
 			blockDur:  s.enc.blockDur,
 		},
-	}, nil
+	}
+	next.now.Store(s.now.Load())
+	return next, nil
 }
 
 // withKey returns a store view that writes with newKey while sharing the same
@@ -52,7 +53,6 @@ func (s *Store) withKey(newKey []byte) (*Store, error) {
 	next := &Store{
 		b:    s.b,
 		root: s.root,
-		now:  s.now,
 		enc: &encState{
 			kc:        kc,
 			encValues: s.enc.encValues,
@@ -60,6 +60,7 @@ func (s *Store) withKey(newKey []byte) (*Store, error) {
 			blockDur:  s.enc.blockDur,
 		},
 	}
+	next.now.Store(s.now.Load())
 	if s.enc.encNames {
 		next.enc.siv, err = encryption.NewSIVNameCipher(newKey, sivInfo)
 		if err != nil {

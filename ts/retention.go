@@ -182,8 +182,8 @@ func (s *Store) EnforceRetention(ctx context.Context, now int64) (int, error) {
 }
 
 // SetNow overrides the clock used for automatic retention enforcement during
-// writes. Passing nil restores the default wall clock. Configure before
-// concurrent use of the store.
+// writes. Passing nil restores the default wall clock. SetNow is safe to call
+// concurrently with other Store operations.
 func (s *Store) SetNow(fn func() int64) {
 	if s == nil {
 		return
@@ -191,12 +191,15 @@ func (s *Store) SetNow(fn func() int64) {
 	if fn == nil {
 		fn = defaultNow
 	}
-	s.now = fn
+	s.now.Store(&nowProvider{fn: fn})
 }
 
 func (s *Store) nowNanos() int64 {
-	if s != nil && s.now != nil {
-		return s.now()
+	if s == nil {
+		return defaultNow()
+	}
+	if p := s.now.Load(); p != nil {
+		return p.fn()
 	}
 	return defaultNow()
 }
@@ -245,9 +248,16 @@ func pruneBucket(b *bolt.Bucket, r Retention, now int64) int {
 		return 0
 	}
 
+	// Collect the keys to drop first, then delete them after the cursor loop so
+	// the traversal never observes a bucket mutated underneath it.
 	cursor = b.Cursor()
+	keys := make([][]byte, 0, remove)
+	for key, _ := cursor.First(); key != nil && len(keys) < remove; key, _ = cursor.Next() {
+		keys = append(keys, append([]byte(nil), key...))
+	}
+
 	deleted := 0
-	for key, _ := cursor.First(); key != nil && deleted < remove; key, _ = cursor.Next() {
+	for _, key := range keys {
 		if err := b.Delete(key); err != nil {
 			return deleted
 		}

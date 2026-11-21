@@ -99,16 +99,6 @@ func (a *aggregator) flush() {
 	a.samples = append(a.samples, Sample{Timestamp: a.current, Value: value})
 }
 
-// aggregatePoints aggregates an ordered point slice.
-func aggregatePoints(points []Point, step int64, fn AggregateFunc) []Sample {
-	agg := &aggregator{fn: fn, step: step}
-	for _, point := range points {
-		agg.add(point)
-	}
-	agg.flush()
-	return agg.samples
-}
-
 // Aggregate buckets [start, end] into windows of width step and computes fn
 // per window. Each returned Sample timestamp is the aligned window start.
 func (se *Series) Aggregate(ctx context.Context, start, end int64, step int64, fn AggregateFunc) ([]Sample, error) {
@@ -128,14 +118,6 @@ func (se *Series) Aggregate(ctx context.Context, start, end int64, step int64, f
 		return nil, fmt.Errorf("ts: invalid aggregate %q", fn)
 	}
 
-	if se.store.blockDuration() > 0 {
-		points, err := se.Range(ctx, start, end)
-		if err != nil {
-			return nil, err
-		}
-		return aggregatePoints(points, step, fn), nil
-	}
-
 	agg := &aggregator{fn: fn, step: step}
 	err := se.store.b.View(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
@@ -148,6 +130,20 @@ func (se *Series) Aggregate(ctx context.Context, start, end int64, step int64, f
 		}
 		if bucket == nil {
 			return nil
+		}
+
+		if se.store.blockDuration() > 0 {
+			// Stream points from the sealed blocks instead of materializing the
+			// whole range before aggregating.
+			err := se.store.scanBlocks(ctx, bucket, start, end, func(point Point) error {
+				agg.add(point)
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			agg.flush()
+			return checkContext(ctx)
 		}
 
 		startKey := encodeKey(start)
