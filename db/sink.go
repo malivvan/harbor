@@ -19,7 +19,7 @@ type item struct {
 	v      []byte
 }
 
-func newSorter(n Node, snk sink) *sorter {
+func newSorter(n *node, snk sink) *sorter {
 	return &sorter{
 		node:  n,
 		sink:  snk,
@@ -30,7 +30,7 @@ func newSorter(n Node, snk sink) *sorter {
 }
 
 type sorter struct {
-	node       Node
+	node       *node
 	sink       sink
 	list       []*item
 	skip       int
@@ -61,7 +61,7 @@ func (s *sorter) filter(ctx context.Context, tree q.Matcher, bucket *bolt.Bucket
 	}
 
 	newElem := rsink.elem()
-	if err := s.node.Codec().Unmarshal(v, newElem.Interface()); err != nil {
+	if err := s.node.unmarshal(v, newElem.Interface()); err != nil {
 		return false, err
 	}
 	itm.value = &newElem
@@ -193,12 +193,12 @@ func (s *sorter) compareValue(left reflect.Value, right reflect.Value) int {
 			}
 		}
 	default:
-		rawLeft, err := toBytes(left.Interface(), s.node.Codec())
+		rawLeft, err := s.node.keyBytes(left.Interface(), keyDomainIndex)
 		if err != nil {
 			s.compareErr = err
 			return -1
 		}
-		rawRight, err := toBytes(right.Interface(), s.node.Codec())
+		rawRight, err := s.node.keyBytes(right.Interface(), keyDomainIndex)
 		if err != nil {
 			s.compareErr = err
 			return 1

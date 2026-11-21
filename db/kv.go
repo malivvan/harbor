@@ -29,7 +29,7 @@ func (n *node) GetBytes(ctx context.Context, bucketName string, key any) ([]byte
 		return nil, wrapError("kv get bytes", err)
 	}
 
-	id, err := toBytes(key, n.codec)
+	id, err := n.keyBytes(key, keyDomainKV)
 	if err != nil {
 		return nil, wrapError("kv get bytes", err)
 	}
@@ -95,7 +95,7 @@ func (n *node) SetBytes(ctx context.Context, bucketName string, key any, value [
 		return wrapError("kv set bytes", ErrNilParam)
 	}
 
-	id, err := toBytes(key, n.codec)
+	id, err := n.keyBytes(key, keyDomainKV)
 	if err != nil {
 		return wrapError("kv set bytes", err)
 	}
@@ -147,7 +147,7 @@ func (n *node) Get(ctx context.Context, bucketName string, key any, to any) erro
 		return wrapError("kv get", ErrPtrNeeded)
 	}
 
-	id, err := toBytes(key, n.codec)
+	id, err := n.keyBytes(key, keyDomainKV)
 	if err != nil {
 		return wrapError("kv get", err)
 	}
@@ -172,7 +172,7 @@ func (n *node) Get(ctx context.Context, bucketName string, key any, to any) erro
 
 		// Decode into a temporary to preserve destination on error.
 		temporary := reflect.New(ref.Elem().Type())
-		if err := n.codec.Unmarshal(raw, temporary.Interface()); err != nil {
+		if err := n.unmarshal(raw, temporary.Interface()); err != nil {
 			return err
 		}
 
@@ -197,7 +197,7 @@ func (n *node) Set(ctx context.Context, bucketName string, key any, value any) e
 		if err := checkContext(ctx); err != nil {
 			return wrapError("kv set", err)
 		}
-		data, err = n.codec.Marshal(value)
+		data, err = n.marshal(value)
 		if err != nil {
 			return wrapError("kv set", err)
 		}
@@ -215,7 +215,7 @@ func (n *node) Delete(ctx context.Context, bucketName string, key any) error {
 		return wrapError("kv delete", err)
 	}
 
-	id, err := toBytes(key, n.codec)
+	id, err := n.keyBytes(key, keyDomainKV)
 	if err != nil {
 		return wrapError("kv delete", err)
 	}
@@ -254,7 +254,7 @@ func (n *node) KeyExists(ctx context.Context, bucketName string, key any) (bool,
 		return false, wrapError("kv key exists", err)
 	}
 
-	id, err := toBytes(key, n.codec)
+	id, err := n.keyBytes(key, keyDomainKV)
 	if err != nil {
 		return false, wrapError("kv key exists", err)
 	}

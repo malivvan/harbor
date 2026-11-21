@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 
 	"github.com/malivvan/storm/db/codec"
 	"github.com/malivvan/storm/db/codec/json"
@@ -17,6 +18,7 @@ import (
 const (
 	databaseInfo   = "__database"
 	metadataBucket = "__metadata"
+	versionKey     = "version"
 )
 
 // BucketNamer is an interface that can be implemented by structs to provide
@@ -35,7 +37,30 @@ var defaultCodec = json.Codec
 // Store. Storm never closes db. root is the optional root bucket key; nil or an
 // empty slice means the database root. c is the codec used to encode and
 // decode entities; nil selects the default JSON codec.
+//
+// Open always creates a plaintext store. Use OpenWithConfig to enable optional
+// encryption.
 func Open(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarshaler) (*Store, error) {
+	return OpenWithConfig(ctx, db, root, c, nil)
+}
+
+// OpenWithConfig initializes Storm with optional native AEAD encryption.
+//
+// A nil cfg, or a cfg that enables no encryption feature, behaves exactly like
+// Open: the store stays plaintext and its on-disk format is unchanged.
+//
+// When encryption is enabled the store writes an unencrypted marker into the
+// __database bucket and verifies it with a sealed canary, so:
+//
+//   - opening an encrypted store without a Config (or with the wrong settings)
+//     fails with ErrWrongMode,
+//   - opening an encrypted store with the wrong key fails with ErrAuthFailed,
+//   - opening a store that already holds plaintext data with encryption
+//     requested fails with ErrWrongMode.
+//
+// Migrating an existing plaintext store to an encrypted one is not supported
+// yet; export and re-import instead.
+func OpenWithConfig(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarshaler, cfg *Config) (*Store, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, wrapError("open", err)
 	}
@@ -47,6 +72,11 @@ func Open(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarsha
 		c = defaultCodec
 	}
 
+	enc, err := resolveConfig(cfg)
+	if err != nil {
+		return nil, wrapError("open", err)
+	}
+
 	var rootBucket []string
 	if len(root) > 0 {
 		rootBucket = []string{string(root)}
@@ -54,6 +84,7 @@ func Open(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarsha
 
 	s := Store{
 		bolt: db,
+		enc:  enc,
 	}
 
 	n := node{
@@ -63,6 +94,10 @@ func Open(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarsha
 	}
 
 	s.Node = &n
+
+	if err := s.checkMode(ctx); err != nil {
+		return nil, wrapError("open", err)
+	}
 
 	if err := s.checkVersion(ctx); err != nil {
 		return nil, wrapError("open", err)
@@ -79,6 +114,9 @@ type Store struct {
 
 	// bolt is the underlying bbolt database. It is owned by the caller.
 	bolt *bolt.DB
+
+	// enc is the optional encryption state. nil means a plaintext store.
+	enc *encState
 }
 
 // NativeDB returns the underlying bbolt database.
@@ -116,24 +154,76 @@ func (s *Store) Close() error {
 func (s *Store) checkVersion(ctx context.Context) error {
 	// Read the encoded value separately so a decode failure can be classified
 	// as an incompatible codec while preserving the underlying codec error.
-	raw, err := s.GetBytes(ctx, databaseInfo, "version")
+	raw, err := s.GetBytes(ctx, databaseInfo, versionKey)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			return s.Set(ctx, databaseInfo, "version", Version)
+			return s.Set(ctx, databaseInfo, versionKey, Version)
 		}
 		return err
 	}
 
+	root, ok := s.Node.(*node)
+	if !ok {
+		return ErrBadType
+	}
+
 	var v string
-	err = s.Codec().Unmarshal(raw, &v)
+	err = root.unmarshal(raw, &v)
 	if err != nil {
+		if errors.Is(err, ErrAuthFailed) {
+			return err
+		}
 		return errors.Join(ErrDifferentCodec, err)
 	}
 	if v == "" {
-		return s.Set(ctx, databaseInfo, "version", Version)
+		return s.Set(ctx, databaseInfo, versionKey, Version)
 	}
 
 	return nil
+}
+
+// checkMode reconciles the encryption settings of the Store with the marker
+// stored on disk. A plaintext store has no marker; an encrypted store always
+// has one, which also proves the configured key can decrypt the store.
+func (s *Store) checkMode(ctx context.Context) error {
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	root, ok := s.Node.(*node)
+	if !ok {
+		return ErrBadType
+	}
+
+	m, canary, found, err := root.loadMarker(ctx)
+	if err != nil {
+		return err
+	}
+
+	if s.enc == nil {
+		if found {
+			return fmt.Errorf("%w: store is encrypted", ErrWrongMode)
+		}
+		return nil
+	}
+
+	if found {
+		if !m.matches(s.enc) {
+			return fmt.Errorf("%w: encryption settings do not match the store", ErrWrongMode)
+		}
+		return s.enc.verifyCanary(canary)
+	}
+
+	// No marker: only a brand-new store may be initialized as encrypted.
+	hasData, err := root.hasUserData(ctx)
+	if err != nil {
+		return err
+	}
+	if hasData {
+		return fmt.Errorf("%w: store already contains plaintext data", ErrWrongMode)
+	}
+
+	return root.storeMarker(ctx, s.enc)
 }
 
 // toBytes turns an interface into a slice of bytes

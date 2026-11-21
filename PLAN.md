@@ -256,3 +256,16 @@ records + indexed values via SIV, authenticated, fresh nonces, key verification
 8. Add `db/rotate.go` — `MultiKeyProvider`, `ReEncrypt`, `RotateAll`, `VerifyAll`.
 9. Add Tier 2 + rotation tests.
 10. Run the full verification checklist; fix any gofmt/vet/test issues.
+
+## Progress log
+
+- [x] **Phase 1 — Tier 1 (`EncryptValues` + `EncryptMetadata`)** — `db/errors.go`
+  sentinels, `db/aead.go` (Config, key providers, `encState`, seal/open/SIV
+  helpers, marker + canary, mode detection helpers), `Store.enc` +
+  `OpenWithConfig` (with `Open` delegating), `*node` helpers
+  `marshal`/`unmarshal`/`keyBytes`, all Tier 1 seam call sites converted
+  (`store.go`, `kv.go`, `finder.go`, `sink.go`), sealed auto-increment counters
+  in `metadata.go`, and `db/aead_test.go` (optionality/byte-identity,
+  plaintext-vs-encrypted round-trip, confidentiality, wrong key, tampering,
+  fresh nonces, mode mismatch, empty plaintext store adoption, invalid config).
+  `go vet ./db/` and `go test ./db/` pass.

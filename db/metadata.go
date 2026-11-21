@@ -20,6 +20,7 @@ func newMeta(b *bolt.Bucket, n Node) (*meta, error) {
 		return &meta{
 			node:   n,
 			bucket: m,
+			enc:    encFromNode(n),
 		}, nil
 	}
 
@@ -32,12 +33,17 @@ func newMeta(b *bolt.Bucket, n Node) (*meta, error) {
 	return &meta{
 		node:   n,
 		bucket: m,
+		enc:    encFromNode(n),
 	}, nil
 }
 
 type meta struct {
 	node   Node
 	bucket *bolt.Bucket
+
+	// enc is the encryption state of the owning store. nil means plaintext,
+	// in which case counters are stored exactly as before.
+	enc *encState
 }
 
 func (m *meta) increment(field *fieldConfig) error {
@@ -46,7 +52,11 @@ func (m *meta) increment(field *fieldConfig) error {
 
 	raw := m.bucket.Get([]byte(field.Name + "counter"))
 	if raw != nil {
-		counter, err = numberfromb(raw)
+		plain, err := m.enc.openMetadata(raw)
+		if err != nil {
+			return err
+		}
+		counter, err = numberfromb(plain)
 		if err != nil {
 			return err
 		}
@@ -54,6 +64,11 @@ func (m *meta) increment(field *fieldConfig) error {
 	}
 
 	raw, err = numbertob(counter)
+	if err != nil {
+		return err
+	}
+
+	raw, err = m.enc.sealMetadata(raw)
 	if err != nil {
 		return err
 	}

@@ -268,7 +268,7 @@ func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data in
 		return err
 	}
 
-	id, err := toBytes(cfg.ID.Value.Interface(), n.codec)
+	id, err := n.keyBytes(cfg.ID.Value.Interface(), keyDomainID)
 	if err != nil {
 		return err
 	}
@@ -319,7 +319,7 @@ func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data in
 			continue
 		}
 
-		value, err := toBytes(fieldCfg.Value.Interface(), n.codec)
+		value, err := n.keyBytes(fieldCfg.Value.Interface(), keyDomainIndex)
 		if err != nil {
 			return err
 		}
@@ -374,7 +374,7 @@ func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data in
 		return err
 	}
 
-	raw, err := n.codec.Marshal(data)
+	raw, err := n.marshal(data)
 	if err != nil {
 		return err
 	}
@@ -570,7 +570,7 @@ func (n *node) DeleteStruct(ctx context.Context, data any) error {
 		return wrapError("delete struct", err)
 	}
 
-	id, err := toBytes(cfg.ID.Value.Interface(), n.codec)
+	id, err := n.keyBytes(cfg.ID.Value.Interface(), keyDomainID)
 	if err != nil {
 		return wrapError("delete struct", err)
 	}

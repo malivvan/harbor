@@ -102,7 +102,7 @@ func (n *node) One(ctx context.Context, fieldName string, value any, to any) err
 		return wrapError("one", sink.flush(ctx))
 	}
 
-	val, err := toBytes(value, n.codec)
+	val, err := n.keyBytes(value, fieldKeyDomain(field))
 	if err != nil {
 		return wrapError("one", err)
 	}
@@ -178,7 +178,7 @@ func (n *node) one(ctx context.Context, tx *bolt.Tx, bucketName, fieldName strin
 	destination := reflect.ValueOf(to)
 	temporary := reflect.New(destination.Elem().Type())
 
-	if err := n.codec.Unmarshal(raw, temporary.Interface()); err != nil {
+	if err := n.unmarshal(raw, temporary.Interface()); err != nil {
 		return err
 	}
 
@@ -240,7 +240,7 @@ func (n *node) Find(ctx context.Context, fieldName string, value any, to any, op
 		return wrapError("find", sink.flush(ctx))
 	}
 
-	val, err := toBytes(value, n.codec)
+	val, err := n.keyBytes(value, fieldKeyDomain(field))
 	if err != nil {
 		return wrapError("find", err)
 	}
@@ -429,7 +429,7 @@ func (n *node) allByIndex(ctx context.Context, tx *bolt.Tx, fieldName string, cf
 			return err
 		}
 
-		err = n.codec.Unmarshal(raw, results.Index(i).Addr().Interface())
+		err = n.unmarshal(raw, results.Index(i).Addr().Interface())
 		if err != nil {
 			return err
 		}
@@ -533,7 +533,7 @@ func (n *node) Range(ctx context.Context, fieldName string, min any, max any, to
 		return wrapError("range", sink.flush(ctx))
 	}
 
-	mn, err := toBytes(min, n.codec)
+	mn, err := n.keyBytes(min, keyDomainIndex)
 	if err != nil {
 		return wrapError("range", err)
 	}
@@ -542,7 +542,7 @@ func (n *node) Range(ctx context.Context, fieldName string, min any, max any, to
 		return wrapError("range", err)
 	}
 
-	mx, err := toBytes(max, n.codec)
+	mx, err := n.keyBytes(max, keyDomainIndex)
 	if err != nil {
 		return wrapError("range", err)
 	}
@@ -676,7 +676,7 @@ func (n *node) Prefix(ctx context.Context, fieldName string, prefix string, to a
 		return wrapError("prefix", sink.flush(ctx))
 	}
 
-	prfx, err := toBytes(prefix, n.codec)
+	prfx, err := n.keyBytes(prefix, keyDomainIndex)
 	if err != nil {
 		return wrapError("prefix", err)
 	}
