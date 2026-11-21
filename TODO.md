@@ -55,6 +55,7 @@ each entry lists a concrete location and a suggested fix. Severity is High / Med
   never panic for a normal miss, and callers cannot `errors.Is` a panic.
   Fix: change the signature to `Get(key string) (string, error)` (or add a `bool` for
   found) and return errors, or at minimum return `("", false)` for not-found.
+  **Status: FIXED** — `Get` now returns `(string, error)` and `ErrKeyNotFound`; no panics.
 
 - **`Open` leaks the BoltDB handle when a sub-store fails to open**
   — `storm.go:75-107`

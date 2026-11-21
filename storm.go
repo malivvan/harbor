@@ -140,9 +140,13 @@ func (s *Store) TS() *ts.Store {
 	return s.ts
 }
 
-func (s *Store) Get(key string) string {
+// ErrKeyNotFound is returned by Get when the key does not exist.
+var ErrKeyNotFound = errors.New("storm: key not found")
+
+// Get returns the value stored under key.
+func (s *Store) Get(key string) (string, error) {
 	if len(key) == 0 {
-		return ""
+		return "", ErrKeyNotFound
 	}
 	var val string
 	err := s.b.View(func(tx *bolt.Tx) error {
@@ -152,15 +156,15 @@ func (s *Store) Get(key string) string {
 		}
 		v := b.Get([]byte(key))
 		if v == nil {
-			return errors.New("key not found")
+			return ErrKeyNotFound
 		}
 		val = string(v)
 		return nil
 	})
 	if err != nil {
-		panic(err)
+		return "", err
 	}
-	return val
+	return val, nil
 }
 
 func (s *Store) Set(key, val string) error {
