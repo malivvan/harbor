@@ -31,17 +31,17 @@ var (
 	ErrAuthFailed = encryption.ErrAuthFailed
 
 	// ErrInvalidKey is returned for a missing or malformed encryption key.
-	ErrInvalidKey = errors.New("ts: invalid encryption key")
+	ErrInvalidKey = encryption.ErrInvalidKey
 
 	// ErrUnsupportedCipher is returned for an unknown cipher suite.
 	ErrUnsupportedCipher = encryption.ErrUnsupportedCipher
 
 	// ErrInvalidConfig is returned for an inconsistent encryption config.
-	ErrInvalidConfig = errors.New("ts: invalid encryption config")
+	ErrInvalidConfig = encryption.ErrInvalidConfig
 
 	// ErrWrongMode is returned when a store is opened with an encryption mode
 	// that does not match what is stored on disk.
-	ErrWrongMode = errors.New("ts: wrong encryption mode")
+	ErrWrongMode = encryption.ErrWrongMode
 )
 
 func checkContext(ctx context.Context) error {

@@ -3,7 +3,6 @@ package fs
 import (
 	"encoding/binary"
 	"fmt"
-	"os"
 
 	"github.com/malivvan/storm/internal/encryption"
 )
@@ -57,48 +56,32 @@ func (c *Config) encryptionEnabled() bool {
 }
 
 // KeyProvider supplies the raw 32-byte master key used for encryption.
-type KeyProvider interface {
-	Key() ([]byte, error)
-}
+type KeyProvider = encryption.KeyProvider
 
 // RawKeyProvider supplies a fixed 32-byte master key.
-type RawKeyProvider struct {
-	key []byte
-}
+type RawKeyProvider = encryption.RawKeyProvider
 
 // NewRawKeyProvider returns a provider that uses key directly.
 func NewRawKeyProvider(key []byte) (*RawKeyProvider, error) {
-	if len(key) != KeySize {
-		return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, KeySize, len(key))
-	}
-	return &RawKeyProvider{key: append([]byte(nil), key...)}, nil
-}
-
-// Key returns a copy of the raw master key.
-func (p *RawKeyProvider) Key() ([]byte, error) {
-	return append([]byte(nil), p.key...), nil
+	return encryption.NewRawKeyProvider(key)
 }
 
 // EnvKeyProvider reads a raw 32-byte master key from an environment variable.
-type EnvKeyProvider struct {
-	envVar string
-}
+type EnvKeyProvider = encryption.EnvKeyProvider
 
 // NewEnvKeyProvider creates a key provider backed by an environment variable.
 func NewEnvKeyProvider(envVar string) *EnvKeyProvider {
-	return &EnvKeyProvider{envVar: envVar}
+	return encryption.NewEnvKeyProvider(envVar)
 }
 
-// Key returns the key stored in the configured environment variable.
-func (e *EnvKeyProvider) Key() ([]byte, error) {
-	key := []byte(os.Getenv(e.envVar))
-	if len(key) == 0 {
-		return nil, fmt.Errorf("%w: environment variable %s not set", ErrInvalidKey, e.envVar)
-	}
-	if len(key) != KeySize {
-		return nil, fmt.Errorf("%w: key from environment variable must be %d bytes, got %d", ErrInvalidKey, KeySize, len(key))
-	}
-	return key, nil
+// MultiKeyProvider supplies several keys for rotation: the first is used for
+// new writes, and every key is tried when decrypting existing data.
+type MultiKeyProvider = encryption.MultiKeyProvider
+
+// NewMultiKeyProvider creates a multi-key provider. At least one provider is
+// required; the first one is the primary key.
+func NewMultiKeyProvider(providers ...KeyProvider) (*MultiKeyProvider, error) {
+	return encryption.NewMultiKeyProvider(providers...)
 }
 
 // encState is the shared encryption configuration of a Store. A nil encState
@@ -278,7 +261,7 @@ func resolveConfig(cfg *Config) (*encState, error) {
 		return nil, ErrUnsupportedCipher
 	}
 
-	keys, err := resolveKeys(cfg)
+	keys, err := encryption.ResolveKeys(cfg.Key, cfg.KeyProvider)
 	if err != nil {
 		return nil, err
 	}
@@ -299,38 +282,4 @@ func resolveConfig(cfg *Config) (*encState, error) {
 	}
 	state.engine = state.engines[0]
 	return state, nil
-}
-
-func resolveKeys(cfg *Config) ([][]byte, error) {
-	if cfg.Key != nil && cfg.KeyProvider != nil {
-		return nil, fmt.Errorf("%w: set either Key or KeyProvider, not both", ErrInvalidConfig)
-	}
-
-	if cfg.KeyProvider == nil {
-		if len(cfg.Key) != KeySize {
-			return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, KeySize, len(cfg.Key))
-		}
-		return [][]byte{append([]byte(nil), cfg.Key...)}, nil
-	}
-
-	providers := []KeyProvider{cfg.KeyProvider}
-	if multi, ok := cfg.KeyProvider.(*MultiKeyProvider); ok {
-		providers = multi.providers
-	}
-
-	keys := make([][]byte, 0, len(providers))
-	for _, provider := range providers {
-		key, err := provider.Key()
-		if err != nil {
-			return nil, err
-		}
-		if len(key) != KeySize {
-			return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, KeySize, len(key))
-		}
-		keys = append(keys, append([]byte(nil), key...))
-	}
-	if len(keys) == 0 {
-		return nil, fmt.Errorf("%w: no key provider", ErrInvalidConfig)
-	}
-	return keys, nil
 }

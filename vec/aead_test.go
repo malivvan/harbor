@@ -14,6 +14,14 @@ import (
 	"go.etcd.io/bbolt"
 )
 
+// aeadRawProvider wraps a raw key as a KeyProvider.
+func aeadRawProvider(t *testing.T, key []byte) KeyProvider {
+	t.Helper()
+	provider, err := NewRawKeyProvider(key)
+	require.NoError(t, err)
+	return provider
+}
+
 // aeadKey returns a deterministic 32-byte test key.
 func aeadKey(fill byte) []byte { return bytes.Repeat([]byte{fill}, KeySize) }
 
@@ -445,7 +453,7 @@ func TestAEADInvalidConfig(t *testing.T) {
 
 	_, err = OpenWithConfig(ctx, bdb, nil, false, nil, &Config{
 		Key:           aeadKey(10),
-		KeyProvider:   &RawKeyProvider{key: aeadKey(10)},
+		KeyProvider:   aeadRawProvider(t, aeadKey(10)),
 		EncryptPoints: true,
 	})
 	require.ErrorIs(t, err, ErrInvalidConfig)

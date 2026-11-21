@@ -10,7 +10,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"errors"
 	"fmt"
 
 	"golang.org/x/crypto/chacha20poly1305"
@@ -18,14 +17,6 @@ import (
 
 // KeySize is the required key length in bytes (256 bits).
 const KeySize = 32
-
-var (
-	// ErrAuthFailed is returned when ciphertext fails authentication.
-	ErrAuthFailed = errors.New("authentication failed - data may be corrupted or tampered")
-
-	// ErrUnsupportedCipher is returned for an unknown cipher suite.
-	ErrUnsupportedCipher = errors.New("unsupported cipher suite")
-)
 
 // CipherSuite represents the authenticated-encryption algorithm to use.
 type CipherSuite uint8

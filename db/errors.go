@@ -66,19 +66,19 @@ var (
 	ErrUnsupportedCipher = encryption.ErrUnsupportedCipher
 
 	// ErrInvalidKey is returned for a missing or malformed encryption key.
-	ErrInvalidKey = errors.New("db: invalid encryption key")
+	ErrInvalidKey = encryption.ErrInvalidKey
 
 	// ErrInvalidConfig is returned for an inconsistent encryption config.
-	ErrInvalidConfig = errors.New("db: invalid encryption config")
+	ErrInvalidConfig = encryption.ErrInvalidConfig
 
 	// ErrWrongMode is returned when a store is opened with an encryption mode
 	// that does not match what is stored on disk.
-	ErrWrongMode = errors.New("db: wrong encryption mode")
+	ErrWrongMode = encryption.ErrWrongMode
 
 	// ErrEncryptedOrdering is returned by ordered or prefix lookups on a store
 	// that encrypts keys: ciphertext ordering is meaningless, so these queries
 	// fail loud instead of silently returning wrong results.
-	ErrEncryptedOrdering = errors.New("db: ordered and prefix queries are not supported when keys are encrypted")
+	ErrEncryptedOrdering = encryption.ErrEncryptedOrdering
 )
 
 // wrapError adds operation context to an error while preserving classification.
