@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/malivvan/storm/internal/encryption"
 	"go.etcd.io/bbolt"
 )
 
@@ -199,12 +200,6 @@ func (r *rotation) verify() bool {
 	return r.next == nil
 }
 
-// pair is an entry rewritten by a rotation.
-type pair struct {
-	key   []byte
-	value []byte
-}
-
 // collectionNames returns the stored (physical) names of all collection
 // buckets, skipping the metadata bucket.
 func (r *rotation) collectionNames(tx *bbolt.Tx) ([]string, error) {
@@ -259,7 +254,7 @@ func (r *rotation) collection(tx *bbolt.Tx, physicalName string) error {
 	}
 
 	var (
-		changed []pair
+		changed []encryption.Pair
 		drop    [][]byte
 	)
 
@@ -303,7 +298,7 @@ func (r *rotation) collection(tx *bbolt.Tx, physicalName string) error {
 			return nil
 		}
 
-		changed = append(changed, pair{key: append([]byte(nil), newKey...), value: append([]byte(nil), newValue...)})
+		changed = append(changed, encryption.Pair{Key: append([]byte(nil), newKey...), Value: append([]byte(nil), newValue...)})
 		drop = append(drop, append([]byte(nil), k...))
 		return nil
 	}); err != nil {
@@ -328,14 +323,14 @@ func (r *rotation) collection(tx *bbolt.Tx, physicalName string) error {
 	}
 
 	if bytes.Equal(newPhysical, []byte(physicalName)) {
-		return r.apply(b, drop, changed)
+		return encryption.ApplyEntries(b, drop, changed)
 	}
 
 	target, err := r.createBucket(tx, newPhysical)
 	if err != nil {
 		return err
 	}
-	if err := r.apply(target, drop, changed); err != nil {
+	if err := encryption.ApplyEntries(target, drop, changed); err != nil {
 		return err
 	}
 	return r.deleteBucket(tx, []byte(physicalName))
@@ -349,7 +344,7 @@ func (r *rotation) metadata(tx *bbolt.Tx) error {
 	}
 
 	var (
-		changed []pair
+		changed []encryption.Pair
 		drop    [][]byte
 	)
 
@@ -393,7 +388,7 @@ func (r *rotation) metadata(tx *bbolt.Tx) error {
 			return nil
 		}
 
-		changed = append(changed, pair{key: append([]byte(nil), newKey...), value: append([]byte(nil), newValue...)})
+		changed = append(changed, encryption.Pair{Key: append([]byte(nil), newKey...), Value: append([]byte(nil), newValue...)})
 		drop = append(drop, append([]byte(nil), k...))
 		return nil
 	}); err != nil {
@@ -404,7 +399,7 @@ func (r *rotation) metadata(tx *bbolt.Tx) error {
 		return nil
 	}
 
-	return r.apply(b, drop, changed)
+	return encryption.ApplyEntries(b, drop, changed)
 }
 
 // metadataEntry rotates one collection metadata entry by its logical name.
@@ -462,21 +457,6 @@ func (r *rotation) writeMarker(tx *bbolt.Tx) error {
 		return err
 	}
 	return b.Put([]byte(markerKey), marker)
-}
-
-// apply deletes and rewrites the staged entries of a bucket.
-func (r *rotation) apply(b *bbolt.Bucket, drop [][]byte, entries []pair) error {
-	for _, k := range drop {
-		if err := b.Delete(k); err != nil {
-			return err
-		}
-	}
-	for _, entry := range entries {
-		if err := b.Put(entry.key, entry.value); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // bucket returns a collection bucket by its physical name.

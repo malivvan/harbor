@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/malivvan/storm/internal/encryption"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -145,12 +146,6 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 	}))
 }
 
-// pair is a key/value entry staged for rewriting.
-type pair struct {
-	key   []byte
-	value []byte
-}
-
 // rotation walks the encrypted structure of a database. With next set it
 // re-encrypts; with next nil it only verifies that everything decrypts.
 type rotation struct {
@@ -282,7 +277,7 @@ func (r *rotation) databaseBucket(b *bolt.Bucket) error {
 // values.
 func (r *rotation) entries(b *bolt.Bucket, domains ...string) error {
 	var (
-		changed []pair
+		changed []encryption.Pair
 		drop    [][]byte
 	)
 
@@ -329,7 +324,7 @@ func (r *rotation) entries(b *bolt.Bucket, domains ...string) error {
 			return nil
 		}
 
-		changed = append(changed, pair{key: append([]byte(nil), newKey...), value: append([]byte(nil), newValue...)})
+		changed = append(changed, encryption.Pair{Key: append([]byte(nil), newKey...), Value: append([]byte(nil), newValue...)})
 		drop = append(drop, append([]byte(nil), k...))
 		return nil
 	})
@@ -337,7 +332,7 @@ func (r *rotation) entries(b *bolt.Bucket, domains ...string) error {
 		return err
 	}
 
-	return applyEntries(b, drop, changed)
+	return encryption.ApplyEntries(b, drop, changed)
 }
 
 // metadataBucket rotates the sealed auto-increment counters of one bucket. The
@@ -348,7 +343,7 @@ func (r *rotation) metadataBucket(b *bolt.Bucket) error {
 	}
 
 	var (
-		changed []pair
+		changed []encryption.Pair
 		drop    [][]byte
 	)
 
@@ -373,7 +368,7 @@ func (r *rotation) metadataBucket(b *bolt.Bucket) error {
 			return err
 		}
 
-		changed = append(changed, pair{key: append([]byte(nil), k...), value: sealed})
+		changed = append(changed, encryption.Pair{Key: append([]byte(nil), k...), Value: sealed})
 		drop = append(drop, append([]byte(nil), k...))
 		return nil
 	})
@@ -381,7 +376,7 @@ func (r *rotation) metadataBucket(b *bolt.Bucket) error {
 		return err
 	}
 
-	return applyEntries(b, drop, changed)
+	return encryption.ApplyEntries(b, drop, changed)
 }
 
 // indexBucket rotates one index bucket: a list index keeps its nested id
@@ -401,7 +396,7 @@ func (r *rotation) indexBucket(b *bolt.Bucket) error {
 // encrypted primary key.
 func (r *rotation) uniqueIndex(b *bolt.Bucket) error {
 	var (
-		changed []pair
+		changed []encryption.Pair
 		drop    [][]byte
 	)
 
@@ -434,7 +429,7 @@ func (r *rotation) uniqueIndex(b *bolt.Bucket) error {
 			return err
 		}
 
-		changed = append(changed, pair{key: newKey, value: newValue})
+		changed = append(changed, encryption.Pair{Key: newKey, Value: newValue})
 		drop = append(drop, append([]byte(nil), k...))
 		return nil
 	})
@@ -442,14 +437,14 @@ func (r *rotation) uniqueIndex(b *bolt.Bucket) error {
 		return err
 	}
 
-	return applyEntries(b, drop, changed)
+	return encryption.ApplyEntries(b, drop, changed)
 }
 
 // listIndex rotates a list index: entries are value ++ "__" ++ id with the id
 // as value, and the nested id bucket mirrors them the other way around.
 func (r *rotation) listIndex(b *bolt.Bucket, ids *bolt.Bucket) error {
 	var (
-		changed []pair
+		changed []encryption.Pair
 		drop    [][]byte
 	)
 
@@ -492,7 +487,7 @@ func (r *rotation) listIndex(b *bolt.Bucket, ids *bolt.Bucket) error {
 		newKey = append(newKey, '_', '_')
 		newKey = append(newKey, newValue...)
 
-		changed = append(changed, pair{key: newKey, value: newValue})
+		changed = append(changed, encryption.Pair{Key: newKey, Value: newValue})
 		drop = append(drop, append([]byte(nil), k...))
 		return nil
 	})
@@ -500,12 +495,12 @@ func (r *rotation) listIndex(b *bolt.Bucket, ids *bolt.Bucket) error {
 		return err
 	}
 
-	if err := applyEntries(b, drop, changed); err != nil {
+	if err := encryption.ApplyEntries(b, drop, changed); err != nil {
 		return err
 	}
 
 	var (
-		idChanged []pair
+		idChanged []encryption.Pair
 		idDrop    [][]byte
 	)
 
@@ -548,7 +543,7 @@ func (r *rotation) listIndex(b *bolt.Bucket, ids *bolt.Bucket) error {
 		newValue = append(newValue, '_', '_')
 		newValue = append(newValue, newKey...)
 
-		idChanged = append(idChanged, pair{key: newKey, value: newValue})
+		idChanged = append(idChanged, encryption.Pair{Key: newKey, Value: newValue})
 		idDrop = append(idDrop, append([]byte(nil), k...))
 		return nil
 	})
@@ -556,7 +551,7 @@ func (r *rotation) listIndex(b *bolt.Bucket, ids *bolt.Bucket) error {
 		return err
 	}
 
-	return applyEntries(ids, idDrop, idChanged)
+	return encryption.ApplyEntries(ids, idDrop, idChanged)
 }
 
 // openKeyAnyDomain decrypts a key that may have been encrypted in any of the
@@ -572,19 +567,4 @@ func (r *rotation) openKeyAnyDomain(cipherKey []byte, domains []string) ([]byte,
 		}
 	}
 	return nil, "", fmt.Errorf("%w: encrypted key does not belong to any expected domain", ErrAuthFailed)
-}
-
-// applyEntries replaces the staged entries of a bucket.
-func applyEntries(b *bolt.Bucket, drop [][]byte, entries []pair) error {
-	for _, k := range drop {
-		if err := b.Delete(k); err != nil {
-			return err
-		}
-	}
-	for _, entry := range entries {
-		if err := b.Put(entry.key, entry.value); err != nil {
-			return err
-		}
-	}
-	return nil
 }

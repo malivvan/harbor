@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/malivvan/storm/internal/encryption"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -31,16 +32,6 @@ func (s *Store) withKey(newKey []byte) (*encState, error) {
 	}, nil
 }
 
-// bucketKeys returns a copy of all keys in a bucket.
-func bucketKeys(bucket *bolt.Bucket) [][]byte {
-	var keys [][]byte
-	_ = bucket.ForEach(func(key, _ []byte) error {
-		keys = append(keys, append([]byte(nil), key...))
-		return nil
-	})
-	return keys
-}
-
 // reEncryptFS rewrites one filesystem with next's key, using s.enc for reads.
 func (s *Store) reEncryptFS(ctx context.Context, name string, next *encState) error {
 	path := s.bucketPath(name)
@@ -63,7 +54,11 @@ func (s *Store) reEncryptFS(ctx context.Context, name string, next *encState) er
 		newB := newFsBucket(bb)
 		newB.enc = next
 
-		for _, key := range bucketKeys(oldB.inodes) {
+		inodeKeys, err := encryption.KeysOf(oldB.inodes)
+		if err != nil {
+			return err
+		}
+		for _, key := range inodeKeys {
 			if len(key) != 8 {
 				continue
 			}
@@ -76,7 +71,11 @@ func (s *Store) reEncryptFS(ctx context.Context, name string, next *encState) er
 			}
 		}
 
-		for _, key := range bucketKeys(oldB.data) {
+		dataKeys, err := encryption.KeysOf(oldB.data)
+		if err != nil {
+			return err
+		}
+		for _, key := range dataKeys {
 			plain, err := s.enc.openContent(oldB.data.Get(key))
 			if err != nil {
 				return err
@@ -90,7 +89,11 @@ func (s *Store) reEncryptFS(ctx context.Context, name string, next *encState) er
 			}
 		}
 
-		for _, key := range bucketKeys(oldB.symlinks) {
+		symlinkKeys, err := encryption.KeysOf(oldB.symlinks)
+		if err != nil {
+			return err
+		}
+		for _, key := range symlinkKeys {
 			plain, err := s.enc.openContent(oldB.symlinks.Get(key))
 			if err != nil {
 				return err
@@ -105,7 +108,11 @@ func (s *Store) reEncryptFS(ctx context.Context, name string, next *encState) er
 		}
 
 		if oldB.chunks != nil {
-			for _, key := range bucketKeys(oldB.chunks) {
+			chunkKeys, err := encryption.KeysOf(oldB.chunks)
+			if err != nil {
+				return err
+			}
+			for _, key := range chunkKeys {
 				plain, err := s.enc.openContent(oldB.chunks.Get(key))
 				if err != nil {
 					return err
@@ -239,7 +246,11 @@ func (s *Store) verifyFS(name string) error {
 			}
 		}
 
-		for _, key := range bucketKeys(b.inodes) {
+		verifyInodeKeys, err := encryption.KeysOf(b.inodes)
+		if err != nil {
+			return err
+		}
+		for _, key := range verifyInodeKeys {
 			if len(key) != 8 {
 				continue
 			}
@@ -253,7 +264,11 @@ func (s *Store) verifyFS(name string) error {
 			if bucket == nil {
 				continue
 			}
-			for _, key := range bucketKeys(bucket) {
+			bucketKeys, err := encryption.KeysOf(bucket)
+			if err != nil {
+				return err
+			}
+			for _, key := range bucketKeys {
 				if _, err := s.enc.openContent(bucket.Get(key)); err != nil {
 					return err
 				}

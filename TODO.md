@@ -171,7 +171,7 @@ Status of each item as the consolidation lands. Commits reference the section.
 | `verifyCanary` | **done** — `encryption.VerifyCanary(keychain, sealed, want)`; the four packages keep a one-line wrapper |
 | marker encode/decode/matches | pending |
 | `withKey`/`adoptEnc` | **partly done** — `Keychain.WithKey` / `WithKeyKeepingFallbacks` exist and every package rebuilds its state through them; the per-entity rotation semantics follow in I2 |
-| `pair` + `applyEntries`, `bucketKeys` | pending |
+| `pair` + `applyEntries`, `bucketKeys` | **done** — `encryption.Pair`/`ApplyEntries` (staged delete+put against a small `EntryWriter` interface) and `encryption.KeysOf` (copy of the plain keys, nested buckets skipped); `db`/`vec` rotations and `fs` now use them |
 | `ErrInvalidKey`/`ErrInvalidConfig`/`ErrWrongMode`/`ErrEncryptedOrdering` | **done** — shared sentinels in `internal/encryption/errors.go`, re-exported by `fs`/`db`/`vec`/`ts` (I6 for the sentinel’s home; the db-only API stays) |
 
 ### Bugs (section 2)
