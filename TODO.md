@@ -197,10 +197,23 @@ Status of each item as the consolidation lands. Commits reference the section.
   unaffected: its rotation is whole-store.
 - **I3 — done.** `Keychain.Seal`/`Open` pass empty payloads through on both sides, so `fs` now matches `db`/`vec` (an empty file blob stays empty instead of being sealed to a nonce-only payload).
 - **I4 — done** together with the shared sentinels.
-- **I5** pending (wrapping convention).
-- **I6 — done for the sentinel’s home** (`ErrEncryptedOrdering` now lives in
-  `internal/encryption` and is re-exported by `db`).
+- **I5 — done.** The convention now lives in the `internal/encryption` package doc: sentinels are returned unwrapped, callers may add operation context with `fmt.Errorf("...: %w", err)` and `errors.Is` keeps matching. An audit of `fs`/`db`/`vec`/`ts` found every encryption error path wrapping with `%w` (the single `%v` in `siv.go` carries the base64 decode detail while `ErrAuthFailed` is still wrapped), so no shared sentinel is lost. `db` keeps its `storm <op>:` prefix; the other stores keep their shorter context — the difference is documented rather than unified, since changing every message would be churn without benefit.
+- **I6 — done.** `ErrEncryptedOrdering` lives in `internal/encryption/errors.go` and `db` re-exports it (`db.ErrEncryptedOrdering = encryption.ErrEncryptedOrdering`), so the “ordered query on encrypted keys” concept has one home while the db-facing name is unchanged.
 
 ### Verification (section 4)
 
-- Pending; section 4 is re-run at the end.
+- **Item 1 — verified.** The `ErrEncryptedOrdering` gate covers every ordered
+  index traversal: `idx.Range`, `idx.Prefix` and `idx.AllRecords` are only
+  reached from `db/finder.go` helpers (`rnge`, `prefix`, `allByIndex`) plus the
+  reverse branch of `find`, all four of which call `errEncryptedOrdering()`.
+  `query.go`, `scan.go` and `sink.go` contain no ordered index scan — query
+  scans iterate record keys and decode values, and `OrderBy` sorts decoded
+  values — so nothing bypasses the gate.
+- **Item 2 — verified.** No package outside `internal/encryption`, `fs`, `db`,
+  `vec` and `ts` refers to the provider types (`ts.KeyProvider`,
+  `db.RawKeyProvider`, `vec.MultiKeyProvider`, …). The moved types are re-export
+  aliases with constructor wrappers, and the changed signatures
+  (`vec.keyBytes`/`bucketKey`/`collectionBucket`, `ts.bucketKey`/`seriesBucket`)
+  are unexported, so the public API of the four packages is unchanged.
+- **Item 3 — re-run in the final step** (`gofmt`, `go vet ./...`,
+  `go test -count=1 ./...`, `go test -race` on the four stores).

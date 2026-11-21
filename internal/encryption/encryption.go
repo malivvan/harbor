@@ -4,6 +4,17 @@
 // It defines the cipher-suite selection, the CipherEngine abstraction and the
 // AES-256-GCM and XChaCha20-Poly1305 implementations, plus nonce generation.
 // Keys are always raw 32-byte (256-bit) values.
+//
+// This package also owns the pieces every store shares: the key providers and
+// key resolution, the Keychain (seal/open with rotation fallbacks), the
+// deterministic SIV name cipher, the marker framing with its canary, the
+// rotation rewrite helpers and the encryption sentinels.
+//
+// Error convention: the sentinels in this package (ErrAuthFailed,
+// ErrUnsupportedCipher, ErrInvalidKey, ErrInvalidConfig, ErrWrongMode,
+// ErrEncryptedOrdering) are returned unwrapped. Callers may add operation
+// context around them with fmt.Errorf("...: %w", err), which keeps errors.Is
+// and errors.As working; the stores in this repository do exactly that.
 package encryption
 
 import (
