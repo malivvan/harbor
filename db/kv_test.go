@@ -185,3 +185,15 @@ func TestKeyExists(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 	require.False(t, exists)
 }
+
+func TestGetRejectsTypedNilDestination(t *testing.T) {
+	db, cleanup := createDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	require.NoError(t, db.Set(ctx, "kv", "k", "v"))
+
+	var out *string
+	err := db.Get(ctx, "kv", "k", out)
+	require.ErrorIs(t, err, ErrPtrNeeded)
+}

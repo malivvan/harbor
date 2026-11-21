@@ -165,7 +165,7 @@ func (n *node) Get(ctx context.Context, bucketName string, key any, to any) erro
 
 	ref := reflect.ValueOf(to)
 
-	if !ref.IsValid() || ref.Kind() != reflect.Ptr {
+	if !ref.IsValid() || ref.Kind() != reflect.Ptr || ref.IsNil() {
 		return wrapError("kv get", ErrPtrNeeded)
 	}
 

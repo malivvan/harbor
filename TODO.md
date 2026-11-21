@@ -144,6 +144,7 @@ the encryption state (sections 4 and 6).
   `reflect.New(ref.Elem().Type())` panics. `One`/`Find` correctly return
   `ErrStructPtrNeeded` in this case.
   Fix: add `ref.IsNil()` to the validation and return `ErrPtrNeeded`.
+  **Status: FIXED** — `Get` rejects typed-nil pointers before `reflect.New(ref.Elem().Type())`.
 
 - **`BucketNamer` implemented on a pointer receiver is ignored by Save/Init/ReIndex**
   — `db/extract.go:53-63` (`bucketNameFromValue`), also `db/sink.go:402-411`
