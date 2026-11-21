@@ -18,14 +18,22 @@ type Store struct {
 	series map[string]*Series
 	order  []string
 
-	// Optional encryption state. All fields are zero/nil for a plaintext store.
-	engine    CipherEngine   // primary engine used for writes
-	engines   []CipherEngine // primary first, rotation fallbacks after
-	cipher    CipherSuite
-	encValues bool
-	encNames  bool
-	blockDur  int64
-	siv       *SIVEngine
+	// enc is the optional encryption state. nil means plaintext.
+	enc *encState
+}
+
+// encryptsValues reports whether values and series metadata are sealed.
+func (s *Store) encryptsValues() bool {
+	return s != nil && s.enc != nil && s.enc.encValues
+}
+
+// blockDuration returns the configured encryption time-block width, or zero
+// when block mode is off.
+func (s *Store) blockDuration() int64 {
+	if s == nil || s.enc == nil {
+		return 0
+	}
+	return s.enc.blockDur
 }
 
 // Open wraps an already-open bbolt database in a time series Store.
@@ -171,18 +179,18 @@ func (s *Store) DeleteSeries(ctx context.Context, name string) error {
 // bucketKey returns the physical key for a series bucket and its metadata.
 // Names are encrypted with deterministic AES-SIV when EncryptSeriesNames is on.
 func (s *Store) bucketKey(name string) []byte {
-	if s == nil || !s.encNames || s.siv == nil {
+	if s == nil || s.enc == nil || !s.enc.encNames || s.enc.siv == nil {
 		return []byte(name)
 	}
-	return s.siv.EncryptName(name)
+	return s.enc.siv.EncryptName(name)
 }
 
 // logicalName maps a physical bucket/meta key back to the series name.
 func (s *Store) logicalName(physical []byte) (string, error) {
-	if s == nil || !s.encNames || s.siv == nil {
+	if s == nil || s.enc == nil || !s.enc.encNames || s.enc.siv == nil {
 		return string(physical), nil
 	}
-	return s.siv.DecryptName(physical)
+	return s.enc.siv.DecryptName(physical)
 }
 
 func (s *Store) rootBucket(tx *bolt.Tx) *bolt.Bucket {

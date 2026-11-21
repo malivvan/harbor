@@ -51,7 +51,7 @@ func (s *Store) readMeta(tx *bolt.Tx, name string) (seriesMeta, error) {
 // enabled.
 func (s *Store) decodeMeta(raw []byte) (seriesMeta, error) {
 	var meta seriesMeta
-	if s.encValues {
+	if s.encryptsValues() {
 		plain, err := s.openBytes(raw)
 		if err != nil {
 			return seriesMeta{}, err
@@ -76,7 +76,7 @@ func (s *Store) writeMeta(tx *bolt.Tx, name string, meta seriesMeta) error {
 	if err != nil {
 		return err
 	}
-	if s.encValues {
+	if s.encryptsValues() {
 		data, err = s.sealBytes(data)
 		if err != nil {
 			return err
@@ -192,7 +192,7 @@ func (se *Series) InsertMany(ctx context.Context, points []Point) error {
 			return err
 		}
 
-		if se.store.blockDur > 0 {
+		if se.store.blockDuration() > 0 {
 			if err := se.store.insertBlocks(ctx, bucket, points); err != nil {
 				return err
 			}
@@ -243,8 +243,8 @@ func (se *Series) Get(ctx context.Context, ts int64) (Point, error) {
 		if bucket == nil {
 			return ErrNotFound
 		}
-		if se.store.blockDur > 0 {
-			points, ok, err := se.store.readBlock(bucket, blockStart(ts, se.store.blockDur))
+		if se.store.blockDuration() > 0 {
+			points, ok, err := se.store.readBlock(bucket, blockStart(ts, se.store.blockDuration()))
 			if err != nil {
 				return err
 			}
@@ -300,7 +300,7 @@ func (se *Series) First(ctx context.Context) (Point, error) {
 		if bucket == nil {
 			return ErrNotFound
 		}
-		if se.store.blockDur > 0 {
+		if se.store.blockDuration() > 0 {
 			stored, ok, err := se.store.blockPoint(bucket, false)
 			if err != nil {
 				return err
@@ -351,7 +351,7 @@ func (se *Series) Last(ctx context.Context) (Point, error) {
 		if bucket == nil {
 			return ErrNotFound
 		}
-		if se.store.blockDur > 0 {
+		if se.store.blockDuration() > 0 {
 			stored, ok, err := se.store.blockPoint(bucket, true)
 			if err != nil {
 				return err
@@ -406,7 +406,7 @@ func (se *Series) Range(ctx context.Context, start, end int64) ([]Point, error) 
 			return nil
 		}
 
-		if se.store.blockDur > 0 {
+		if se.store.blockDuration() > 0 {
 			return se.store.scanBlocks(ctx, bucket, start, end, func(point Point) error {
 				points = append(points, point)
 				return nil
@@ -462,7 +462,7 @@ func (se *Series) RangeEach(ctx context.Context, start, end int64, fn func(Point
 			return nil
 		}
 
-		if se.store.blockDur > 0 {
+		if se.store.blockDuration() > 0 {
 			return se.store.scanBlocks(ctx, bucket, start, end, fn)
 		}
 
@@ -508,7 +508,7 @@ func (se *Series) Count(ctx context.Context) (int, error) {
 		if bucket == nil {
 			return checkContext(ctx)
 		}
-		if se.store.blockDur > 0 {
+		if se.store.blockDuration() > 0 {
 			var blockErr error
 			count, blockErr = se.store.countBlocks(ctx, bucket)
 			return blockErr
@@ -550,7 +550,7 @@ func (se *Series) DeleteRange(ctx context.Context, start, end int64) (int, error
 			return nil
 		}
 
-		if se.store.blockDur > 0 {
+		if se.store.blockDuration() > 0 {
 			var blockErr error
 			deleted, blockErr = se.store.deleteBlocks(ctx, bucket, start, end)
 			return blockErr

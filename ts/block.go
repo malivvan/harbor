@@ -114,7 +114,7 @@ func (s *Store) writeBlock(bucket *bolt.Bucket, start int64, points []Point) err
 func (s *Store) insertBlocks(ctx context.Context, bucket *bolt.Bucket, points []Point) error {
 	groups := make(map[int64][]Point)
 	for _, point := range points {
-		start := blockStart(point.Timestamp, s.blockDur)
+		start := blockStart(point.Timestamp, s.blockDuration())
 		groups[start] = append(groups[start], point)
 	}
 
@@ -141,7 +141,7 @@ func (s *Store) insertBlocks(ctx context.Context, bucket *bolt.Bucket, points []
 
 // scanBlocks calls fn for every point in [start, end] in time order.
 func (s *Store) scanBlocks(ctx context.Context, bucket *bolt.Bucket, start, end int64, fn func(Point) error) error {
-	firstKey := encodeKey(blockStart(start, s.blockDur))
+	firstKey := encodeKey(blockStart(start, s.blockDuration()))
 	cursor := bucket.Cursor()
 	for key, raw := cursor.Seek(firstKey[:]); key != nil; key, raw = cursor.Next() {
 		if err := checkContext(ctx); err != nil {
@@ -226,7 +226,7 @@ func (s *Store) deleteBlocks(ctx context.Context, bucket *bolt.Bucket, start, en
 		points []Point
 	}
 
-	firstKey := encodeKey(blockStart(start, s.blockDur))
+	firstKey := encodeKey(blockStart(start, s.blockDuration()))
 	var updates []update
 	deleted := 0
 
@@ -323,7 +323,7 @@ func (s *Store) pruneBlocks(bucket *bolt.Bucket, r Retention, now int64) (int, e
 
 	groups := make(map[int64][]Point)
 	for _, point := range all[remove:] {
-		start := blockStart(point.Timestamp, s.blockDur)
+		start := blockStart(point.Timestamp, s.blockDuration())
 		groups[start] = append(groups[start], point)
 	}
 	for start, points := range groups {

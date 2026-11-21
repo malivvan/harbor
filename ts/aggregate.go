@@ -128,7 +128,7 @@ func (se *Series) Aggregate(ctx context.Context, start, end int64, step int64, f
 		return nil, fmt.Errorf("ts: invalid aggregate %q", fn)
 	}
 
-	if se.store.blockDur > 0 {
+	if se.store.blockDuration() > 0 {
 		points, err := se.Range(ctx, start, end)
 		if err != nil {
 			return nil, err

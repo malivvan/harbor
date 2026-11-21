@@ -5,38 +5,37 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/malivvan/storm/internal/encryption"
 	bolt "go.etcd.io/bbolt"
 )
 
 // withKey returns a store view that writes with newKey while sharing the same
 // database. It is used internally to re-encrypt data.
 func (s *Store) withKey(newKey []byte) (*Store, error) {
-	if s.engine == nil {
+	if s.enc == nil {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 	if len(newKey) != KeySize {
 		return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, KeySize, len(newKey))
 	}
 
-	engine, err := encryption.NewCipherEngine(s.cipher, newKey)
+	kc, err := s.enc.kc.WithKey(newKey)
 	if err != nil {
 		return nil, err
 	}
 
 	next := &Store{
-		b:         s.b,
-		root:      s.root,
-		now:       s.now,
-		engine:    engine,
-		engines:   []CipherEngine{engine},
-		cipher:    s.cipher,
-		encValues: s.encValues,
-		encNames:  s.encNames,
-		blockDur:  s.blockDur,
+		b:    s.b,
+		root: s.root,
+		now:  s.now,
+		enc: &encState{
+			kc:        kc,
+			encValues: s.enc.encValues,
+			encNames:  s.enc.encNames,
+			blockDur:  s.enc.blockDur,
+		},
 	}
-	if s.encNames {
-		next.siv, err = newSIVEngine(newKey)
+	if s.enc.encNames {
+		next.enc.siv, err = newSIVEngine(newKey)
 		if err != nil {
 			return nil, err
 		}
@@ -47,9 +46,7 @@ func (s *Store) withKey(newKey []byte) (*Store, error) {
 // adopt switches the store's write and read keys to next after a successful
 // rotation.
 func (s *Store) adopt(next *Store) {
-	s.engine = next.engine
-	s.engines = next.engines
-	s.siv = next.siv
+	s.enc = next.enc
 }
 
 // readAllPoints returns every point stored in a series bucket.
@@ -67,7 +64,7 @@ func (s *Store) readAllPoints(ctx context.Context, bucket *bolt.Bucket) ([]Point
 		if len(key) != recordSize {
 			continue
 		}
-		if s.blockDur > 0 {
+		if s.blockDuration() > 0 {
 			block, err := s.openBlock(raw)
 			if err != nil {
 				return nil, err
@@ -108,7 +105,7 @@ func (s *Store) writeMarker(tx *bolt.Tx) error {
 	if err != nil {
 		return err
 	}
-	raw, err := s.encodeMarker()
+	raw, err := s.enc.encodeMarker()
 	if err != nil {
 		return err
 	}
@@ -159,7 +156,7 @@ func (s *Store) reEncryptSeries(ctx context.Context, name string, next *Store) e
 			if err != nil {
 				return err
 			}
-			if next.blockDur > 0 {
+			if next.blockDuration() > 0 {
 				if err := next.insertBlocks(ctx, bucket, points); err != nil {
 					return err
 				}
@@ -262,7 +259,7 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 
 	var names []string
 	if err := s.b.View(func(tx *bolt.Tx) error {
-		if s.engine != nil {
+		if s.enc != nil {
 			meta, err := s.metaBucket(tx, false)
 			if err != nil {
 				return err
@@ -273,7 +270,7 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 					if err != nil {
 						return err
 					}
-					if err := s.verifyCanary(canary); err != nil {
+					if err := s.enc.verifyCanary(canary); err != nil {
 						return err
 					}
 				}

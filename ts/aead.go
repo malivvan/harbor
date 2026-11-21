@@ -87,16 +87,42 @@ func NewMultiKeyProvider(providers ...KeyProvider) (*MultiKeyProvider, error) {
 	return encryption.NewMultiKeyProvider(providers...)
 }
 
-// encSettings is the resolved encryption configuration of a store.
-type encSettings struct {
-	cipher    CipherSuite
-	keys      [][]byte
+// encState is the resolved encryption state of a store: the cipher engines
+// (through a Keychain) plus the enabled features. A nil keychain means
+// plaintext, and every helper below is then a passthrough.
+type encState struct {
+	kc        *encryption.Keychain
 	encValues bool
 	encNames  bool
 	blockDur  int64
+	siv       *SIVEngine
 }
 
-func resolveConfig(cfg *Config) (*encSettings, error) {
+// cipher returns the resolved cipher suite.
+func (e *encState) cipher() CipherSuite {
+	if e == nil {
+		return CipherAuto
+	}
+	return e.kc.Cipher()
+}
+
+// seal encrypts plain with the primary key, prepending a fresh nonce.
+func (e *encState) seal(plain []byte) ([]byte, error) {
+	if e == nil {
+		return plain, nil
+	}
+	return e.kc.Seal(plain)
+}
+
+// open decrypts raw, trying the primary key and then any rotation fallbacks.
+func (e *encState) open(raw []byte) ([]byte, error) {
+	if e == nil {
+		return raw, nil
+	}
+	return e.kc.Open(raw)
+}
+
+func resolveConfig(cfg *Config) (*encState, error) {
 	if !cfg.encryptionEnabled() {
 		return nil, nil
 	}
@@ -123,13 +149,24 @@ func resolveConfig(cfg *Config) (*encSettings, error) {
 		}
 	}
 
-	return &encSettings{
-		cipher:    cipherSuite,
-		keys:      keys,
+	kc, err := encryption.NewKeychain(cipherSuite, keys)
+	if err != nil {
+		return nil, err
+	}
+
+	state := &encState{
+		kc:        kc,
 		encValues: cfg.EncryptValues,
 		encNames:  cfg.EncryptSeriesNames,
 		blockDur:  cfg.BlockDuration,
-	}, nil
+	}
+	if state.encNames {
+		state.siv, err = newSIVEngine(keys[0])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return state, nil
 }
 
 // Marker constants. The marker is stored unencrypted in the metadata bucket so
@@ -154,33 +191,33 @@ type marker struct {
 	blockDur  int64
 }
 
-func (m marker) matches(s *encSettings) bool {
-	return m.cipher == s.cipher &&
+func (m marker) matches(s *encState) bool {
+	return m.cipher == s.cipher() &&
 		m.encValues == s.encValues &&
 		m.encNames == s.encNames &&
 		m.blockDur == s.blockDur
 }
 
 // encodeMarker serializes the marker with a sealed canary for key verification.
-func (s *Store) encodeMarker() ([]byte, error) {
-	canary, err := s.sealBytes([]byte(canaryPlaintext))
+func (e *encState) encodeMarker() ([]byte, error) {
+	canary, err := e.seal([]byte(canaryPlaintext))
 	if err != nil {
 		return nil, err
 	}
 
 	var flags byte
-	if s.encValues {
+	if e.encValues {
 		flags |= markerFlagValues
 	}
-	if s.encNames {
+	if e.encNames {
 		flags |= markerFlagNames
 	}
 
 	raw := make([]byte, 0, 4+1+1+1+8+len(canary))
 	raw = append(raw, markerMagic...)
-	raw = append(raw, markerVersion, byte(s.cipher), flags)
+	raw = append(raw, markerVersion, byte(e.cipher()), flags)
 	var blockDur [8]byte
-	binary.LittleEndian.PutUint64(blockDur[:], uint64(s.blockDur))
+	binary.LittleEndian.PutUint64(blockDur[:], uint64(e.blockDur))
 	raw = append(raw, blockDur[:]...)
 	raw = append(raw, canary...)
 	return raw, nil
@@ -238,8 +275,8 @@ func (s *Store) readMarker(db *bolt.DB) (marker, []byte, bool, error) {
 }
 
 // verifyCanary checks that at least one configured key can decrypt the canary.
-func (s *Store) verifyCanary(canary []byte) error {
-	plaintext, err := s.openBytes(canary)
+func (e *encState) verifyCanary(canary []byte) error {
+	plaintext, err := e.open(canary)
 	if err != nil {
 		return err
 	}
@@ -252,7 +289,7 @@ func (s *Store) verifyCanary(canary []byte) error {
 // ensureMarker writes the encryption marker if the store does not have one yet.
 // It is called inside write transactions for encrypted stores.
 func (s *Store) ensureMarker(tx *bolt.Tx) error {
-	if s == nil || s.engine == nil {
+	if s == nil || s.enc == nil {
 		return nil
 	}
 	bucket, err := s.metaBucket(tx, true)
@@ -262,7 +299,7 @@ func (s *Store) ensureMarker(tx *bolt.Tx) error {
 	if bucket.Get([]byte(markerKey)) != nil {
 		return nil
 	}
-	raw, err := s.encodeMarker()
+	raw, err := s.enc.encodeMarker()
 	if err != nil {
 		return err
 	}
@@ -330,29 +367,7 @@ func OpenWithConfig(ctx context.Context, db *bolt.DB, root []byte, cfg *Config) 
 		series: make(map[string]*Series),
 	}
 
-	if settings != nil {
-		s.cipher = settings.cipher
-		s.encValues = settings.encValues
-		s.encNames = settings.encNames
-		s.blockDur = settings.blockDur
-
-		s.engines = make([]CipherEngine, 0, len(settings.keys))
-		for _, key := range settings.keys {
-			engine, err := encryption.NewCipherEngine(settings.cipher, key)
-			if err != nil {
-				return nil, err
-			}
-			s.engines = append(s.engines, engine)
-		}
-		s.engine = s.engines[0]
-
-		if s.encNames {
-			s.siv, err = newSIVEngine(settings.keys[0])
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
+	s.enc = settings
 
 	existing, canary, found, err := s.readMarker(db)
 	if err != nil {
@@ -365,7 +380,7 @@ func OpenWithConfig(ctx context.Context, db *bolt.DB, root []byte, cfg *Config) 
 		if !existing.matches(settings) {
 			return nil, fmt.Errorf("%w: encryption settings do not match the store", ErrWrongMode)
 		}
-		if err := s.verifyCanary(canary); err != nil {
+		if err := s.enc.verifyCanary(canary); err != nil {
 			return nil, err
 		}
 		return s, nil

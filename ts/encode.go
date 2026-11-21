@@ -4,8 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
-
-	"github.com/malivvan/storm/internal/encryption"
 )
 
 const recordSize = 8
@@ -38,24 +36,12 @@ func decodeValue(b []byte) float64 {
 	return math.Float64frombits(binary.BigEndian.Uint64(b))
 }
 
-// sealBytes seals plain with the store's primary engine, prepending a fresh
-// nonce.
+// sealBytes seals plain with the store's primary key, prepending a fresh nonce.
 func (s *Store) sealBytes(plain []byte) ([]byte, error) {
-	return sealBytesWith(s.engine, s.cipher, plain)
-}
-
-func sealBytesWith(engine CipherEngine, cipher CipherSuite, plain []byte) ([]byte, error) {
-	nonce, err := encryption.GenerateNonce(cipher)
-	if err != nil {
-		return nil, err
+	if s == nil {
+		return nil, ErrAuthFailed
 	}
-	sealed, err := engine.Encrypt(nonce, plain)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]byte, 0, len(nonce)+len(sealed))
-	out = append(out, nonce...)
-	return append(out, sealed...), nil
+	return s.enc.seal(plain)
 }
 
 // openBytes opens a sealed record. Rotation fallback keys are tried in order.
@@ -63,31 +49,13 @@ func (s *Store) openBytes(raw []byte) ([]byte, error) {
 	if s == nil {
 		return nil, ErrAuthFailed
 	}
-	for _, engine := range s.engines {
-		plain, err := openBytesWith(engine, raw)
-		if err == nil {
-			return plain, nil
-		}
-	}
-	return nil, ErrAuthFailed
-}
-
-func openBytesWith(engine CipherEngine, raw []byte) ([]byte, error) {
-	nonceSize := engine.NonceSize()
-	if len(raw) < nonceSize+engine.Overhead() {
-		return nil, ErrAuthFailed
-	}
-	plain, err := engine.Decrypt(raw[:nonceSize], raw[nonceSize:])
-	if err != nil {
-		return nil, ErrAuthFailed
-	}
-	return plain, nil
+	return s.enc.open(raw)
 }
 
 // sealValue encodes v and seals it when encryption is enabled.
 func (s *Store) sealValue(v float64) ([]byte, error) {
 	raw := encodeValue(v)
-	if s.engine == nil {
+	if s.enc == nil {
 		return raw[:], nil
 	}
 	return s.sealBytes(raw[:])
@@ -95,7 +63,7 @@ func (s *Store) sealValue(v float64) ([]byte, error) {
 
 // openValue decodes a stored value, decrypting it when necessary.
 func (s *Store) openValue(raw []byte) (float64, error) {
-	if s.engine == nil {
+	if s.enc == nil {
 		if len(raw) != recordSize {
 			return 0, errCorruptPoint
 		}
@@ -120,7 +88,7 @@ func (s *Store) decodePoint(key, value []byte) (Point, bool, error) {
 		return Point{}, false, nil
 	}
 
-	if s.engine == nil {
+	if s.enc == nil {
 		if len(value) != recordSize {
 			return Point{}, false, nil
 		}
