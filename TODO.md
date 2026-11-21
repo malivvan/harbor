@@ -63,6 +63,9 @@ each entry lists a concrete location and a suggested fix. Severity is High / Med
   `nil, err` without calling `s.b.Close()`. The caller has no way to close the already-opened
   database.
   Fix: on any sub-store error, `s.b.Close()` before returning.
+  **Status: FIXED** — `Open` defers a close that fires unless it reaches the success
+  return; the store-ID `Update` error is now checked too. Regression test verifies the lock
+  is released after a wrong-key failure.
 
 ### Low
 

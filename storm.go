@@ -52,6 +52,13 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Opti
 	if err != nil {
 		return nil, err
 	}
+	bdb := s.b
+	opened := false
+	defer func() {
+		if !opened {
+			_ = bdb.Close()
+		}
+	}()
 	err = s.b.Update(func(tx *bolt.Tx) (err error) {
 		b := tx.Bucket([]byte{0})
 		if b == nil {
@@ -80,6 +87,9 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Opti
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	secret := append([]byte(nil), cfg.Secret...)
 
@@ -117,6 +127,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Opti
 		return nil, err
 	}
 
+	opened = true
 	return s, nil
 }
 

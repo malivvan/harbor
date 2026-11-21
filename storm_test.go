@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	bolt "go.etcd.io/bbolt"
+
 	"github.com/malivvan/storm/ts"
 	"github.com/malivvan/storm/vec"
 )
@@ -151,5 +153,34 @@ func TestGetMissingKeyReturnsError(t *testing.T) {
 
 	if _, err := s.Get("missing"); !errors.Is(err, ErrKeyNotFound) {
 		t.Fatalf("Get(missing) error = %v, want ErrKeyNotFound", err)
+	}
+}
+
+func TestOpenReleasesHandleOnSubStoreFailure(t *testing.T) {
+	path := t.TempDir() + "/leak.db"
+	key := bytes.Repeat([]byte{3}, 32)
+
+	s, err := Open(context.Background(), path, 0600, &bolt.Options{Timeout: time.Second}, Config{Secret: key})
+	if err != nil {
+		t.Fatalf("seed open: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("seed close: %v", err)
+	}
+
+	// A wrong key makes db.Open fail after bolt.Open succeeded.
+	wrong := bytes.Repeat([]byte{4}, 32)
+	if _, err := Open(context.Background(), path, 0600, &bolt.Options{Timeout: time.Second}, Config{Secret: wrong}); err == nil {
+		t.Fatal("Open with the wrong key succeeded")
+	}
+
+	// If the failed Open leaked its handle, this second Open cannot take the
+	// file lock and times out.
+	s2, err := Open(context.Background(), path, 0600, &bolt.Options{Timeout: 500 * time.Millisecond}, Config{Secret: key})
+	if err != nil {
+		t.Fatalf("failed Open leaked the database handle: %v", err)
+	}
+	if err := s2.Close(); err != nil {
+		t.Fatalf("close: %v", err)
 	}
 }
