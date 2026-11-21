@@ -19,6 +19,9 @@ Initial release of Storm v1.
   c codec.MarshalUnmarshaler)` wraps an existing bbolt database. Storm borrows
   the database and never closes it; callers close the native `*bolt.DB`.
 - **Codecs**: JSON by default, plus Gob and an AES-GCM codec wrapper.
+- **Bucket store (`kv`)**: a `Store` that manages cached, named `Bucket`
+  structs with `Open(ctx, db, root, codec)`, key/value operations, raw
+  iteration, and bucket deletion.
 - **Operation-wrapped errors** with `errors.Is`-compatible causes.
 - **Destination safety**: read operations decode before publishing to caller
   destinations.

@@ -25,6 +25,7 @@ Storm is a simple and powerful toolkit for [BoltDB](https://github.com/etcd-io/b
   - [Attaching to a caller-owned transaction](#attaching-to-a-caller-owned-transaction)
 - [Nodes and nested buckets](#nodes-and-nested-buckets)
 - [Key/value store](#keyvalue-store)
+  - [Bucket store (kv)](#bucket-store-kv)
 - [Context and cancellation](#context-and-cancellation)
 - [Error handling](#error-handling)
 - [Database lifecycle](#database-lifecycle)
@@ -539,6 +540,47 @@ exists, err := db.KeyExists(ctx, "sessions", sessionID)
 // Delete
 err = db.Delete(ctx, "sessions", sessionID)
 ```
+
+### Bucket store (kv)
+
+The `kv` package provides a bucket-oriented facade over the same database. A
+`Store` manages named `Bucket` structs, creating and caching them on demand:
+
+```go
+import "github.com/malivvan/storm/kv"
+
+store, err := kv.Open(ctx, bDB, nil, nil)
+if err != nil {
+	log.Fatal(err)
+}
+defer store.Close()
+
+users := store.Bucket("users")
+sessions := store.Bucket("sessions")
+
+err = users.Set(ctx, "alice", &user)
+err = sessions.Set(ctx, sessionID, "active")
+
+var found User
+err = users.Get(ctx, "alice", &found)
+
+exists, err := sessions.Exists(ctx, sessionID)
+keys, err := users.Keys(ctx)
+count, err := users.Len(ctx)
+
+err = users.ForEach(ctx, func(key, value []byte) error {
+	// key and value are raw encoded bytes
+	return nil
+})
+
+// Delete one bucket and its keys.
+err = users.Drop(ctx)
+```
+
+`kv.Open` has the same database, root bucket, and codec parameters as
+`db.Open`. The `Store` borrows the bbolt database; closing it does not close
+the native database. `Bucket.Keys`, `Bucket.Len`, and `Bucket.ForEach` operate
+on raw encoded keys and skip nested metadata buckets.
 
 ## Context and cancellation
 
