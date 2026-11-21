@@ -289,4 +289,19 @@ verification + rotation).
 - [x] **Phase 3 — key rotation** — `MultiKeyProvider` fallback reads,
   `ReEncryptSeries`, `RotateAll`, `VerifyAll`; name re-keying and block
   re-sealing included; tests in `ts/rotate_test.go`.
-- [ ] Final verification and `POST.md`.
+- [x] **Final verification** — `go build ./...`, `go vet ./...`,
+  `go test ./...` and `go test -race ./ts/` all pass; remaining caveats are
+  recorded in `POST.md`.
+
+### Implementation notes
+
+- The shared `SIVEngine` was added to `internal/encryption` together with
+  Phase 1 so the `Store` encryption state is complete from the first commit.
+- `EncryptSeriesNames` landed in Phase 2a, while the rotation **operations**
+  landed in Phase 3.
+- `BlockDuration > 0` activates encryption by itself; blocks are always sealed,
+  so `EncryptValues` has no additional effect in block mode.
+- Rotation re-keys AES-SIV series names as well as values, blocks and metadata.
+- Any encryption-feature, cipher or block-duration difference between the
+  config and the on-disk marker returns `ErrWrongMode` (no silent upgrade or
+  downgrade).
