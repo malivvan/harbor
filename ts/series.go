@@ -192,17 +192,23 @@ func (se *Series) InsertMany(ctx context.Context, points []Point) error {
 			return err
 		}
 
-		for _, point := range points {
-			if err := checkContext(ctx); err != nil {
+		if se.store.blockDur > 0 {
+			if err := se.store.insertBlocks(ctx, bucket, points); err != nil {
 				return err
 			}
-			key := encodeKey(point.Timestamp)
-			value, err := se.store.sealValue(point.Value)
-			if err != nil {
-				return err
-			}
-			if err := bucket.Put(key[:], value); err != nil {
-				return err
+		} else {
+			for _, point := range points {
+				if err := checkContext(ctx); err != nil {
+					return err
+				}
+				key := encodeKey(point.Timestamp)
+				value, err := se.store.sealValue(point.Value)
+				if err != nil {
+					return err
+				}
+				if err := bucket.Put(key[:], value); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -237,6 +243,23 @@ func (se *Series) Get(ctx context.Context, ts int64) (Point, error) {
 		if bucket == nil {
 			return ErrNotFound
 		}
+		if se.store.blockDur > 0 {
+			points, ok, err := se.store.readBlock(bucket, blockStart(ts, se.store.blockDur))
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return ErrNotFound
+			}
+			for _, stored := range points {
+				if stored.Timestamp == ts {
+					point = stored
+					return checkContext(ctx)
+				}
+			}
+			return ErrNotFound
+		}
+
 		key := encodeKey(ts)
 		raw := bucket.Get(key[:])
 		if raw == nil {
@@ -277,6 +300,18 @@ func (se *Series) First(ctx context.Context) (Point, error) {
 		if bucket == nil {
 			return ErrNotFound
 		}
+		if se.store.blockDur > 0 {
+			stored, ok, err := se.store.blockPoint(bucket, false)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return ErrNotFound
+			}
+			point = stored
+			return checkContext(ctx)
+		}
+
 		key, value := bucket.Cursor().First()
 		if key == nil {
 			return ErrNotFound
@@ -316,6 +351,18 @@ func (se *Series) Last(ctx context.Context) (Point, error) {
 		if bucket == nil {
 			return ErrNotFound
 		}
+		if se.store.blockDur > 0 {
+			stored, ok, err := se.store.blockPoint(bucket, true)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return ErrNotFound
+			}
+			point = stored
+			return checkContext(ctx)
+		}
+
 		key, value := bucket.Cursor().Last()
 		if key == nil {
 			return ErrNotFound
@@ -357,6 +404,13 @@ func (se *Series) Range(ctx context.Context, start, end int64) ([]Point, error) 
 		bucket := se.store.seriesBucket(tx, se.name)
 		if bucket == nil {
 			return nil
+		}
+
+		if se.store.blockDur > 0 {
+			return se.store.scanBlocks(ctx, bucket, start, end, func(point Point) error {
+				points = append(points, point)
+				return nil
+			})
 		}
 
 		startKey := encodeKey(start)
@@ -408,6 +462,10 @@ func (se *Series) RangeEach(ctx context.Context, start, end int64, fn func(Point
 			return nil
 		}
 
+		if se.store.blockDur > 0 {
+			return se.store.scanBlocks(ctx, bucket, start, end, fn)
+		}
+
 		startKey := encodeKey(start)
 		cursor := bucket.Cursor()
 		for key, value := cursor.Seek(startKey[:]); key != nil; key, value = cursor.Next() {
@@ -447,9 +505,15 @@ func (se *Series) Count(ctx context.Context) (int, error) {
 			return err
 		}
 		bucket := se.store.seriesBucket(tx, se.name)
-		if bucket != nil {
-			count = bucket.Stats().KeyN
+		if bucket == nil {
+			return checkContext(ctx)
 		}
+		if se.store.blockDur > 0 {
+			var blockErr error
+			count, blockErr = se.store.countBlocks(ctx, bucket)
+			return blockErr
+		}
+		count = bucket.Stats().KeyN
 		return checkContext(ctx)
 	})
 	if err != nil {
@@ -484,6 +548,12 @@ func (se *Series) DeleteRange(ctx context.Context, start, end int64) (int, error
 		bucket := se.store.seriesBucket(tx, se.name)
 		if bucket == nil {
 			return nil
+		}
+
+		if se.store.blockDur > 0 {
+			var blockErr error
+			deleted, blockErr = se.store.deleteBlocks(ctx, bucket, start, end)
+			return blockErr
 		}
 
 		var keys [][]byte

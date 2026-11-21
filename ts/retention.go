@@ -202,6 +202,9 @@ func defaultNow() int64 {
 // pruneSeriesBucket applies a retention policy to a series. Plaintext and
 // value-encrypted stores prune by timestamp key; block mode overrides this.
 func (s *Store) pruneSeriesBucket(bucket *bolt.Bucket, r Retention, now int64) (int, error) {
+	if s.blockDur > 0 {
+		return s.pruneBlocks(bucket, r, now)
+	}
 	return pruneBucket(bucket, r, now), nil
 }
 

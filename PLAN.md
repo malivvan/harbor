@@ -283,6 +283,8 @@ verification + rotation).
   `internal/encryption/siv.go`, HKDF-derived SIV keys in `ts/siv.go`,
   deterministic bucket/meta keys, rotation provider primitive (`ts/rotate.go`);
   tests in `ts/siv_test.go`.
-- [ ] Phase 2b — `BlockDuration` time blocks.
+- [x] **Phase 2b — `BlockDuration` time blocks** — packed, per-block sealed
+  records; insert merge, get/first/last/range/range-each/count/delete/aggregate
+  and block-aware retention; tests in `ts/block_test.go`.
 - [ ] Phase 3 — key rotation (`ReEncryptSeries`, `RotateAll`, `VerifyAll`).
 - [ ] Final verification and `POST.md`.

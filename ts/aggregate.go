@@ -27,6 +27,88 @@ const (
 	AggLast AggregateFunc = "last"
 )
 
+// aggregator accumulates points into aligned windows.
+type aggregator struct {
+	fn      AggregateFunc
+	step    int64
+	samples []Sample
+
+	have    bool
+	current int64
+	count   int64
+	sum     float64
+	min     float64
+	max     float64
+	first   float64
+	last    float64
+}
+
+func (a *aggregator) add(point Point) {
+	window := bucketStart(point.Timestamp, a.step)
+	if !a.have || window != a.current {
+		a.flush()
+		a.have = true
+		a.current = window
+		a.count = 0
+		a.sum = 0
+		a.min = 0
+		a.max = 0
+		a.first = 0
+		a.last = 0
+	}
+
+	if a.count == 0 {
+		a.first = point.Value
+		a.min = point.Value
+		a.max = point.Value
+	} else {
+		if point.Value < a.min {
+			a.min = point.Value
+		}
+		if point.Value > a.max {
+			a.max = point.Value
+		}
+	}
+	a.last = point.Value
+	a.sum += point.Value
+	a.count++
+}
+
+func (a *aggregator) flush() {
+	if !a.have || a.count == 0 {
+		return
+	}
+
+	var value float64
+	switch a.fn {
+	case AggMin:
+		value = a.min
+	case AggMax:
+		value = a.max
+	case AggAvg:
+		value = a.sum / float64(a.count)
+	case AggSum:
+		value = a.sum
+	case AggCount:
+		value = float64(a.count)
+	case AggFirst:
+		value = a.first
+	case AggLast:
+		value = a.last
+	}
+	a.samples = append(a.samples, Sample{Timestamp: a.current, Value: value})
+}
+
+// aggregatePoints aggregates an ordered point slice.
+func aggregatePoints(points []Point, step int64, fn AggregateFunc) []Sample {
+	agg := &aggregator{fn: fn, step: step}
+	for _, point := range points {
+		agg.add(point)
+	}
+	agg.flush()
+	return agg.samples
+}
+
 // Aggregate buckets [start, end] into windows of width step and computes fn
 // per window. Each returned Sample timestamp is the aligned window start.
 func (se *Series) Aggregate(ctx context.Context, start, end int64, step int64, fn AggregateFunc) ([]Sample, error) {
@@ -46,7 +128,15 @@ func (se *Series) Aggregate(ctx context.Context, start, end int64, step int64, f
 		return nil, fmt.Errorf("ts: invalid aggregate %q", fn)
 	}
 
-	var samples []Sample
+	if se.store.blockDur > 0 {
+		points, err := se.Range(ctx, start, end)
+		if err != nil {
+			return nil, err
+		}
+		return aggregatePoints(points, step, fn), nil
+	}
+
+	agg := &aggregator{fn: fn, step: step}
 	err := se.store.b.View(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
@@ -55,42 +145,6 @@ func (se *Series) Aggregate(ctx context.Context, start, end int64, step int64, f
 		bucket := se.store.seriesBucket(tx, se.name)
 		if bucket == nil {
 			return nil
-		}
-
-		var (
-			have    bool
-			current int64
-			count   int64
-			sum     float64
-			min     float64
-			max     float64
-			first   float64
-			last    float64
-		)
-
-		flush := func() {
-			if !have || count == 0 {
-				return
-			}
-
-			var value float64
-			switch fn {
-			case AggMin:
-				value = min
-			case AggMax:
-				value = max
-			case AggAvg:
-				value = sum / float64(count)
-			case AggSum:
-				value = sum
-			case AggCount:
-				value = float64(count)
-			case AggFirst:
-				value = first
-			case AggLast:
-				value = last
-			}
-			samples = append(samples, Sample{Timestamp: current, Value: value})
 		}
 
 		startKey := encodeKey(start)
@@ -109,44 +163,16 @@ func (se *Series) Aggregate(ctx context.Context, start, end int64, step int64, f
 			if point.Timestamp > end {
 				break
 			}
-
-			window := bucketStart(point.Timestamp, step)
-			if !have || window != current {
-				flush()
-				have = true
-				current = window
-				count = 0
-				sum = 0
-				min = 0
-				max = 0
-				first = 0
-				last = 0
-			}
-
-			if count == 0 {
-				first = point.Value
-				min = point.Value
-				max = point.Value
-			} else {
-				if point.Value < min {
-					min = point.Value
-				}
-				if point.Value > max {
-					max = point.Value
-				}
-			}
-			last = point.Value
-			sum += point.Value
-			count++
+			agg.add(point)
 		}
-		flush()
+		agg.flush()
 
 		return checkContext(ctx)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return samples, nil
+	return agg.samples, nil
 }
 
 func validAggregate(fn AggregateFunc) bool {
