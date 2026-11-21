@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"os"
-	"sync"
 
 	"github.com/google/uuid"
 	"github.com/malivvan/storm/fs"
@@ -26,19 +25,22 @@ type Config struct {
 
 type Store struct {
 	b   *bolt.DB
-	mu  sync.RWMutex
 	id  uuid.UUID
 	db  *db.Store
 	fs  *fs.Store
 	ts  *ts.Store
 	vec *vec.Store
-	ctx context.Context
 }
 
-var _null []byte      // sys
-var _zero = []byte{0} // kv
-var _one = []byte{1}  // db
-var _two = []byte{2}
+// Top-level bucket layout. Each sub-store owns one bucket; the first also holds
+// the store ID and the package's small key/value API.
+var (
+	kvBucket  = []byte{0}
+	dbBucket  = []byte{1}
+	fsBucket  = []byte{2}
+	tsBucket  = []byte{3}
+	vecBucket = []byte{4}
+)
 
 func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Options, cfg Config) (s *Store, err error) {
 	if ctx == nil {
@@ -47,7 +49,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Opti
 	if len(cfg.Secret) != db.KeySize {
 		return nil, fmt.Errorf("storm: master key must be %d bytes, got %d", db.KeySize, len(cfg.Secret))
 	}
-	s = &Store{ctx: ctx}
+	s = &Store{}
 	s.b, err = bolt.Open(path, mode, options)
 	if err != nil {
 		return nil, err
@@ -60,9 +62,9 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Opti
 		}
 	}()
 	err = s.b.Update(func(tx *bolt.Tx) (err error) {
-		b := tx.Bucket([]byte{0})
+		b := tx.Bucket(kvBucket)
 		if b == nil {
-			b, err = tx.CreateBucket([]byte{0})
+			b, err = tx.CreateBucket(kvBucket)
 			if err != nil {
 				return err
 			}
@@ -93,7 +95,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Opti
 
 	secret := append([]byte(nil), cfg.Secret...)
 
-	if s.db, err = db.Open(ctx, s.b, []byte{1}, db.Config{
+	if s.db, err = db.Open(ctx, s.b, dbBucket, db.Config{
 		Secret:          secret,
 		Codec:           db.JSONCodec,
 		EncryptKeys:     true,
@@ -102,21 +104,21 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Opti
 	}); err != nil {
 		return nil, err
 	}
-	if s.fs, err = fs.Open(ctx, s.b, []byte{2}, fs.Config{
+	if s.fs, err = fs.Open(ctx, s.b, fsBucket, fs.Config{
 		Secret:          secret,
 		EncryptMetadata: true,
 		EncryptContent:  true,
 	}); err != nil {
 		return nil, err
 	}
-	if s.ts, err = ts.Open(ctx, s.b, []byte{3}, ts.Config{
+	if s.ts, err = ts.Open(ctx, s.b, tsBucket, ts.Config{
 		Secret:             secret,
 		EncryptValues:      true,
 		EncryptSeriesNames: true,
 	}); err != nil {
 		return nil, err
 	}
-	if s.vec, err = vec.Open(ctx, s.b, []byte{4}, vec.Config{
+	if s.vec, err = vec.Open(ctx, s.b, vecBucket, vec.Config{
 		Secret:                 secret,
 		UseQuant:               false,
 		Quantizer:              nil,
@@ -161,7 +163,7 @@ func (s *Store) Get(key string) (string, error) {
 	}
 	var val string
 	err := s.b.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(_zero)
+		b := tx.Bucket(kvBucket)
 		if b == nil {
 			return errors.New("kv bucket not found")
 		}
@@ -183,7 +185,7 @@ func (s *Store) Set(key, val string) error {
 		return errors.New("key is empty")
 	}
 	return s.b.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(_zero)
+		b := tx.Bucket(kvBucket)
 		if b == nil {
 			return errors.New("kv bucket not found")
 		}

@@ -77,6 +77,8 @@ each entry lists a concrete location and a suggested fix. Severity is High / Med
   and `Store.ctx` is stored but only read via the sub-store opens.
   Fix: either delete the unused vars/fields or use them consistently; document the bucket-key
   layout in one place.
+  **Status: FIXED** — `kvBucket`…`vecBucket` document the layout and are used everywhere;
+  `_null`/`_one`/`_two`, the unused `Store.mu` and `Store.ctx` are gone.
 
 - **`storm_test.go` is a throwaway demo, not a test**
   — `storm_test.go`
