@@ -273,3 +273,14 @@ verification + rotation).
    `VerifyAll`.
 9. Add Tier 2 tests (SIV, blocks, rotation, mode mismatch).
 10. Run the full verification checklist; fix any gofmt/vet/test issues.
+
+## Progress log
+
+- [x] **Phase 1 — Tier 1 (`EncryptValues`)** — `ts/aead.go` (Config, key providers,
+  marker/canary, `OpenWithConfig`), value and metadata sealing, mode detection;
+  tests in `ts/aead_test.go`.
+- [ ] Phase 2a — Tier 2 (`EncryptSeriesNames`, SIV bucket keys) and rotation
+  primitives (`internal/encryption/siv.go`, `ts/siv.go`).
+- [ ] Phase 2b — `BlockDuration` time blocks.
+- [ ] Phase 3 — key rotation (`ReEncryptSeries`, `RotateAll`, `VerifyAll`).
+- [ ] Final verification and `POST.md`.

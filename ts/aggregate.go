@@ -99,7 +99,10 @@ func (se *Series) Aggregate(ctx context.Context, start, end int64, step int64, f
 			if err := checkContext(ctx); err != nil {
 				return err
 			}
-			point, ok := decodePoint(key, raw)
+			point, ok, err := se.store.decodePoint(key, raw)
+			if err != nil {
+				return err
+			}
 			if !ok {
 				continue
 			}

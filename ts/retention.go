@@ -2,7 +2,6 @@ package ts
 
 import (
 	"context"
-	"encoding/json"
 	"math"
 	"time"
 
@@ -106,7 +105,10 @@ func (se *Series) EnforceRetention(ctx context.Context, now int64) (int, error) 
 		if err != nil {
 			return err
 		}
-		removed = pruneBucket(bucket, meta.Retention, now)
+		removed, err = se.store.pruneSeriesBucket(bucket, meta.Retention, now)
+		if err != nil {
+			return err
+		}
 		return checkContext(ctx)
 	})
 	if err != nil {
@@ -139,20 +141,31 @@ func (s *Store) EnforceRetention(ctx context.Context, now int64) (int, error) {
 			return nil
 		}
 
-		return metaBucket.ForEach(func(name, raw []byte) error {
+		return metaBucket.ForEach(func(physical, raw []byte) error {
 			if err := checkContext(ctx); err != nil {
 				return err
 			}
+			if string(physical) == markerKey {
+				return nil
+			}
 
-			var meta seriesMeta
-			if err := json.Unmarshal(raw, &meta); err != nil {
+			meta, err := s.decodeMeta(raw)
+			if err != nil {
 				return err
 			}
-			bucket := s.seriesBucket(tx, string(name))
+			name, err := s.logicalName(physical)
+			if err != nil {
+				return err
+			}
+			bucket := s.seriesBucket(tx, name)
 			if bucket == nil {
 				return nil
 			}
-			total += pruneBucket(bucket, meta.Retention, now)
+			removed, err := s.pruneSeriesBucket(bucket, meta.Retention, now)
+			if err != nil {
+				return err
+			}
+			total += removed
 			return checkContext(ctx)
 		})
 	})
@@ -184,6 +197,12 @@ func (s *Store) nowNanos() int64 {
 
 func defaultNow() int64 {
 	return time.Now().UnixNano()
+}
+
+// pruneSeriesBucket applies a retention policy to a series. Plaintext and
+// value-encrypted stores prune by timestamp key; block mode overrides this.
+func (s *Store) pruneSeriesBucket(bucket *bolt.Bucket, r Retention, now int64) (int, error) {
+	return pruneBucket(bucket, r, now), nil
 }
 
 func pruneBucket(b *bolt.Bucket, r Retention, now int64) int {

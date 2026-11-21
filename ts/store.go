@@ -17,6 +17,15 @@ type Store struct {
 	mu     sync.RWMutex
 	series map[string]*Series
 	order  []string
+
+	// Optional encryption state. All fields are zero/nil for a plaintext store.
+	engine    CipherEngine   // primary engine used for writes
+	engines   []CipherEngine // primary first, rotation fallbacks after
+	cipher    CipherSuite
+	encValues bool
+	encNames  bool
+	blockDur  int64
+	siv       *SIVEngine
 }
 
 // Open wraps an already-open bbolt database in a time series Store.
@@ -25,19 +34,7 @@ type Store struct {
 // Store never closes db. root is an optional root bucket key; nil or an empty
 // slice means the database root.
 func Open(ctx context.Context, db *bolt.DB, root []byte) (*Store, error) {
-	if err := checkContext(ctx); err != nil {
-		return nil, err
-	}
-	if db == nil {
-		return nil, ErrNilParam
-	}
-
-	return &Store{
-		b:      db,
-		root:   append([]byte(nil), root...),
-		now:    defaultNow,
-		series: make(map[string]*Series),
-	}, nil
+	return OpenWithConfig(ctx, db, root, nil)
 }
 
 // NativeDB returns the underlying bbolt database.
@@ -122,15 +119,16 @@ func (s *Store) DeleteSeries(ctx context.Context, name string) error {
 			parent = tx.Bucket(s.root)
 		}
 
+		key := s.bucketKey(name)
 		if parent == nil {
-			if tx.Bucket([]byte(name)) != nil {
-				if err := tx.DeleteBucket([]byte(name)); err != nil {
+			if tx.Bucket(key) != nil {
+				if err := tx.DeleteBucket(key); err != nil {
 					return err
 				}
 				found = true
 			}
-		} else if parent.Bucket([]byte(name)) != nil {
-			if err := parent.DeleteBucket([]byte(name)); err != nil {
+		} else if parent.Bucket(key) != nil {
+			if err := parent.DeleteBucket(key); err != nil {
 				return err
 			}
 			found = true
@@ -140,8 +138,9 @@ func (s *Store) DeleteSeries(ctx context.Context, name string) error {
 		if err != nil {
 			return err
 		}
-		if meta != nil && meta.Get([]byte(name)) != nil {
-			if err := meta.Delete([]byte(name)); err != nil {
+		metaKey := s.bucketKey(name)
+		if meta != nil && meta.Get(metaKey) != nil {
+			if err := meta.Delete(metaKey); err != nil {
 				return err
 			}
 			found = true
@@ -169,6 +168,23 @@ func (s *Store) DeleteSeries(ctx context.Context, name string) error {
 	return nil
 }
 
+// bucketKey returns the physical key for a series bucket and its metadata.
+// Names are encrypted with deterministic AES-SIV when EncryptSeriesNames is on.
+func (s *Store) bucketKey(name string) []byte {
+	if s == nil || !s.encNames || s.siv == nil {
+		return []byte(name)
+	}
+	return s.siv.EncryptName(name)
+}
+
+// logicalName maps a physical bucket/meta key back to the series name.
+func (s *Store) logicalName(physical []byte) (string, error) {
+	if s == nil || !s.encNames || s.siv == nil {
+		return string(physical), nil
+	}
+	return s.siv.DecryptName(physical)
+}
+
 func (s *Store) rootBucket(tx *bolt.Tx) *bolt.Bucket {
 	if len(s.root) == 0 {
 		return nil
@@ -177,27 +193,29 @@ func (s *Store) rootBucket(tx *bolt.Tx) *bolt.Bucket {
 }
 
 func (s *Store) seriesBucket(tx *bolt.Tx, name string) *bolt.Bucket {
+	key := s.bucketKey(name)
 	if len(s.root) == 0 {
-		return tx.Bucket([]byte(name))
+		return tx.Bucket(key)
 	}
 
 	root := s.rootBucket(tx)
 	if root == nil {
 		return nil
 	}
-	return root.Bucket([]byte(name))
+	return root.Bucket(key)
 }
 
 func (s *Store) createSeriesBucket(tx *bolt.Tx, name string) (*bolt.Bucket, error) {
+	key := s.bucketKey(name)
 	if len(s.root) == 0 {
-		return tx.CreateBucketIfNotExists([]byte(name))
+		return tx.CreateBucketIfNotExists(key)
 	}
 
 	root, err := tx.CreateBucketIfNotExists(s.root)
 	if err != nil {
 		return nil, err
 	}
-	return root.CreateBucketIfNotExists([]byte(name))
+	return root.CreateBucketIfNotExists(key)
 }
 
 func (s *Store) metaBucket(tx *bolt.Tx, create bool) (*bolt.Bucket, error) {

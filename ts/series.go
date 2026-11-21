@@ -40,9 +40,23 @@ func (s *Store) readMeta(tx *bolt.Tx, name string) (seriesMeta, error) {
 	if bucket == nil {
 		return meta, nil
 	}
-	raw := bucket.Get([]byte(name))
+	raw := bucket.Get(s.bucketKey(name))
 	if raw == nil {
 		return meta, nil
+	}
+	return s.decodeMeta(raw)
+}
+
+// decodeMeta unmarshals series metadata, decrypting it when value encryption is
+// enabled.
+func (s *Store) decodeMeta(raw []byte) (seriesMeta, error) {
+	var meta seriesMeta
+	if s.encValues {
+		plain, err := s.openBytes(raw)
+		if err != nil {
+			return seriesMeta{}, err
+		}
+		raw = plain
 	}
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		return seriesMeta{}, err
@@ -51,6 +65,9 @@ func (s *Store) readMeta(tx *bolt.Tx, name string) (seriesMeta, error) {
 }
 
 func (s *Store) writeMeta(tx *bolt.Tx, name string, meta seriesMeta) error {
+	if err := s.ensureMarker(tx); err != nil {
+		return err
+	}
 	bucket, err := s.metaBucket(tx, true)
 	if err != nil {
 		return err
@@ -59,7 +76,13 @@ func (s *Store) writeMeta(tx *bolt.Tx, name string, meta seriesMeta) error {
 	if err != nil {
 		return err
 	}
-	return bucket.Put([]byte(name), data)
+	if s.encValues {
+		data, err = s.sealBytes(data)
+		if err != nil {
+			return err
+		}
+	}
+	return bucket.Put(s.bucketKey(name), data)
 }
 
 // Name returns the series name.
@@ -160,6 +183,10 @@ func (se *Series) InsertMany(ctx context.Context, points []Point) error {
 			return err
 		}
 
+		if err := se.store.ensureMarker(tx); err != nil {
+			return err
+		}
+
 		bucket, err := se.store.createSeriesBucket(tx, se.name)
 		if err != nil {
 			return err
@@ -170,8 +197,11 @@ func (se *Series) InsertMany(ctx context.Context, points []Point) error {
 				return err
 			}
 			key := encodeKey(point.Timestamp)
-			value := encodeValue(point.Value)
-			if err := bucket.Put(key[:], value[:]); err != nil {
+			value, err := se.store.sealValue(point.Value)
+			if err != nil {
+				return err
+			}
+			if err := bucket.Put(key[:], value); err != nil {
 				return err
 			}
 		}
@@ -180,7 +210,9 @@ func (se *Series) InsertMany(ctx context.Context, points []Point) error {
 		if err != nil {
 			return err
 		}
-		pruneBucket(bucket, meta.Retention, se.store.nowNanos())
+		if _, err := se.store.pruneSeriesBucket(bucket, meta.Retention, se.store.nowNanos()); err != nil {
+			return err
+		}
 
 		return checkContext(ctx)
 	})
@@ -210,10 +242,14 @@ func (se *Series) Get(ctx context.Context, ts int64) (Point, error) {
 		if raw == nil {
 			return ErrNotFound
 		}
-		if len(raw) != recordSize {
+		decoded, ok, err := se.store.decodePoint(key[:], raw)
+		if err != nil {
+			return err
+		}
+		if !ok {
 			return fmt.Errorf("ts: corrupt point at %d", ts)
 		}
-		point = Point{Timestamp: ts, Value: decodeValue(raw)}
+		point = decoded
 		return checkContext(ctx)
 	})
 	if err != nil {
@@ -245,7 +281,10 @@ func (se *Series) First(ctx context.Context) (Point, error) {
 		if key == nil {
 			return ErrNotFound
 		}
-		decoded, ok := decodePoint(key, value)
+		decoded, ok, err := se.store.decodePoint(key, value)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			return fmt.Errorf("ts: corrupt point")
 		}
@@ -281,7 +320,10 @@ func (se *Series) Last(ctx context.Context) (Point, error) {
 		if key == nil {
 			return ErrNotFound
 		}
-		decoded, ok := decodePoint(key, value)
+		decoded, ok, err := se.store.decodePoint(key, value)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			return fmt.Errorf("ts: corrupt point")
 		}
@@ -323,7 +365,10 @@ func (se *Series) Range(ctx context.Context, start, end int64) ([]Point, error) 
 			if err := checkContext(ctx); err != nil {
 				return err
 			}
-			point, ok := decodePoint(key, value)
+			point, ok, err := se.store.decodePoint(key, value)
+			if err != nil {
+				return err
+			}
 			if !ok {
 				continue
 			}
@@ -369,7 +414,10 @@ func (se *Series) RangeEach(ctx context.Context, start, end int64, fn func(Point
 			if err := checkContext(ctx); err != nil {
 				return err
 			}
-			point, ok := decodePoint(key, value)
+			point, ok, err := se.store.decodePoint(key, value)
+			if err != nil {
+				return err
+			}
 			if !ok {
 				continue
 			}
@@ -429,6 +477,10 @@ func (se *Series) DeleteRange(ctx context.Context, start, end int64) (int, error
 			return err
 		}
 
+		if err := se.store.ensureMarker(tx); err != nil {
+			return err
+		}
+
 		bucket := se.store.seriesBucket(tx, se.name)
 		if bucket == nil {
 			return nil
@@ -441,7 +493,10 @@ func (se *Series) DeleteRange(ctx context.Context, start, end int64) (int, error
 			if err := checkContext(ctx); err != nil {
 				return err
 			}
-			point, ok := decodePoint(key, value)
+			point, ok, err := se.store.decodePoint(key, value)
+			if err != nil {
+				return err
+			}
 			if !ok {
 				continue
 			}

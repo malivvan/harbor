@@ -3,6 +3,8 @@ package ts
 import (
 	"context"
 	"errors"
+
+	"github.com/malivvan/storm/internal/encryption"
 )
 
 var (
@@ -24,6 +26,22 @@ var (
 	// ErrInvalidRetention is returned for a retention policy with a negative
 	// MaxAge or negative MaxPoints.
 	ErrInvalidRetention = errors.New("ts: invalid retention")
+
+	// ErrAuthFailed is returned when encrypted data fails authentication.
+	ErrAuthFailed = encryption.ErrAuthFailed
+
+	// ErrInvalidKey is returned for a missing or malformed encryption key.
+	ErrInvalidKey = errors.New("ts: invalid encryption key")
+
+	// ErrUnsupportedCipher is returned for an unknown cipher suite.
+	ErrUnsupportedCipher = encryption.ErrUnsupportedCipher
+
+	// ErrInvalidConfig is returned for an inconsistent encryption config.
+	ErrInvalidConfig = errors.New("ts: invalid encryption config")
+
+	// ErrWrongMode is returned when a store is opened with an encryption mode
+	// that does not match what is stored on disk.
+	ErrWrongMode = errors.New("ts: wrong encryption mode")
 )
 
 func checkContext(ctx context.Context) error {

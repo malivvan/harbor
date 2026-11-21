@@ -795,16 +795,22 @@ func TestCoverageInsertManyEmpty(t *testing.T) {
 }
 
 func TestCoverageDecodePointRejectsInvalidRecords(t *testing.T) {
-	_, ok := decodePoint(nil, nil)
+	store := &Store{} // plaintext store
+
+	_, ok, err := store.decodePoint(nil, nil)
 	require.False(t, ok)
-	_, ok = decodePoint(make([]byte, recordSize-1), make([]byte, recordSize))
+	require.NoError(t, err)
+	_, ok, err = store.decodePoint(make([]byte, recordSize-1), make([]byte, recordSize))
 	require.False(t, ok)
-	_, ok = decodePoint(make([]byte, recordSize), make([]byte, recordSize+1))
+	require.NoError(t, err)
+	_, ok, err = store.decodePoint(make([]byte, recordSize), make([]byte, recordSize+1))
 	require.False(t, ok)
+	require.NoError(t, err)
 
 	key := encodeKey(7)
 	value := encodeValue(1.5)
-	point, ok := decodePoint(key[:], value[:])
+	point, ok, err := store.decodePoint(key[:], value[:])
+	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, Point{Timestamp: 7, Value: 1.5}, point)
 }
