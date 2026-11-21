@@ -13,8 +13,8 @@ type TransactionManager interface {
 	WriteTransaction(ctx context.Context, fn func(Node) error) error
 }
 
-// Compile-time assertion: *DB implements TransactionManager.
-var _ TransactionManager = (*DB)(nil)
+// Compile-time assertion: *Store implements TransactionManager.
+var _ TransactionManager = (*Store)(nil)
 
 // ReadTransaction executes fn within a read-only bbolt transaction.
 // The transaction is automatically closed when fn returns.
@@ -26,7 +26,7 @@ var _ TransactionManager = (*DB)(nil)
 // Panic behavior: if fn panics, bbolt closes (rolls back) the read
 // transaction and the panic propagates to the caller. Storm does
 // not recover panics.
-func (s *DB) ReadTransaction(ctx context.Context, fn func(Node) error) error {
+func (s *Store) ReadTransaction(ctx context.Context, fn func(Node) error) error {
 	if err := checkContext(ctx); err != nil {
 		return wrapError("read transaction", err)
 	}
@@ -69,7 +69,7 @@ func (s *DB) ReadTransaction(ctx context.Context, fn func(Node) error) error {
 // Panic behavior: if fn panics, bbolt rolls back the transaction and
 // the panic propagates to the caller. All writes performed before the
 // panic are discarded. Storm does not recover panics.
-func (s *DB) WriteTransaction(ctx context.Context, fn func(Node) error) error {
+func (s *Store) WriteTransaction(ctx context.Context, fn func(Node) error) error {
 	if err := checkContext(ctx); err != nil {
 		return wrapError("write transaction", err)
 	}
@@ -100,8 +100,8 @@ func (s *DB) WriteTransaction(ctx context.Context, fn func(Node) error) error {
 
 // transactionNode builds a transaction-bound node that preserves
 // codec, root bucket, and other configuration from the root node.
-// It does not modify the root node or store state on DB.
-func (s *DB) transactionNode(tx *bolt.Tx) (Node, error) {
+// It does not modify the root node or store state on Store.
+func (s *Store) transactionNode(tx *bolt.Tx) (Node, error) {
 	root, ok := s.Node.(*node)
 	if !ok {
 		return nil, ErrBadType

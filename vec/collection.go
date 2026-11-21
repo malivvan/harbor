@@ -1,0 +1,270 @@
+package vec
+
+import (
+	"fmt"
+	"sync"
+	"time"
+)
+
+// Collection represents a single logical group of vectors, similar to a table in SQL databases.
+// It provides thread-safe operations for inserting, searching, and deleting vectors.
+// Each collection has a fixed vector dimension and uses a specific distance metric.
+//
+// 写入缓冲：Upsert 将数据先写入内存 HNSW 索引（查询即时可见），
+// 然后缓冲到 writeBuf 中，攒够 flushThreshold 个点再批量写入 bbolt，
+// 从而将 N 次 fsync 降为 1 次，显著提升索引吞吐。
+type Collection struct {
+	Name      string   // Unique name of the collection
+	VectorLen int      // Dimension of vectors in this collection
+	Metric    Distance // Distance metric used for similarity search
+
+	mu      sync.RWMutex
+	index   VectorIndex // Transparent index engine (Flat or HNSW)
+	storage *Store      // Embedded Persistence
+
+	writeBuf       []PointStruct // 缓冲写入的点，攒批后批量刷盘减少 fsync
+	flushThreshold int           // writeBuf 达到此大小时触发刷盘
+}
+
+// DefaultFlushThreshold 默认写入缓冲阈值（点数量）。
+// 攒够此数量的点后统一写入 bbolt，将多次 fsync 合并为一次。
+const DefaultFlushThreshold = 64
+
+// NewCollection initializes a new vector collection, optionally loading from storage.
+// If useHNSW is true, it uses the optimized HNSW graph search; otherwise uses flat memory search.
+// When storage is provided, existing points are automatically loaded into memory.
+// Returns an error if the collection cannot be created or if loaded points have invalid dimensions.
+func NewCollection(name string, vectorLen int, metric Distance, store *Store, useHNSW bool) (*Collection, error) {
+	return NewCollectionWithParams(name, vectorLen, metric, store, useHNSW, DefaultHNSWParams())
+}
+
+// NewCollectionWithParams initializes a new vector collection with custom HNSW parameters.
+// If useHNSW is true, it uses the optimized HNSW graph search with the provided parameters;
+// otherwise uses flat memory search.
+// When storage is provided, existing points are automatically loaded into memory.
+// Returns an error if the collection cannot be created or if loaded points have invalid dimensions.
+func NewCollectionWithParams(name string, vectorLen int, metric Distance, store *Store, useHNSW bool, hnswParams HNSWParams) (*Collection, error) {
+	var index VectorIndex
+	if useHNSW {
+		index = NewHNSWIndexWithParams(metric, hnswParams)
+	} else {
+		index = NewFlatIndex(metric)
+	}
+
+	col := &Collection{
+		Name:      name,
+		VectorLen: vectorLen,
+		Metric:    metric,
+		index:     index,
+		storage:   store,
+
+		writeBuf:       make([]PointStruct, 0),
+		flushThreshold: DefaultFlushThreshold,
+	}
+
+	if store != nil {
+		if err := store.EnsureCollection(name); err != nil {
+			return nil, fmt.Errorf("failed to ensure storage collection %s: %w", name, err)
+		}
+
+		// Save collection metadata
+		meta := CollectionMeta{
+			Name:       name,
+			VectorLen:  vectorLen,
+			Metric:     metric,
+			UseHNSW:    useHNSW,
+			HNSWParams: hnswParams,
+		}
+		if err := store.SaveCollectionMeta(name, meta); err != nil {
+			return nil, fmt.Errorf("failed to save metadata for %s: %w", name, err)
+		}
+
+		// Load existing points into memory index
+		loadedPoints, err := store.LoadCollection(name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load points for %s: %w", name, err)
+		}
+
+		// Validate and prep array for Upsert
+		var batch []PointStruct
+		for _, p := range loadedPoints {
+			if len(p.Vector) != vectorLen {
+				return nil, fmt.Errorf("loaded point %s has invalid dimension %d (expected %d)", p.ID, len(p.Vector), vectorLen)
+			}
+			batch = append(batch, *p)
+		}
+
+		if len(batch) > 0 {
+			if err := col.index.Upsert(batch); err != nil {
+				return nil, fmt.Errorf("failed to load initial points into index: %w", err)
+			}
+		}
+	}
+
+	return col, nil
+}
+
+// Upsert adds or updates points in the collection.
+//
+// 写入流程：
+//  1. 更新内存 HNSW 索引（查询即时可见）
+//  2. 将点追加到 writeBuf 缓冲
+//  3. 当缓冲区达到 flushThreshold 时批量写入 bbolt（将 N 次 fsync 降为 1 次）
+//
+// Points are first written to the memory index, then buffered for bbolt persistence.
+// Returns an error if any point has an invalid vector length or if persistence fails.
+func (c *Collection) Upsert(points []PointStruct) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// 1. Validate
+	version := uint64(time.Now().UnixNano())
+	for i := range points {
+		p := &points[i]
+		if len(p.Vector) != c.VectorLen {
+			return fmt.Errorf("point %s has invalid vector length %d, expected %d", p.ID, len(p.Vector), c.VectorLen)
+		}
+		p.Version = version
+	}
+
+	// 2. Update Memory Index Immediately（查询需要最新数据）
+	if err := c.index.Upsert(points); err != nil {
+		return fmt.Errorf("failed to update memory index: %w", err)
+	}
+
+	// 3. Buffer for bbolt persistence（攒批减少 fsync）
+	c.writeBuf = append(c.writeBuf, points...)
+	if len(c.writeBuf) >= c.flushThreshold {
+		return c.flushUnsafe()
+	}
+
+	return nil
+}
+
+// Flush 强制将 writeBuf 中所有缓冲点写入 bbolt。
+func (c *Collection) Flush() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.flushUnsafe()
+}
+
+// flushUnsafe 要求调用方已持有 c.mu（写锁）。
+func (c *Collection) flushUnsafe() error {
+	if c.storage == nil || len(c.writeBuf) == 0 {
+		c.writeBuf = nil // 确保 nil 而非空切片，方便 GC
+		return nil
+	}
+	if err := c.storage.UpsertPoints(c.Name, c.writeBuf); err != nil {
+		return fmt.Errorf("failed to flush buffer to bbolt: %w", err)
+	}
+	c.writeBuf = nil
+	return nil
+}
+
+// Close 刷完缓冲区并关闭底层存储引擎。
+// 调用后 Collection 不可再用。
+func (c *Collection) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := c.flushUnsafe(); err != nil {
+		return err
+	}
+	if c.storage != nil {
+		return c.storage.Close()
+	}
+	return nil
+}
+
+// Search performs a similarity search using the underlying VectorIndex.
+// It finds the topK nearest neighbors to the query vector, optionally filtered by payload.
+// Returns an error if the query vector dimension doesn't match the collection.
+func (c *Collection) Search(queryVector []float32, filter *Filter, topK int) ([]ScoredPoint, error) {
+	if len(queryVector) != c.VectorLen {
+		return nil, fmt.Errorf("query vector length mismatch: expected %d, got %d", c.VectorLen, len(queryVector))
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.index.Search(queryVector, filter, topK)
+}
+
+// Count returns the number of points currently stored in the collection.
+func (c *Collection) Count() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.index.Count()
+}
+
+// GetPointsByFilter returns all points with full payload and vectors that match the given filter.
+func (c *Collection) GetPointsByFilter(filter *Filter) ([]PointStruct, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if filter == nil {
+		return nil, fmt.Errorf("filter cannot be nil")
+	}
+
+	return c.index.GetPointsByFilter(filter), nil
+}
+
+// Delete removes points either by explicit IDs or by a filter match.
+// If points slice is provided, those specific points are deleted.
+// If filter is provided, all points matching the filter are deleted.
+// Returns the number of points deleted and any error encountered.
+// Returns an error if neither points nor filter is provided.
+// Ensures data consistency between storage and memory index.
+func (c *Collection) Delete(points []string, filter *Filter) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// First, determine which IDs to delete
+	var targetIDs []string
+
+	if len(points) > 0 {
+		targetIDs = points
+	} else if filter != nil {
+		targetIDs = c.index.GetIDsByFilter(filter)
+	} else {
+		return 0, fmt.Errorf("must provide points or filter")
+	}
+
+	if len(targetIDs) == 0 {
+		return 0, nil
+	}
+
+	// Build a set for O(1) lookup
+	targetSet := make(map[string]struct{}, len(targetIDs))
+	for _, id := range targetIDs {
+		targetSet[id] = struct{}{}
+	}
+
+	// 0. Remove deleted IDs from write buffer（防止刷盘时重写已删数据）
+	if len(c.writeBuf) > 0 {
+		filtered := make([]PointStruct, 0, len(c.writeBuf))
+		for _, p := range c.writeBuf {
+			if _, ok := targetSet[p.ID]; !ok {
+				filtered = append(filtered, p)
+			}
+		}
+		c.writeBuf = filtered
+	}
+
+	// 1. Delete from storage first (if configured)
+	if c.storage != nil {
+		if err := c.storage.DeletePoints(c.Name, targetIDs); err != nil {
+			return 0, fmt.Errorf("failed to delete from storage: %w", err)
+		}
+	}
+
+	// 2. Delete from memory index
+	successCount := 0
+	for _, id := range targetIDs {
+		if err := c.index.Delete(id); err == nil {
+			successCount++
+		}
+	}
+
+	return successCount, nil
+}

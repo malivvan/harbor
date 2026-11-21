@@ -10,7 +10,7 @@ import (
 )
 
 // openStormDB opens a bbolt database and wraps it with Storm for the test.
-func openStormDB(tb testing.TB, path string) *storm.DB {
+func openStormDB(tb testing.TB, path string) *storm.Store {
 	tb.Helper()
 
 	bdb, err := bolt.Open(path, 0600, nil)

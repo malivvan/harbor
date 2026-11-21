@@ -56,7 +56,7 @@ func (c *stepContext) Value(key any) any { return nil }
 // ---------------------------------------------------------------------------
 
 type testDB struct {
-	db  *storm.DB
+	db  *storm.Store
 	bdb *bolt.DB
 	dir string
 }
@@ -676,7 +676,7 @@ func TestMutation_ListRemoveIDCancellationRollsBack(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func callView(
-	db *storm.DB,
+	db *storm.Store,
 	bucketName, indexName string,
 	fn func(index.Index) ([][]byte, error),
 ) ([][]byte, error) {

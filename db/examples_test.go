@@ -569,7 +569,7 @@ func ExampleNode_PrefixScan() {
 
 	ctx := context.Background()
 
-	// The PrefixScan method is available on both DB and Node.
+	// The PrefixScan method is available on both Store and Node.
 	// This example shows the usage on Node.
 	// The Node notes will be the top-level bucket.
 	notes := db.From("notes")
@@ -635,7 +635,7 @@ func ExampleNode_RangeScan() {
 
 	ctx := context.Background()
 
-	// The RangeScan method is available on both DB and Node.
+	// The RangeScan method is available on both Store and Node.
 	// This example shows the usage on Node.
 	// The Node notes will be the top-level bucket.
 	notes := db.From("notes")
@@ -694,7 +694,7 @@ type Note struct {
 	Text string
 }
 
-func prepareDB() (string, *storm.DB) {
+func prepareDB() (string, *storm.Store) {
 	dir, err := os.MkdirTemp(os.TempDir(), "storm")
 	if err != nil {
 		log.Fatal(err)

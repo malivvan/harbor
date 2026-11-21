@@ -123,9 +123,9 @@ func TestWrap_OpenBorrowedInitFailure(t *testing.T) {
 	require.True(t, strings.HasPrefix(err.Error(), "storm open:"))
 	require.Nil(t, db)
 
-	// Borrowed DB must still be open.
+	// Borrowed Store must still be open.
 	err = bDB.View(func(tx *bolt.Tx) error { return nil })
-	require.NoError(t, err, "borrowed DB must remain open after init failure")
+	require.NoError(t, err, "borrowed Store must remain open after init failure")
 	require.NoError(t, bDB.Close())
 }
 
@@ -134,14 +134,14 @@ func TestWrap_OpenBorrowedInitFailure(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWrap_CloseNilReceiver(t *testing.T) {
-	var nilDB *DB
+	var nilDB *Store
 	err := nilDB.Close()
 	require.ErrorIs(t, err, ErrNilParam)
 	require.True(t, strings.HasPrefix(err.Error(), "storm close:"))
 }
 
 func TestWrap_CloseNilBackend(t *testing.T) {
-	db := &DB{}
+	db := &Store{}
 	err := db.Close()
 	require.ErrorIs(t, err, ErrNilParam)
 	require.True(t, strings.HasPrefix(err.Error(), "storm close:"))
@@ -159,7 +159,7 @@ func TestWrap_CloseDoesNotCloseBackend(t *testing.T) {
 	require.NoError(t, err, "Close must return nil")
 
 	err = bDB.View(func(tx *bolt.Tx) error { return nil })
-	require.NoError(t, err, "Close must not close the caller-owned DB")
+	require.NoError(t, err, "Close must not close the caller-owned Store")
 	require.NoError(t, bDB.Close())
 }
 
@@ -743,7 +743,7 @@ func TestWrap_AllOperationLabelsCovered(t *testing.T) {
 		op     func() error
 	}{
 		{"open", "storm open:", func() error { _, err := Open(nilCtx, nil, nil, nil); return err }},
-		{"close", "storm close:", func() error { return (*DB)(nil).Close() }},
+		{"close", "storm close:", func() error { return (*Store)(nil).Close() }},
 		{"read transaction", "storm read transaction:", func() error { return db.ReadTransaction(nilCtx, nil) }},
 		{"write transaction", "storm write transaction:", func() error { return db.WriteTransaction(nilCtx, nil) }},
 		{"init", "storm init:", func() error { return db.Init(ctx, 10) }},

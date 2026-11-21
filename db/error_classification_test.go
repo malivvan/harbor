@@ -429,7 +429,7 @@ func TestClassification_ClosedNativeDB(t *testing.T) {
 	db, err := Open(context.Background(), bDB, nil, nil)
 	require.NoError(t, err)
 
-	// Close the underlying bolt.DB.
+	// Close the underlying bolt.Store.
 	require.NoError(t, db.NativeDB().Close())
 
 	ctx := context.Background()

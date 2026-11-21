@@ -22,7 +22,7 @@ type attachUser struct {
 // attachDB opens a Storm database in a temporary directory.
 // Cleanup closes the database; register it before any transaction cleanup so
 // that cleanup LIFO order rolls transactions back before the database closes.
-func attachDB(t *testing.T) *DB {
+func attachDB(t *testing.T) *Store {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "storm.db")
@@ -42,7 +42,7 @@ func attachDB(t *testing.T) *DB {
 // attachBegin opens a caller-owned bbolt transaction on db.
 // Cleanup rolls the transaction back if the test ends before committing, so a
 // failing assertion cannot leak an open transaction into db.Close.
-func attachBegin(t *testing.T, db *DB, writable bool) *bolt.Tx {
+func attachBegin(t *testing.T, db *Store, writable bool) *bolt.Tx {
 	t.Helper()
 
 	tx, err := db.NativeDB().Begin(writable)
@@ -398,7 +398,7 @@ func TestAttach_Validation(t *testing.T) {
 	require.Nil(t, txn)
 
 	// A nil receiver is rejected without panicking.
-	var nilDB *DB
+	var nilDB *Store
 	txn, err = nilDB.Attach(nil)
 	require.ErrorIs(t, err, ErrNilParam)
 	require.Nil(t, txn)

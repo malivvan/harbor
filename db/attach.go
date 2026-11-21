@@ -44,7 +44,7 @@ var _ Tx = (*node)(nil)
 // as using the bbolt transaction itself would be: reads may panic and writes
 // fail with bbolt's ErrTxClosed. Storm never falls back to a managed
 // transaction for a dead handle.
-func (s *DB) Attach(tx *bolt.Tx) (Tx, error) {
+func (s *Store) Attach(tx *bolt.Tx) (Tx, error) {
 	if s == nil || tx == nil {
 		return nil, wrapError("attach", ErrNilParam)
 	}

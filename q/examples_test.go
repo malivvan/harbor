@@ -49,7 +49,7 @@ type User struct {
 	CreatedAt time.Time `storm:"index"`
 }
 
-func prepareDB() (string, *storm.DB, *bolt.DB) {
+func prepareDB() (string, *storm.Store, *bolt.DB) {
 	dir, err := os.MkdirTemp(os.TempDir(), "storm")
 	if err != nil {
 		log.Fatal(err)

@@ -56,7 +56,7 @@ func TestOpen_InitializationErrorDoesNotCloseBorrowedDatabase(t *testing.T) {
 
 	bDBPath := filepath.Join(dir, "borrowed.db")
 
-	// Step 1: use a non-default codec (gob) to open the borrowed DB so that the
+	// Step 1: use a non-default codec (gob) to open the borrowed Store so that the
 	// __storm_db metadata records gob as the codec.
 	bDB, err := bolt.Open(bDBPath, 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestOpen_InitializationErrorDoesNotCloseBorrowedDatabase(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Step 2: hand the borrowed DB to Storm with the default (json) codec.
+	// Step 2: hand the borrowed Store to Storm with the default (json) codec.
 	// checkVersion will call Set on __storm_db, which builds the data
 	// bucket via setBytes -> newMeta, and newMeta will compare codec names and
 	// return ErrDifferentCodec. That is our deterministic initialization error.
@@ -88,7 +88,7 @@ func TestOpen_InitializationErrorDoesNotCloseBorrowedDatabase(t *testing.T) {
 	require.True(t, errors.Is(err, ErrDifferentCodec), "expected ErrDifferentCodec, got %v", err)
 	require.Nil(t, db)
 
-	// The borrowed bolt.DB must NOT have been closed by Storm. We confirm
+	// The borrowed bolt.Store must NOT have been closed by Storm. We confirm
 	// by performing a fresh close on bDB directly: if Storm had closed it,
 	// this would fail with "database not open".
 	require.NoError(t, bDB.Close())

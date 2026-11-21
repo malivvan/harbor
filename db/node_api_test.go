@@ -148,16 +148,16 @@ func TestNodeInterface_NoBboltExposure(t *testing.T) {
 	}
 }
 
-// TestDBInterface_NoBboltExposure uses reflection on the DB type to prove:
-// - DB has no exported field named Bolt;
-// - DB has no exported field recursively containing a bbolt type;
+// TestDBInterface_NoBboltExposure uses reflection on the Store type to prove:
+// - Store has no exported field named Bolt;
+// - Store has no exported field recursively containing a bbolt type;
 // - NativeDB is the only method returning a bbolt type.
 func TestDBInterface_NoBboltExposure(t *testing.T) {
-	dbType := reflect.TypeOf((*storm.DB)(nil)).Elem()
-	dbPtrType := reflect.TypeOf((*storm.DB)(nil))
+	dbType := reflect.TypeOf((*storm.Store)(nil)).Elem()
+	dbPtrType := reflect.TypeOf((*storm.Store)(nil))
 	bboltPkg := "go.etcd.io/bbolt"
 
-	// DB has no exported field named Bolt.
+	// Store has no exported field named Bolt.
 	for i := 0; i < dbType.NumField(); i++ {
 		f := dbType.Field(i)
 		// Only check exported (public) fields.
@@ -165,23 +165,23 @@ func TestDBInterface_NoBboltExposure(t *testing.T) {
 			continue
 		}
 		require.NotEqual(t, "Bolt", f.Name,
-			"DB must not have an exported field named Bolt (found %q)", f.Name)
+			"Store must not have an exported field named Bolt (found %q)", f.Name)
 
-		// DB has no exported field whose type exposes a bbolt type.
+		// Store has no exported field whose type exposes a bbolt type.
 		require.False(t, containsBboltType(f.Type, bboltPkg),
-			"DB field %q exposes bbolt type %v", f.Name, f.Type)
+			"Store field %q exposes bbolt type %v", f.Name, f.Type)
 	}
 
 	// Verify NativeDB exists and returns the expected type.
-	// NativeDB has a pointer receiver, so look it up on *DB.
+	// NativeDB has a pointer receiver, so look it up on *Store.
 	nativeDB, ok := dbPtrType.MethodByName("NativeDB")
-	require.True(t, ok, "DB must have a NativeDB method")
+	require.True(t, ok, "Store must have a NativeDB method")
 	require.Equal(t, 1, nativeDB.Type.NumOut(), "NativeDB must return exactly one value")
 	outType := nativeDB.Type.Out(0)
 	require.Equal(t, reflect.Pointer, outType.Kind(), "NativeDB must return a pointer")
-	require.Equal(t, bboltPkg, outType.Elem().PkgPath(), "NativeDB must return *bolt.DB")
+	require.Equal(t, bboltPkg, outType.Elem().PkgPath(), "NativeDB must return *bolt.Store")
 
-	// Verify no other method on *DB returns a bbolt type (except NativeDB).
+	// Verify no other method on *Store returns a bbolt type (except NativeDB).
 	for i := 0; i < dbPtrType.NumMethod(); i++ {
 		m := dbPtrType.Method(i)
 		if m.Name == "NativeDB" {
@@ -190,7 +190,7 @@ func TestDBInterface_NoBboltExposure(t *testing.T) {
 		for j := 0; j < m.Type.NumOut(); j++ {
 			outType := m.Type.Out(j)
 			require.False(t, containsBboltType(outType, bboltPkg),
-				"DB method %q return %d exposes bbolt type %v", m.Name, j, outType)
+				"Store method %q return %d exposes bbolt type %v", m.Name, j, outType)
 		}
 	}
 }

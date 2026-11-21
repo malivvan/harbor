@@ -17,7 +17,7 @@ func TestOpenNilDBRejected(t *testing.T) {
 	require.Nil(t, db)
 }
 
-// TestCallerOwnsLifecycle verifies that Storm borrows the supplied bbolt DB.
+// TestCallerOwnsLifecycle verifies that Storm borrows the supplied bbolt Store.
 func TestCallerOwnsLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	bDBPath := filepath.Join(dir, "borrowed.db")
@@ -31,17 +31,17 @@ func TestCallerOwnsLifecycle(t *testing.T) {
 	// NativeDB returns the exact pointer supplied to Open.
 	require.Same(t, bDB, db.NativeDB(), "NativeDB must return same pointer as supplied bDB")
 
-	// Close releases the Storm wrapper without closing the caller's DB.
+	// Close releases the Storm wrapper without closing the caller's Store.
 	require.NoError(t, db.Close(), "Close must return nil")
 
 	err = bDB.View(func(tx *bolt.Tx) error { return nil })
-	require.NoError(t, err, "bbolt DB must still be usable after Storm Close")
+	require.NoError(t, err, "bbolt Store must still be usable after Storm Close")
 
 	// The caller remains responsible for closing the database.
-	require.NoError(t, bDB.Close(), "caller must be able to close the DB after Storm Close")
+	require.NoError(t, bDB.Close(), "caller must be able to close the Store after Storm Close")
 }
 
-// TestInitFailureDoesNotClose verifies a failed Open leaves the caller's DB open.
+// TestInitFailureDoesNotClose verifies a failed Open leaves the caller's Store open.
 func TestInitFailureDoesNotClose(t *testing.T) {
 	dir := t.TempDir()
 	bDBPath := filepath.Join(dir, "borrowed_no_close.db")
@@ -68,14 +68,14 @@ func TestInitFailureDoesNotClose(t *testing.T) {
 	require.ErrorIs(t, err, ErrDifferentCodec)
 	require.Nil(t, db)
 
-	// The supplied DB must still be open.
+	// The supplied Store must still be open.
 	err = bDB.View(func(tx *bolt.Tx) error { return nil })
 	require.NoError(t, err, "bbolt must still be usable after init failure")
 
 	require.NoError(t, bDB.Close())
 }
 
-// TestCancellationDoesNotClose verifies a cancelled Open leaves the caller's DB open.
+// TestCancellationDoesNotClose verifies a cancelled Open leaves the caller's Store open.
 func TestCancellationDoesNotClose(t *testing.T) {
 	dir := t.TempDir()
 	bDBPath := filepath.Join(dir, "borrowed_cancel.db")
@@ -98,14 +98,14 @@ func TestCancellationDoesNotClose(t *testing.T) {
 
 // TestDBNilClose verifies nil receiver and nil bolt Close behavior.
 func TestDBNilClose(t *testing.T) {
-	// (*DB)(nil).Close() returns ErrNilParam.
-	var nilDB *DB
+	// (*Store)(nil).Close() returns ErrNilParam.
+	var nilDB *Store
 	err := nilDB.Close()
 	require.ErrorIs(t, err, ErrNilParam)
 	require.Nil(t, nilDB.NativeDB())
 
-	// DB with nil private database returns ErrNilParam from Close.
-	db := &DB{} // bolt is nil
+	// Store with nil private database returns ErrNilParam from Close.
+	db := &Store{} // bolt is nil
 	err = db.Close()
 	require.ErrorIs(t, err, ErrNilParam)
 	require.Nil(t, db.NativeDB())

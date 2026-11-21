@@ -14,7 +14,7 @@ type Node interface {
 	BucketScanner
 
 	// From returns a new Storm node with a new bucket root below the current.
-	// All DB operations on the new node will be executed relative to this bucket.
+	// All Store operations on the new node will be executed relative to this bucket.
 	From(addend ...string) Node
 
 	// Bucket returns the bucket name as a slice from the root.
@@ -33,7 +33,7 @@ var _ Node = (*node)(nil)
 
 // node implements Node for a specific bucket path and optional transaction.
 type node struct {
-	s *DB
+	s *Store
 
 	// The root bucket. In the normal, simple case this will be empty.
 	rootBucket []string
@@ -58,7 +58,7 @@ func cloneBucketPath(path []string) []string {
 }
 
 // From returns a new Storm Node with a new bucket root below the current.
-// All DB operations on the new node will be executed relative to this bucket.
+// All Store operations on the new node will be executed relative to this bucket.
 func (n node) From(addend ...string) Node {
 	path := make([]string, 0, len(n.rootBucket)+len(addend))
 	path = append(path, n.rootBucket...)

@@ -15,7 +15,7 @@ type Score struct {
 	Value int
 }
 
-func prepareScoreDB(t *testing.T) (*DB, func()) {
+func prepareScoreDB(t *testing.T) (*Store, func()) {
 	db, cleanup := createDB(t)
 
 	ctx := context.Background()

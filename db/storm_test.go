@@ -154,7 +154,7 @@ func TestToBytes(t *testing.T) {
 	}
 }
 
-func createDB(t errorHandler, opts ...testOpenOption) (*DB, func()) {
+func createDB(t errorHandler, opts ...testOpenOption) (*Store, func()) {
 	cfg := defaultTestOpenOptions()
 	for _, opt := range opts {
 		opt(&cfg)

@@ -32,10 +32,10 @@ var defaultCodec = json.Codec
 // Open initializes Storm on an already-open bbolt database.
 //
 // The caller owns db and must keep it open for the lifetime of the returned
-// DB. Storm never closes db. root is the optional root bucket key; nil or an
+// Store. Storm never closes db. root is the optional root bucket key; nil or an
 // empty slice means the database root. c is the codec used to encode and
 // decode entities; nil selects the default JSON codec.
-func Open(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarshaler) (*DB, error) {
+func Open(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarshaler) (*Store, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, wrapError("open", err)
 	}
@@ -52,7 +52,7 @@ func Open(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarsha
 		rootBucket = []string{string(root)}
 	}
 
-	s := DB{
+	s := Store{
 		bolt: db,
 	}
 
@@ -71,9 +71,9 @@ func Open(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarsha
 	return &s, nil
 }
 
-// DB is the wrapper around BoltDB. It contains an instance of BoltDB and uses it to perform all the
+// Store is the wrapper around BoltDB. It contains an instance of BoltDB and uses it to perform all the
 // needed operations
-type DB struct {
+type Store struct {
 	// The root node that points to the root bucket.
 	Node
 
@@ -91,11 +91,11 @@ type DB struct {
 // Callers are responsible for coordinating native transactions with Storm
 // operations. Normal application code should prefer Storm APIs and managed
 // transactions.
-func (db *DB) NativeDB() *bolt.DB {
-	if db == nil {
+func (s *Store) NativeDB() *bolt.DB {
+	if s == nil {
 		return nil
 	}
-	return db.bolt
+	return s.bolt
 }
 
 // Close releases the Storm wrapper. The underlying bbolt database is owned by
@@ -103,7 +103,7 @@ func (db *DB) NativeDB() *bolt.DB {
 //
 // If the receiver is nil or the underlying bbolt database is nil, Close returns
 // ErrNilParam without panicking.
-func (s *DB) Close() error {
+func (s *Store) Close() error {
 	if s == nil {
 		return wrapError("close", ErrNilParam)
 	}
@@ -113,7 +113,7 @@ func (s *DB) Close() error {
 	return nil
 }
 
-func (s *DB) checkVersion(ctx context.Context) error {
+func (s *Store) checkVersion(ctx context.Context) error {
 	// Read the encoded value separately so a decode failure can be classified
 	// as an incompatible codec while preserving the underlying codec error.
 	raw, err := s.GetBytes(ctx, dbinfo, "version")

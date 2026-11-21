@@ -63,8 +63,8 @@ func TestCheckVersion_ErrorChainPreservation(t *testing.T) {
 	// Create a database with the default JSON codec. This writes
 	// __storm_db/version using the JSON codec.
 	seedDB, err := Open(context.Background(), bDB, nil, nil)
-	require.NoError(t, err, "create seed DB")
-	require.NoError(t, seedDB.Close(), "close seed DB")
+	require.NoError(t, err, "create seed Store")
+	require.NoError(t, seedDB.Close(), "close seed Store")
 
 	// Open with an incompatible codec that deliberately fails Unmarshal.
 	db, err := Open(context.Background(), bDB, nil, testDecodeCodec{})
@@ -78,8 +78,8 @@ func TestCheckVersion_ErrorChainPreservation(t *testing.T) {
 	require.ErrorIs(t, err, errTestDecode,
 		"checkVersion must preserve the underlying decode error in the chain")
 
-	// No partial DB is returned.
-	assert.Nil(t, db, "returned DB must be nil on initialization failure")
+	// No partial Store is returned.
+	assert.Nil(t, db, "returned Store must be nil on initialization failure")
 
 	// Reopening with the correct codec must succeed and data must be intact.
 	db2, err := Open(context.Background(), bDB, nil, nil)
