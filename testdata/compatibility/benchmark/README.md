@@ -1,4 +1,4 @@
-# Rainstorm Cross-Major Benchmark Module
+# Storm Cross-Major Benchmark Module
 
 This nested module compares representative v5.3.0 and current local v6 operations
 using equivalent data, codecs, indexes, and bbolt versions.
@@ -49,9 +49,9 @@ See `results/comparison.md` for the full methodology, raw data, and analysis.
 
 ```go
 type BenchmarkRecord struct {
-    ID       uint64 `rainstorm:"id,increment"`
-    Key      string `rainstorm:"unique"`
-    Category string `rainstorm:"index"`
+    ID       uint64 `storm:"id,increment"`
+    Key      string `storm:"unique"`
+    Category string `storm:"index"`
     Name     string
     Revision int
     Payload  string

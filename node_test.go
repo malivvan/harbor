@@ -1,17 +1,17 @@
-package rainstorm
+package storm
 
 import (
 	"context"
 	"testing"
 
-	"github.com/AndersonBargas/rainstorm/v6/codec/gob"
-	"github.com/AndersonBargas/rainstorm/v6/codec/json"
+	"github.com/malivvan/storm/codec/gob"
+	"github.com/malivvan/storm/codec/json"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
 
 func TestNode(t *testing.T) {
-	db, cleanup := createDB(t, Root("a"))
+	db, cleanup := createDB(t, testRoot("a"))
 	defer cleanup()
 
 	n1 := db.From("b", "c")
@@ -73,7 +73,7 @@ func TestNodeWithCodec(t *testing.T) {
 
 		type User struct {
 			ID   int
-			Name string `rainstorm:"index"`
+			Name string `storm:"index"`
 		}
 
 		requireBytesEqual := func(raw []byte, expected interface{}) {

@@ -1,5 +1,5 @@
-// generator creates reproducible Rainstorm v5.3.0 baseline and codec fixtures
-// for compatibility testing in Rainstorm v6.
+// generator creates reproducible Storm v5.3.0 baseline and codec fixtures
+// for compatibility testing in Storm v6.
 //
 // Run from the generator directory:
 //
@@ -18,13 +18,11 @@ import (
 	"path/filepath"
 	"reflect"
 
-	rainstorm "github.com/AndersonBargas/rainstorm/v5"
-	"github.com/AndersonBargas/rainstorm/v5/codec"
-	"github.com/AndersonBargas/rainstorm/v5/codec/aes"
-	"github.com/AndersonBargas/rainstorm/v5/codec/gob"
-	"github.com/AndersonBargas/rainstorm/v5/codec/json"
-	"github.com/AndersonBargas/rainstorm/v5/codec/msgpack"
-	"github.com/AndersonBargas/rainstorm/v5/codec/sereal"
+	storm "github.com/malivvan/storm"
+	"github.com/malivvan/storm/codec"
+	"github.com/malivvan/storm/codec/aes"
+	"github.com/malivvan/storm/codec/gob"
+	"github.com/malivvan/storm/codec/json"
 )
 
 // -- shared schema types ---------------------------------------------------
@@ -32,30 +30,30 @@ import (
 // CompatibilityUser matches the schema used by v6 compatibility tests.
 // Tags follow the v5.3.0 syntax verified against the v5.3.0 extract.go.
 type CompatibilityUser struct {
-	ID       uint64 `rainstorm:"id,increment"`
-	Email    string `rainstorm:"unique"`
-	Team     string `rainstorm:"index"`
+	ID       uint64 `storm:"id,increment"`
+	Email    string `storm:"unique"`
+	Team     string `storm:"index"`
 	Name     string
 	Revision int
 }
 
 // CompatibilityNamedEvent uses a custom bucket name via BucketNamer.
 type CompatibilityNamedEvent struct {
-	ID       uint64 `rainstorm:"id,increment"`
-	Code     string `rainstorm:"unique"`
-	Category string `rainstorm:"index"`
+	ID       uint64 `storm:"id,increment"`
+	Code     string `storm:"unique"`
+	Category string `storm:"index"`
 	Message  string
 }
 
-func (CompatibilityNamedEvent) RainstormBucketName() string {
+func (CompatibilityNamedEvent) StormBucketName() string {
 	return "compatibility_named_events"
 }
 
 // CodecCompatibilityRecord is the shared schema for codec-specific fixtures.
 type CodecCompatibilityRecord struct {
-	ID       uint64 `rainstorm:"id,increment"`
-	Key      string `rainstorm:"unique"`
-	Category string `rainstorm:"index"`
+	ID       uint64 `storm:"id,increment"`
+	Key      string `storm:"unique"`
+	Category string `storm:"index"`
 	Name     string
 	Revision int
 }
@@ -93,7 +91,7 @@ func runBaseline() (err error) {
 		return fmt.Errorf("baseline: remove existing: %w", err)
 	}
 
-	db, err := rainstorm.Open(target)
+	db, err := storm.Open(target)
 	if err != nil {
 		return fmt.Errorf("baseline: open: %w", err)
 	}
@@ -166,9 +164,9 @@ func runBaseline() (err error) {
 
 	// B. Runtime-generated type through explicit From.
 	runtimeExplicitType := reflect.StructOf([]reflect.StructField{
-		{Name: "ID", Type: reflect.TypeOf(uint64(0)), Tag: reflect.StructTag(`rainstorm:"id,increment"`)},
-		{Name: "Slug", Type: reflect.TypeOf(""), Tag: reflect.StructTag(`rainstorm:"unique"`)},
-		{Name: "Group", Type: reflect.TypeOf(""), Tag: reflect.StructTag(`rainstorm:"index"`)},
+		{Name: "ID", Type: reflect.TypeOf(uint64(0)), Tag: reflect.StructTag(`storm:"id,increment"`)},
+		{Name: "Slug", Type: reflect.TypeOf(""), Tag: reflect.StructTag(`storm:"unique"`)},
+		{Name: "Group", Type: reflect.TypeOf(""), Tag: reflect.StructTag(`storm:"index"`)},
 		{Name: "Label", Type: reflect.TypeOf("")},
 		{Name: "Revision", Type: reflect.TypeOf(0)},
 	})
@@ -199,9 +197,9 @@ func runBaseline() (err error) {
 
 	// C. Runtime-generated type using node root as data bucket.
 	runtimeRootDataType := reflect.StructOf([]reflect.StructField{
-		{Name: "ID", Type: reflect.TypeOf(uint64(0)), Tag: reflect.StructTag(`rainstorm:"id,increment"`)},
-		{Name: "Slug", Type: reflect.TypeOf(""), Tag: reflect.StructTag(`rainstorm:"unique"`)},
-		{Name: "Group", Type: reflect.TypeOf(""), Tag: reflect.StructTag(`rainstorm:"index"`)},
+		{Name: "ID", Type: reflect.TypeOf(uint64(0)), Tag: reflect.StructTag(`storm:"id,increment"`)},
+		{Name: "Slug", Type: reflect.TypeOf(""), Tag: reflect.StructTag(`storm:"unique"`)},
+		{Name: "Group", Type: reflect.TypeOf(""), Tag: reflect.StructTag(`storm:"index"`)},
 		{Name: "Label", Type: reflect.TypeOf("")},
 		{Name: "Revision", Type: reflect.TypeOf(0)},
 	})
@@ -252,8 +250,6 @@ func runCodecs() (err error) {
 		codec    codec.MarshalUnmarshaler
 	}{
 		{name: "gob", filename: "gob.db", codec: gob.Codec},
-		{name: "msgpack", filename: "msgpack.db", codec: msgpack.Codec},
-		{name: "sereal", filename: "sereal.db", codec: sereal.Codec},
 	}
 	for _, c := range plainCodecs {
 		target := filepath.Join(codecsDir, c.filename)
@@ -283,7 +279,7 @@ func createCodecFixture(target, codecName string, c codec.MarshalUnmarshaler) (e
 		return fmt.Errorf("remove existing: %w", remErr)
 	}
 
-	db, openErr := rainstorm.Open(target, rainstorm.Codec(c))
+	db, openErr := storm.Open(target, storm.Codec(c))
 	if openErr != nil {
 		return fmt.Errorf("open: %w", openErr)
 	}
@@ -297,7 +293,7 @@ func createCodecFixture(target, codecName string, c codec.MarshalUnmarshaler) (e
 	return err
 }
 
-func populateCodecDB(db *rainstorm.DB, codecName string) error {
+func populateCodecDB(db *storm.DB, codecName string) error {
 	records := []CodecCompatibilityRecord{
 		{Key: "alpha", Category: "shared", Name: "Alpha", Revision: 1},
 		{Key: "beta", Category: "shared", Name: "Beta", Revision: 2},

@@ -1,9 +1,9 @@
-# Rainstorm
+# Storm
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/AndersonBargas/rainstorm/v6.svg)](https://pkg.go.dev/github.com/AndersonBargas/rainstorm/v6)
-[![CI](https://github.com/AndersonBargas/rainstorm/actions/workflows/main.yml/badge.svg)](https://github.com/AndersonBargas/rainstorm/actions/workflows/main.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/storm.svg)](https://pkg.go.dev/github.com/malivvan/storm)
+[![CI](https://github.com/malivvan/storm/actions/workflows/main.yml/badge.svg)](https://github.com/malivvan/storm/actions/workflows/main.yml)
 
-Rainstorm is a simple and powerful toolkit for [BoltDB](https://github.com/etcd-io/bbolt), forked from [Storm](https://github.com/asdine/storm). It provides indexes, a wide range of methods to store and fetch data, an advanced query system, and much more.
+Storm is a simple and powerful toolkit for [BoltDB](https://github.com/etcd-io/bbolt), forked from [Storm](https://github.com/asdine/storm). It provides indexes, a wide range of methods to store and fetch data, an advanced query system, and much more.
 
 ## Table of Contents
 
@@ -38,14 +38,14 @@ Rainstorm is a simple and powerful toolkit for [BoltDB](https://github.com/etcd-
 
 ## Installation
 
-Rainstorm v6 requires **Go 1.24** or later.
+Storm v6 requires **Go 1.24** or later.
 
 ```sh
-go get github.com/AndersonBargas/rainstorm/v6
+go get github.com/malivvan/storm
 ```
 
 ```go
-import "github.com/AndersonBargas/rainstorm/v6"
+import "github.com/malivvan/storm"
 ```
 
 ## Quick start
@@ -57,21 +57,33 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
-	"github.com/AndersonBargas/rainstorm/v6"
+	"github.com/malivvan/storm"
+	bolt "go.etcd.io/bbolt"
 )
 
 type User struct {
-	ID    int    `rainstorm:"id,increment"`
-	Name  string `rainstorm:"index"`
-	Email string `rainstorm:"unique"`
-	Age   int    `rainstorm:"index"`
+	ID    int    `storm:"id,increment"`
+	Name  string `storm:"index"`
+	Email string `storm:"unique"`
+	Age   int    `storm:"index"`
 }
 
 func main() {
 	ctx := context.Background()
 
-	db, err := rainstorm.Open(ctx, "my.db")
+	bDB, err := bolt.Open("my.db", 0600, &bolt.Options{Timeout: time.Second})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() {
+		if err := bDB.Close(); err != nil {
+			log.Println("close:", err)
+		}
+	}()
+
+	db, err := storm.Open(ctx, bDB, nil, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -99,16 +111,16 @@ func main() {
 
 ## Declaring models
 
-Rainstorm maps Go structs to BoltDB buckets. The struct name becomes the bucket name unless a `BucketNamer` implementation provides a custom name.
+Storm maps Go structs to BoltDB buckets. The struct name becomes the bucket name unless a `BucketNamer` implementation provides a custom name.
 
 ```go
 type User struct {
-	ID        int       `rainstorm:"id,increment"`
-	Group     string    `rainstorm:"index"`
-	Email     string    `rainstorm:"unique"`
+	ID        int       `storm:"id,increment"`
+	Group     string    `storm:"index"`
+	Email     string    `storm:"unique"`
 	Name      string
-	Age       int       `rainstorm:"index"`
-	CreatedAt time.Time `rainstorm:"index"`
+	Age       int       `storm:"index"`
+	CreatedAt time.Time `storm:"index"`
 }
 ```
 
@@ -120,15 +132,15 @@ Use the `inline` tag to flatten embedded structs. The container's bucket name is
 
 ```go
 type Base struct {
-	Ident string `rainstorm:"id"`
+	Ident string `storm:"id"`
 }
 
 type User struct {
-	Base      `rainstorm:"inline"`
-	Group     string `rainstorm:"index"`
-	Email     string `rainstorm:"unique"`
+	Base      `storm:"inline"`
+	Group     string `storm:"index"`
+	Email     string `storm:"unique"`
 	Name      string
-	CreatedAt time.Time `rainstorm:"index"`
+	CreatedAt time.Time `storm:"index"`
 }
 ```
 
@@ -142,7 +154,7 @@ type User struct {
 | `unique`     | Creates a unique index for the field. |
 | `inline`     | Flattens an embedded struct into the parent. |
 
-All tags belong to the `rainstorm` struct-tag namespace: `` `rainstorm:"id,increment"` ``.
+All tags belong to the `storm` struct-tag namespace: `` `storm:"id,increment"` ``.
 
 ## Custom bucket names
 
@@ -152,11 +164,11 @@ Structs can implement `BucketNamer` to provide a custom bucket name:
 
 ```go
 type User struct {
-	ID   int    `rainstorm:"id,increment"`
-	Name string `rainstorm:"index"`
+	ID   int    `storm:"id,increment"`
+	Name string `storm:"index"`
 }
 
-func (u User) RainstormBucketName() string {
+func (u User) StormBucketName() string {
 	return "customers"
 }
 ```
@@ -172,12 +184,12 @@ dynType := reflect.StructOf([]reflect.StructField{
 	{
 		Name: "ID",
 		Type: reflect.TypeOf(uint64(0)),
-		Tag:  reflect.StructTag(`rainstorm:"id,increment"`),
+		Tag:  reflect.StructTag(`storm:"id,increment"`),
 	},
 	{
 		Name: "Name",
 		Type: reflect.TypeOf(""),
-		Tag:  reflect.StructTag(`rainstorm:"index"`),
+		Tag:  reflect.StructTag(`storm:"index"`),
 	},
 })
 
@@ -192,28 +204,23 @@ Use the same reconstructed runtime type and explicit node path for subsequent re
 
 ## Opening a database
 
-### Owned database
-
-`Open` creates and owns the BoltDB database. `Close` shuts it down:
+`Open` wraps an already-open bbolt database:
 
 ```go
-db, err := rainstorm.Open(ctx, "my.db")
-if err != nil {
-	log.Fatal(err)
-}
-defer func() {
-	if err := db.Close(); err != nil {
-		log.Println("close:", err)
-	}
-}()
+func Open(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarshaler) (*DB, error)
 ```
 
-### Borrowed database
+The parameters are:
 
-Use `UseDB` to hand Rainstorm an already-open `*bbolt.DB`:
+- `db` — a caller-owned `*bolt.DB`. It must be non-nil and remain open while Storm is in use.
+- `root` — an optional root bucket key. Pass `nil` or an empty slice to operate from the database root.
+- `c` — the codec used for entities. Pass `nil` to use the default JSON codec.
+
+`Open` does not take ownership of `db`. `DB.Close()` releases the Storm wrapper but
+leaves the bbolt database open; the caller remains responsible for closing it.
 
 ```go
-bDB, err := bolt.Open("bolt.db", 0600, &bolt.Options{Timeout: 10 * time.Second})
+bDB, err := bolt.Open("my.db", 0600, &bolt.Options{Timeout: 10 * time.Second})
 if err != nil {
 	log.Fatal(err)
 }
@@ -223,28 +230,20 @@ defer func() {
 	}
 }()
 
-db, err := rainstorm.Open(ctx, "", rainstorm.UseDB(bDB))
+db, err := storm.Open(ctx, bDB, nil, nil)
 if err != nil {
 	log.Fatal(err)
 }
-// DB.Close is a no-op for the borrowed native database, but still check it.
 defer func() {
 	if err := db.Close(); err != nil {
-		log.Println("rainstorm close:", err)
+		log.Println("storm close:", err)
 	}
 }()
 ```
 
-`UseDB(nil)` is rejected with an error matching `ErrNilParam`.
-
-### Options
-
-`Open` accepts any number of `OpenOption` values:
-
-- `rainstorm.BoltOptions(mode, *bolt.Options)` — custom BoltDB file mode and options.
-- `rainstorm.Codec(codec)` — custom codec (default: JSON).
-- `rainstorm.Root("bucket", ...)` — set a root bucket prefix.
-- `rainstorm.UseDB(db)` — borrow an existing BoltDB connection.
+A nil `db` is rejected with an error matching `ErrNilParam`. Use `From` to
+operate below a root bucket or `WithCodec` to select a different codec for a
+node.
 
 ## CRUD operations
 
@@ -264,11 +263,11 @@ err := db.Save(ctx, &user)
 
 ```go
 type Product struct {
-	ID                 int    `rainstorm:"id,increment"`
+	ID                 int    `storm:"id,increment"`
 	Name               string
-	Count              uint64 `rainstorm:"increment"`
-	IndexedCount       uint32 `rainstorm:"index,increment"`
-	UniqueCount        int16  `rainstorm:"unique,increment=100"`
+	Count              uint64 `storm:"increment"`
+	IndexedCount       uint32 `storm:"index,increment"`
+	UniqueCount        int16  `storm:"unique,increment=100"`
 }
 
 p := Product{Name: "Widget"}
@@ -315,8 +314,8 @@ err = db.Prefix(ctx, "Name", "Jo", &users)
 Pagination is available via `FindOption`:
 
 ```go
-err := db.Find(ctx, "Group", "staff", &users, rainstorm.Limit(10), rainstorm.Skip(5))
-err = db.All(ctx, &users, rainstorm.Limit(10), rainstorm.Skip(5), rainstorm.Reverse())
+err := db.Find(ctx, "Group", "staff", &users, storm.Limit(10), storm.Skip(5))
+err = db.All(ctx, &users, storm.Limit(10), storm.Skip(5), storm.Reverse())
 ```
 
 ### Query API
@@ -324,7 +323,7 @@ err = db.All(ctx, &users, rainstorm.Limit(10), rainstorm.Skip(5), rainstorm.Reve
 For complex queries, use `Select` with matchers from the `q` package:
 
 ```go
-import "github.com/AndersonBargas/rainstorm/v6/q"
+import "github.com/malivvan/storm/q"
 
 // Matchers
 q.Eq("Name", "John")
@@ -401,12 +400,12 @@ err = db.ReIndex(ctx, &User{})
 
 ## Managed transactions
 
-Rainstorm v6 provides callback-managed transactions only. Manual `Begin`/`Commit`/`Rollback` APIs do not exist.
+Storm v6 provides callback-managed transactions only. Manual `Begin`/`Commit`/`Rollback` APIs do not exist.
 
 ### ReadTransaction
 
 ```go
-err := db.ReadTransaction(ctx, func(tx rainstorm.Node) error {
+err := db.ReadTransaction(ctx, func(tx storm.Node) error {
 	var u User
 	if err := tx.One(ctx, "ID", 1, &u); err != nil {
 		return err
@@ -419,7 +418,7 @@ err := db.ReadTransaction(ctx, func(tx rainstorm.Node) error {
 ### WriteTransaction
 
 ```go
-err := db.WriteTransaction(ctx, func(tx rainstorm.Node) error {
+err := db.WriteTransaction(ctx, func(tx storm.Node) error {
 	if err := tx.Save(ctx, &accountA); err != nil {
 		return err
 	}
@@ -442,8 +441,8 @@ err := db.WriteTransaction(ctx, func(tx rainstorm.Node) error {
 ### Attaching to a caller-owned transaction
 
 For units of work that must own their bbolt transaction (for example, to mix
-Rainstorm record/index operations with raw BoltDB bucket writes), use `Attach`
-to bind a Rainstorm facade to an existing transaction:
+Storm record/index operations with raw BoltDB bucket writes), use `Attach`
+to bind a Storm facade to an existing transaction:
 
 ```go
 tx, err := db.NativeDB().Begin(true)
@@ -452,12 +451,12 @@ if err != nil {
 }
 defer tx.Rollback()
 
-txn, err := db.Attach(tx) // rainstorm.Tx
+txn, err := db.Attach(tx) // storm.Tx
 if err != nil {
 	return err
 }
 
-// Rainstorm record write (record + indexes) in the caller's transaction…
+// Storm record write (record + indexes) in the caller's transaction…
 if err := txn.Save(ctx, &account); err != nil {
 	return err
 }
@@ -479,7 +478,7 @@ return tx.Commit()
 - `Tx` exposes the full `Node` surface (`Save`, `Update`, `One`, `Find`,
   `All`, queries, scans, KV access); descendants from `From`, `WithCodec`,
   `PrefixScan`, and `RangeScan` remain transaction-bound.
-- Rainstorm never commits, rolls back, closes, or replaces the supplied
+- Storm never commits, rolls back, closes, or replaces the supplied
   transaction, and it never opens a managed transaction for a bound `Tx`.
 - Reads and writes through the bound `Tx` use the supplied transaction:
   uncommitted writes are visible to reads through the same `Tx` and invisible
@@ -519,7 +518,7 @@ The `Bucket()` method returns the bucket path as a `[]string`. The `BucketScanne
 
 ## Key/value store
 
-Rainstorm can also be used as a simple key/value store:
+Storm can also be used as a simple key/value store:
 
 ```go
 // Store
@@ -545,7 +544,7 @@ err = db.Delete(ctx, "sessions", sessionID)
 
 Database open, CRUD, finder, query, scanner, KV, and managed-transaction paths accept `context.Context`; passing nil to those context-aware operations returns an error matching `ErrNilContext`. `Close` and `NativeDB` are lifecycle/escape-hatch exceptions.
 
-Cancellation is cooperative, not preemptive. Rainstorm checks the context at operation boundaries and loop checkpoints. It cannot interrupt:
+Cancellation is cooperative, not preemptive. Storm checks the context at operation boundaries and loop checkpoints. It cannot interrupt:
 
 - a filesystem syscall,
 - a bbolt mutex or lock wait,
@@ -563,7 +562,7 @@ Always use `errors.Is` for sentinel classification, never direct equality or str
 ```go
 var user User
 if err := db.One(ctx, "ID", 999, &user); err != nil {
-	if errors.Is(err, rainstorm.ErrNotFound) {
+	if errors.Is(err, storm.ErrNotFound) {
 		// handle missing record
 	}
 	if errors.Is(err, context.Canceled) {
@@ -577,10 +576,10 @@ if err := db.One(ctx, "ID", 999, &user); err != nil {
 Errors are wrapped with an operation label:
 
 ```
-rainstorm <operation>: <cause>
+storm <operation>: <cause>
 ```
 
-Wrapping preserves Rainstorm sentinels, `context.Canceled`, `context.DeadlineExceeded`, bbolt errors, callback errors, and codec errors in the error chain. Callers can match the innermost cause with `errors.Is` through the wrapper.
+Wrapping preserves Storm sentinels, `context.Canceled`, `context.DeadlineExceeded`, bbolt errors, callback errors, and codec errors in the error chain. Callers can match the innermost cause with `errors.Is` through the wrapper.
 
 ### Sentinels
 
@@ -606,23 +605,15 @@ Do not parse error strings. Use `errors.Is` (and `errors.As` if a typed error is
 
 ## Database lifecycle
 
-### Owned
+Storm always borrows the bbolt database supplied to `Open`:
 
-When `Open` is called without `UseDB`, Rainstorm owns the native database:
+- `Open` accepts an already-open `*bolt.DB`.
+- A nil database returns an error matching `ErrNilParam`.
+- Storm does not close the database.
+- `DB.Close()` returns nil and does not close the underlying database.
+- The caller owns the lifecycle and must keep the database open while Storm is active.
 
-- `Open` creates and opens the BoltDB file.
-- Initialization failure closes only the owned database.
-- `DB.Close()` closes the underlying BoltDB file.
-
-### Borrowed
-
-When `Open` is called with `UseDB`, Rainstorm borrows the database:
-
-- `UseDB` accepts an already-open `*bbolt.DB`.
-- `UseDB(nil)` returns an error matching `ErrNilParam`.
-- Rainstorm does not close a borrowed database.
-- `DB.Close()` returns nil for borrowed databases.
-- The caller owns the lifecycle and must keep it open while Rainstorm is active.
+Close the bbolt database after `DB.Close()` when it is no longer needed.
 
 ## Native BoltDB access
 
@@ -630,34 +621,32 @@ When `Open` is called with `UseDB`, Rainstorm borrows the database:
 
 **Warnings:**
 
-- Native operations bypass Rainstorm context checkpoints.
+- Native operations bypass Storm context checkpoints.
 - Native writes can bypass codecs, indexes, metadata, and invariants.
-- Rainstorm cannot guarantee index consistency or cancellation for native operations.
-- Callers must coordinate native and Rainstorm transactions internally.
-- Callers must not close the native database while Rainstorm is active.
+- Storm cannot guarantee index consistency or cancellation for native operations.
+- Callers must coordinate native and Storm transactions internally.
+- Callers must not close the native database while Storm is active.
 
-Normal application code should prefer the managed Rainstorm APIs.
+Normal application code should prefer the managed Storm APIs.
 
 ## Codecs
 
-Rainstorm marshals data to BoltDB using a codec. The default is JSON. Change the codec with the `Codec` option:
+Storm marshals data to BoltDB using a codec. The default is JSON. Pass a codec as
+the fourth argument to `Open`:
 
 ```go
-import "github.com/AndersonBargas/rainstorm/v6/codec/gob"
+import "github.com/malivvan/storm/codec/gob"
 
-db, err := rainstorm.Open(ctx, "my.db", rainstorm.Codec(gob.Codec))
+db, err := storm.Open(ctx, bDB, nil, gob.Codec)
 ```
 
 ### Built-in codecs
 
 | Package | Import path | Codec variable |
 |---------|-------------|----------------|
-| JSON (default) | `rainstorm/v6/codec/json` | `json.Codec` |
-| Gob | `rainstorm/v6/codec/gob` | `gob.Codec` |
-| MsgPack | `rainstorm/v6/codec/msgpack` | `msgpack.Codec` |
-| Sereal | `rainstorm/v6/codec/sereal` | `sereal.Codec` |
-| Protobuf | `rainstorm/v6/codec/protobuf` | `protobuf.Codec` |
-| AES | `rainstorm/v6/codec/aes` | `NewAES(subCodec, key)` |
+| JSON (default) | `storm/v6/codec/json` | `json.Codec` |
+| Gob | `storm/v6/codec/gob` | `gob.Codec` |
+| AES | `storm/v6/codec/aes` | `NewAES(subCodec, key)` |
 
 AES wraps another codec with AES-GCM encryption.
 
@@ -675,25 +664,22 @@ type MarshalUnmarshaler interface {
 
 ### Codec compatibility
 
-Rainstorm records codec metadata for record/KV leaf buckets and an encoded database-version value used during `Open`. An incompatible root codec is classified with `ErrDifferentCodec`; metadata-validating initialization and write operations also classify a mismatched node codec this way. Read paths may instead return the underlying decode error, so nodes configured with `WithCodec` must continue using their matching codec.
+Storm records codec metadata for record/KV leaf buckets and an encoded database-version value used during `Open`. An incompatible root codec is classified with `ErrDifferentCodec`; metadata-validating initialization and write operations also classify a mismatched node codec this way. Read paths may instead return the underlying decode error, so nodes configured with `WithCodec` must continue using their matching codec.
 
 ## Compatibility with v5
 
-Rainstorm v6 reads and mutates databases created by Rainstorm v5.3.0 without migration for the tested codecs:
+Storm v6 reads and mutates databases created by Storm v5.3.0 without migration for the tested codecs:
 
 | Codec | Fixture | Read | Mutate | Reopen |
 |-------|---------|------|--------|--------|
 | JSON (default) | baseline.db | ✓ | ✓ | ✓ |
 | Gob | gob.db | ✓ | ✓ | ✓ |
-| MsgPack | msgpack.db | ✓ | ✓ | ✓ |
-| Sereal | sereal.db | ✓ | ✓ | ✓ |
 | AES-JSON | aes.db | ✓ | ✓ | ✓ |
 
 IDs, ordinary indexes, unique indexes, nested buckets, KV operations, `BucketNamer`, and `reflect.StructOf` are all covered. Same-process v5→v6→v5→v6 roundtrip is verified.
 
 **Limitations:**
 
-- Protobuf fixtures are excluded because the existing generated type cannot carry the required indexed fixture schema, and a generic struct would fall back to JSON.
 - Process-isolated roundtrip testing is deferred.
 - Compatibility evidence is behavioural, not byte-level (raw bbolt bytes are not deterministic).
 
@@ -705,7 +691,7 @@ See [`docs/release-notes-v6.md`](docs/release-notes-v6.md) for the v6 release su
 
 ## Performance
 
-Rainstorm v6 adds context propagation, operation wrapping, managed transactions, and destination safety on top of v5's foundation. Measured paired workloads under equivalent configurations (Apple M4, darwin/arm64, default JSON codec, `NoSync`) show:
+Storm v6 adds context propagation, operation wrapping, managed transactions, and destination safety on top of v5's foundation. Measured paired workloads under equivalent configurations (Apple M4, darwin/arm64, default JSON codec, `NoSync`) show:
 
 - Point reads: approximately 2–3% higher ns/op.
 - Bulk reads: approximately 0.4–1.3% higher ns/op.

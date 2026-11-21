@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"fmt"
@@ -6,18 +6,18 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/AndersonBargas/rainstorm/v6/index"
+	"github.com/malivvan/storm/index"
 	bolt "go.etcd.io/bbolt"
 )
 
-// Rainstorm tags
+// Storm tags
 const (
 	tagID        = "id"
 	tagIdx       = "index"
 	tagUniqueIdx = "unique"
 	tagInline    = "inline"
 	tagIncrement = "increment"
-	indexPrefix  = "__rainstorm_index_"
+	indexPrefix  = "__storm_index_"
 )
 
 type fieldConfig struct {
@@ -44,7 +44,7 @@ type structConfig struct {
 // Otherwise the type's static name is used.
 func bucketName(data interface{}) string {
 	if bn, ok := data.(BucketNamer); ok {
-		return bn.RainstormBucketName()
+		return bn.StormBucketName()
 	}
 	return reflect.Indirect(reflect.ValueOf(data)).Type().Name()
 }
@@ -57,7 +57,7 @@ func bucketNameFromValue(v *reflect.Value) string {
 	}
 	if v.CanInterface() {
 		if bn, ok := v.Interface().(BucketNamer); ok {
-			return bn.RainstormBucketName()
+			return bn.StormBucketName()
 		}
 	}
 	return v.Type().Name()
@@ -119,7 +119,7 @@ func extractField(value *reflect.Value, field *reflect.StructField, m *structCon
 	var f *fieldConfig
 	var err error
 
-	tag := field.Tag.Get("rainstorm")
+	tag := field.Tag.Get("storm")
 	if tag != "" {
 		f = &fieldConfig{
 			Name:           field.Name,

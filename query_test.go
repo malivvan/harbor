@@ -1,17 +1,17 @@
-package rainstorm
+package storm
 
 import (
 	"context"
 	"fmt"
 	"testing"
 
-	"github.com/AndersonBargas/rainstorm/v6/codec/json"
-	"github.com/AndersonBargas/rainstorm/v6/q"
+	"github.com/malivvan/storm/codec/json"
+	"github.com/malivvan/storm/q"
 	"github.com/stretchr/testify/require"
 )
 
 type Score struct {
-	ID    int `rainstorm:"increment"`
+	ID    int `storm:"increment"`
 	Value int
 }
 
@@ -220,7 +220,7 @@ func TestSelectFindOrderBy(t *testing.T) {
 	ctx := context.Background()
 
 	type T struct {
-		ID  int `rainstorm:"increment"`
+		ID  int `storm:"increment"`
 		Str string
 		Int int
 		Rnd int
@@ -375,7 +375,7 @@ func TestSelectFirstOrderBy(t *testing.T) {
 	ctx := context.Background()
 
 	type T struct {
-		ID  int `rainstorm:"increment"`
+		ID  int `storm:"increment"`
 		Str string
 		Int int
 	}
@@ -514,7 +514,7 @@ func TestSelectCount(t *testing.T) {
 }
 
 func TestSelectRaw(t *testing.T) {
-	db, cleanup := createDB(t, Codec(json.Codec))
+	db, cleanup := createDB(t, testCodec(json.Codec))
 	defer cleanup()
 
 	ctx := context.Background()
@@ -544,7 +544,7 @@ func TestSelectRaw(t *testing.T) {
 }
 
 func TestSelectEach(t *testing.T) {
-	db, cleanup := createDB(t, Codec(json.Codec))
+	db, cleanup := createDB(t, testCodec(json.Codec))
 	defer cleanup()
 
 	ctx := context.Background()

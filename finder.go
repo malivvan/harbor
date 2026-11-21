@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/AndersonBargas/rainstorm/v6/index"
-	"github.com/AndersonBargas/rainstorm/v6/q"
+	"github.com/malivvan/storm/index"
+	"github.com/malivvan/storm/q"
 	bolt "go.etcd.io/bbolt"
 )
 
-// Finder retrieves records from Rainstorm buckets.
+// Finder retrieves records from Storm buckets.
 type Finder interface {
 	// One returns one record by the specified index
 	One(ctx context.Context, fieldName string, value any, to any) error

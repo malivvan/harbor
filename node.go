@@ -1,19 +1,19 @@
-package rainstorm
+package storm
 
 import (
 	"context"
 
-	"github.com/AndersonBargas/rainstorm/v6/codec"
+	"github.com/malivvan/storm/codec"
 	bolt "go.etcd.io/bbolt"
 )
 
-// Node exposes Rainstorm operations relative to a bbolt bucket path.
+// Node exposes Storm operations relative to a bbolt bucket path.
 type Node interface {
 	TypeStore
 	KeyValueStore
 	BucketScanner
 
-	// From returns a new Rainstorm node with a new bucket root below the current.
+	// From returns a new Storm node with a new bucket root below the current.
 	// All DB operations on the new node will be executed relative to this bucket.
 	From(addend ...string) Node
 
@@ -57,7 +57,7 @@ func cloneBucketPath(path []string) []string {
 	return cloned
 }
 
-// From returns a new Rainstorm Node with a new bucket root below the current.
+// From returns a new Storm Node with a new bucket root below the current.
 // All DB operations on the new node will be executed relative to this bucket.
 func (n node) From(addend ...string) Node {
 	path := make([]string, 0, len(n.rootBucket)+len(addend))
@@ -67,13 +67,13 @@ func (n node) From(addend ...string) Node {
 	return &n
 }
 
-// withTransaction returns a new Rainstorm Node that will use the given transaction.
+// withTransaction returns a new Storm Node that will use the given transaction.
 func (n node) withTransaction(tx *bolt.Tx) *node {
 	n.tx = tx
 	return &n
 }
 
-// WithCodec returns a new Rainstorm Node that will use the given Codec.
+// WithCodec returns a new Storm Node that will use the given Codec.
 func (n node) WithCodec(codec codec.MarshalUnmarshaler) Node {
 	n.codec = codec
 	return &n
@@ -85,7 +85,7 @@ func (n *node) Bucket() []string {
 	return cloneBucketPath(n.rootBucket)
 }
 
-// Codec returns the EncodeDecoder used by this instance of Rainstorm
+// Codec returns the EncodeDecoder used by this instance of Storm
 func (n *node) Codec() codec.MarshalUnmarshaler {
 	return n.codec
 }

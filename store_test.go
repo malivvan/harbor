@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AndersonBargas/rainstorm/v6/codec/gob"
-	"github.com/AndersonBargas/rainstorm/v6/codec/json"
-	"github.com/AndersonBargas/rainstorm/v6/q"
+	"github.com/malivvan/storm/codec/gob"
+	"github.com/malivvan/storm/codec/json"
+	"github.com/malivvan/storm/q"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -70,8 +70,8 @@ func TestReIndex(t *testing.T) {
 	for i := 1; i < 10; i++ {
 		type User struct {
 			ID   int
-			Age  int    `rainstorm:"index"`
-			Name string `rainstorm:"unique"`
+			Age  int    `storm:"index"`
+			Name string `storm:"unique"`
 		}
 
 		u := User{
@@ -95,8 +95,8 @@ func TestReIndex(t *testing.T) {
 	type User struct {
 		ID    int
 		Age   int
-		Name  string `rainstorm:"index"`
-		Group string `rainstorm:"unique"`
+		Name  string `storm:"index"`
+		Group string `storm:"unique"`
 	}
 
 	require.NoError(t, db.ReIndex(ctx, new(User)))
@@ -336,9 +336,9 @@ func TestSaveIncrement(t *testing.T) {
 	ctx := context.Background()
 
 	type User struct {
-		Identifier int    `rainstorm:"id,increment"`
-		Name       string `rainstorm:"index,increment"`
-		Age        int    `rainstorm:"unique,increment=18"`
+		Identifier int    `storm:"id,increment"`
+		Name       string `storm:"index,increment"`
+		Age        int    `storm:"unique,increment=18"`
 	}
 
 	for i := 1; i < 10; i++ {
@@ -403,16 +403,16 @@ func TestSaveEmbedded(t *testing.T) {
 	ctx := context.Background()
 
 	type Base struct {
-		ID int `rainstorm:"id,increment"`
+		ID int `storm:"id,increment"`
 	}
 
 	type User struct {
-		Base      `rainstorm:"inline"`
-		Group     string `rainstorm:"index"`
-		Email     string `rainstorm:"unique"`
+		Base      `storm:"inline"`
+		Group     string `storm:"index"`
+		Email     string `storm:"unique"`
 		Name      string
 		Age       int
-		CreatedAt time.Time `rainstorm:"index"`
+		CreatedAt time.Time `storm:"index"`
 	}
 
 	user := User{
@@ -494,12 +494,12 @@ func TestUpdate(t *testing.T) {
 	ctx := context.Background()
 
 	type User struct {
-		ID          int       `rainstorm:"id,increment"`
-		Name        string    `rainstorm:"index"`
-		Age         uint64    `rainstorm:"index,increment"`
-		DateOfBirth time.Time `rainstorm:"index"`
+		ID          int       `storm:"id,increment"`
+		Name        string    `storm:"index"`
+		Age         uint64    `storm:"index,increment"`
+		DateOfBirth time.Time `storm:"index"`
 		Group       string
-		Slug        string `rainstorm:"unique"`
+		Slug        string `storm:"unique"`
 	}
 
 	var u User
@@ -549,12 +549,12 @@ func TestUpdateField(t *testing.T) {
 	ctx := context.Background()
 
 	type User struct {
-		ID          int       `rainstorm:"id,increment"`
-		Name        string    `rainstorm:"index"`
-		Age         uint64    `rainstorm:"index,increment"`
-		DateOfBirth time.Time `rainstorm:"index"`
+		ID          int       `storm:"id,increment"`
+		Name        string    `storm:"index"`
+		Age         uint64    `storm:"index,increment"`
+		DateOfBirth time.Time `storm:"index"`
 		Group       string
-		Slug        string `rainstorm:"unique"`
+		Slug        string `storm:"unique"`
 	}
 
 	var u User

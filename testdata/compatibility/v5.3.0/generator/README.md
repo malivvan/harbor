@@ -1,11 +1,11 @@
 # v5.3.0 baseline fixture generator
 
-This generator creates `../baseline.db` — the canonical Rainstorm v5.3.0
+This generator creates `../baseline.db` — the canonical Storm v5.3.0
 compatibility fixture used by the v6 compatibility test suite.
 
 ## Source
 
-- Module: `github.com/AndersonBargas/rainstorm/v5`
+- Module: `github.com/malivvan/storm`
 - Version: `v5.3.0` (tag `b98ebe5`)
 
 ## Generation command

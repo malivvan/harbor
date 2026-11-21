@@ -1,11 +1,11 @@
-# Rainstorm v5.3.0 vs v6 Cross-Major Benchmark Comparison
+# Storm v5.3.0 vs v6 Cross-Major Benchmark Comparison
 
 ## 1. Commits Compared
 
 | Version   | Identifier                                                                 |
 |-----------|----------------------------------------------------------------------------|
-| v5.3.0    | `github.com/AndersonBargas/rainstorm/v5` v5.3.0                            |
-| v6 (local)| `github.com/AndersonBargas/rainstorm/v6` HEAD `4860c35` (ancestry of v5.3.0) |
+| v5.3.0    | `github.com/malivvan/storm` v5.3.0                            |
+| v6 (local)| `github.com/malivvan/storm` HEAD `4860c35` (ancestry of v5.3.0) |
 
 ## 2. Environment
 
@@ -48,9 +48,9 @@ All benchmarks use `BenchmarkRecord` with the default JSON codec:
 
 ```go
 type BenchmarkRecord struct {
-    ID       uint64 `rainstorm:"id,increment"`
-    Key      string `rainstorm:"unique"`
-    Category string `rainstorm:"index"`
+    ID       uint64 `storm:"id,increment"`
+    Key      string `storm:"unique"`
+    Category string `storm:"index"`
     Name     string
     Revision int
     Payload  string  // 100 deterministic bytes
@@ -91,7 +91,7 @@ type BenchmarkRecord struct {
 
 For Save, a fresh struct with a unique key (`fmt.Sprintf("save-%d", i)`) is created
 inside the timed loop. The `fmt.Sprintf` overhead is identically included in both v5
-and v6. Each iteration resets `ID` to zero so Rainstorm assigns a new increment ID.
+and v6. Each iteration resets `ID` to zero so Storm assigns a new increment ID.
 
 For Update, the target record's `Revision` alternates between the non-zero values 1001
 and 1002 so every iteration performs a real persisted update. A postflight lookup verifies

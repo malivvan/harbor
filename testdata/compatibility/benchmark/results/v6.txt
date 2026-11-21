@@ -1,6 +1,6 @@
 goos: darwin
 goarch: arm64
-pkg: github.com/AndersonBargas/rainstorm/testdata/compatibility/benchmark
+pkg: github.com/malivvan/storm/testdata/compatibility/benchmark
 cpu: Apple M4
 BenchmarkV6/OneByID/100-10         	  319352	      1826 ns/op	    1784 B/op	      32 allocs/op
 BenchmarkV6/OneByID/100-10         	  328386	      1818 ns/op	    1784 B/op	      32 allocs/op
@@ -78,4 +78,4 @@ BenchmarkV6/KVSet-10               	   61716	      9310 ns/op	   19395 B/op	    
 BenchmarkV6/KVSet-10               	   63985	      9472 ns/op	   19399 B/op	      62 allocs/op
 BenchmarkV6/KVSet-10               	   64338	      9443 ns/op	   19397 B/op	      62 allocs/op
 PASS
-ok  	github.com/AndersonBargas/rainstorm/testdata/compatibility/benchmark	64.477s
+ok  	github.com/malivvan/storm/testdata/compatibility/benchmark	64.477s

@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"bytes"
@@ -6,8 +6,8 @@ import (
 	"errors"
 	"reflect"
 
-	"github.com/AndersonBargas/rainstorm/v6/index"
-	"github.com/AndersonBargas/rainstorm/v6/q"
+	"github.com/malivvan/storm/index"
+	"github.com/malivvan/storm/q"
 	bolt "go.etcd.io/bbolt"
 )
 

@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 // Version is the legacy metadata marker written to newly initialized databases.
 // It is distinct from the Go module version; compatibility is established by

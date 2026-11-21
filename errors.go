@@ -1,10 +1,10 @@
-package rainstorm
+package storm
 
 import (
 	"errors"
 	"fmt"
 
-	"github.com/AndersonBargas/rainstorm/v6/index"
+	"github.com/malivvan/storm/index"
 )
 
 // Errors
@@ -65,5 +65,5 @@ func wrapError(operation string, err error) error {
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("rainstorm %s: %w", operation, err)
+	return fmt.Errorf("storm %s: %w", operation, err)
 }

@@ -3,19 +3,33 @@ package roundtrip
 import (
 	"context"
 	"testing"
+	"time"
 
-	rainstormv5 "github.com/AndersonBargas/rainstorm/v5"
-	rainstormv6 "github.com/AndersonBargas/rainstorm/v6"
+	stormv5 "github.com/malivvan/storm"
+	stormv6 "github.com/malivvan/storm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	bolt "go.etcd.io/bbolt"
 )
+
+// openV6 opens a NoSync-compatible bbolt database and wraps it with Storm v6.
+func openV6(t *testing.T, ctx context.Context, path string) *stormv6.DB {
+	t.Helper()
+	bdb, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
+	require.NoError(t, err, "open bbolt")
+	t.Cleanup(func() { _ = bdb.Close() })
+	db, err := stormv6.Open(ctx, bdb, nil, nil)
+	require.NoError(t, err, "open storm v6")
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
 
 // RoundtripRecord is the shared schema for the roundtrip test.
 // It uses the v5.3.0 tag syntax which is compatible with both versions.
 type RoundtripRecord struct {
-	ID       uint64 `rainstorm:"id,increment"`
-	Key      string `rainstorm:"unique"`
-	Category string `rainstorm:"index"`
+	ID       uint64 `storm:"id,increment"`
+	Key      string `storm:"unique"`
+	Category string `storm:"index"`
 	Name     string
 	Revision int
 }
@@ -33,7 +47,7 @@ func TestRoundtrip_Bidirectional(t *testing.T) {
 	// Phase 1: v5 creates the database with default JSON codec.
 	// ------------------------------------------------------------------
 	t.Run("Phase1_v5Create", func(t *testing.T) {
-		db, err := rainstormv5.Open(dbPath)
+		db, err := stormv5.Open(dbPath)
 		require.NoError(t, err, "v5 open")
 
 		// Three root records: IDs 1, 2, 3.
@@ -72,8 +86,7 @@ func TestRoundtrip_Bidirectional(t *testing.T) {
 	// Phase 2: v6 reads and mutates.
 	// ------------------------------------------------------------------
 	t.Run("Phase2_v6Mutate", func(t *testing.T) {
-		db, err := rainstormv6.Open(ctx, dbPath)
-		require.NoError(t, err, "v6 open")
+		db := openV6(t, ctx, dbPath)
 		defer func() { require.NoError(t, db.Close(), "v6 close") }()
 
 		var all []RoundtripRecord
@@ -158,11 +171,11 @@ func TestRoundtrip_Bidirectional(t *testing.T) {
 		require.NoError(t, err, "v6 delete beta")
 
 		err = db.One(ctx, "Key", "beta", &RoundtripRecord{})
-		require.ErrorIs(t, err, rainstormv6.ErrNotFound, "v6: beta deleted")
+		require.ErrorIs(t, err, stormv6.ErrNotFound, "v6: beta deleted")
 
 		var sharedEmpty []RoundtripRecord
 		err = db.Find(ctx, "Category", "shared", &sharedEmpty)
-		require.ErrorIs(t, err, rainstormv6.ErrNotFound, "v6: shared should be empty")
+		require.ErrorIs(t, err, stormv6.ErrNotFound, "v6: shared should be empty")
 
 		// 3. Reuse Key "beta" in a replacement (ID = 4).
 		replacement := RoundtripRecord{
@@ -201,7 +214,7 @@ func TestRoundtrip_Bidirectional(t *testing.T) {
 	// Phase 3: v5 reopens and verifies.
 	// ------------------------------------------------------------------
 	t.Run("Phase3_v5Reopen", func(t *testing.T) {
-		db, err := rainstormv5.Open(dbPath)
+		db, err := stormv5.Open(dbPath)
 		require.NoError(t, err, "v5 reopen")
 		defer func() { require.NoError(t, db.Close(), "v5 close after reopen") }()
 
@@ -253,7 +266,7 @@ func TestRoundtrip_Bidirectional(t *testing.T) {
 		// Old index "shared" is empty.
 		var shared []RoundtripRecord
 		err = db.Find("Category", "shared", &shared)
-		require.ErrorIs(t, err, rainstormv5.ErrNotFound, "v5: shared should be empty")
+		require.ErrorIs(t, err, stormv5.ErrNotFound, "v5: shared should be empty")
 		require.Empty(t, shared)
 
 		// "migrated" contains alpha.
@@ -280,7 +293,7 @@ func TestRoundtrip_Bidirectional(t *testing.T) {
 
 		// Old beta (ID 2) deleted — lookup by ID must fail.
 		err = db.One("ID", uint64(2), &RoundtripRecord{})
-		require.ErrorIs(t, err, rainstormv5.ErrNotFound, "v5: old beta ID 2 deleted")
+		require.ErrorIs(t, err, stormv5.ErrNotFound, "v5: old beta ID 2 deleted")
 
 		// Gamma unchanged.
 		var gamma RoundtripRecord
@@ -320,8 +333,7 @@ func TestRoundtrip_Bidirectional(t *testing.T) {
 	// Phase 4: v6 final reopen, verify v5's final write.
 	// ------------------------------------------------------------------
 	t.Run("Phase4_v6FinalReopen", func(t *testing.T) {
-		db, err := rainstormv6.Open(ctx, dbPath)
-		require.NoError(t, err, "v6 final reopen")
+		db := openV6(t, ctx, dbPath)
 		defer func() { require.NoError(t, db.Close(), "v6 final close") }()
 
 		// All must equal exact IDs 1, 3, 4, 5, 6 and exact Keys.

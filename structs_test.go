@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"io"
@@ -19,7 +19,7 @@ type ClassicNoTags struct {
 
 type ClassicBadTags struct {
 	ID          string
-	PublicField int `rainstorm:"mrots"`
+	PublicField int `storm:"mrots"`
 	//lint:ignore U1000 Private fields are deliberate reflection fixtures.
 	privateField string
 	Date         time.Time
@@ -32,49 +32,49 @@ type ClassicBadTags struct {
 
 type ClassicUnique struct {
 	ID          string
-	PublicField int `rainstorm:"unique"`
+	PublicField int `storm:"unique"`
 	//lint:ignore U1000 Private tagged fields verify reflection visibility rules.
-	privateField string `rainstorm:"unique"`
+	privateField string `storm:"unique"`
 	//lint:ignore U1000 Private tagged fields verify reflection visibility rules.
-	privateField2 string    `rainstorm:"unique"`
-	Date          time.Time `rainstorm:"unique"`
+	privateField2 string    `storm:"unique"`
+	Date          time.Time `storm:"unique"`
 	InlineStruct  struct {
 		A float32
 		B float64
-	} `rainstorm:"unique"`
-	Interf io.Writer `rainstorm:"unique"`
+	} `storm:"unique"`
+	Interf io.Writer `storm:"unique"`
 }
 
 type ClassicIndex struct {
 	ID          string
-	PublicField int `rainstorm:"index"`
+	PublicField int `storm:"index"`
 	//lint:ignore U1000 Private tagged fields verify reflection visibility rules.
-	privateField string    `rainstorm:"index"`
-	Date         time.Time `rainstorm:"index"`
+	privateField string    `storm:"index"`
+	Date         time.Time `storm:"index"`
 	InlineStruct struct {
 		a float32
 		B float64
-	} `rainstorm:"index"`
-	InlineStructPtr *UserWithNoID `rainstorm:"index"`
-	Interf          io.Writer     `rainstorm:"index"`
+	} `storm:"index"`
+	InlineStructPtr *UserWithNoID `storm:"index"`
+	Interf          io.Writer     `storm:"index"`
 }
 
 type ClassicInline struct {
-	PublicField  int `rainstorm:"unique"`
-	ClassicIndex `rainstorm:"inline"`
-	*ToEmbed     `rainstorm:"inline"`
-	Date         time.Time `rainstorm:"unique"`
+	PublicField  int `storm:"unique"`
+	ClassicIndex `storm:"inline"`
+	*ToEmbed     `storm:"inline"`
+	Date         time.Time `storm:"unique"`
 }
 
 type User struct {
-	ID          int       `rainstorm:"id,increment"`
-	Name        string    `rainstorm:"index"`
-	Age         int       `rainstorm:"index,increment"`
-	DateOfBirth time.Time `rainstorm:"index"`
+	ID          int       `storm:"id,increment"`
+	Name        string    `storm:"index"`
+	Age         int       `storm:"index,increment"`
+	DateOfBirth time.Time `storm:"index"`
 	Group       string
 	//lint:ignore U1000 Private fields are deliberate reflection fixtures.
 	unexportedField int
-	Slug            string `rainstorm:"unique"`
+	Slug            string `storm:"unique"`
 }
 
 type ToEmbed struct {
@@ -82,12 +82,12 @@ type ToEmbed struct {
 }
 
 type NestedID struct {
-	ToEmbed `rainstorm:"inline"`
+	ToEmbed `storm:"inline"`
 	Name    string
 }
 
 type SimpleUser struct {
-	ID   int `rainstorm:"id"`
+	ID   int `storm:"id"`
 	Name string
 	age  int
 }
@@ -112,32 +112,32 @@ type UserWithStringIDField struct {
 }
 
 type UserWithEmbeddedIDField struct {
-	UserWithIDField `rainstorm:"inline"`
+	UserWithIDField `storm:"inline"`
 	Age             int
 }
 
 type UserWithEmbeddedField struct {
-	UserWithNoID `rainstorm:"inline"`
+	UserWithNoID `storm:"inline"`
 	ID           uint64
 }
 
 type UserWithIncrementField struct {
 	ID   int
 	Name string
-	Age  int `rainstorm:"unique,increment"`
+	Age  int `storm:"unique,increment"`
 }
 
 type IndexedNameUser struct {
-	ID          int    `rainstorm:"id"`
-	Name        string `rainstorm:"index"`
-	Score       int    `rainstorm:"index,increment"`
+	ID          int    `storm:"id"`
+	Name        string `storm:"index"`
+	Score       int    `storm:"index,increment"`
 	age         int
-	DateOfBirth time.Time `rainstorm:"index"`
+	DateOfBirth time.Time `storm:"index"`
 	Group       string
 }
 
 type UniqueNameUser struct {
-	ID   int    `rainstorm:"id"`
-	Name string `rainstorm:"unique"`
-	Age  int    `rainstorm:"index,increment"`
+	ID   int    `storm:"id"`
+	Name string `storm:"unique"`
+	Age  int    `storm:"index,increment"`
 }

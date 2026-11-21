@@ -1,10 +1,10 @@
-# Rainstorm v6.1.1 Release Notes
+# Storm v6.1.1 Release Notes
 
-> **Release date:** 2026-09-06 · **Tag:** `v6.1.1` · **Module:** `github.com/AndersonBargas/rainstorm/v6`
+> **Release date:** 2026-09-06 · **Tag:** `v6.1.1` · **Module:** `github.com/malivvan/storm`
 
 ## 1. Summary
 
-Rainstorm v6.1.1 is a patch release with no public API changes. It updates the
+Storm v6.1.1 is a patch release with no public API changes. It updates the
 test-only dependency `github.com/stretchr/testify` from `v1.11.1` to `v1.12.1`
 (Dependabot go-deps group) and keeps the nested compatibility fixtures under
 `testdata/compatibility` in sync so the tidy/diff CI gates stay green.
@@ -18,7 +18,7 @@ test-only dependency `github.com/stretchr/testify` from `v1.11.1` to `v1.12.1`
 ## 3. Upgrade
 
 ```sh
-go get github.com/AndersonBargas/rainstorm/v6@v6.1.1
+go get github.com/malivvan/storm@v6.1.1
 go mod tidy
 ```
 

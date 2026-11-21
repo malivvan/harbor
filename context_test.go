@@ -1,14 +1,13 @@
-package rainstorm
+package storm
 
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/AndersonBargas/rainstorm/v6/codec/gob"
+	"github.com/malivvan/storm/codec/gob"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -32,63 +31,33 @@ func timedOutCtx() context.Context {
 // 16.1 Open
 // ============================================================================
 
-func TestOpen_CancelledContextDoesNotOpenDatabase(t *testing.T) {
-	dir, err := os.MkdirTemp(os.TempDir(), "rainstorm")
+func TestOpen_CancelledContextDoesNotInitializeDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "storm.db")
+
+	bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer bDB.Close()
 
-	path := filepath.Join(dir, "rainstorm.db")
-
-	db, err := Open(canceledCtx(), path)
+	db, err := Open(canceledCtx(), bDB, nil, nil)
 	require.Error(t, err)
 	require.Nil(t, db)
 	require.True(t, errors.Is(err, context.Canceled))
 
-	// The database file must not have been opened.
-	_, statErr := os.Stat(path)
-	require.True(t, os.IsNotExist(statErr), "database file should not exist after canceled Open")
-}
-
-func TestOpen_CancelledAfterOpenClosesOwnedDatabase(t *testing.T) {
-	dir, err := os.MkdirTemp(os.TempDir(), "rainstorm")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	path := filepath.Join(dir, "rainstorm.db")
-
-	// Use the deterministic post-open test seam. The hook cancels the context
-	// immediately after Rainstorm has opened the owned bolt.DB but before the
-	// post-open context check and version initialization. No time.Sleep.
-	ctx, cancel := context.WithCancel(context.Background())
-	cancelAfterOpen := OpenOption(func(opts *Options) error {
-		opts.postOpenHook = func(_ context.Context) {
-			cancel()
-		}
+	// No initialization work must have been performed.
+	err = bDB.View(func(tx *bolt.Tx) error {
+		require.Nil(t, tx.Bucket([]byte(dbinfo)))
 		return nil
 	})
-
-	db, err := Open(ctx, path, cancelAfterOpen)
-	require.Error(t, err)
-	require.Nil(t, db)
-	require.True(t, errors.Is(err, context.Canceled))
-
-	// The owned bolt.DB must have been closed so that the data file is no longer
-	// exclusively held. We can reopen it from scratch.
-	db2, err := Open(context.Background(), path)
 	require.NoError(t, err)
-	require.NotNil(t, db2)
-	require.NoError(t, db2.Close())
 }
 
 func TestOpen_InitializationErrorDoesNotCloseBorrowedDatabase(t *testing.T) {
-	dir, err := os.MkdirTemp(os.TempDir(), "rainstorm")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	bDBPath := filepath.Join(dir, "borrowed.db")
 
 	// Step 1: use a non-default codec (gob) to open the borrowed DB so that the
-	// __rainstorm_db metadata records gob as the codec.
+	// __storm_db metadata records gob as the codec.
 	bDB, err := bolt.Open(bDBPath, 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
 
@@ -110,17 +79,17 @@ func TestOpen_InitializationErrorDoesNotCloseBorrowedDatabase(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Step 2: hand the borrowed DB to Rainstorm with the default (json) codec.
-	// checkVersion will call Set on __rainstorm_db, which builds the data
+	// Step 2: hand the borrowed DB to Storm with the default (json) codec.
+	// checkVersion will call Set on __storm_db, which builds the data
 	// bucket via setBytes -> newMeta, and newMeta will compare codec names and
 	// return ErrDifferentCodec. That is our deterministic initialization error.
-	db, err := Open(context.Background(), "", UseDB(bDB))
+	db, err := Open(context.Background(), bDB, nil, nil)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrDifferentCodec), "expected ErrDifferentCodec, got %v", err)
 	require.Nil(t, db)
 
-	// The borrowed bolt.DB must NOT have been closed by Rainstorm. We confirm
-	// by performing a fresh close on bDB directly: if Rainstorm had closed it,
+	// The borrowed bolt.DB must NOT have been closed by Storm. We confirm
+	// by performing a fresh close on bDB directly: if Storm had closed it,
 	// this would fail with "database not open".
 	require.NoError(t, bDB.Close())
 

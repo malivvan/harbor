@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"reflect"
@@ -78,12 +78,12 @@ func TestExtractInlineWithIndex(t *testing.T) {
 
 func TestExtractMultipleTags(t *testing.T) {
 	type User struct {
-		ID  uint64 `rainstorm:"id,increment"`
-		Age uint16 `rainstorm:"index,increment"`
+		ID  uint64 `storm:"id,increment"`
+		Age uint16 `storm:"index,increment"`
 		//lint:ignore U1000 This private tagged field verifies that extraction ignores inaccessible fields.
-		unexportedField int32  `rainstorm:"index,increment"`
-		X               uint32 `rainstorm:"unique,increment=100"`
-		Y               int8   `rainstorm:"index,increment=-100"`
+		unexportedField int32  `storm:"index,increment"`
+		X               uint32 `storm:"unique,increment=100"`
+		Y               int8   `storm:"index,increment=-100"`
 	}
 
 	s := User{}
@@ -122,7 +122,7 @@ func TestExtractMultipleTags(t *testing.T) {
 	require.NotNil(t, infos.Fields["Y"].Value)
 
 	type NoInt struct {
-		ID uint64 `rainstorm:"id,increment=hello"`
+		ID uint64 `storm:"id,increment=hello"`
 	}
 
 	var n NoInt
@@ -131,7 +131,7 @@ func TestExtractMultipleTags(t *testing.T) {
 	require.Error(t, err)
 
 	type BadSuffix struct {
-		ID uint64 `rainstorm:"id,incrementag=100"`
+		ID uint64 `storm:"id,incrementag=100"`
 	}
 
 	var b BadSuffix

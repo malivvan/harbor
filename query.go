@@ -1,10 +1,10 @@
-package rainstorm
+package storm
 
 import (
 	"context"
 
-	"github.com/AndersonBargas/rainstorm/v6/internal"
-	"github.com/AndersonBargas/rainstorm/v6/q"
+	"github.com/malivvan/storm/internal"
+	"github.com/malivvan/storm/q"
 	bolt "go.etcd.io/bbolt"
 )
 

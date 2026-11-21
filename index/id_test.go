@@ -6,30 +6,30 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/AndersonBargas/rainstorm/v6"
-	"github.com/AndersonBargas/rainstorm/v6/index"
-	"github.com/AndersonBargas/rainstorm/v6/q"
+	"github.com/malivvan/storm"
+	"github.com/malivvan/storm/index"
+	"github.com/malivvan/storm/q"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
 
 // SimpleLogin represents a simple login model
 type SimpleLogin struct {
-	Email    string `rainstorm:"id"`
+	Email    string `storm:"id"`
 	Password string
 }
 
 // SimpleProduct represents a simple product model
 type SimpleProduct struct {
-	Barcode     int `rainstorm:"id,increment"`
+	Barcode     int `storm:"id,increment"`
 	Description string
 }
 
 func TestIDIndex(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
-	db, _ := rainstorm.Open(ctx, filepath.Join(dir, "rainstorm.db"))
+	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
 	err := db.Init(ctx, &SimpleLogin{})
@@ -63,10 +63,10 @@ func TestIDIndex(t *testing.T) {
 }
 
 func TestIDIndexPrefix(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
-	db, _ := rainstorm.Open(ctx, filepath.Join(dir, "rainstorm.db"))
+	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
 	err := db.Init(ctx, &SimpleLogin{})
@@ -104,7 +104,7 @@ func TestIDIndexPrefix(t *testing.T) {
 	}
 	err = db.Prefix(ctx, "Email", "uni", &simpleLogins, setZeroedLimit)
 	require.Error(t, err)
-	require.ErrorIs(t, err, rainstorm.ErrNotFound)
+	require.ErrorIs(t, err, storm.ErrNotFound)
 
 	setLimit := func(opt *index.Options) {
 		opt.Limit = 1
@@ -114,10 +114,10 @@ func TestIDIndexPrefix(t *testing.T) {
 }
 
 func TestIDIndexRange(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
-	db, _ := rainstorm.Open(ctx, filepath.Join(dir, "rainstorm.db"))
+	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
 	err := db.Init(ctx, &SimpleProduct{})
@@ -150,7 +150,7 @@ func TestIDIndexRange(t *testing.T) {
 
 	err = db.Range(ctx, "Barcode", 5, 8, &simpleProducts, setZeroedLimit)
 	require.Error(t, err)
-	require.ErrorIs(t, err, rainstorm.ErrNotFound)
+	require.ErrorIs(t, err, storm.ErrNotFound)
 
 	setLimit := func(opt *index.Options) {
 		opt.Limit = 1
@@ -162,10 +162,10 @@ func TestIDIndexRange(t *testing.T) {
 }
 
 func TestIDIndexParams(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
-	db, _ := rainstorm.Open(ctx, filepath.Join(dir, "rainstorm.db"))
+	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
 	err := db.NativeDB().Update(func(tx *bolt.Tx) error {
@@ -202,10 +202,11 @@ func TestIDIndexParams(t *testing.T) {
 }
 
 /*func TestIDIndex(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
-	db, _ := rainstorm.Open(ctx, filepath.Join(dir, "rainstorm.db"))
+	bDB, _ := bolt.Open(filepath.Join(dir, "storm.db"), 0600, nil)
+	db, _ := storm.Open(ctx, bDB, nil, nil)
 	defer db.Close()
 
 	err := db.NativeDB().Update(func(tx *bolt.Tx) error {
@@ -308,10 +309,10 @@ func TestIDIndexParams(t *testing.T) {
 }
 
 func TestIDIndexRange(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
-	db, _ := rainstorm.Open(ctx, filepath.Join(dir, "rainstorm.db"))
+	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
 	db.NativeDB().Update(func(tx *bolt.Tx) error {
@@ -381,10 +382,10 @@ func TestIDIndexRange(t *testing.T) {
 }
 
 func TestIDIndexPrefix(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
-	db, _ := rainstorm.Open(ctx, filepath.Join(dir, "rainstorm.db"))
+	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
 	db.NativeDB().Update(func(tx *bolt.Tx) error {

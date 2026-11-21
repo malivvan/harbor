@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -18,32 +18,32 @@ import (
 
 // CustomBucketUser demonstrates a struct with a custom bucket name.
 type CustomBucketUser struct {
-	ID   int    `rainstorm:"id,increment"`
-	Name string `rainstorm:"index"`
+	ID   int    `storm:"id,increment"`
+	Name string `storm:"index"`
 }
 
-func (c CustomBucketUser) RainstormBucketName() string {
+func (c CustomBucketUser) StormBucketName() string {
 	return "my_custom_bucket"
 }
 
 // NamerUser is used for update/updatefield tests with BucketNamer.
 type NamerUser struct {
-	ID    int    `rainstorm:"id,increment"`
-	Name  string `rainstorm:"index"`
-	Email string `rainstorm:"unique"`
+	ID    int    `storm:"id,increment"`
+	Name  string `storm:"index"`
+	Email string `storm:"unique"`
 }
 
-func (n NamerUser) RainstormBucketName() string {
+func (n NamerUser) StormBucketName() string {
 	return "namer_users"
 }
 
 // DropUser is used for drop tests with BucketNamer.
 type DropUser struct {
-	ID   int    `rainstorm:"id"`
-	Name string `rainstorm:"index"`
+	ID   int    `storm:"id"`
+	Name string `storm:"index"`
 }
 
-func (d DropUser) RainstormBucketName() string {
+func (d DropUser) StormBucketName() string {
 	return "drop_me"
 }
 
@@ -58,8 +58,8 @@ func TestBucketNamerSaveAndOne(t *testing.T) {
 	ctx := context.Background()
 
 	type User struct {
-		ID   int    `rainstorm:"id,increment"`
-		Name string `rainstorm:"index"`
+		ID   int    `storm:"id,increment"`
+		Name string `storm:"index"`
 	}
 
 	u := User{Name: "Alice"}
@@ -84,17 +84,17 @@ func TestDynamicStructSaveAndOneViaFrom(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Build a runtime struct: { ID int `rainstorm:"id,increment"`, Name string `rainstorm:"index"` }
+	// Build a runtime struct: { ID int `storm:"id,increment"`, Name string `storm:"index"` }
 	dynType := reflect.StructOf([]reflect.StructField{
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`rainstorm:"id,increment"`),
+			Tag:  reflect.StructTag(`storm:"id,increment"`),
 		},
 		{
 			Name: "Name",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`rainstorm:"index"`),
+			Tag:  reflect.StructTag(`storm:"index"`),
 		},
 	})
 
@@ -126,17 +126,17 @@ func TestDynamicStructAllViaFrom(t *testing.T) {
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`rainstorm:"id,increment"`),
+			Tag:  reflect.StructTag(`storm:"id,increment"`),
 		},
 		{
 			Name: "Name",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`rainstorm:"index"`),
+			Tag:  reflect.StructTag(`storm:"index"`),
 		},
 		{
 			Name: "Score",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`rainstorm:"index"`),
+			Tag:  reflect.StructTag(`storm:"index"`),
 		},
 	})
 
@@ -178,17 +178,17 @@ func TestDynamicStructFindByIndexViaFrom(t *testing.T) {
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`rainstorm:"id,increment"`),
+			Tag:  reflect.StructTag(`storm:"id,increment"`),
 		},
 		{
 			Name: "Name",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`rainstorm:"index"`),
+			Tag:  reflect.StructTag(`storm:"index"`),
 		},
 		{
 			Name: "Score",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`rainstorm:"index"`),
+			Tag:  reflect.StructTag(`storm:"index"`),
 		},
 	})
 
@@ -230,7 +230,7 @@ func TestDynamicStructBucketIsolation(t *testing.T) {
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`rainstorm:"id,increment"`),
+			Tag:  reflect.StructTag(`storm:"id,increment"`),
 		},
 		{
 			Name: "Value",
@@ -283,17 +283,17 @@ func TestDynamicStructSelectCombined(t *testing.T) {
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`rainstorm:"id,increment"`),
+			Tag:  reflect.StructTag(`storm:"id,increment"`),
 		},
 		{
 			Name: "Category",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`rainstorm:"index"`),
+			Tag:  reflect.StructTag(`storm:"index"`),
 		},
 		{
 			Name: "Price",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`rainstorm:"index"`),
+			Tag:  reflect.StructTag(`storm:"index"`),
 		},
 	})
 
@@ -347,7 +347,7 @@ func TestDynamicStructDelete(t *testing.T) {
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`rainstorm:"id"`),
+			Tag:  reflect.StructTag(`storm:"id"`),
 		},
 		{
 			Name: "Data",
@@ -387,17 +387,17 @@ func TestDynamicStructInit(t *testing.T) {
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`rainstorm:"id"`),
+			Tag:  reflect.StructTag(`storm:"id"`),
 		},
 		{
 			Name: "Email",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`rainstorm:"unique"`),
+			Tag:  reflect.StructTag(`storm:"unique"`),
 		},
 		{
 			Name: "Group",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`rainstorm:"index"`),
+			Tag:  reflect.StructTag(`storm:"index"`),
 		},
 	})
 
@@ -426,17 +426,20 @@ func TestDynamicStructInit(t *testing.T) {
 // ============================================================================
 
 func TestExplicitBucketFromSave(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
-	file := filepath.Join(dir, "rainstorm.db")
+	file := filepath.Join(dir, "storm.db")
 	ctx := context.Background()
-	db, err := Open(ctx, file)
+	bDB, err := bolt.Open(file, 0600, nil)
+	require.NoError(t, err)
+	defer bDB.Close()
+	db, err := Open(ctx, bDB, nil, nil)
 	require.NoError(t, err)
 	defer db.Close()
 
 	type User struct {
-		ID   int    `rainstorm:"id,increment"`
-		Name string `rainstorm:"index"`
+		ID   int    `storm:"id,increment"`
+		Name string `storm:"index"`
 	}
 
 	// Save with explicit bucket using db.From
@@ -462,11 +465,14 @@ func TestExplicitBucketFromSave(t *testing.T) {
 // ============================================================================
 
 func TestBucketNamerInterface(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
-	file := filepath.Join(dir, "rainstorm.db")
+	file := filepath.Join(dir, "storm.db")
 	ctx := context.Background()
-	db, err := Open(ctx, file)
+	bDB, err := bolt.Open(file, 0600, nil)
+	require.NoError(t, err)
+	defer bDB.Close()
+	db, err := Open(ctx, bDB, nil, nil)
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -490,11 +496,14 @@ func TestBucketNamerInterface(t *testing.T) {
 // ============================================================================
 
 func TestBucketNamerUpdate(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
-	file := filepath.Join(dir, "rainstorm.db")
+	file := filepath.Join(dir, "storm.db")
 	ctx := context.Background()
-	db, err := Open(ctx, file)
+	bDB, err := bolt.Open(file, 0600, nil)
+	require.NoError(t, err)
+	defer bDB.Close()
+	db, err := Open(ctx, bDB, nil, nil)
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -523,11 +532,14 @@ func TestBucketNamerUpdate(t *testing.T) {
 // ============================================================================
 
 func TestBucketNamerDrop(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
-	file := filepath.Join(dir, "rainstorm.db")
+	file := filepath.Join(dir, "storm.db")
 	ctx := context.Background()
-	db, err := Open(ctx, file)
+	bDB, err := bolt.Open(file, 0600, nil)
+	require.NoError(t, err)
+	defer bDB.Close()
+	db, err := Open(ctx, bDB, nil, nil)
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -554,16 +566,19 @@ func TestBucketNamerDrop(t *testing.T) {
 // ============================================================================
 
 func TestBucketNamerListSinkResolution(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "rainstorm.db")
+	file := filepath.Join(t.TempDir(), "storm.db")
 	ctx := context.Background()
-	db, err := Open(ctx, file)
+	bDB, err := bolt.Open(file, 0600, nil)
+	require.NoError(t, err)
+	defer bDB.Close()
+	db, err := Open(ctx, bDB, nil, nil)
 	require.NoError(t, err)
 	defer func() {
 		err := db.Close()
 		require.NoError(t, err)
 	}()
 
-	// Use NamerUser: Go type name is "NamerUser", RainstormBucketName is "namer_users".
+	// Use NamerUser: Go type name is "NamerUser", StormBucketName is "namer_users".
 	users := []NamerUser{
 		{Name: "Alice", Email: "alice@test.com"},
 		{Name: "Bob", Email: "bob@test.com"},

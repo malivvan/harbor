@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -15,22 +15,22 @@ import (
 // CompatibilityUser matches the schema used by the v5.3.0 generator.
 // Tags follow the v5.3.0 syntax verified against the v5.3.0 extract.go.
 type CompatibilityUser struct {
-	ID       uint64 `rainstorm:"id,increment"`
-	Email    string `rainstorm:"unique"`
-	Team     string `rainstorm:"index"`
+	ID       uint64 `storm:"id,increment"`
+	Email    string `storm:"unique"`
+	Team     string `storm:"index"`
 	Name     string
 	Revision int
 }
 
 // CompatibilityNamedEvent matches the v5.3.0 BucketNamer type used in the generator.
 type CompatibilityNamedEvent struct {
-	ID       uint64 `rainstorm:"id,increment"`
-	Code     string `rainstorm:"unique"`
-	Category string `rainstorm:"index"`
+	ID       uint64 `storm:"id,increment"`
+	Code     string `storm:"unique"`
+	Category string `storm:"index"`
 	Message  string
 }
 
-func (CompatibilityNamedEvent) RainstormBucketName() string {
+func (CompatibilityNamedEvent) StormBucketName() string {
 	return "compatibility_named_events"
 }
 
@@ -194,7 +194,8 @@ func copyFixture(tb testing.TB) string {
 // openFixture opens a copied fixture with v6.
 func openFixture(tb testing.TB, path string) *DB {
 	tb.Helper()
-	db, err := Open(context.Background(), path)
+	bdb := openBoltForTest(tb, path)
+	db, err := Open(context.Background(), bdb, nil, nil)
 	require.NoError(tb, err, "open fixture %s", path)
 	return db
 }
@@ -203,6 +204,7 @@ func openFixture(tb testing.TB, path string) *DB {
 func assertClose(tb testing.TB, db *DB) {
 	tb.Helper()
 	require.NoError(tb, db.Close(), "close database")
+	require.NoError(tb, db.NativeDB().Close(), "close native database")
 }
 
 // readManifest reads and decodes the manifest.
@@ -224,17 +226,17 @@ func makeRuntimeExplicitType() reflect.Type {
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(uint64(0)),
-			Tag:  reflect.StructTag(`rainstorm:"id,increment"`),
+			Tag:  reflect.StructTag(`storm:"id,increment"`),
 		},
 		{
 			Name: "Slug",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`rainstorm:"unique"`),
+			Tag:  reflect.StructTag(`storm:"unique"`),
 		},
 		{
 			Name: "Group",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`rainstorm:"index"`),
+			Tag:  reflect.StructTag(`storm:"index"`),
 		},
 		{
 			Name: "Label",
@@ -254,17 +256,17 @@ func makeRuntimeRootDataType() reflect.Type {
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(uint64(0)),
-			Tag:  reflect.StructTag(`rainstorm:"id,increment"`),
+			Tag:  reflect.StructTag(`storm:"id,increment"`),
 		},
 		{
 			Name: "Slug",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`rainstorm:"unique"`),
+			Tag:  reflect.StructTag(`storm:"unique"`),
 		},
 		{
 			Name: "Group",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`rainstorm:"index"`),
+			Tag:  reflect.StructTag(`storm:"index"`),
 		},
 		{
 			Name: "Label",
@@ -301,7 +303,7 @@ func runtimeSliceFromPtr(ptr reflect.Value) (reflect.Value, int) {
 func TestCompatibility_Manifest(t *testing.T) {
 	m := readManifest(t)
 
-	assert.Equal(t, "github.com/AndersonBargas/rainstorm", m.Source.Module)
+	assert.Equal(t, "github.com/malivvan/storm", m.Source.Module)
 	assert.Equal(t, "v5.3.0", m.Source.Version)
 	assert.Equal(t, "baseline.db", m.Source.FixtureFile)
 	assert.NotEmpty(t, m.Source.GeneratorPath)
@@ -794,9 +796,10 @@ func TestCompatibility_MetadataReopen(t *testing.T) {
 	}()
 
 	// Reopen and verify all expected old/new data remains readable.
-	db2, err := Open(context.Background(), path)
-	require.NoError(t, err, "reopen after v6 writes")
+	db2 := openFixture(t, path)
 	defer assertClose(t, db2)
+
+	var err error
 
 	// v5 data still readable.
 	var u1 CompatibilityUser
@@ -845,7 +848,7 @@ func TestCompatibility_BucketNamerRead(t *testing.T) {
 	ctx := context.Background()
 
 	// Read all three named events via the custom bucket name.
-	// The v6 type CompatibilityNamedEvent implements RainstormBucketName
+	// The v6 type CompatibilityNamedEvent implements StormBucketName
 	// which returns "compatibility_named_events", matching v5's custom bucket.
 	var all []CompatibilityNamedEvent
 	err := db.All(ctx, &all)
@@ -1389,9 +1392,10 @@ func TestCompatibility_RuntimeRootDataV6Mutation(t *testing.T) {
 	}()
 
 	// Reopen with v6 and prove all changes persist.
-	db2, err := Open(context.Background(), path)
-	require.NoError(t, err, "reopen after runtime root-data mutations")
+	db2 := openFixture(t, path)
 	defer assertClose(t, db2)
+
+	var err error
 
 	node2 := db2.From(nodePath...)
 

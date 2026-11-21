@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -7,8 +7,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/AndersonBargas/rainstorm/v6/index"
-	"github.com/AndersonBargas/rainstorm/v6/q"
+	"github.com/malivvan/storm/index"
+	"github.com/malivvan/storm/q"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -403,7 +403,7 @@ func newListSink(node Node, to interface{}) (*listSink, error) {
 	proto := reflect.New(elemType)
 	if proto.Elem().CanInterface() {
 		if bn, ok := proto.Elem().Interface().(BucketNamer); ok {
-			name = bn.RainstormBucketName()
+			name = bn.StormBucketName()
 		}
 	}
 	if name == "" {
@@ -524,7 +524,7 @@ func (f *firstSink) bucketName() string {
 	v := reflect.Indirect(f.ref)
 	if v.CanInterface() {
 		if bn, ok := v.Interface().(BucketNamer); ok {
-			return bn.RainstormBucketName()
+			return bn.StormBucketName()
 		}
 	}
 	return v.Type().Name()

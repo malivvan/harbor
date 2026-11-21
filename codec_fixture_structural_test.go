@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"bytes"
@@ -10,15 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/AndersonBargas/rainstorm/v6/codec"
-	gobcodec "github.com/AndersonBargas/rainstorm/v6/codec/gob"
-	msgpackcodec "github.com/AndersonBargas/rainstorm/v6/codec/msgpack"
-	serealcodec "github.com/AndersonBargas/rainstorm/v6/codec/sereal"
+	"github.com/malivvan/storm/codec"
+	gobcodec "github.com/malivvan/storm/codec/gob"
 )
 
 // TestCodecFixture_StructuralSanity inspects the checked-in codec fixtures
 // through NativeDB/bbolt to prove:
-// 1. The Rainstorm metadata codec marker for the record bucket is correct.
+// 1. The Storm metadata codec marker for the record bucket is correct.
 // 2. The raw stored value for the same logical record is non-empty.
 // 3. The raw stored values are not all identical across codecs.
 func TestCodecFixture_StructuralSanity(t *testing.T) {
@@ -28,12 +26,10 @@ func TestCodecFixture_StructuralSanity(t *testing.T) {
 		codec         codec.MarshalUnmarshaler
 	}{
 		{"gob.db", "gob", gobcodec.Codec},
-		{"msgpack.db", "msgpack", msgpackcodec.Codec},
-		{"sereal.db", "sereal", serealcodec.Codec},
 	}
 
 	recordBucket := []byte("CodecCompatibilityRecord")
-	metaBucket := []byte("__rainstorm_metadata")
+	metaBucket := []byte("__storm_metadata")
 	codecKey := []byte("codec")
 
 	var rawByCodec = make(map[string][]byte, len(tests)+1)
@@ -41,7 +37,8 @@ func TestCodecFixture_StructuralSanity(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.filename, func(t *testing.T) {
 			path := copyCodecFixture(t, tc.filename)
-			db, err := Open(context.Background(), path, Codec(tc.codec))
+			bdb := openBoltForTest(t, path)
+			db, err := Open(context.Background(), bdb, nil, tc.codec)
 			require.NoError(t, err, "open %s", tc.filename)
 			defer assertClose(t, db)
 
@@ -79,7 +76,7 @@ func TestCodecFixture_StructuralSanity(t *testing.T) {
 					return fmt.Errorf("%s: record bucket does not exist in second View", tc.filename)
 				}
 
-				// Rainstorm's toBytes for uint64 produces big-endian bytes.
+				// Storm's toBytes for uint64 produces big-endian bytes.
 				// ID 1 = 0x0000000000000001 in big-endian.
 				idKey := []byte{0, 0, 0, 0, 0, 0, 0, 1}
 				v := b.Get(idKey)
@@ -100,7 +97,8 @@ func TestCodecFixture_StructuralSanity(t *testing.T) {
 	t.Run("aes.db", func(t *testing.T) {
 		entry := makeAESEntry(t)
 		path := copyCodecFixture(t, "aes.db")
-		db, err := Open(context.Background(), path, Codec(entry.codec))
+		bdb := openBoltForTest(t, path)
+		db, err := Open(context.Background(), bdb, nil, entry.codec)
 		require.NoError(t, err, "open aes.db")
 		defer assertClose(t, db)
 
@@ -144,9 +142,9 @@ func TestCodecFixture_StructuralSanity(t *testing.T) {
 		rawByCodec["aes.db"] = rawValue
 	})
 
-	// Prove the raw values are not all identical across the four codecs.
+	// Prove the raw values are not identical across the two codecs.
 	allSame := true
-	filenames := []string{"gob.db", "msgpack.db", "sereal.db", "aes.db"}
+	filenames := []string{"gob.db", "aes.db"}
 	for i := 0; i < len(filenames); i++ {
 		for j := i + 1; j < len(filenames); j++ {
 			if !bytes.Equal(rawByCodec[filenames[i]], rawByCodec[filenames[j]]) {
@@ -155,5 +153,5 @@ func TestCodecFixture_StructuralSanity(t *testing.T) {
 		}
 	}
 	assert.False(t, allSame,
-		"raw record bytes must not be identical across all four codecs")
+		"raw record bytes must not be identical across both codecs")
 }

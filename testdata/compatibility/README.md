@@ -1,9 +1,9 @@
-# Rainstorm v6 Compatibility Suite
+# Storm v6 Compatibility Suite
 
 ## Purpose
 
-This directory contains the R6.5 compatibility suite that proves Rainstorm v6
-can read, mutate, and coexist with databases created by Rainstorm v5.3.0. The
+This directory contains the R6.5 compatibility suite that proves Storm v6
+can read, mutate, and coexist with databases created by Storm v5.3.0. The
 suite verifies on-disk format, codec, index, BucketNamer, runtime-struct, and
 roundtrip compatibility across major versions.
 
@@ -20,8 +20,6 @@ testdata/compatibility/
 │   ├── codecs/
 │   │   ├── manifest.json              ← codec fixture manifest
 │   │   ├── gob.db
-│   │   ├── msgpack.db
-│   │   ├── sereal.db
 │   │   └── aes.db
 │   └── generator/
 │       ├── go.mod                     ← isolated module: requires v5.3.0 only
@@ -48,7 +46,7 @@ testdata/compatibility/
 
 ## Source Fixture Version
 
-- Module: `github.com/AndersonBargas/rainstorm/v5`
+- Module: `github.com/malivvan/storm`
 - Tag: `v5.3.0`
 - Generator directory: `v5.3.0/generator/`
 - The main v6 module does **not** import v5.
@@ -134,10 +132,6 @@ See `benchmark/results/comparison.md` for the detailed report.
 | reflect.StructOf: close/reopen persistence    | Verified (runtime root-data mutation)          |
 | Gob: read, IDs, indexes, KV, struct evidence  | Verified                                       |
 | Gob: v6 mutate/index movement/reopen          | Verified                                       |
-| MsgPack: read, IDs, indexes, KV               | Verified                                       |
-| MsgPack: v6 mutate/index movement/reopen      | Verified                                       |
-| Sereal: read, IDs, indexes, KV                | Verified                                       |
-| Sereal: v6 mutate/index movement/reopen       | Verified                                       |
 | AES-JSON: read, IDs, indexes, KV              | Verified                                       |
 | AES-JSON: v6 mutate/index movement/reopen     | Verified                                       |
 | AES: wrong key → ErrDifferentCodec            | Verified                                       |
@@ -145,8 +139,7 @@ See `benchmark/results/comparison.md` for the detailed report.
 | AES: fixed key is test-only                   | Verified                                       |
 | Incompatible codec classification             | Verified                                       |
 | Codec raw record bytes for ID 1              | Structurally verified as non-empty and not all identical |
-| Codec metadata markers (gob/msgpack/sereal/aes-json) | Structurally verified                  |
-| Protobuf                                      | Excluded: existing generated type cannot carry required indexed fixture schema; generic struct would fall back to JSON, which would not prove protobuf wire compatibility |
+| Codec metadata markers (gob/aes-json)        | Structurally verified                  |
 | v5 → v6 → v5 → v6 bidirectional roundtrip     | Verified in same-process cross-major module    |
 | v5 → v6 benchmarks                            | Verified: same-process, equivalent workloads   |
 | Process-isolated roundtrip                    | Deferred; revisit if dependency/toolchain divergence requires it |
@@ -156,11 +149,8 @@ See `benchmark/results/comparison.md` for the detailed report.
 | Codec     | Fixture | Metadata Marker | Read | Indexes | KV | Mutate | Reopen | Incompatible Detection | Wrong Key | Raw Evidence |
 |-----------|---------|-----------------|------|---------|-----|--------|--------|----------------------|-----------|-------------|
 | Gob       | gob.db  | `gob`           | ✓    | ✓       | ✓   | ✓      | ✓      | ✓                    | N/A       | Structurally verified |
-| MsgPack   | msgpack.db | `msgpack`    | ✓    | ✓       | ✓   | ✓      | ✓      | ✓                    | N/A       | Structurally verified |
-| Sereal    | sereal.db | `sereal`     | ✓    | ✓       | ✓   | ✓      | ✓      | ✓                    | N/A       | Structurally verified |
 | AES-JSON  | aes.db  | `aes-json`      | ✓    | ✓       | ✓   | ✓      | ✓      | ✓                    | ✓         | Structurally verified |
 | JSON      | baseline.db | N/A        | ✓    | ✓       | ✓   | ✓      | ✓      | N/A (default codec)   | N/A       | Implicit        |
-| Protobuf  | N/A     | N/A             | Excluded with documented reason (see codec manifest) |     |    |        |         |                      |           |                 |
 
 ## Bidirectional Roundtrip Scope
 
@@ -200,8 +190,6 @@ See `benchmark/results/comparison.md` for the full report.
 
 ## Known Limitations and Exclusions
 
-- **Protobuf:** Excluded because the existing generated type cannot carry the
-  required indexed fixture schema, and a generic struct would fall back to JSON.
 - **Process-isolated roundtrip:** Deferred; current roundtrip uses a single test
   binary with shared MVS dependency resolution.
 - **Benchmarks are single-machine, NoSync, 5-sample:** Results are descriptive

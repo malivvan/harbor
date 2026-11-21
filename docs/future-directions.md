@@ -1,14 +1,14 @@
-# Rainstorm future directions
+# Storm future directions
 
 Status: exploratory, non-normative
 
-This document preserves architectural ideas for possible work after Rainstorm v6 is stable in real applications. It is not a roadmap, release commitment, or justification for expanding the v6 scope.
+This document preserves architectural ideas for possible work after Storm v6 is stable in real applications. It is not a roadmap, release commitment, or justification for expanding the v6 scope.
 
 The decision to pursue any item requires production evidence, benchmarks, compatibility analysis, and a separate normative design.
 
 ## Decision principle
 
-Rainstorm v6 is an evolutionary refactor focused on context propagation, safe transaction boundaries, encapsulation, compatibility, quality, and documentation. A larger redesign is not currently required.
+Storm v6 is an evolutionary refactor focused on context propagation, safe transaction boundaries, encapsulation, compatibility, quality, and documentation. A larger redesign is not currently required.
 
 A future redesign should be considered only if measured limitations cannot be addressed safely through incremental changes. Relevant signals include:
 
@@ -194,7 +194,7 @@ Iterator lifecycle must be proven safe before exposing it publicly.
 
 ## 8. Neutral observability hooks
 
-Rainstorm could expose optional instrumentation without depending directly on a telemetry vendor:
+Storm could expose optional instrumentation without depending directly on a telemetry vendor:
 
 ```go
 type Observer interface {
@@ -237,21 +237,21 @@ Any format migration requires rollback guidance and fixtures from previous suppo
 
 ## 10. bbolt cancellation research
 
-Rainstorm should retain official bbolt unless measurements demonstrate a concrete limitation.
+Storm should retain official bbolt unless measurements demonstrate a concrete limitation.
 
 A future feasibility study may examine:
 
 - writer lock wait duration;
 - read transaction effects on commit latency;
 - fsync and mmap behavior;
-- whether a Rainstorm-owned writer gate improves cancellation responsiveness;
+- whether a Storm-owned writer gate improves cancellation responsiveness;
 - cancellation points suitable for an upstream bbolt proposal.
 
-A permanent bbolt fork is a last resort because it transfers responsibility for crash consistency, storage compatibility, platform behavior, and security fixes to Rainstorm maintainers.
+A permanent bbolt fork is a last resort because it transfers responsibility for crash consistency, storage compatibility, platform behavior, and security fixes to Storm maintainers.
 
 ## 11. Evaluation process
 
-After Rainstorm v6 is stable in production use:
+After Storm v6 is stable in production use:
 
 1. collect production traces and benchmarks;
 2. identify concrete bottlenecks or maintenance hazards;
@@ -260,4 +260,4 @@ After Rainstorm v6 is stable in production use:
 5. decide independently for each subsystem whether to retain, refactor, or replace it;
 6. avoid a full rewrite unless evidence shows that staged replacement is insufficient.
 
-A possible future document may be titled `Rainstorm v7 feasibility report`, but its existence and conclusions are intentionally undecided.
+A possible future document may be titled `Storm v7 feasibility report`, but its existence and conclusions are intentionally undecided.

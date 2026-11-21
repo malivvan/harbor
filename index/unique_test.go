@@ -7,17 +7,16 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/AndersonBargas/rainstorm/v6"
-	"github.com/AndersonBargas/rainstorm/v6/codec/gob"
-	"github.com/AndersonBargas/rainstorm/v6/index"
+	"github.com/malivvan/storm/codec/gob"
+	"github.com/malivvan/storm/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
 
 func TestUniqueIndex(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
-	db, _ := rainstorm.Open(context.Background(), filepath.Join(dir, "rainstorm.db"))
+	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
 	err := db.NativeDB().Update(func(tx *bolt.Tx) error {
@@ -120,9 +119,9 @@ func TestUniqueIndex(t *testing.T) {
 }
 
 func TestUniqueIndexRange(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
-	db, _ := rainstorm.Open(context.Background(), filepath.Join(dir, "rainstorm.db"))
+	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
 	db.NativeDB().Update(func(tx *bolt.Tx) error {
@@ -192,9 +191,9 @@ func TestUniqueIndexRange(t *testing.T) {
 }
 
 func TestUniqueIndexPrefix(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
-	db, _ := rainstorm.Open(context.Background(), filepath.Join(dir, "rainstorm.db"))
+	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
 	db.NativeDB().Update(func(tx *bolt.Tx) error {

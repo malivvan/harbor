@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -255,7 +255,7 @@ func TestRangeScan_ValidAfterCanceled(t *testing.T) {
 
 func TestPrefixScan_NestedRootPathsAreCorrect(t *testing.T) {
 	ctx := context.Background()
-	db, cleanup := createDB(t, Root("tenant", "context"))
+	db, cleanup := createDB(t, testRoot("tenant", "context"))
 	defer cleanup()
 
 	for i := 1; i <= 3; i++ {
@@ -281,7 +281,7 @@ func TestPrefixScan_NestedRootPathsAreCorrect(t *testing.T) {
 
 func TestRangeScan_NestedRootPathsAreCorrect(t *testing.T) {
 	ctx := context.Background()
-	db, cleanup := createDB(t, Root("ns", "scope"))
+	db, cleanup := createDB(t, testRoot("ns", "scope"))
 	defer cleanup()
 
 	for i := 1; i <= 3; i++ {
@@ -307,7 +307,7 @@ func TestRangeScan_NestedRootPathsAreCorrect(t *testing.T) {
 
 func TestPrefixScan_EachNodeHasIndependentPath(t *testing.T) {
 	ctx := context.Background()
-	db, cleanup := createDB(t, Root("root"))
+	db, cleanup := createDB(t, testRoot("root"))
 	defer cleanup()
 
 	for i := 1; i <= 3; i++ {
@@ -445,7 +445,7 @@ func TestRangeScan_MutatingBucketDoesNotAffectResults(t *testing.T) {
 
 func TestPrefixScan_DoesNotMutateReceiverRootPath(t *testing.T) {
 	ctx := context.Background()
-	db, cleanup := createDB(t, Root("immutable"))
+	db, cleanup := createDB(t, testRoot("immutable"))
 	defer cleanup()
 
 	original := db.Bucket()
@@ -464,7 +464,7 @@ func TestPrefixScan_DoesNotMutateReceiverRootPath(t *testing.T) {
 
 func TestRangeScan_DoesNotMutateReceiverRootPath(t *testing.T) {
 	ctx := context.Background()
-	db, cleanup := createDB(t, Root("immutable"))
+	db, cleanup := createDB(t, testRoot("immutable"))
 	defer cleanup()
 
 	original := db.Bucket()

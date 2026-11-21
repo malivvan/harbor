@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -53,8 +53,8 @@ func TestFind(t *testing.T) {
 
 	err = db.Find(ctx, "unexportedField", "John", &users)
 	require.Error(t, err)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm find:"),
-		"expected prefix 'rainstorm find:', got %q", err.Error())
+	require.True(t, strings.HasPrefix(err.Error(), "storm find:"),
+		"expected prefix 'storm find:', got %q", err.Error())
 	require.True(t, strings.HasSuffix(err.Error(), "field unexportedField not found"))
 
 	err = db.Find(ctx, "DateOfBirth", "John", &users)
@@ -121,9 +121,9 @@ func TestFindNil(t *testing.T) {
 	ctx := context.Background()
 
 	type User struct {
-		ID        int        `rainstorm:"increment"`
-		CreatedAt *time.Time `rainstorm:"index"`
-		DeletedAt *time.Time `rainstorm:"unique"`
+		ID        int        `storm:"increment"`
+		CreatedAt *time.Time `storm:"index"`
+		DeletedAt *time.Time `storm:"unique"`
 	}
 
 	t1 := time.Now()
@@ -163,8 +163,8 @@ func TestFindIntIndex(t *testing.T) {
 	ctx := context.Background()
 
 	type Score struct {
-		ID    int    `rainstorm:"increment"`
-		Score uint64 `rainstorm:"index"`
+		ID    int    `storm:"increment"`
+		Score uint64 `storm:"index"`
 	}
 
 	for i := 0; i < 10; i++ {
@@ -510,19 +510,27 @@ func TestOne(t *testing.T) {
 }
 
 func TestOneNotWritable(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "storm.db")
 	ctx := context.Background()
-	db, _ := Open(ctx, filepath.Join(dir, "rainstorm.db"))
 
-	err := db.Save(ctx, &User{ID: 10, Name: "John"})
+	bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 10 * time.Second})
+	require.NoError(t, err)
+	db, err := Open(ctx, bDB, nil, nil)
 	require.NoError(t, err)
 
-	db.Close()
+	err = db.Save(ctx, &User{ID: 10, Name: "John"})
+	require.NoError(t, err)
 
-	db, _ = Open(ctx, filepath.Join(dir, "rainstorm.db"), BoltOptions(0660, &bolt.Options{
-		ReadOnly: true,
-	}))
+	require.NoError(t, db.Close())
+	require.NoError(t, bDB.Close())
+
+	roBDB, err := bolt.Open(path, 0660, &bolt.Options{ReadOnly: true})
+	require.NoError(t, err)
+	defer roBDB.Close()
+	db, err = Open(ctx, roBDB, nil, nil)
+	require.NoError(t, err)
 	defer db.Close()
 
 	err = db.Save(ctx, &User{ID: 20, Name: "John"})

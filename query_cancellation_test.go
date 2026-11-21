@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/AndersonBargas/rainstorm/v6/q"
+	"github.com/malivvan/storm/q"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -488,9 +488,9 @@ func TestQueryDelete_CancellationRollsBackRecordsAndIndexes(t *testing.T) {
 
 	// Use a type with an index so we can verify index integrity.
 	type IndexedScore struct {
-		ID    int    `rainstorm:"id,increment"`
-		Value int    `rainstorm:"index"`
-		Name  string `rainstorm:"unique"`
+		ID    int    `storm:"id,increment"`
+		Value int    `storm:"index"`
+		Name  string `storm:"unique"`
 	}
 	require.NoError(t, db.Init(ctx, &IndexedScore{}))
 
@@ -547,7 +547,7 @@ func TestQueryFind_CancellationDuringSortPreservesDestination(t *testing.T) {
 	ctx := context.Background()
 
 	type Sortable struct {
-		ID    int `rainstorm:"id,increment"`
+		ID    int `storm:"id,increment"`
 		Value int
 	}
 	for i := 0; i < 20; i++ {
@@ -582,7 +582,7 @@ func TestQueryFind_SortErrorPreservesDestination(t *testing.T) {
 	ctx := context.Background()
 
 	type Simple struct {
-		ID    int `rainstorm:"id,increment"`
+		ID    int `storm:"id,increment"`
 		Value int
 	}
 	for i := 0; i < 5; i++ {
@@ -608,7 +608,7 @@ func TestQueryFind_OrderedSuccessPublishesCompleteResult(t *testing.T) {
 	ctx := context.Background()
 
 	type Item struct {
-		ID    int `rainstorm:"id,increment"`
+		ID    int `storm:"id,increment"`
 		Value int
 	}
 	for i := 0; i < 10; i++ {

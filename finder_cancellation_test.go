@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AndersonBargas/rainstorm/v6/codec"
-	"github.com/AndersonBargas/rainstorm/v6/codec/json"
-	"github.com/AndersonBargas/rainstorm/v6/index"
+	"github.com/malivvan/storm/codec"
+	"github.com/malivvan/storm/codec/json"
+	"github.com/malivvan/storm/index"
 	"github.com/stretchr/testify/require"
 )
 
@@ -616,8 +616,8 @@ func TestOne_IndexedRuntimeStructStillWorks(t *testing.T) {
 
 	ctx := context.Background()
 	dynamicType := reflect.StructOf([]reflect.StructField{
-		{Name: "ID", Type: reflect.TypeOf(0), Tag: reflect.StructTag(`rainstorm:"id"`)},
-		{Name: "Name", Type: reflect.TypeOf(""), Tag: reflect.StructTag(`rainstorm:"index"`)},
+		{Name: "ID", Type: reflect.TypeOf(0), Tag: reflect.StructTag(`storm:"id"`)},
+		{Name: "Name", Type: reflect.TypeOf(""), Tag: reflect.StructTag(`storm:"index"`)},
 	})
 
 	n := db.From("runtime_one_indexed")

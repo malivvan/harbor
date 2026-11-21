@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"bytes"
@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AndersonBargas/rainstorm/v6/codec/json"
+	"github.com/malivvan/storm/codec/json"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -20,17 +20,21 @@ import (
 const maxInt = 1<<(bits.UintSize-1) - 1
 
 func TestNewStorm(t *testing.T) {
-	db, err := Open(context.Background(), "")
+	db, err := Open(context.Background(), nil, nil, nil)
 
 	require.Error(t, err)
 	require.Nil(t, db)
 
-	dir, err := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, err := os.MkdirTemp(os.TempDir(), "storm")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	file := filepath.Join(dir, "rainstorm.db")
-	db, err = Open(context.Background(), file)
+	file := filepath.Join(dir, "storm.db")
+	bdb, err := bolt.Open(file, 0600, &bolt.Options{Timeout: time.Second})
+	require.NoError(t, err)
+	defer bdb.Close()
+
+	db, err = Open(context.Background(), bdb, nil, nil)
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -44,29 +48,39 @@ func TestNewStorm(t *testing.T) {
 	require.Equal(t, Version, v)
 }
 
-func TestNewRainstormWithRainstormOptions(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+func TestNewStormWithRootAndCodec(t *testing.T) {
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
 
 	dc := new(dummyCodec)
-	db1, _ := Open(context.Background(), filepath.Join(dir, "rainstorm1.db"), BoltOptions(0660, &bolt.Options{Timeout: 10 * time.Second}), Codec(dc), Root("a", "b"))
-	require.Equal(t, dc, db1.Codec())
-	require.Equal(t, []string{"a", "b"}, db1.Node.(*node).rootBucket)
 
-	err := db1.Save(context.Background(), &SimpleUser{ID: 1})
+	bdb1, err := bolt.Open(filepath.Join(dir, "storm1.db"), 0660, &bolt.Options{Timeout: 10 * time.Second})
+	require.NoError(t, err)
+	defer bdb1.Close()
+	db1, err := Open(context.Background(), bdb1, []byte("a"), dc)
+	require.NoError(t, err)
+	require.Equal(t, dc, db1.Codec())
+	require.Equal(t, []string{"a"}, db1.Node.(*node).rootBucket)
+
+	err = db1.Save(context.Background(), &SimpleUser{ID: 1})
 	require.NoError(t, err)
 
-	db2, _ := Open(context.Background(), filepath.Join(dir, "rainstorm2.db"), Codec(dc))
+	bdb2, err := bolt.Open(filepath.Join(dir, "storm2.db"), 0600, &bolt.Options{Timeout: 10 * time.Second})
+	require.NoError(t, err)
+	defer bdb2.Close()
+	db2, err := Open(context.Background(), bdb2, nil, dc)
+	require.NoError(t, err)
 	require.Equal(t, dc, db2.Codec())
 }
 
 func TestBoltDB(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
 	defer os.RemoveAll(dir)
 	bDB, err := bolt.Open(filepath.Join(dir, "bolt.db"), 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
-	// no need to close bolt.DB Rainstorm will take care of it
-	sDB, err := Open(context.Background(), "my.db", UseDB(bDB))
+	defer bDB.Close()
+
+	sDB, err := Open(context.Background(), bDB, nil, nil)
 	require.NoError(t, err)
 	defer sDB.Close()
 	err = sDB.Save(context.Background(), &SimpleUser{ID: 10})
@@ -140,19 +154,44 @@ func TestToBytes(t *testing.T) {
 	}
 }
 
-func createDB(t errorHandler, opts ...OpenOption) (*DB, func()) {
-	dir, err := os.MkdirTemp(os.TempDir(), "rainstorm")
-	if err != nil {
-		t.Error(err)
+func createDB(t errorHandler, opts ...testOpenOption) (*DB, func()) {
+	cfg := defaultTestOpenOptions()
+	for _, opt := range opts {
+		opt(&cfg)
 	}
-	db, err := Open(context.Background(), filepath.Join(dir, "rainstorm.db"), opts...)
+
+	dir, err := os.MkdirTemp(os.TempDir(), "storm")
 	if err != nil {
 		t.Error(err)
 	}
 
+	bdb, err := bolt.Open(filepath.Join(dir, "storm.db"), cfg.mode, cfg.boltOptions)
+	if err != nil {
+		t.Error(err)
+	}
+
+	var root []byte
+	if len(cfg.root) > 0 {
+		root = []byte(cfg.root[0])
+	}
+
+	db, err := Open(context.Background(), bdb, root, cfg.codec)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if db != nil && len(cfg.root) > 1 {
+		db.Node = db.Node.From(cfg.root[1:]...)
+	}
+
 	return db, func() {
-		db.Close()
-		os.RemoveAll(dir)
+		if db != nil {
+			_ = db.Close()
+		}
+		if bdb != nil {
+			_ = bdb.Close()
+		}
+		_ = os.RemoveAll(dir)
 	}
 }
 

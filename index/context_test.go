@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AndersonBargas/rainstorm/v6"
-	"github.com/AndersonBargas/rainstorm/v6/index"
+	"github.com/malivvan/storm"
+	"github.com/malivvan/storm/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -56,22 +56,25 @@ func (c *stepContext) Value(key any) any { return nil }
 // ---------------------------------------------------------------------------
 
 type testDB struct {
-	db  *rainstorm.DB
+	db  *storm.DB
+	bdb *bolt.DB
 	dir string
 }
 
 func openTestDB(t *testing.T) *testDB {
 	t.Helper()
-	dir, err := os.MkdirTemp(os.TempDir(), "rainstorm-index")
+	dir, err := os.MkdirTemp(os.TempDir(), "storm-index")
 	require.NoError(t, err)
-	db, err := rainstorm.Open(context.Background(), filepath.Join(dir, "rainstorm.db"))
+	bdb, err := bolt.Open(filepath.Join(dir, "storm.db"), 0600, nil)
 	require.NoError(t, err)
-	return &testDB{db: db, dir: dir}
+	db, err := storm.Open(context.Background(), bdb, nil, nil)
+	require.NoError(t, err)
+	return &testDB{db: db, bdb: bdb, dir: dir}
 }
 
 func (td *testDB) cleanup(t *testing.T) {
 	t.Helper()
-	closeErr := td.db.Close()
+	closeErr := errors.Join(td.db.Close(), td.bdb.Close())
 	removeErr := os.RemoveAll(td.dir)
 	require.NoError(t, errors.Join(closeErr, removeErr))
 }
@@ -673,7 +676,7 @@ func TestMutation_ListRemoveIDCancellationRollsBack(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func callView(
-	db *rainstorm.DB,
+	db *storm.DB,
 	bucketName, indexName string,
 	fn func(index.Index) ([][]byte, error),
 ) ([][]byte, error) {

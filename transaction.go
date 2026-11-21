@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 )
 
 // TransactionManager provides callback-managed transactions.
-// These are the canonical transaction boundaries for Rainstorm v6.
+// These are the canonical transaction boundaries for Storm v6.
 type TransactionManager interface {
 	ReadTransaction(ctx context.Context, fn func(Node) error) error
 	WriteTransaction(ctx context.Context, fn func(Node) error) error
@@ -24,7 +24,7 @@ var _ TransactionManager = (*DB)(nil)
 // returns successfully, the cancellation error is returned.
 //
 // Panic behavior: if fn panics, bbolt closes (rolls back) the read
-// transaction and the panic propagates to the caller. Rainstorm does
+// transaction and the panic propagates to the caller. Storm does
 // not recover panics.
 func (s *DB) ReadTransaction(ctx context.Context, fn func(Node) error) error {
 	if err := checkContext(ctx); err != nil {
@@ -68,7 +68,7 @@ func (s *DB) ReadTransaction(ctx context.Context, fn func(Node) error) error {
 //
 // Panic behavior: if fn panics, bbolt rolls back the transaction and
 // the panic propagates to the caller. All writes performed before the
-// panic are discarded. Rainstorm does not recover panics.
+// panic are discarded. Storm does not recover panics.
 func (s *DB) WriteTransaction(ctx context.Context, fn func(Node) error) error {
 	if err := checkContext(ctx); err != nil {
 		return wrapError("write transaction", err)

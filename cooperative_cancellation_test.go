@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/AndersonBargas/rainstorm/v6/codec"
-	"github.com/AndersonBargas/rainstorm/v6/codec/json"
+	"github.com/malivvan/storm/codec"
+	"github.com/malivvan/storm/codec/json"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )

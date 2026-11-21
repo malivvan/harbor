@@ -1,6 +1,6 @@
 {
   "source": {
-    "module": "github.com/AndersonBargas/rainstorm",
+    "module": "github.com/malivvan/storm",
     "version": "v5.3.0",
     "generator_path": "generator/main.go",
     "fixture_filename": "baseline.db"

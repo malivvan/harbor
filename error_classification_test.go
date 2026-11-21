@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/AndersonBargas/rainstorm/v6/index"
+	"github.com/malivvan/storm/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
@@ -24,19 +24,19 @@ import (
 func TestSharedSentinelIdentity(t *testing.T) {
 	t.Run("ErrNotFound", func(t *testing.T) {
 		require.Equal(t, index.ErrNotFound, ErrNotFound,
-			"rainstorm.ErrNotFound must be identical to index.ErrNotFound")
+			"storm.ErrNotFound must be identical to index.ErrNotFound")
 	})
 	t.Run("ErrAlreadyExists", func(t *testing.T) {
 		require.Equal(t, index.ErrAlreadyExists, ErrAlreadyExists,
-			"rainstorm.ErrAlreadyExists must be identical to index.ErrAlreadyExists")
+			"storm.ErrAlreadyExists must be identical to index.ErrAlreadyExists")
 	})
 	t.Run("ErrNilParam", func(t *testing.T) {
 		require.Equal(t, index.ErrNilParam, ErrNilParam,
-			"rainstorm.ErrNilParam must be identical to index.ErrNilParam")
+			"storm.ErrNilParam must be identical to index.ErrNilParam")
 	})
 	t.Run("ErrNilContext", func(t *testing.T) {
 		require.Equal(t, index.ErrNilContext, ErrNilContext,
-			"rainstorm.ErrNilContext must be identical to index.ErrNilContext")
+			"storm.ErrNilContext must be identical to index.ErrNilContext")
 	})
 }
 
@@ -99,7 +99,7 @@ func TestNilContext_RootOperations(t *testing.T) {
 	require.NoError(t, db.Save(ctx, &User{ID: 1, Name: "test", Slug: "t1"}))
 
 	t.Run("Open", func(t *testing.T) {
-		db2, err := Open(nilCtx, filepath.Join(t.TempDir(), "test.db"))
+		db2, err := Open(nilCtx, nil, nil, nil)
 		require.ErrorIs(t, err, ErrNilContext)
 		require.NotErrorIs(t, err, ErrNilParam)
 		require.Nil(t, db2)
@@ -422,8 +422,11 @@ func TestClassification_ExpiredContextNotErrNilContext(t *testing.T) {
 	require.NotErrorIs(t, err, ErrNilContext)
 }
 
-func TestClassification_ClosedOwnedNativeDB(t *testing.T) {
-	db, err := Open(context.Background(), filepath.Join(t.TempDir(), "closed.db"))
+func TestClassification_ClosedNativeDB(t *testing.T) {
+	bDB, err := bolt.Open(filepath.Join(t.TempDir(), "closed.db"), 0600, nil)
+	require.NoError(t, err)
+
+	db, err := Open(context.Background(), bDB, nil, nil)
 	require.NoError(t, err)
 
 	// Close the underlying bolt.DB.

@@ -1,6 +1,6 @@
 # Roundtrip compatibility suite
 
-This nested module imports both `v5` and `v6` of Rainstorm intentionally
+This nested module imports both `v5` and `v6` of Storm intentionally
 to perform cross-version roundtrip compatibility testing.
 
 ## Why a nested module?

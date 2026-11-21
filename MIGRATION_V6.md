@@ -1,4 +1,4 @@
-# Rainstorm v5.3.0 → v6 Migration Guide
+# Storm v5.3.0 → v6 Migration Guide
 
 ## Table of Contents
 
@@ -10,7 +10,7 @@
 6. [Module and import-path migration](#6-module-and-import-path-migration)
 7. [Context propagation](#7-context-propagation)
 8. [Open and lifecycle changes](#8-open-and-lifecycle-changes)
-9. [Owned versus borrowed databases](#9-owned-versus-borrowed-databases)
+9. [Database lifecycle](#9-database-lifecycle)
 10. [CRUD signature migration](#10-crud-signature-migration)
 11. [KV signature migration](#11-kv-signature-migration)
 12. [Finder and query migration](#12-finder-and-query-migration)
@@ -39,7 +39,7 @@
 
 ## 1. Overview
 
-Rainstorm v6 is a major release that introduces context propagation, managed
+Storm v6 is a major release that introduces context propagation, managed
 transactions, operation-wrapped errors, and a clarified lifecycle model. This
 guide documents every known breaking API change from **v5.3.0** to **v6** and
 provides mechanical before/after replacements, semantic explanations, and a
@@ -48,7 +48,7 @@ practical migration checklist.
 The v6 module path is:
 
 ```
-github.com/AndersonBargas/rainstorm/v6
+github.com/malivvan/storm
 ```
 
 The minimum supported Go version is **Go 1.24**.
@@ -58,10 +58,10 @@ The minimum supported Go version is **Go 1.24**.
 ## 2. Who should migrate
 
 - Maintainers of applications that currently depend on
-  `github.com/AndersonBargas/rainstorm/v5` (any patch release).
+  `github.com/malivvan/storm` (any patch release).
 - Anyone who needs context propagation, managed transactions, or error
   classification in their persistence layer.
-- Anyone who must stay current with the supported Rainstorm major version.
+- Anyone who must stay current with the supported Storm major version.
 
 If you are pinned to v5.3.0 and have no need for the v6 features, you may
 continue using v5.3.0. v5.3.0 remains published and usable.
@@ -70,7 +70,7 @@ continue using v5.3.0. v5.3.0 remains published and usable.
 
 ## 3. Supported starting point
 
-This guide targets migration from **Rainstorm v5.3.0**.
+This guide targets migration from **Storm v5.3.0**.
 
 Earlier v5 versions (v5.0.x – v5.2.x) are not covered by the checked-in
 compatibility fixtures. If you are on an earlier v5 release, upgrade to v5.3.0
@@ -83,15 +83,16 @@ first and run your application test suite before starting the v6 migration.
 | Change | Impact |
 |--------|--------|
 | Database open, CRUD, finder, query-terminal, scanner, KV, and managed-transaction operations require `context.Context` | Update those context-aware call sites; lifecycle/configuration methods remain context-free |
-| `Open` signature: `(path)` → `(ctx, path)` | All `Open` call sites must update |
+| `Open` now takes an existing `*bolt.DB`, a root bucket key, and a codec | Open bbolt yourself and replace every `Open` call |
+| `OpenOption`, `Options`, `BoltOptions`, `Codec`, `Root`, and `UseDB` removed | Configuration is passed directly to `Open`; use `From`/`WithCodec` for nodes |
 | `DB.Bolt` public field replaced by `NativeDB()` method | All direct field accesses must change |
 | Manual transaction APIs (`Begin`, `Commit`, `Rollback`, `Tx`) removed | Rewrite to `ReadTransaction` / `WriteTransaction` |
 | Batch APIs (`Batch()`, `WithBatch`, `batchMode`) removed | Rewrite to `WriteTransaction` |
 | `PrefixScan`/`RangeScan` now return `([]Node, error)` with context | Return value and error handling must change |
 | Query terminal methods require `context.Context` | Every query chain must update |
-| All errors are operation-wrapped (`rainstorm <op>: <cause>`) | Applications must use `errors.Is`, never `==` |
+| All errors are operation-wrapped (`storm <op>: <cause>`) | Applications must use `errors.Is`, never `==` |
 | `ErrNotInTransaction` removed | No direct replacement; managed transactions avoid this state |
-| `UseDB` no longer closes the borrowed database | Caller must manage the native DB lifecycle |
+| Storm borrows the database passed to `Open` | The caller must open and close the native DB and keep it alive while Storm is active |
 | `Node.GetBucket`, `Node.CreateBucketIfNotExists`, `Node.WithTransaction` unexported | Use Node directly in transactions or managed APIs |
 | `Node.WithBatch` removed | No direct replacement |
 
@@ -113,13 +114,13 @@ first and run your application test suite before starting the v6 migration.
 Before:
 
 ```go
-import "github.com/AndersonBargas/rainstorm/v5"
+import "github.com/malivvan/storm"
 ```
 
 After:
 
 ```go
-import "github.com/AndersonBargas/rainstorm/v6"
+import "github.com/malivvan/storm"
 ```
 
 ### 6.2 Sub-package imports
@@ -130,8 +131,8 @@ Before:
 
 ```go
 import (
-    "github.com/AndersonBargas/rainstorm/v5/codec/gob"
-    "github.com/AndersonBargas/rainstorm/v5/q"
+    "github.com/malivvan/storm/codec/gob"
+    "github.com/malivvan/storm/q"
 )
 ```
 
@@ -139,8 +140,8 @@ After:
 
 ```go
 import (
-    "github.com/AndersonBargas/rainstorm/v6/codec/gob"
-    "github.com/AndersonBargas/rainstorm/v6/q"
+    "github.com/malivvan/storm/codec/gob"
+    "github.com/malivvan/storm/q"
 )
 ```
 
@@ -179,7 +180,7 @@ migration only if labeled as transitional.
 Before (v5.3.0):
 
 ```go
-db, err := rainstorm.Open("/path/to/db")
+db, err := storm.Open("/path/to/db")
 err = db.Save(&user)
 err = db.One("ID", id, &user)
 ```
@@ -188,7 +189,8 @@ After (v6):
 
 ```go
 ctx := context.Background() // or application context
-db, err := rainstorm.Open(ctx, "/path/to/db")
+bDB, err := bolt.Open("/path/to/db", 0600, &bolt.Options{Timeout: time.Second})
+db, err := storm.Open(ctx, bDB, nil, nil)
 err = db.Save(ctx, &user)
 err = db.One(ctx, "ID", id, &user)
 ```
@@ -196,12 +198,12 @@ err = db.One(ctx, "ID", id, &user)
 ### 7.3 Nil context behavior
 
 - A `nil` context returns an error matching `ErrNilContext`.
-- Rainstorm does **not** silently replace `nil` with `context.Background()`.
+- Storm does **not** silently replace `nil` with `context.Background()`.
 - A `nil` required non-context argument returns an error matching `ErrNilParam`.
 - Use `errors.Is` to classify:
 
 ```go
-if errors.Is(err, rainstorm.ErrNilContext) {
+if errors.Is(err, storm.ErrNilContext) {
     // caller passed nil context
 }
 ```
@@ -215,95 +217,24 @@ if errors.Is(err, rainstorm.ErrNilContext) {
 Before (v5.3.0):
 
 ```go
-db, err := rainstorm.Open(path, options...)
+db, err := storm.Open(path, options...)
 ```
 
 After (v6):
 
 ```go
-db, err := rainstorm.Open(ctx, path, options...)
+func Open(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarshaler) (*DB, error)
 ```
 
-### 8.2 Open options
-
-Open options remain structurally similar but use the defined `OpenOption` function type instead of the unnamed raw function type:
-
-Before (v5.3.0):
+The caller opens bbolt directly and passes it to Storm:
 
 ```go
-// Option type: func(*Options) error
-db, err := rainstorm.Open(path, rainstorm.Codec(gob.Codec))
-```
-
-After (v6):
-
-```go
-// Option type: rainstorm.OpenOption
-db, err := rainstorm.Open(ctx, path, rainstorm.Codec(gob.Codec))
-```
-
-### 8.3 Close behavior
-
-Before (v5.3.0):
-- `Close()` always closes the underlying `*bolt.DB`.
-- `UseDB` docs warned that `Close()` would close the provided database.
-
-After (v6):
-- For an **owned** database (opened without `UseDB`): `Close()` closes the
-  underlying bbolt database and returns its error.
-- For a **borrowed** database (opened with `UseDB`): `Close()` returns `nil`
-  and does **not** close the native database.
-- If the receiver is `nil` or the underlying database is `nil`, `Close()`
-  returns an error matching `ErrNilParam`.
-
-Before (v5.3.0):
-```go
-db, _ := rainstorm.Open(path)
-defer db.Close()
-```
-
-After (v6):
-```go
-db, err := rainstorm.Open(ctx, path)
-if err != nil {
-    // handle error; do NOT defer Close on a nil db
-    return err
-}
-defer func() {
-    if cerr := db.Close(); cerr != nil {
-        // log or handle close error
-    }
-}()
-```
-
----
-
-## 9. Owned versus borrowed databases
-
-### 9.1 Owned database
-
-When `Open` is called **without** `UseDB`:
-
-```go
-db, err := rainstorm.Open(ctx, "/path/to/db")
-```
-
-- Rainstorm opens the bbolt database.
-- `DB.Close()` closes the native database.
-- If initialization fails or the context is canceled after the bbolt open,
-  Rainstorm closes the owned database before returning the error.
-
-### 9.2 Borrowed database
-
-When `Open` is called **with** `UseDB`:
-
-```go
-bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 1 * time.Second})
+bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
 if err != nil {
     return err
 }
 
-db, err := rainstorm.Open(ctx, "", rainstorm.UseDB(bDB))
+db, err := storm.Open(ctx, bDB, nil, nil)
 if err != nil {
     if closeErr := bDB.Close(); closeErr != nil {
         return errors.Join(err, closeErr)
@@ -312,19 +243,98 @@ if err != nil {
 }
 defer func() {
     if closeErr := db.Close(); closeErr != nil {
-        log.Printf("close Rainstorm handle: %v", closeErr)
+        log.Printf("close Storm handle: %v", closeErr)
     }
     if closeErr := bDB.Close(); closeErr != nil {
-        log.Printf("close borrowed bbolt database: %v", closeErr)
+        log.Printf("close bbolt database: %v", closeErr)
     }
 }()
 ```
 
-Rules for borrowed databases:
-- `UseDB(nil)` returns an error matching `ErrNilParam`.
-- Rainstorm does **not** close the borrowed database.
+### 8.2 Root bucket and codec
+
+The former `Root` and `Codec` options are now parameters:
+
+```go
+// Root bucket and custom codec.
+db, err := storm.Open(ctx, bDB, []byte("tenant"), gob.Codec)
+```
+
+- `root` is a single root bucket key. Pass `nil` or an empty slice for the
+  database root. Use `db.From("child")` to operate in nested buckets.
+- `c` is the codec. Pass `nil` to use the default JSON codec.
+- `OpenOption`, `Options`, `BoltOptions`, `Codec`, `Root`, and `UseDB` have
+  been removed.
+
+### 8.3 Close behavior
+
+- `Open` never takes ownership of the bbolt database.
+- `DB.Close()` returns `nil` and does **not** close the underlying database.
+- If the receiver is `nil` or the underlying database is `nil`, `Close()`
+  returns an error matching `ErrNilParam`.
+- The caller must close the bbolt database.
+
+Before (v5.3.0):
+```go
+db, _ := storm.Open(path)
+defer db.Close()
+```
+
+After (v6):
+```go
+bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
+if err != nil {
+    return err
+}
+defer func() {
+    if cerr := bDB.Close(); cerr != nil {
+        log.Printf("close bbolt database: %v", cerr)
+    }
+}()
+
+db, err := storm.Open(ctx, bDB, nil, nil)
+if err != nil {
+    // handle error; do NOT defer Close on a nil db
+    return err
+}
+defer func() {
+    if cerr := db.Close(); cerr != nil {
+        log.Printf("close Storm handle: %v", cerr)
+    }
+}()
+```
+
+---
+
+## 9. Database lifecycle
+
+Storm always borrows the bbolt database supplied to `Open`:
+
+```go
+bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
+if err != nil {
+    return err
+}
+
+db, err := storm.Open(ctx, bDB, nil, nil)
+if err != nil {
+    return err
+}
+defer func() {
+    if closeErr := db.Close(); closeErr != nil {
+        log.Printf("close Storm handle: %v", closeErr)
+    }
+    if closeErr := bDB.Close(); closeErr != nil {
+        log.Printf("close bbolt database: %v", closeErr)
+    }
+}()
+```
+
+Rules:
+- A nil database returns an error matching `ErrNilParam`.
+- Storm does **not** close the database.
 - `DB.Close()` returns `nil` and does not close the native database.
-- The caller must keep the native database alive while Rainstorm uses it.
+- The caller must keep the native database open while Storm uses it.
 - The caller remains responsible for closing the native database.
 
 ---
@@ -507,12 +517,12 @@ v6 replaces manual `Begin`/`Commit`/`Rollback` transactions with callback-based
 managed transactions. The canonical v6 forms are:
 
 ```go
-err := db.ReadTransaction(ctx, func(tx rainstorm.Node) error {
+err := db.ReadTransaction(ctx, func(tx storm.Node) error {
     // reads through tx
     return nil
 })
 
-err = db.WriteTransaction(ctx, func(tx rainstorm.Node) error {
+err = db.WriteTransaction(ctx, func(tx storm.Node) error {
     // writes through tx
     return nil
 })
@@ -541,7 +551,7 @@ After (v6):
 
 ```go
 // v6 managed read transaction
-err := db.ReadTransaction(ctx, func(tx rainstorm.Node) error {
+err := db.ReadTransaction(ctx, func(tx storm.Node) error {
     return tx.One(ctx, "ID", 1, &user)
 })
 ```
@@ -577,7 +587,7 @@ After (v6):
 
 ```go
 // v6 managed write transaction
-err := db.WriteTransaction(ctx, func(tx rainstorm.Node) error {
+err := db.WriteTransaction(ctx, func(tx storm.Node) error {
     account1.Amount -= 1000
     account2.Amount += 1000
 
@@ -606,7 +616,7 @@ err := db.WriteTransaction(ctx, func(tx rainstorm.Node) error {
   callback's error is primary (the context is checked first, but a non-nil
   callback return takes precedence since bbolt already sees the error).
 - Panics inside the callback propagate unchanged; bbolt rolls back the
-  transaction. Rainstorm does not recover panics.
+  transaction. Storm does not recover panics.
 - Do **not** store or use the callback `Node` after the callback returns.
   Its transaction is already closed.
 
@@ -634,7 +644,7 @@ return tx.Commit()
 After (v6, managed transaction):
 
 ```go
-return db.WriteTransaction(ctx, func(tx rainstorm.Node) error {
+return db.WriteTransaction(ctx, func(tx storm.Node) error {
     if err := tx.Save(ctx, &order); err != nil {
         return fmt.Errorf("save order: %w", err)
     }
@@ -646,7 +656,7 @@ return db.WriteTransaction(ctx, func(tx rainstorm.Node) error {
 ```
 
 Note: v6 operation wrapping already prefixes errors with
-`rainstorm <op>:`, so additional wrapping by the caller is optional.
+`storm <op>:`, so additional wrapping by the caller is optional.
 
 ---
 
@@ -674,7 +684,7 @@ tx.Rollback()
 After (v6):
 
 ```go
-err := db.WriteTransaction(ctx, func(tx rainstorm.Node) error {
+err := db.WriteTransaction(ctx, func(tx storm.Node) error {
     // ...
     return nil
 })
@@ -688,7 +698,7 @@ The following v5.3.0 batch-related APIs are **removed** in v6:
 
 | Removed API | v5.3.0 usage | v6 replacement |
 |-------------|-------------|----------------|
-| `Batch()` option | `rainstorm.Open(path, rainstorm.Batch())` | `WriteTransaction` |
+| `Batch()` option | `storm.Open(path, storm.Batch())` | `WriteTransaction` |
 | `Node.WithBatch(bool)` | `n.WithBatch(true)` | Managed write transaction |
 | `batchMode` field | (internal) | No direct equivalent |
 
@@ -697,7 +707,7 @@ The following v5.3.0 batch-related APIs are **removed** in v6:
 Before (v5.3.0, batch mode):
 
 ```go
-db, err := rainstorm.Open(path, rainstorm.Batch())
+db, err := storm.Open(path, storm.Batch())
 // All writes use bbolt Batch under the hood:
 db.Save(&record1)
 db.Save(&record2)
@@ -707,9 +717,9 @@ db.Save(&record3)
 After (v6, managed write transaction):
 
 ```go
-db, err := rainstorm.Open(ctx, path)
+db, err := storm.Open(ctx, bDB, nil, nil)
 
-err = db.WriteTransaction(ctx, func(tx rainstorm.Node) error {
+err = db.WriteTransaction(ctx, func(tx storm.Node) error {
     if err := tx.Save(ctx, &record1); err != nil {
         return err
     }
@@ -804,18 +814,17 @@ nativeDB := db.NativeDB()
 
 Native operations are an **advanced interoperability escape hatch**:
 
-- Native operations bypass Rainstorm context checkpoints. Cancellation is
+- Native operations bypass Storm context checkpoints. Cancellation is
   not checked during native bbolt operations.
-- Native operations are outside Rainstorm's operation wrapping. Errors from
-  native operations are not wrapped with `rainstorm <op>:`.
+- Native operations are outside Storm's operation wrapping. Errors from
+  native operations are not wrapped with `storm <op>:`.
 - Native writes may bypass codecs, indexes, metadata, and invariants.
-- Native writes can make Rainstorm indexes inconsistent with stored data.
-- Native and Rainstorm transactions must be coordinated by the caller. bbolt
+- Native writes can make Storm indexes inconsistent with stored data.
+- Native and Storm transactions must be coordinated by the caller. bbolt
   allows only one read-write transaction at a time.
-- Do **not** close the native `*bolt.DB` while Rainstorm is in use.
-- Do **not** close a native database managed by Rainstorm (owned); use
-  `DB.Close()` instead.
-- Prefer Rainstorm managed APIs (`ReadTransaction`, `WriteTransaction`,
+- Do **not** close the native `*bolt.DB` while Storm is in use.
+- Close the native `*bolt.DB` yourself when Storm is no longer needed.
+- Prefer Storm managed APIs (`ReadTransaction`, `WriteTransaction`,
   individual CRUD/KV methods) for application code.
 
 ---
@@ -827,7 +836,7 @@ Native operations are an **advanced interoperability escape hatch**:
 v6 wraps every public error with operation context:
 
 ```
-rainstorm <operation>: <cause>
+storm <operation>: <cause>
 ```
 
 This means direct sentinel equality (`==`) no longer works. Applications must
@@ -836,7 +845,7 @@ use `errors.Is`:
 Incorrect (v5 style — **does not work in v6**):
 
 ```go
-if err == rainstorm.ErrNotFound {
+if err == storm.ErrNotFound {
     // will NOT match in v6
 }
 ```
@@ -844,7 +853,7 @@ if err == rainstorm.ErrNotFound {
 Correct (v6):
 
 ```go
-if errors.Is(err, rainstorm.ErrNotFound) {
+if errors.Is(err, storm.ErrNotFound) {
     // correctly matches wrapped errors
 }
 ```
@@ -854,9 +863,9 @@ if errors.Is(err, rainstorm.ErrNotFound) {
 Operation wrapping preserves all underlying sentinels:
 
 ```
-rainstorm save: already exists
-rainstorm one: not found
-rainstorm open: context canceled
+storm save: already exists
+storm one: not found
+storm open: context canceled
 ```
 
 Nested operation wrapping is allowed. The outermost public operation label
@@ -869,9 +878,9 @@ Applications **should not** depend on exact full error text.
 
 | Sentinel | v5.3.0 | v6 status |
 |----------|--------|-----------|
-| `ErrNotFound` | Local to `rainstorm` | Shared with `index` package; `errors.Is` works across both |
-| `ErrAlreadyExists` | Local to `rainstorm` | Shared with `index` package; `errors.Is` works across both |
-| `ErrNilParam` | Local to `rainstorm` | Shared with `index` package |
+| `ErrNotFound` | Local to `storm` | Shared with `index` package; `errors.Is` works across both |
+| `ErrAlreadyExists` | Local to `storm` | Shared with `index` package; `errors.Is` works across both |
+| `ErrNilParam` | Local to `storm` | Shared with `index` package |
 | `ErrNilContext` | **Did not exist** | New in v6; returned when `ctx` is `nil` |
 | `ErrNotInTransaction` | `errors.New("not in transaction")` | **Removed** (no transaction state to be outside of) |
 | `ErrNoID` | Present | Unchanged |
@@ -890,9 +899,9 @@ Applications **should not** depend on exact full error text.
 
 | v5 pattern | v6 replacement |
 |------------|---------------|
-| `err == rainstorm.ErrNotFound` | `errors.Is(err, rainstorm.ErrNotFound)` |
-| `err == rainstorm.ErrAlreadyExists` | `errors.Is(err, rainstorm.ErrAlreadyExists)` |
-| `err == rainstorm.ErrNotInTransaction` | Remove; managed transactions eliminate this state |
+| `err == storm.ErrNotFound` | `errors.Is(err, storm.ErrNotFound)` |
+| `err == storm.ErrAlreadyExists` | `errors.Is(err, storm.ErrAlreadyExists)` |
+| `err == storm.ErrNotInTransaction` | Remove; managed transactions eliminate this state |
 | `err.Error() == "not found"` | Never use string comparison; use `errors.Is` |
 | `strings.Contains(err.Error(), "not found")` | Never use string matching; use `errors.Is` |
 | `err == context.Canceled` | `errors.Is(err, context.Canceled)` |
@@ -906,10 +915,10 @@ Applications **should not** depend on exact full error text.
 | `ctx` is `nil` | Returns error, operation not attempted | `ErrNilContext` |
 | Required non-context argument is `nil` | Returns error, operation not attempted | `ErrNilParam` |
 | `fn` is `nil` in managed transactions | Returns error | `ErrNilParam` |
-| `UseDB(nil)` | Returns error during `Open` | `ErrNilParam` |
+| `Open` with a nil `*bolt.DB` | Returns error during `Open` | `ErrNilParam` |
 | `Close()` on nil receiver | Returns error, no panic | `ErrNilParam` |
 
-Rainstorm does **not** silently substitute `context.Background()` for a nil
+Storm does **not** silently substitute `context.Background()` for a nil
 context. Callers must always provide a valid context.
 
 ---
@@ -918,7 +927,7 @@ context. Callers must always provide a valid context.
 
 ### 20.1 Cooperative cancellation
 
-Rainstorm makes best-effort cancellation checks at explicit boundaries:
+Storm makes best-effort cancellation checks at explicit boundaries:
 
 - Before a bbolt transaction is acquired.
 - After a bbolt transaction is acquired (before the callback runs).
@@ -926,7 +935,7 @@ Rainstorm makes best-effort cancellation checks at explicit boundaries:
 - Before commit (writes).
 - After a successful read (reads do not retroactively change published data).
 
-Rainstorm **cannot**:
+Storm **cannot**:
 
 - Interrupt an OS syscall.
 - Interrupt a bbolt lock wait.
@@ -947,7 +956,7 @@ application work.
 
 In a `WriteTransaction`:
 
-1. Rainstorm checks context before the bbolt callback.
+1. Storm checks context before the bbolt callback.
 2. If the context is already canceled, the callback is not called.
 3. If the callback runs and returns an error, that error is returned.
 4. If the callback succeeds but the context was canceled during the callback,
@@ -985,23 +994,23 @@ Default is JSON (unchanged from v5).
 Before (v5.3.0):
 
 ```go
-db, err := rainstorm.Open(path, rainstorm.Codec(gob.Codec))
+db, err := storm.Open(path, storm.Codec(gob.Codec))
 ```
 
 After (v6):
 
 ```go
-db, err := rainstorm.Open(ctx, path, rainstorm.Codec(gob.Codec))
+db, err := storm.Open(ctx, bDB, nil, gob.Codec)
 ```
 
 ### 22.3 Codec metadata and mismatch classification
 
-Rainstorm records codec metadata in record and KV leaf buckets. Structural parent buckets need not carry a marker, and `WithCodec` allows different nodes to select different codecs. Rainstorm also stores an encoded database-version value used during `Open`.
+Storm records codec metadata in record and KV leaf buckets. Structural parent buckets need not carry a marker, and `WithCodec` allows different nodes to select different codecs. Storm also stores an encoded database-version value used during `Open`.
 
 Opening a database whose version value cannot be decoded by the selected root codec returns an error matching `ErrDifferentCodec`. Operations that create or validate leaf metadata, such as initialization and writes, also return `ErrDifferentCodec` when the selected node codec disagrees with the stored marker:
 
 ```go
-if errors.Is(err, rainstorm.ErrDifferentCodec) {
+if errors.Is(err, storm.ErrDifferentCodec) {
     // verify the root Open codec and any node-specific WithCodec selection
 }
 ```
@@ -1016,13 +1025,11 @@ The following codecs are tested compatible with v5.3.0 databases:
 
 - JSON (default)
 - Gob
-- MsgPack
-- Sereal
 - AES-JSON
 
-Protobuf compatibility is **excluded** — the existing generated type cannot
-carry the required indexed fixture schema, and a generic struct would fall back
-to JSON, which would not prove protobuf wire compatibility.
+MsgPack, Sereal, and Protobuf are not included in this release. Databases
+created with those codecs cannot be opened by this module; export or migrate
+that data with a release that still provides the codec before upgrading.
 
 Custom codecs are not universally guaranteed compatible. Test with your
 specific codec against a copy of production data before rollout.
@@ -1056,7 +1063,6 @@ Based on the checked-in compatibility fixtures and roundtrip tests:
 - Compatibility evidence targets v5.3.0 specifically.
 - Custom codecs and arbitrary historical schemas require application-specific
   testing.
-- Protobuf fixture compatibility is excluded.
 - Byte-for-byte deterministic files are **not** guaranteed (raw bbolt bytes
   are not deterministic across runs).
 - **Backups are still required** before production rollout.
@@ -1071,7 +1077,7 @@ The `BucketNamer` interface is unchanged in v6:
 
 ```go
 type BucketNamer interface {
-    RainstormBucketName() string
+    StormBucketName() string
 }
 ```
 
@@ -1080,7 +1086,7 @@ affected `BucketNamer` records in list-producing operations) was fixed before
 release.
 
 Application migration does **not** require renaming existing v5 custom buckets.
-Named types should continue implementing `RainstormBucketName()` consistently.
+Named types should continue implementing `StormBucketName()` consistently.
 
 ### 24.2 Runtime-generated structs (reflect.StructOf)
 
@@ -1099,12 +1105,12 @@ fields := []reflect.StructField{
     {
         Name: "ID",
         Type: reflect.TypeOf(int(0)),
-        Tag:  reflect.StructTag(`rainstorm:"id,increment"`),
+        Tag:  reflect.StructTag(`storm:"id,increment"`),
     },
     {
         Name: "Value",
         Type: reflect.TypeOf(""),
-        Tag:  reflect.StructTag(`rainstorm:"unique"`),
+        Tag:  reflect.StructTag(`storm:"unique"`),
     },
 }
 rt := reflect.StructOf(fields)
@@ -1119,7 +1125,7 @@ err := node.All(ctx, records)
 
 Identical `reflect.StructOf` shapes may resolve to the same canonical Go type
 when created in the same process. This is a Go runtime property, not a
-Rainstorm behavior.
+Storm behavior.
 
 ---
 
@@ -1168,16 +1174,17 @@ for the full methodology and results.
    and thread them through to persistence calls.
 4. **Update module and import paths**: `go.mod` require v6, all imports from
    `v5` to `v6`.
-5. **Update `Open` calls**: add `ctx` as the first argument.
+5. **Update `Open` calls**: open bbolt with `bolt.Open`, then pass the
+   `*bolt.DB`, root bucket key, and codec to `storm.Open`.
 6. **Update CRUD, KV, query, and scanner call signatures**: add `ctx` as the
    first argument to every I/O call.
 7. **Replace manual transactions and batch APIs** with
    `ReadTransaction`/`WriteTransaction`.
 8. **Replace `db.Bolt` field access** with `db.NativeDB()` or prefer managed
-   Rainstorm APIs.
+   Storm APIs.
 9. **Migrate error checks** to `errors.Is`.
-10. **Review lifecycle ownership**: ensure borrowed databases are not closed
-    by `DB.Close()` and that the caller closes them at the right point.
+10. **Review lifecycle ownership**: Storm never closes the bbolt database;
+    the caller must close it at the right point.
 11. **Run compatibility tests** against a copy of production data.
 12. **Run race tests** (`go test -race`) and your application's benchmarks.
 13. **Deploy to a staging environment** with real workload patterns.
@@ -1190,9 +1197,9 @@ for the full methodology and results.
 
 | Search pattern | Replacement / Action | Risk |
 |---------------|---------------------|------|
-| `/rainstorm/v5` | `/rainstorm/v6` | Low: mechanical, but verify compilation |
-| `rainstorm.Open(path` | `rainstorm.Open(ctx, path` | Low: adds param |
-| `.Save(` | `.Save(ctx, ` | **High**: may affect non-Rainstorm `Save` methods; compile after each family |
+| `/storm/v5` | `/storm/v6` | Low: mechanical, but verify compilation |
+| `storm.Open(path, ...)` | `storm.Open(ctx, bDB, root, codec)` | **High**: open bbolt first and pass the DB |
+| `.Save(` | `.Save(ctx, ` | **High**: may affect non-Storm `Save` methods; compile after each family |
 | `.Update(` | `.Update(ctx, ` | **High**: same risk |
 | `.One(` | `.One(ctx, ` | **High**: same risk |
 | `.Find(` | `.Find(ctx, ` | **High**: same risk |
@@ -1215,12 +1222,12 @@ for the full methodology and results.
 | `.PrefixScan(` | `.PrefixScan(ctx, ` | **High**: also add error handling |
 | `.RangeScan(` | `.RangeScan(ctx, ` | **High**: also add error handling |
 | `db.Bolt` | `db.NativeDB()` | Medium: method call vs field access |
-| `== rainstorm.Err` (any sentinel) | `errors.Is(err, rainstorm.Err...)` | Low: mechanical, but must import `errors` |
-| `db.Begin(false)` | `db.ReadTransaction(ctx, func(tx rainstorm.Node) error { ... })` | **High**: requires structural rewrite |
-| `db.Begin(true)` | `db.WriteTransaction(ctx, func(tx rainstorm.Node) error { ... })` | **High**: requires structural rewrite |
+| `== storm.Err` (any sentinel) | `errors.Is(err, storm.Err...)` | Low: mechanical, but must import `errors` |
+| `db.Begin(false)` | `db.ReadTransaction(ctx, func(tx storm.Node) error { ... })` | **High**: requires structural rewrite |
+| `db.Begin(true)` | `db.WriteTransaction(ctx, func(tx storm.Node) error { ... })` | **High**: requires structural rewrite |
 | `tx.Commit()` | (remove; callback return nil) | **High**: part of transaction rewrite |
 | `tx.Rollback()` | (remove; callback return error) | **High**: part of transaction rewrite |
-| `rainstorm.Batch()` | (remove; use `WriteTransaction`) | **High**: requires structural rewrite |
+| `storm.Batch()` | (remove; use `WriteTransaction`) | **High**: requires structural rewrite |
 | `.WithBatch(` | (remove; use `WriteTransaction`) | **High**: requires structural rewrite |
 | Query terminal calls such as `query.Find(...)` and `db.Select(...).First(...)` | Add `ctx` to the terminal method only | **High**: chained calls and generic method names require AST/compiler-guided review |
 
@@ -1237,15 +1244,15 @@ After migration, verify:
 - [ ] `go build ./...` succeeds.
 - [ ] `go vet ./...` passes.
 - [ ] `go test -race -count=1 ./...` passes.
-- [ ] No direct sentinel equality (`== rainstorm.Err...`) remains.
+- [ ] No direct sentinel equality (`== storm.Err...`) remains.
 - [ ] No `db.Bolt` field access remains.
 - [ ] No manual `Begin`/`Commit`/`Rollback` calls remain.
-- [ ] No `rainstorm.Batch()` or `.WithBatch()` calls remain.
+- [ ] No `storm.Batch()` or `.WithBatch()` calls remain.
 - [ ] No `db.Begin(false)` used as a read transaction (use `ReadTransaction`).
-- [ ] All `Open` calls include context.
+- [ ] All `Open` calls pass an open `*bolt.DB`, root bucket key, and codec.
 - [ ] All I/O calls include context from the appropriate application boundary.
-- [ ] Borrowed database lifecycle: caller closes the native `*bolt.DB`.
-- [ ] `DB.Close()` return value is checked for owned databases.
+- [ ] The caller closes the native `*bolt.DB`.
+- [ ] `DB.Close()` return values are checked.
 - [ ] All error classification uses `errors.Is`.
 - [ ] Production database backup is verified readable.
 
@@ -1257,7 +1264,7 @@ After migration, verify:
 
 **Symptom:** `too many arguments in call to db.Save`.
 
-**Cause:** The context is being passed but other non-Rainstorm methods share the
+**Cause:** The context is being passed but other non-Storm methods share the
 same name (e.g. a local `Save` helper).
 
 **Fix:** Use qualified calls or rename local helpers. Compile after each method
@@ -1265,10 +1272,10 @@ family.
 
 ### 29.2 Nil context returns ErrNilContext
 
-**Symptom:** `rainstorm save: nil context` or `errors.Is(err, ErrNilContext)`
+**Symptom:** `storm save: nil context` or `errors.Is(err, ErrNilContext)`
 is true.
 
-**Cause:** A `nil` context was passed. Rainstorm does not replace `nil` with
+**Cause:** A `nil` context was passed. Storm does not replace `nil` with
 `context.Background()`.
 
 **Fix:** Pass `context.Background()` (temporarily) or, preferably, plumb the
@@ -1276,7 +1283,7 @@ application context through.
 
 ### 29.3 Operation error text changed
 
-**Symptom:** Error messages now include `rainstorm <op>:` prefix.
+**Symptom:** Error messages now include `storm <op>:` prefix.
 
 **Cause:** v6 wraps all errors with operation context.
 
@@ -1285,15 +1292,15 @@ matching.
 
 ### 29.4 Direct sentinel comparison no longer works
 
-**Symptom:** `if err == rainstorm.ErrNotFound` no longer matches.
+**Symptom:** `if err == storm.ErrNotFound` no longer matches.
 
-**Cause:** Errors are now wrapped: `rainstorm one: not found`.
+**Cause:** Errors are now wrapped: `storm one: not found`.
 
-**Fix:** Use `errors.Is(err, rainstorm.ErrNotFound)`.
+**Fix:** Use `errors.Is(err, storm.ErrNotFound)`.
 
 ### 29.5 Manual transaction symbols missing
 
-**Symptom:** `undefined: rainstorm.Tx`, `db.Begin undefined`.
+**Symptom:** `undefined: storm.Tx`, `db.Begin undefined`.
 
 **Cause:** Manual transaction APIs were removed in v6.
 
@@ -1301,25 +1308,25 @@ matching.
 
 ### 29.6 `db.Bolt` missing
 
-**Symptom:** `db.Bolt undefined (type *rainstorm.DB has no field or method Bolt)`.
+**Symptom:** `db.Bolt undefined (type *storm.DB has no field or method Bolt)`.
 
 **Cause:** The public field was replaced by `NativeDB()`.
 
-**Fix:** Use `db.NativeDB()` or, preferably, use managed Rainstorm APIs.
+**Fix:** Use `db.NativeDB()` or, preferably, use managed Storm APIs.
 
-### 29.7 Borrowed DB unexpectedly remains open after DB.Close
+### 29.7 Native DB remains open after DB.Close
 
 **Symptom:** The native `*bolt.DB` is still open after calling `db.Close()`.
 
-**Cause:** `DB.Close()` returns `nil` for borrowed databases and does not close
-the native database.
+**Cause:** Storm borrows the database passed to `Open` and `DB.Close()` does not
+close it.
 
 **Fix:** The caller must close the native `*bolt.DB` explicitly. See
-[Section 9.2](#92-borrowed-database).
+[Section 9](#9-database-lifecycle).
 
 ### 29.8 Wrong codec returns ErrDifferentCodec
 
-**Symptom:** `errors.Is(err, rainstorm.ErrDifferentCodec)` is true.
+**Symptom:** `errors.Is(err, storm.ErrDifferentCodec)` is true.
 
 **Cause:** The selected root codec may be unable to decode the stored database-version value, or a metadata-validating initialization/write may detect that a node's selected codec disagrees with the record/KV leaf marker. Read paths do not uniformly validate leaf markers; a wrong node codec may instead produce a codec-specific decode error.
 
@@ -1330,7 +1337,7 @@ the native database.
 **Symptom:** Opening an AES-encrypted v5.3.0 database with v6 using the wrong
 key returns `ErrDifferentCodec`.
 
-**Cause:** The AES decryption failed, and Rainstorm classifies this as a
+**Cause:** The AES decryption failed, and Storm classifies this as a
 codec incompatibility.
 
 **Fix:** Use the correct AES key. The underlying decryption error is preserved
@@ -1341,7 +1348,7 @@ inside the error chain.
 **Symptom:** `All`, `Find`, or `One` returns no records for a
 `reflect.StructOf` type that has data in v5.3.0.
 
-**Cause:** Common causes include using a different `From(...)` path or reconstructing a runtime shape that the selected codec cannot decode compatibly. Rainstorm's evidence covers the canonical same-shape reconstruction pattern; it does not prove that every shape difference must fail.
+**Cause:** Common causes include using a different `From(...)` path or reconstructing a runtime shape that the selected codec cannot decode compatibly. Storm's evidence covers the canonical same-shape reconstruction pattern; it does not prove that every shape difference must fail.
 
 **Fix:** Start with the tested pattern: reconstruct identical fields, types, order, and tags, use the same `From(...)` path, and verify reads before enabling writes.
 
@@ -1349,10 +1356,10 @@ inside the error chain.
 
 **Symptom:** Custom bucket records written by v5.3.0 are not found in v6.
 
-**Cause:** The `RainstormBucketName()` implementation may return a different
+**Cause:** The `StormBucketName()` implementation may return a different
 value, or the Node path may differ.
 
-**Fix:** Ensure `RainstormBucketName()` returns the same string as in v5.
+**Fix:** Ensure `StormBucketName()` returns the same string as in v5.
 Ensure the same Node path is used.
 
 ### 29.12 Cancellation is not immediate
@@ -1360,7 +1367,7 @@ Ensure the same Node path is used.
 **Symptom:** After canceling a context, the operation continues for a
 noticeable duration.
 
-**Cause:** Cooperation-based cancellation checks occur at Rainstorm operation
+**Cause:** Cooperation-based cancellation checks occur at Storm operation
 boundaries, not preemptively. bbolt lock waits, OS syscalls, codec operations,
 and user callbacks are not preempted.
 
@@ -1372,7 +1379,7 @@ long-running application work (e.g. within `Each` / `RawEach` callbacks).
 **Symptom:** In a `WriteTransaction`, if the callback returns an error and
 the context is also canceled, only one error is returned.
 
-**Cause:** Once the callback runs and returns a non-nil error, Rainstorm preserves that callback error as the primary cause and rolls the transaction back, even if the callback also canceled the context.
+**Cause:** Once the callback runs and returns a non-nil error, Storm preserves that callback error as the primary cause and rolls the transaction back, even if the callback also canceled the context.
 
 **Fix:** If you need both errors, handle cancellation explicitly inside the
 callback.
@@ -1402,17 +1409,16 @@ before the first v6 write and deploy the v5 binary.
 
 ## 30. Known limitations
 
-1. **Protobuf compatibility** is excluded from the compatibility suite.
-2. **Process-isolated roundtrip** is not currently proven (the roundtrip suite
+1. **Process-isolated roundtrip** is not currently proven (the roundtrip suite
    uses a single test binary with shared MVS dependency graph).
-3. **Byte-for-byte deterministic files** are not guaranteed by bbolt.
-4. **Custom codecs** are not universally guaranteed compatible — test with
+2. **Byte-for-byte deterministic files** are not guaranteed by bbolt.
+3. **Custom codecs** are not universally guaranteed compatible — test with
    your specific codec and schema.
-5. **Performance benchmarks** are single-machine, NoSync, five-sample
+4. **Performance benchmarks** are single-machine, NoSync, five-sample
    snapshots. They are not permanent performance guarantees.
-6. **v5.3.0 is the only supported starting version** — earlier v5 releases
+5. **v5.3.0 is the only supported starting version** — earlier v5 releases
    are not covered by compatibility fixtures.
-7. **Go 1.24 is the minimum** — Go versions below 1.24 are not supported.
+6. **Go 1.24 is the minimum** — Go versions below 1.24 are not supported.
 
 ---
 
@@ -1438,9 +1444,9 @@ A production rollback plan must include:
 8. **After v6 writes**, tested v5.3.0 roundtrip compatibility exists, but
    production rollback still requires backups and application-level
    verification.
-9. **Native writes outside Rainstorm guarantees** complicate rollback because
+9. **Native writes outside Storm guarantees** complicate rollback because
    indexes may not reflect native changes. If you used `NativeDB()` to perform
-   writes, verify index consistency before relying on Rainstorm finders after
+   writes, verify index consistency before relying on Storm finders after
    rollback.
 
 Rollback is **not risk-free**. Always test on a staging copy first.

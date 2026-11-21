@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -6,24 +6,24 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	bolt "go.etcd.io/bbolt"
 
-	"github.com/AndersonBargas/rainstorm/v6/codec"
-	"github.com/AndersonBargas/rainstorm/v6/codec/aes"
-	gobcodec "github.com/AndersonBargas/rainstorm/v6/codec/gob"
-	"github.com/AndersonBargas/rainstorm/v6/codec/json"
-	msgpackcodec "github.com/AndersonBargas/rainstorm/v6/codec/msgpack"
-	serealcodec "github.com/AndersonBargas/rainstorm/v6/codec/sereal"
+	"github.com/malivvan/storm/codec"
+	"github.com/malivvan/storm/codec/aes"
+	gobcodec "github.com/malivvan/storm/codec/gob"
+	"github.com/malivvan/storm/codec/json"
 )
 
 // CodecCompatibilityRecord mirrors the schema used by the v5.3.0 codec
 // fixture generator (package main).
 type CodecCompatibilityRecord struct {
-	ID       uint64 `rainstorm:"id,increment"`
-	Key      string `rainstorm:"unique"`
-	Category string `rainstorm:"index"`
+	ID       uint64 `storm:"id,increment"`
+	Key      string `storm:"unique"`
+	Category string `storm:"index"`
 	Name     string
 	Revision int
 }
@@ -55,10 +55,21 @@ func copyCodecFixture(tb testing.TB, filename string) string {
 	return dst
 }
 
+// openBoltForTest opens a bbolt database for a compatibility test.
+// Cleanup closes it if the test has not already done so.
+func openBoltForTest(tb testing.TB, path string) *bolt.DB {
+	tb.Helper()
+	bdb, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
+	require.NoError(tb, err, "open bolt database %s", path)
+	tb.Cleanup(func() { _ = bdb.Close() })
+	return bdb
+}
+
 // openCodecFixture opens a copied codec fixture with v6 using the given codec.
 func openCodecFixture(tb testing.TB, path string, c codec.MarshalUnmarshaler) *DB {
 	tb.Helper()
-	db, err := Open(context.Background(), path, Codec(c))
+	bdb := openBoltForTest(tb, path)
+	db, err := Open(context.Background(), bdb, nil, c)
 	require.NoError(tb, err, "open codec fixture %s", path)
 	return db
 }
@@ -87,21 +98,7 @@ func makeCodecTable() []codecTestEntry {
 			filename:     "gob.db",
 			codec:        gobcodec.Codec,
 			expectedKV:   "gob-fixture",
-			incompatible: msgpackcodec.Codec,
-		},
-		{
-			name:         "msgpack",
-			filename:     "msgpack.db",
-			codec:        msgpackcodec.Codec,
-			expectedKV:   "msgpack-fixture",
-			incompatible: gobcodec.Codec,
-		},
-		{
-			name:         "sereal",
-			filename:     "sereal.db",
-			codec:        serealcodec.Codec,
-			expectedKV:   "sereal-fixture",
-			incompatible: gobcodec.Codec,
+			incompatible: json.Codec,
 		},
 	}
 }
@@ -612,9 +609,10 @@ func TestCompatibility_CodecReopen(t *testing.T) {
 			}()
 
 			// Reopen with the same codec.
-			db2, err := Open(context.Background(), path, Codec(entry.codec))
-			require.NoError(t, err, "%s: reopen", entry.name)
+			db2 := openCodecFixture(t, path, entry.codec)
 			defer assertClose(t, db2)
+
+			var err error
 
 			// Key "beta" resolves to replacement ID 5.
 			var repl CodecCompatibilityRecord
@@ -677,10 +675,10 @@ func TestCompatibility_CodecReopen(t *testing.T) {
 			assert.Equal(t, uint64(4), newRec.ID)
 		}()
 
-		db2, err := Open(context.Background(), path, Codec(entry.codec))
-		require.NoError(t, err, "aes: reopen")
+		db2 := openCodecFixture(t, path, entry.codec)
 		defer assertClose(t, db2)
 
+		var err error
 		var delta CodecCompatibilityRecord
 		err = db2.One(ctx, "Key", "delta", &delta)
 		require.NoError(t, err, "aes: reopen read delta")
@@ -698,15 +696,16 @@ func TestCompatibility_CodecIncompatible(t *testing.T) {
 			path := copyCodecFixture(t, entry.filename)
 
 			// Attempt to open with a known incompatible codec.
-			db, err := Open(context.Background(), path, Codec(entry.incompatible))
+			bdb := openBoltForTest(t, path)
+			db, err := Open(context.Background(), bdb, nil, entry.incompatible)
 			require.ErrorIs(t, err, ErrDifferentCodec,
 				"%s: expected ErrDifferentCodec when opening with %s",
 				entry.name, entry.incompatible.Name())
 			require.Nil(t, db, "%s: db must be nil on failed open", entry.name)
+			require.NoError(t, bdb.Close())
 
 			// Reopening with the correct codec still succeeds.
-			db2, err2 := Open(context.Background(), path, Codec(entry.codec))
-			require.NoError(t, err2, "%s: reopen with correct codec after incompatible attempt", entry.name)
+			db2 := openCodecFixture(t, path, entry.codec)
 			defer assertClose(t, db2)
 
 			// Data remains exact.
@@ -733,13 +732,14 @@ func TestCompatibility_CodecIncompatible(t *testing.T) {
 		path := copyCodecFixture(t, entry.filename)
 
 		// Opening AES fixture with gob codec must return ErrDifferentCodec.
-		db, err := Open(context.Background(), path, Codec(gobcodec.Codec))
+		bdb := openBoltForTest(t, path)
+		db, err := Open(context.Background(), bdb, nil, gobcodec.Codec)
 		require.ErrorIs(t, err, ErrDifferentCodec, "aes: open with gob must be ErrDifferentCodec")
 		require.Nil(t, db, "aes: db must be nil on failed open")
+		require.NoError(t, bdb.Close())
 
 		// Correct codec still works.
-		db2, err2 := Open(context.Background(), path, Codec(entry.codec))
-		require.NoError(t, err2, "aes: reopen with correct codec")
+		db2 := openCodecFixture(t, path, entry.codec)
 		defer assertClose(t, db2)
 
 		var all []CodecCompatibilityRecord
@@ -779,18 +779,19 @@ func TestCompatibility_CodecAESWrongKey(t *testing.T) {
 
 	// Opening with the wrong key must fail during checkVersion. The codec name
 	// still matches ("aes-json"), but the encrypted version cannot be decoded.
-	db, openErr := Open(context.Background(), path, Codec(wrongCodec))
+	bdb := openBoltForTest(t, path)
+	db, openErr := Open(context.Background(), bdb, nil, wrongCodec)
 	require.Error(t, openErr, "aes: wrong key must fail Open")
 	require.ErrorIs(t, openErr, ErrDifferentCodec,
 		"aes: wrong key must return ErrDifferentCodec")
 	require.Nil(t, db, "aes: db must be nil on wrong-key open")
+	require.NoError(t, bdb.Close())
 
 	// Generic preservation of the underlying decode cause is covered by
 	// TestCheckVersion_ErrorChainPreservation using a classifiable sentinel.
 	// Fixture must remain uncorrupted: correct key still works.
 	entry := makeAESEntry(t)
-	db2, err := Open(context.Background(), path, Codec(entry.codec))
-	require.NoError(t, err, "aes: correct key still works after wrong-key attempt")
+	db2 := openCodecFixture(t, path, entry.codec)
 	defer assertClose(t, db2)
 
 	var all []CodecCompatibilityRecord

@@ -1,5 +1,29 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking: `Open` signature**: `Open(ctx, db *bolt.DB, root []byte, c codec.MarshalUnmarshaler)`
+  now wraps an already-open bbolt database. `root` is the optional root bucket
+  key and `c` is the codec (nil selects JSON). Storm borrows the database and
+  never closes it; `DB.Close()` only releases the Storm wrapper.
+
+### Removed
+
+- **`OpenOption` and open options**: `OpenOption`, `Options`, `BoltOptions`,
+  `Codec`, `Root`, and `UseDB` have been removed. Callers now open bbolt
+  directly and pass the database, root bucket key, and codec to `Open`.
+
+### Removed
+
+- **MsgPack, Sereal, and Protobuf codecs**: The `codec/msgpack`,
+  `codec/sereal`, and `codec/protobuf` packages, their dependencies, and their
+  compatibility fixtures have been removed. Databases written with these
+  codecs can no longer be opened by this module. Export such data with a
+  release that still includes the codec, or keep using that release, before
+  upgrading.
+
 ## [6.1.1] — 2026-09-06
 
 ### Dependencies
@@ -13,10 +37,10 @@
 ### Added
 
 - **Transaction-bound facade (`Attach`)**: `DB.Attach(tx *bolt.Tx) (Tx, error)` binds
-  Rainstorm record/index operations to an existing, caller-owned bbolt transaction. The
+  Storm record/index operations to an existing, caller-owned bbolt transaction. The
   returned `Tx` exposes the full `Node` surface — descendants from `From`, `WithCodec`,
   `PrefixScan`, and `RangeScan` remain transaction-bound — and every operation executes
-  inside the supplied transaction. Rainstorm never commits, rolls back, closes, or
+  inside the supplied transaction. Storm never commits, rolls back, closes, or
   replaces the transaction, and it never opens a managed transaction for a bound `Tx`.
   Uncommitted writes are visible to reads through the same `Tx` and invisible to other
   transactions until the caller commits. A bound `Tx` is valid only for the lifetime of
@@ -41,22 +65,22 @@
 - **Owned/borrowed lifecycle distinction**: `Open` without `UseDB` creates and owns the
   native database; `Open` with `UseDB` borrows an existing one. Ownership determines Close
   behavior.
-- **Operation wrapping**: Public operations add a `rainstorm <operation>: <cause>` prefix while preserving wrapped causes for `errors.Is` classification.
+- **Operation wrapping**: Public operations add a `storm <operation>: <cause>` prefix while preserving wrapped causes for `errors.Is` classification.
 - **Destination/output safety**: Read operations decode into a temporary buffer before
   publishing to the caller's destination, preventing partial writes on error.
-- **v5.3.0 compatibility fixtures**: Checked-in baseline, Gob, MsgPack, Sereal, and
-  AES-JSON fixtures with full read/mutate/reopen behavioural tests.
+- **v5.3.0 compatibility fixtures**: Checked-in baseline, Gob, and AES-JSON
+  fixtures with full read/mutate/reopen behavioural tests.
 - **v5→v6→v5→v6 roundtrip**: Same-process cross-major module roundtrip test proving
   bidirectional interoperability.
 - **v5/v6 benchmarks**: Paired benchmark comparison (five samples, manual medians) with
   v6-only ReadTransaction, WriteTransaction, and CanceledContext benchmarks.
 - **CI and quality gates**: GitHub Actions workflow with formatting, tidy, vet, build, Staticcheck 2026.1, test matrix, race detector, compatibility verification, benchmark-module compile checks, and coverage threshold (≥80.0%).
 - **Dependency automation**: Dependabot configured for Go modules and GitHub Actions with
-  codec/storage dependencies intentionally frozen for v6.
+  storage dependencies intentionally frozen for v6.
 
 ### Changed
 
-- **Module path** to `github.com/AndersonBargas/rainstorm/v6`.
+- **Module path** to `github.com/malivvan/storm`.
 - **Go minimum version** raised to 1.24.
 - **All context-aware operation signatures** require `context.Context` as first parameter:
   `Open`, `Save`, `Update`, `UpdateField`, `DeleteStruct`, `Drop`, `Init`, `ReIndex`,
@@ -85,8 +109,8 @@
 - `Commit` — commit is automatic in managed transactions.
 - `Rollback` — rollback on error is automatic in `WriteTransaction`.
 - Public `Tx` — transaction is managed internally.
-- `WithTransaction` — removed with no equivalent for binding Rainstorm to a caller-owned `*bbolt.Tx`; managed transactions create their own transaction.
-- `GetBucket` and `CreateBucketIfNotExists` — raw bucket helpers are no longer public; use `NativeDB()` for fully native bbolt work, outside Rainstorm guarantees.
+- `WithTransaction` — removed with no equivalent for binding Storm to a caller-owned `*bbolt.Tx`; managed transactions create their own transaction.
+- `GetBucket` and `CreateBucketIfNotExists` — raw bucket helpers are no longer public; use `NativeDB()` for fully native bbolt work, outside Storm guarantees.
 - `Batch` and `WithBatch` — removed. Group writes explicitly in `WriteTransaction`; this changes bbolt Batch coalescing/retry and atomicity semantics.
 - `ErrNotInTransaction` — removed; managed transactions avoid this state.
 - Exported `DB.Bolt` field — replaced by `NativeDB()` method.
@@ -97,17 +121,14 @@
   behaviour for list-producing operations).
 - `checkVersion` now classifies failure to decode the stored version marker as `ErrDifferentCodec` and preserves the decode/decryption cause. This classification may also cover corruption or decoder failure, not only a true codec-name mismatch.
 - `isInteger(nil)` handled defensively in `extract.go`.
-- Generated Protobuf `SimpleUser` fixture moved to test-only scope so it is no longer an accidental exported production API; codec wire tests continue using the same generated descriptor.
 
 ### Compatibility
 
-- v5.3.0 JSON, Gob, MsgPack, Sereal, and AES-JSON fixtures verified: read, mutate, and
+- v5.3.0 JSON, Gob, and AES-JSON fixtures verified: read, mutate, and
   reopen work without migration.
 - IDs, ordinary indexes, unique indexes, nested buckets, KV, `BucketNamer`, and
   `reflect.StructOf` all tested.
 - Same-process v5→v6→v5→v6 roundtrip verified.
-- Protobuf fixtures excluded — existing generated type cannot carry required indexed
-  fixture schema.
 - No process-isolated roundtrip claim; both versions share a single dependency graph
   through MVS.
 
@@ -125,7 +146,7 @@
 
 ### Security/dependency policy
 
-- Codec and storage dependencies intentionally frozen for v6: Sereal, protobuf, MsgPack, and bbolt. Revisit in a future v7.
+- Storage dependencies intentionally frozen for v6: bbolt. Revisit in a future v7.
 - `govulncheck` was not available during the dependency audit; no vulnerability-free or security-audited claim is made.
 - Dependabot configured for root Go module and GitHub Actions; nested compatibility
   modules excluded.
@@ -139,8 +160,8 @@ See [`MIGRATION_V6.md`](MIGRATION_V6.md) for the complete v5.3.0 → v6 migratio
 
 ### Added
 
-- **`BucketNamer` interface**: New public interface `rainstorm.BucketNamer` with method
-  `RainstormBucketName() string`. Structs implementing this interface can define a custom
+- **`BucketNamer` interface**: New public interface `storm.BucketNamer` with method
+  `StormBucketName() string`. Structs implementing this interface can define a custom
   bucket name, overriding the default type-name-based bucket resolution. This is essential
   for runtime-generated types (`reflect.StructOf`) that have no static type name.
   ([#1](#))

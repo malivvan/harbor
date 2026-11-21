@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import bolt "go.etcd.io/bbolt"
 

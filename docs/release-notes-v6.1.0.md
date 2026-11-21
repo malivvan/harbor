@@ -1,11 +1,11 @@
-# Rainstorm v6.1.0 Release Notes
+# Storm v6.1.0 Release Notes
 
-> **Release date:** 2026-09-05 · **Tag:** `v6.1.0` · **Module:** `github.com/AndersonBargas/rainstorm/v6`
+> **Release date:** 2026-09-05 · **Tag:** `v6.1.0` · **Module:** `github.com/malivvan/storm`
 
 ## 1. Executive summary
 
-Rainstorm v6.1.0 is an additive, backward-compatible release. It introduces a
-transaction-bound facade so Rainstorm record/index operations can participate
+Storm v6.1.0 is an additive, backward-compatible release. It introduces a
+transaction-bound facade so Storm record/index operations can participate
 in a bbolt transaction **owned by the caller**, without leaking a `*bolt.Tx`
 parameter into every public operation and without moving transaction ownership
 out of the caller's unit of work.
@@ -19,19 +19,19 @@ type Tx interface {
 	Node
 }
 
-// Attach binds Rainstorm to an existing, caller-owned bbolt transaction.
+// Attach binds Storm to an existing, caller-owned bbolt transaction.
 func (s *DB) Attach(tx *bolt.Tx) (Tx, error)
 
 // ErrTxFromDifferentDB: Attach received a transaction from another database.
 var ErrTxFromDifferentDB error
 ```
 
-`rainstorm.Tx` satisfies `rainstorm.Node`, so existing code that accepts a
+`storm.Tx` satisfies `storm.Node`, so existing code that accepts a
 `Node` works unchanged with a bound `Tx`.
 
 ## 3. Guarantees
 
-- Rainstorm never commits, rolls back, closes, or replaces the supplied
+- Storm never commits, rolls back, closes, or replaces the supplied
   transaction, and never opens a managed transaction for a bound `Tx`.
 - All reads and writes through the bound `Tx` — including nodes derived via
   `From`, `WithCodec`, `PrefixScan`, and `RangeScan` — execute inside the
@@ -54,12 +54,12 @@ if err != nil {
 }
 defer tx.Rollback()
 
-txn, err := db.Attach(tx) // rainstorm.Tx — Rainstorm borrows, never owns
+txn, err := db.Attach(tx) // storm.Tx — Storm borrows, never owns
 if err != nil {
 	return err
 }
 
-// Rainstorm record write (record + indexes) in the caller's transaction…
+// Storm record write (record + indexes) in the caller's transaction…
 if err := txn.Save(ctx, &account); err != nil {
 	return err
 }
@@ -78,10 +78,10 @@ return tx.Commit() // the caller decides the outcome
 
 ## 5. Tests
 
-Ten new tests cover: atomic commit of Rainstorm record writes plus raw bolt
+Ten new tests cover: atomic commit of Storm record writes plus raw bolt
 bucket writes; rollback discarding records, indexes, and raw writes;
 read-your-own-uncommitted-writes through the bound handle; isolation from
-managed, raw, and other attached transactions; proof that Rainstorm never
+managed, raw, and other attached transactions; proof that Storm never
 commits or rolls back the caller's transaction; read-only transaction write
 rejection; index consistency under commit and rollback; Attach validation; and
 handle lifetime.
@@ -94,7 +94,7 @@ Compatibility, Coverage) pass on the tag and on `master`.
 ## 7. Upgrade
 
 ```sh
-go get github.com/AndersonBargas/rainstorm/v6@v6.1.0
+go get github.com/malivvan/storm@v6.1.0
 go mod tidy
 ```
 

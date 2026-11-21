@@ -3,7 +3,7 @@
 **Audit date:** 2026-07-15
 **Commit:** `f5994e78b7ec312bcefc7b51f6ff5bab4ce7f6b3` (docs: consolidate v5 compatibility evidence)
 **Phase:** R6.6A — Dependency inventory, risk classification, testify update
-**Module:** `github.com/AndersonBargas/rainstorm/v6`
+**Module:** `github.com/malivvan/storm`
 
 ---
 
@@ -25,10 +25,7 @@
 
 | Module | Current | Latest Available | Usage | Status | Compat Risk | R6.6 Decision |
 |--------|---------|-----------------|-------|--------|-------------|---------------|
-| `github.com/Sereal/Sereal` | `v0.0.0-20200820125258-a016b7cda3f3` | `v0.0.0-20260710121258-d894361fc66f` | Production codec (`codec/sereal`) | Pseudo-version only; no tagged releases | **High** — API/encoding changes possible | Defer to dedicated phase (R6.6A4) |
-| `github.com/golang/protobuf` | `v1.3.2` | `v1.5.4` | Production codec (`codec/protobuf`) | **Deprecated** — use `google.golang.org/protobuf` | **High** — wire format, API, generated code | Defer to dedicated phase (R6.6A2) |
 | `github.com/stretchr/testify` | `v1.10.0` | **`v1.11.1`** | Test-only (`_test.go` files, roundtrip) | Active, stable | **Low** — minor version, test-only | **Updated in R6.6A** |
-| `github.com/vmihailenco/msgpack` | `v4.0.4+incompatible` | (v5 via `github.com/vmihailenco/msgpack/v5`) | Production codec (`codec/msgpack`) | `+incompatible`; maintained releases use `v5` major path | **High** — API, encoding, fixture compatibility | Defer to dedicated phase (R6.6A3) |
 | `go.etcd.io/bbolt` | `v1.4.3` | `v1.5.0` | Production storage layer | Active; v1.5.0 requires Go 1.24+ | **Medium** — see bbolt analysis below | Keep current in R6.6A; evaluate in later subphase |
 
 ---
@@ -37,29 +34,25 @@
 
 | Module | Current | Latest Available | Notes |
 |--------|---------|-----------------|-------|
-| `github.com/DataDog/zstd` | `v1.4.1` | `v1.5.7` | Transitive through Sereal; update must be evaluated with the Sereal codec |
-| `github.com/golang/snappy` | `v0.0.1` | `v1.0.0` | Transitive through Sereal; update must be evaluated with the Sereal codec |
-| `golang.org/x/net` | `v0.0.0-20191105084925-a882066a44e0` | `v0.57.0` | Transitive through the legacy MsgPack v4 → App Engine datastore path |
 | `golang.org/x/sys` | `v0.39.0` | `v0.47.0` | Used transitively by production bbolt and by test/tool dependencies |
-| `google.golang.org/appengine` | `v1.6.5` | `v1.6.8` | Required transitively by legacy MsgPack v4; removal is coupled to MsgPack migration |
-| `gopkg.in/yaml.v3` | `v3.0.1` | `v3.0.1` | Current; stable; no update needed |
+| `go.yaml.in/yaml/v3` | `v3.0.5` | `v3.0.5` | Current; stable; no update needed |
 
 ---
 
 ## 4. Nested Module Policy
 
 ### v5 Fixture Generator (`testdata/compatibility/v5.3.0/generator`)
-- **Must remain pinned** to `github.com/AndersonBargas/rainstorm/v5 v5.3.0` and its dependency graph.
-- Its `go.mod` pins historical versions (`v4.0.4+incompatible` msgpack, `v1.3.2` protobuf, `v1.4.1` zstd, etc.).
+- **Must remain pinned** to `github.com/malivvan/storm v5.3.0` and its dependency graph.
+- Its `go.mod` reflects the historical fixture-generation environment.
 - **Do not update.** Fixture provenance must not be invalidated.
 
 ### Roundtrip (`testdata/compatibility/roundtrip`)
-- Intentionally imports both `rainstorm/v5` and local `rainstorm/v6` via `replace` directive.
+- Intentionally imports both `storm/v5` and local `storm/v6` via `replace` directive.
 - Already uses `testify v1.11.1`.
 - **No changes needed in R6.6A.**
 
 ### Benchmark (`testdata/compatibility/benchmark`)
-- Intentionally imports both `rainstorm/v5` and local `rainstorm/v6` via `replace` directive.
+- Intentionally imports both `storm/v5` and local `storm/v6` via `replace` directive.
 - **No changes needed in R6.6A.**
 
 ### Nested module CI invocation
@@ -73,18 +66,21 @@
 
 ## 5. Codec Wire/On-disk Compatibility Constraints
 
-All codec dependency updates carry **on-disk compatibility risk** with existing v5 databases:
+Only the remaining built-in codecs are supported:
 
 | Codec | Risk |
 |-------|------|
-| **MsgPack** | `+incompatible` semantics; v5 API uses different import path; encoding may differ |
-| **Protobuf** | Old API (`github.com/golang/protobuf`) vs new API (`google.golang.org/protobuf`); generated code regeneration required; wire format must be verified |
-| **Sereal** | No tagged releases; pseudo-version only; encoding stability unknown across pseudo-versions |
 | **JSON** | Standard library; no risk |
 | **Gob** | Standard library; no risk |
 | **AES** | Standard library; no risk |
 
-Checked-in v5 fixtures (`testdata/compatibility/v5.3.0/baseline.db` and `testdata/compatibility/v5.3.0/codecs/*.db`) must remain readable after any codec migration.
+The MsgPack, Sereal, and Protobuf codec packages have been removed. Databases
+written with those codecs are no longer readable by this module and must be
+exported or migrated with a release that still provides the codec.
+
+Checked-in v5 fixtures (`testdata/compatibility/v5.3.0/baseline.db` and the
+remaining fixtures under `testdata/compatibility/v5.3.0/codecs/`) must remain
+readable.
 
 ---
 
@@ -126,28 +122,17 @@ go mod tidy
 ### Group A: Low-risk, test-only (done)
 - ✅ testify v1.11.1 — applied
 
-### Group B: Codec migrations — dedicated subphases required
-- **R6.6A2:** Protobuf API migration (v1.3.2 → `google.golang.org/protobuf`)
-  - Requires generated-code regeneration
-  - Requires wire/on-disk compatibility verification
-  - Old module is deprecated
-- **R6.6A3:** MsgPack major-version migration (v4 → v5 import path)
-  - Requires fixture compatibility proof
-  - API changes, encoding may differ
-- **R6.6A4:** Sereal + transitive dependency decision
-  - Sereal has no tagged releases; evaluate replacement/removal
-  - DataDog/zstd v1.4.1 is old and only transitively needed
+### Group B: Codec dependencies — removed
+- The MsgPack, Sereal, and Protobuf codec packages and their transitive
+  dependency graph were removed.
+- The codec migration subphases previously proposed here (protobuf API,
+  MsgPack v4→v5, Sereal update/replacement) are obsolete.
 
 ### Group C: bbolt evaluation
 - v1.4.3 is current enough (released 2025-08-19)
 - v1.5.0 available; requires Go 1.24+ (compatible with current directive)
 - v5 fixtures and v6 currently share the same bbolt version
 - Evaluate in a later subphase with on-disk compatibility testing
-
-### Group D: Legacy indirect dependency graph
-- `golang.org/x/net` and `google.golang.org/appengine` are pulled in by legacy MsgPack v4 and must be evaluated with the MsgPack migration.
-- `github.com/golang/snappy` and `github.com/DataDog/zstd` are pulled in by Sereal and must be evaluated with the Sereal decision.
-- These modules must not be independently removed or upgraded without their owning codec compatibility tests.
 
 ---
 
@@ -172,40 +157,7 @@ go mod tidy
 | Does any production package import it? | No |
 | R6.6A action | **Updated.** |
 
-### C. golang/protobuf (`github.com/golang/protobuf` v1.3.2)
-
-| Question | Answer |
-|----------|--------|
-| Is the module deprecated? | Yes — marked deprecated; recommends `google.golang.org/protobuf` |
-| Does Rainstorm use the old API? | Yes — `codec/protobuf/protobuf.go` imports `github.com/golang/protobuf/proto` |
-| Would migration require source changes? | Yes — API differs; the test-only `codec/protobuf/simple_user_test.go` fixture is generated with the old API |
-| Would migration require wire verification? | Yes — protobuf wire compatibility must be confirmed |
-| R6.6A action | **No change.** Needs dedicated subphase. |
-
-### D. MsgPack (`github.com/vmihailenco/msgpack` v4.0.4+incompatible)
-
-| Question | Answer |
-|----------|--------|
-| Current import semantics | `+incompatible` — module has no `go.mod` or pre-modules `go.mod` |
-| Maintained releases | Use `github.com/vmihailenco/msgpack/v5` (major-version import path) |
-| Would migration change API? | Yes — different package, likely API changes |
-| Would migration change encoding? | Possibly — must verify |
-| Must v5 fixtures remain readable? | Yes — checked-in MsgPack fixtures must still decode |
-| R6.6A action | **No change.** Needs dedicated subphase. |
-
-### E. Sereal (`github.com/Sereal/Sereal`)
-
-| Question | Answer |
-|----------|--------|
-| Latest available pseudo-version | `v0.0.0-20260710121258-d894361fc66f` (2026-07-10) |
-| Tagged releases? | No — only pseudo-versions |
-| Maintenance activity | Recent commits visible (2026-07-10) |
-| Relationship with DataDog/zstd | Sereal depends on DataDog/zstd; v1.4.1 is old |
-| Safe in-place update? | Unclear — no changelog, no tagged releases, encoding stability unknown |
-| Replacement/removal? | Should be considered only in a future major version |
-| R6.6A action | **No change.** Defer to R6.6A4. |
-
-### F. Go Version Policy (finalized in R6.6B)
+### C. Go Version Policy (finalized in R6.6B)
 
 | Item | Value |
 |------|-------|
@@ -235,8 +187,8 @@ go mod tidy
 | `go mod tidy` (second) | ✅ Stable — no additional diff |
 | `go mod verify` | ✅ All modules verified |
 | `go vet ./...` | ✅ Pass |
-| `go test -count=1 -timeout 180s ./...` | ✅ All 11 packages pass |
-| `go test -race -count=1 -timeout 300s ./...` | ✅ All 11 packages pass |
+| `go test -count=1 -timeout 180s ./...` | ✅ All packages pass |
+| `go test -race -count=1 -timeout 300s ./...` | ✅ All packages pass |
 | `go build ./...` | ✅ Pass |
 | `go -C testdata/compatibility/roundtrip test ...` | ✅ Pass |
 | `go -C testdata/compatibility/benchmark test ...` | ✅ Pass (no tests to run) |
@@ -248,7 +200,6 @@ go mod tidy
 - **Files changed:** `go.mod`, `go.sum`, and `docs/dependency-audit.md`
 - **Production `.go` files:** unchanged
 - **Test `.go` files:** unchanged
-- **Generated protobuf file:** unchanged
 - **Compatibility fixtures:** unchanged
 - **Nested module `go.mod`/`go.sum`:** unchanged
 - **No commit or push performed**
@@ -258,13 +209,11 @@ go mod tidy
 
 ## 12. Proposed Next Subphases
 
-1. **R6.6A2:** Protobuf API migration feasibility and fixture proof
-2. **R6.6A3:** MsgPack major-version migration feasibility and fixture proof
-3. **R6.6A4:** Sereal/transitive dependency decision (update, replace, or defer)
-4. **R6.6C:** Staticcheck integration and coverage threshold
-5. **R6.6D:** Dependency automation (Dependabot/Renovate)
+1. **R6.6C:** Staticcheck integration and coverage threshold
+2. **R6.6D:** Dependency automation (Dependabot/Renovate)
 
-Codec migrations that cannot demonstrate wire/on-disk compatibility with checked-in v5 fixtures should be explicitly deferred to v7.
+Codec dependency work was resolved by removing the MsgPack, Sereal, and
+Protobuf codecs rather than migrating them.
 
 ---
 
@@ -342,12 +291,12 @@ cache-dependency-path: |
 
 | Check | Result |
 |-------|--------|
-| `gofmt -l .` | Pass after formatting the pre-existing generated protobuf file |
+| `gofmt -l .` | Pass |
 | `go mod tidy` + `git diff --exit-code` | Pass |
 | `go mod verify` | Pass |
 | `go vet ./...` | Pass |
-| `go test -count=1 -timeout 180s ./...` | Pass (11 packages) |
-| `go test -race -count=1 -timeout 300s ./...` | Pass (11 packages) |
+| `go test -count=1 -timeout 180s ./...` | Pass (all packages) |
+| `go test -race -count=1 -timeout 300s ./...` | Pass (all packages) |
 | `go build ./...` | Pass |
 | Coverage profile + summary | Total: 80.1% |
 | Roundtrip normal | Pass |
@@ -385,7 +334,6 @@ cache-dependency-path: |
 
 - `.github/workflows/main.yml` -- replaced with new CI pipeline
 - `docs/dependency-audit.md` -- added Go version policy and R6.6B CI section
-- `codec/protobuf/simple_user.pb.go` -- gofmt-only generated-file cleanup required by the formatting job (later moved unchanged to test-only `simple_user_test.go` during the v6 public API audit)
 
 ---
 
@@ -439,7 +387,7 @@ go install honnef.co/go/tools/cmd/staticcheck@2026.1
 
 #### Remaining diagnostics resolved
 
-- Removed genuinely dead test artifacts, an unused protobuf sentinel, an unused private helper, and unused struct state.
+- Removed genuinely dead test artifacts, an unused private helper, and unused struct state.
 - Replaced the single-iteration cursor loop with an equivalent `Seek` plus conditional.
 - Added assertions that make defensive-copy mutations and nil-on-error results observable.
 - Added narrow `//lint:ignore U1000` directives only to private fields intentionally present in reflection fixtures; each directive explains the fixture contract.
@@ -552,8 +500,8 @@ cache-dependency-path: |
 | `go mod verify` | PASS |
 | `go vet ./...` | PASS |
 | `go build ./...` | PASS |
-| `go test -count=1 -timeout 180s ./...` | PASS (11 packages) |
-| `go test -race -count=1 -timeout 300s ./...` | PASS (11 packages) |
+| `go test -count=1 -timeout 180s ./...` | PASS (all packages) |
+| `go test -race -count=1 -timeout 300s ./...` | PASS (all packages) |
 | `go run honnef.co/go/tools/cmd/staticcheck@2026.1 ./...` | PASS (zero diagnostics) |
 | Coverage profile | Generated |
 | Coverage summary | total: 80.4% |
@@ -582,7 +530,7 @@ cache-dependency-path: |
 - `storm_test.go` — fixed error check order (SA5001) and removed an unused constant
 - `bench_test.go`, `bucket_path_test.go`, `operation_wrapping_r6c2b_test.go`, `scan_cancellation_test.go` — removed dead artifacts or added meaningful state assertions
 - `extract_test.go`, `structs_test.go` — documented reflection-only private fixture fields with narrow lint directives; added nil coverage for `isInteger`
-- `codec/protobuf/protobuf.go`, `q/tree.go`, `sink.go` — removed unused private declarations
+- `q/tree.go`, `sink.go` — removed unused private declarations
 - `q/regexp.go` — normalized an error message to Go's lowercase error grammar; this is an observable text-only cleanup
 - `index/id.go` — removed redundant nil checks (S1009)
 - `index/list.go` — removed redundant nil checks (S1009)
@@ -643,26 +591,19 @@ cache-dependency-path: |
 #### Frozen root dependencies and rationale
 
 Dependabot is configured to **ignore** the following direct dependencies in the root module.
-These dependencies control storage format and codec wire compatibility; automated upgrades
-could silently break on-disk fixture compatibility without dedicated migration subphases.
+These dependencies control the storage format; automated upgrades could silently break
+on-disk fixture compatibility without dedicated migration subphases.
 
 | Dependency | Rationale | Revisit |
 |-----------|-----------|---------|
-| `github.com/Sereal/Sereal` | Wire/on-disk codec; migration requires cross-version fixture proof | v7 |
-| `github.com/golang/protobuf` | Legacy protobuf API; migration to `google.golang.org/protobuf` requires generated-code and fixture evaluation | v7 |
-| `github.com/vmihailenco/msgpack` | Wire/on-disk codec; v4→v5 major-version migration requires fixture-proof validation | v7 |
 | `go.etcd.io/bbolt` | Storage engine; upgrades must be evaluated for on-disk format, performance regression, and fixture compatibility | v7 |
-| Sereal transitives | `DataDog/zstd`, `golang/snappy`, and `google/go-cmp` remain aligned with the frozen codec graph | v7 |
-| MsgPack transitives | `x/net`, App Engine, `check.v1`, and `kr/pretty` remain aligned with the frozen codec graph | v7 |
 
 **Policy:** Each frozen dependency must be manually migrated with a dedicated subphase that includes:
 1. Cross-version fixture compatibility proof.
 2. Full CI validation (normal + race + roundtrip).
 3. Benchmark comparison against checked-in baselines.
 
-This freeze does **not** block updates to `github.com/stretchr/testify`, its test-support graph, `golang.org/x/sys`, or other indirect dependencies unrelated to the legacy codec graphs.
-
-The following codec transitives are also frozen because `go mod why -m` traces them through Sereal or MsgPack: `github.com/DataDog/zstd`, `github.com/golang/snappy`, `github.com/google/go-cmp`, `golang.org/x/net`, `google.golang.org/appengine`, `gopkg.in/check.v1`, and `github.com/kr/pretty`.
+This freeze does **not** block updates to `github.com/stretchr/testify`, its test-support graph, `golang.org/x/sys`, or other indirect dependencies.
 
 #### Nested-module exclusion policy
 

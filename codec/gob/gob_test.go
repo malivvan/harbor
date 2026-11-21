@@ -3,7 +3,7 @@ package gob
 import (
 	"testing"
 
-	"github.com/AndersonBargas/rainstorm/v6/codec/internal"
+	"github.com/malivvan/storm/codec/internal"
 	"github.com/stretchr/testify/require"
 )
 

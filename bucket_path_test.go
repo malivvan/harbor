@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -56,7 +56,7 @@ func TestFrom_SiblingPathsAreIndependent(t *testing.T) {
 // TestBucket_ReturnsDefensiveCopy verifies that Bucket() returns
 // a defensive copy which, when mutated, does not affect the node.
 func TestBucket_ReturnsDefensiveCopy(t *testing.T) {
-	db, cleanup := createDB(t, Root("a", "b", "c"))
+	db, cleanup := createDB(t, testRoot("a", "b", "c"))
 	defer cleanup()
 
 	path1 := db.Bucket()
@@ -86,7 +86,7 @@ func TestBucket_ReturnsDefensiveCopyNil(t *testing.T) {
 // the caller's slice so that subsequent mutations don't affect the node.
 func TestRoot_CopiesCallerPath(t *testing.T) {
 	parts := []string{"tenant", "context"}
-	rootOption := Root(parts...)
+	rootOption := testRoot(parts...)
 
 	// Root must snapshot its arguments when the option is created, not later
 	// when Open applies it.
@@ -102,9 +102,9 @@ func TestRoot_CopiesCallerPath(t *testing.T) {
 // TestRoot_DifferentCallsIndependent verifies that distinct Root calls
 // produce independent paths.
 func TestRoot_DifferentCallsIndependent(t *testing.T) {
-	db1, cleanup1 := createDB(t, Root("a"))
+	db1, cleanup1 := createDB(t, testRoot("a"))
 	defer cleanup1()
-	db2, cleanup2 := createDB(t, Root("b"))
+	db2, cleanup2 := createDB(t, testRoot("b"))
 	defer cleanup2()
 
 	require.Equal(t, []string{"a"}, db1.Bucket())
@@ -121,7 +121,7 @@ func TestRoot_DifferentCallsIndependent(t *testing.T) {
 // that call CreateBucketIfNotExists and GetBucket and confirms
 // the node path is preserved.
 func TestBucketHelpers_DoNotMutateNodePath(t *testing.T) {
-	db, cleanup := createDB(t, Root("root"))
+	db, cleanup := createDB(t, testRoot("root"))
 	defer cleanup()
 
 	node := db.From("tenant").(*node)
@@ -298,7 +298,7 @@ func TestBucketScanner_ReturnsIndependentNodePaths(t *testing.T) {
 // TestBucketScanner_NestedRoot verifies scanner behavior with nested root buckets.
 func TestBucketScanner_NestedRoot(t *testing.T) {
 	ctx := context.Background()
-	db, cleanup := createDB(t, Root("tenant", "context"))
+	db, cleanup := createDB(t, testRoot("tenant", "context"))
 	defer cleanup()
 
 	// db already has rootBucket ["tenant", "context"].

@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -31,12 +31,16 @@ func TestCheckVersion_EmptyVersionIsInitialized(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "empty-version.db")
 	ctx := context.Background()
 
-	db, err := Open(ctx, path)
+	bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 10 * time.Second})
+	require.NoError(t, err)
+	defer bDB.Close()
+
+	db, err := Open(ctx, bDB, nil, nil)
 	require.NoError(t, err)
 	require.NoError(t, db.Set(ctx, dbinfo, "version", ""))
 	require.NoError(t, db.Close())
 
-	db, err = Open(ctx, path)
+	db, err = Open(ctx, bDB, nil, nil)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, db.Close()) }()
 
@@ -52,14 +56,18 @@ func TestCheckVersion_ErrorChainPreservation(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "seed.db")
 
+	bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 10 * time.Second})
+	require.NoError(t, err)
+	defer bDB.Close()
+
 	// Create a database with the default JSON codec. This writes
-	// __rainstorm_db/version using the JSON codec.
-	seedDB, err := Open(context.Background(), path)
+	// __storm_db/version using the JSON codec.
+	seedDB, err := Open(context.Background(), bDB, nil, nil)
 	require.NoError(t, err, "create seed DB")
 	require.NoError(t, seedDB.Close(), "close seed DB")
 
 	// Open with an incompatible codec that deliberately fails Unmarshal.
-	db, err := Open(context.Background(), path, Codec(testDecodeCodec{}))
+	db, err := Open(context.Background(), bDB, nil, testDecodeCodec{})
 	require.Error(t, err)
 
 	// Must match ErrDifferentCodec.
@@ -73,15 +81,8 @@ func TestCheckVersion_ErrorChainPreservation(t *testing.T) {
 	// No partial DB is returned.
 	assert.Nil(t, db, "returned DB must be nil on initialization failure")
 
-	// The owned database file must be closed and its bbolt lock released after
-	// failed initialization. Opening the file descriptor alone would not prove
-	// this because bbolt locking is advisory.
-	verifyBolt, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
-	require.NoError(t, err, "seed database lock must be released by failed Open")
-	require.NoError(t, verifyBolt.Close())
-
 	// Reopening with the correct codec must succeed and data must be intact.
-	db2, err := Open(context.Background(), path)
+	db2, err := Open(context.Background(), bDB, nil, nil)
 	require.NoError(t, err, "reopen with correct codec")
 	require.NoError(t, db2.Close())
 }

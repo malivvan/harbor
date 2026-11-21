@@ -1,4 +1,4 @@
-package rainstorm_test
+package storm_test
 
 import (
 	"context"
@@ -8,15 +8,28 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 	"time"
 
-	"github.com/AndersonBargas/rainstorm/v6"
-	"github.com/AndersonBargas/rainstorm/v6/codec/gob"
+	"github.com/malivvan/storm"
+	"github.com/malivvan/storm/codec/gob"
 	bolt "go.etcd.io/bbolt"
 )
 
+var exampleBoltDBs []*bolt.DB
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	for _, bdb := range exampleBoltDBs {
+		if err := bdb.Close(); err != nil {
+			log.Println("close error:", err)
+		}
+	}
+	os.Exit(code)
+}
+
 func ExampleOpen() {
-	dir, err := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, err := os.MkdirTemp(os.TempDir(), "storm")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -28,7 +41,17 @@ func ExampleOpen() {
 
 	ctx := context.Background()
 
-	db, err := rainstorm.Open(ctx, filepath.Join(dir, "rainstorm.db"))
+	bdb, err := bolt.Open(filepath.Join(dir, "storm.db"), 0600, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() {
+		if err := bdb.Close(); err != nil {
+			log.Println("close error:", err)
+		}
+	}()
+
+	db, err := storm.Open(ctx, bdb, nil, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -45,7 +68,7 @@ func ExampleOpen() {
 }
 
 func ExampleDB_Save() {
-	dir, err := os.MkdirTemp(os.TempDir(), "rainstorm")
+	dir, err := os.MkdirTemp(os.TempDir(), "storm")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -58,16 +81,26 @@ func ExampleDB_Save() {
 	ctx := context.Background()
 
 	type User struct {
-		ID        int    `rainstorm:"id,increment"` // the increment tag will auto-increment integer IDs without existing values.
-		Group     string `rainstorm:"index"`
-		Email     string `rainstorm:"unique"`
+		ID        int    `storm:"id,increment"` // the increment tag will auto-increment integer IDs without existing values.
+		Group     string `storm:"index"`
+		Email     string `storm:"unique"`
 		Name      string
-		Age       int       `rainstorm:"index"`
-		CreatedAt time.Time `rainstorm:"index"`
+		Age       int       `storm:"index"`
+		CreatedAt time.Time `storm:"index"`
 	}
 
-	// Open takes an optional list of options as the last argument.
-	db, err := rainstorm.Open(ctx, filepath.Join(dir, "rainstorm.db"), rainstorm.Codec(gob.Codec))
+	// Open the underlying bbolt database, then wrap it with a custom codec.
+	bdb, err := bolt.Open(filepath.Join(dir, "storm.db"), 0600, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() {
+		if err := bdb.Close(); err != nil {
+			log.Println("close error:", err)
+		}
+	}()
+
+	db, err := storm.Open(ctx, bdb, nil, gob.Codec)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -102,7 +135,7 @@ func ExampleDB_Save() {
 
 	// Output:
 	// 1
-	// rainstorm save: already exists
+	// storm save: already exists
 }
 
 func ExampleDB_One() {
@@ -131,7 +164,7 @@ func ExampleDB_One() {
 	fmt.Println(err)
 
 	// Output:
-	// rainstorm one: not found
+	// storm one: not found
 }
 
 func ExampleDB_Find() {
@@ -222,7 +255,7 @@ func ExampleLimit() {
 	ctx := context.Background()
 
 	var users []User
-	err := db.All(ctx, &users, rainstorm.Limit(2))
+	err := db.All(ctx, &users, storm.Limit(2))
 
 	if err != nil {
 		log.Fatal(err)
@@ -242,7 +275,7 @@ func ExampleSkip() {
 	ctx := context.Background()
 
 	var users []User
-	err := db.All(ctx, &users, rainstorm.Skip(1))
+	err := db.All(ctx, &users, storm.Skip(1))
 
 	if err != nil {
 		log.Fatal(err)
@@ -254,8 +287,8 @@ func ExampleSkip() {
 	// Found 2
 }
 
-func ExampleUseDB() {
-	dir, err := os.MkdirTemp(os.TempDir(), "rainstorm")
+func ExampleOpen_existingDB() {
+	dir, err := os.MkdirTemp(os.TempDir(), "storm")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -272,7 +305,7 @@ func ExampleUseDB() {
 		log.Fatal(err)
 	}
 
-	db, err := rainstorm.Open(ctx, "", rainstorm.UseDB(bDB))
+	db, err := storm.Open(ctx, bDB, nil, nil)
 	if err != nil {
 		if closeErr := bDB.Close(); closeErr != nil {
 			log.Println("native close after open failure:", closeErr)
@@ -281,7 +314,7 @@ func ExampleUseDB() {
 	}
 	defer func() {
 		if err := db.Close(); err != nil {
-			log.Println("rainstorm close error:", err)
+			log.Println("storm close error:", err)
 		}
 		if err := bDB.Close(); err != nil {
 			log.Println("native close error:", err)
@@ -333,7 +366,7 @@ func ExampleDB_WriteTransaction() {
 	// both start out with a balance of 10000 cents
 	var account1, account2 Account
 
-	err := db.WriteTransaction(ctx, func(tx rainstorm.Node) error {
+	err := db.WriteTransaction(ctx, func(tx storm.Node) error {
 		err := tx.One(ctx, "ID", 1, &account1)
 		if err != nil {
 			return err
@@ -395,7 +428,7 @@ func ExampleDB_ReadTransaction() {
 
 	var u User
 	// ReadTransaction executes the callback in a managed read-only transaction.
-	err := db.ReadTransaction(ctx, func(tx rainstorm.Node) error {
+	err := db.ReadTransaction(ctx, func(tx storm.Node) error {
 		return tx.One(ctx, "ID", 1, &u)
 	})
 	if err != nil {
@@ -418,7 +451,7 @@ func Example_errorsIs() {
 	var user User
 	err := db.One(ctx, "Name", "Nobody", &user)
 	// Classify errors with errors.Is, never with direct equality.
-	if errors.Is(err, rainstorm.ErrNotFound) {
+	if errors.Is(err, storm.ErrNotFound) {
 		fmt.Println("not found")
 	}
 
@@ -495,7 +528,7 @@ func ExampleDB_From() {
 	fmt.Println(personalNote.Text)
 
 	// Output:
-	// rainstorm one: not found
+	// storm one: not found
 	// Work related.
 	// This is some private text.
 	// This is some very personal text.
@@ -526,7 +559,7 @@ func ExampleDB_Drop() {
 	fmt.Println(err)
 
 	// Output:
-	// rainstorm one: not found
+	// storm one: not found
 }
 
 func ExampleNode_PrefixScan() {
@@ -643,31 +676,37 @@ func ExampleNode_RangeScan() {
 }
 
 type User struct {
-	ID        int    `rainstorm:"id,increment"`
-	Group     string `rainstorm:"index"`
-	Email     string `rainstorm:"unique"`
+	ID        int    `storm:"id,increment"`
+	Group     string `storm:"index"`
+	Email     string `storm:"unique"`
 	Name      string
-	Age       int       `rainstorm:"index"`
-	CreatedAt time.Time `rainstorm:"index"`
+	Age       int       `storm:"index"`
+	CreatedAt time.Time `storm:"index"`
 }
 
 type Account struct {
-	ID     int   `rainstorm:"id,increment"`
+	ID     int   `storm:"id,increment"`
 	Amount int64 // amount in cents
 }
 
 type Note struct {
-	ID   string `rainstorm:"id"`
+	ID   string `storm:"id"`
 	Text string
 }
 
-func prepareDB() (string, *rainstorm.DB) {
-	dir, err := os.MkdirTemp(os.TempDir(), "rainstorm")
+func prepareDB() (string, *storm.DB) {
+	dir, err := os.MkdirTemp(os.TempDir(), "storm")
 	if err != nil {
 		log.Fatal(err)
 	}
 	ctx := context.Background()
-	db, err := rainstorm.Open(ctx, filepath.Join(dir, "rainstorm.db"))
+	bdb, err := bolt.Open(filepath.Join(dir, "storm.db"), 0600, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	exampleBoltDBs = append(exampleBoltDBs, bdb)
+
+	db, err := storm.Open(ctx, bdb, nil, nil)
 	if err != nil {
 		log.Fatal(err)
 	}

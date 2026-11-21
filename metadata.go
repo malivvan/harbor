@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"reflect"

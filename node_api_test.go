@@ -1,4 +1,4 @@
-package rainstorm_test
+package storm_test
 
 import (
 	"context"
@@ -6,22 +6,29 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/AndersonBargas/rainstorm/v6"
-	"github.com/AndersonBargas/rainstorm/v6/codec/gob"
+	"github.com/malivvan/storm"
+	"github.com/malivvan/storm/codec/gob"
 	"github.com/stretchr/testify/require"
+	bolt "go.etcd.io/bbolt"
 )
 
 // testUser is used in external-package consumer tests.
 type testUser struct {
-	ID   int    `rainstorm:"id"`
-	Name string `rainstorm:"index"`
+	ID   int    `storm:"id"`
+	Name string `storm:"index"`
 }
 
-// TestNode_ConsumerCanUseWithoutBbolt verifies that an external consumer can
-// declare and use a rainstorm.Node without importing bbolt.
-func TestNode_ConsumerCanUseWithoutBbolt(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "rainstorm.db")
-	db, err := rainstorm.Open(context.Background(), path, rainstorm.Codec(gob.Codec))
+// TestNode_ConsumerCanUseNode verifies that an external consumer can declare
+// and use a storm.Node.
+func TestNode_ConsumerCanUseNode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "storm.db")
+	bDB, err := bolt.Open(path, 0600, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, bDB.Close())
+	})
+
+	db, err := storm.Open(context.Background(), bDB, nil, gob.Codec)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, db.Close())
@@ -30,7 +37,7 @@ func TestNode_ConsumerCanUseWithoutBbolt(t *testing.T) {
 	ctx := context.Background()
 
 	// Exercise Node interface: From, Bucket, Codec, WithCodec.
-	var n rainstorm.Node = db.From("tenant", "ns")
+	var n storm.Node = db.From("tenant", "ns")
 	require.Equal(t, []string{"tenant", "ns"}, n.Bucket())
 
 	n2 := n.From("child")
@@ -105,7 +112,7 @@ func containsBboltType(typ reflect.Type, bboltPkg string) bool {
 // TestNodeInterface_NoBboltExposure uses reflection on the public Node interface
 // to prove that no method parameter or return type exposes a bbolt type.
 func TestNodeInterface_NoBboltExposure(t *testing.T) {
-	iface := reflect.TypeOf((*rainstorm.Node)(nil)).Elem()
+	iface := reflect.TypeOf((*storm.Node)(nil)).Elem()
 
 	bboltPkg := "go.etcd.io/bbolt"
 
@@ -146,8 +153,8 @@ func TestNodeInterface_NoBboltExposure(t *testing.T) {
 // - DB has no exported field recursively containing a bbolt type;
 // - NativeDB is the only method returning a bbolt type.
 func TestDBInterface_NoBboltExposure(t *testing.T) {
-	dbType := reflect.TypeOf((*rainstorm.DB)(nil)).Elem()
-	dbPtrType := reflect.TypeOf((*rainstorm.DB)(nil))
+	dbType := reflect.TypeOf((*storm.DB)(nil)).Elem()
+	dbPtrType := reflect.TypeOf((*storm.DB)(nil))
 	bboltPkg := "go.etcd.io/bbolt"
 
 	// DB has no exported field named Bolt.

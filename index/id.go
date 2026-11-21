@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 
-	"github.com/AndersonBargas/rainstorm/v6/internal"
+	"github.com/malivvan/storm/internal"
 	bolt "go.etcd.io/bbolt"
 )
 

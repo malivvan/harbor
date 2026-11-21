@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AndersonBargas/rainstorm/v6/codec/gob"
-	"github.com/AndersonBargas/rainstorm/v6/index"
+	"github.com/malivvan/storm/codec/gob"
+	"github.com/malivvan/storm/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
@@ -42,8 +42,8 @@ func TestWrapError_ContextErrorMatches(t *testing.T) {
 
 func TestWrapError_ExactPrefix(t *testing.T) {
 	err := wrapError("save", ErrNotFound)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm save:"),
-		"message must start with 'rainstorm save:'")
+	require.True(t, strings.HasPrefix(err.Error(), "storm save:"),
+		"message must start with 'storm save:'")
 }
 
 func TestWrapError_NoFormattingArtifacts(t *testing.T) {
@@ -61,42 +61,40 @@ func TestWrapError_NoFormattingArtifacts(t *testing.T) {
 
 func TestWrap_OpenNilContext(t *testing.T) {
 	var nilCtx context.Context
-	db, err := Open(nilCtx, filepath.Join(t.TempDir(), "test.db"))
+	db, err := Open(nilCtx, nil, nil, nil)
 	require.ErrorIs(t, err, ErrNilContext)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm open:"),
+	require.True(t, strings.HasPrefix(err.Error(), "storm open:"),
 		"error must have open prefix")
 	require.Nil(t, db)
 }
 
-func TestWrap_OpenOptionErrorDiscoverable(t *testing.T) {
+func TestWrap_OpenNilDB(t *testing.T) {
 	ctx := context.Background()
-	db, err := Open(ctx, filepath.Join(t.TempDir(), "test.db"), UseDB(nil))
+	db, err := Open(ctx, nil, nil, nil)
 	require.ErrorIs(t, err, ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm open:"))
+	require.True(t, strings.HasPrefix(err.Error(), "storm open:"))
 	require.Nil(t, db)
 }
 
-func TestWrap_OpenPostOpenCanceled(t *testing.T) {
+func TestWrap_OpenCanceledContext(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "canceled.db")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancelAfterOpen := OpenOption(func(opts *Options) error {
-		opts.postOpenHook = func(_ context.Context) {
-			cancel()
-		}
-		return nil
-	})
+	bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 10 * time.Second})
+	require.NoError(t, err)
+	defer bDB.Close()
 
-	db, err := Open(ctx, path, cancelAfterOpen)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	db, err := Open(ctx, bDB, nil, nil)
 	require.ErrorIs(t, err, context.Canceled)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm open:"))
+	require.True(t, strings.HasPrefix(err.Error(), "storm open:"))
 	require.Nil(t, db)
 
-	// Owned cleanup occurred — file can be reopened.
-	db2, err := Open(context.Background(), path)
+	// The database remains usable by its owner.
+	err = bDB.View(func(tx *bolt.Tx) error { return nil })
 	require.NoError(t, err)
-	require.NoError(t, db2.Close())
 }
 
 func TestWrap_OpenBorrowedInitFailure(t *testing.T) {
@@ -120,9 +118,9 @@ func TestWrap_OpenBorrowedInitFailure(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	db, err := Open(context.Background(), "", UseDB(bDB))
+	db, err := Open(context.Background(), bDB, nil, nil)
 	require.ErrorIs(t, err, ErrDifferentCodec)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm open:"))
+	require.True(t, strings.HasPrefix(err.Error(), "storm open:"))
 	require.Nil(t, db)
 
 	// Borrowed DB must still be open.
@@ -139,52 +137,43 @@ func TestWrap_CloseNilReceiver(t *testing.T) {
 	var nilDB *DB
 	err := nilDB.Close()
 	require.ErrorIs(t, err, ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm close:"))
+	require.True(t, strings.HasPrefix(err.Error(), "storm close:"))
 }
 
 func TestWrap_CloseNilBackend(t *testing.T) {
 	db := &DB{}
 	err := db.Close()
 	require.ErrorIs(t, err, ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm close:"))
+	require.True(t, strings.HasPrefix(err.Error(), "storm close:"))
 }
 
-func TestWrap_CloseBorrowedReturnsNil(t *testing.T) {
+func TestWrap_CloseDoesNotCloseBackend(t *testing.T) {
 	dir := t.TempDir()
 	bDB, err := bolt.Open(filepath.Join(dir, "b.db"), 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
 
-	db, err := Open(context.Background(), "", UseDB(bDB))
+	db, err := Open(context.Background(), bDB, nil, nil)
 	require.NoError(t, err)
 
 	err = db.Close()
-	require.NoError(t, err, "borrowed Close must return nil")
+	require.NoError(t, err, "Close must return nil")
+
+	err = bDB.View(func(tx *bolt.Tx) error { return nil })
+	require.NoError(t, err, "Close must not close the caller-owned DB")
 	require.NoError(t, bDB.Close())
 }
 
-func TestWrap_CloseOwnedSuccessful(t *testing.T) {
+func TestWrap_CloseIdempotent(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "owned.db")
-
-	db, err := Open(context.Background(), path)
+	bDB, err := bolt.Open(filepath.Join(dir, "borrowed.db"), 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
+	defer bDB.Close()
 
-	err = db.Close()
-	require.NoError(t, err)
-}
-
-func TestWrap_CloseSecondOwned(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "owned2.db")
-
-	db, err := Open(context.Background(), path)
+	db, err := Open(context.Background(), bDB, nil, nil)
 	require.NoError(t, err)
 
 	require.NoError(t, db.Close())
-
-	// Second Close is idempotent in bbolt v1.4.3 (returns nil).
-	err = db.Close()
-	require.NoError(t, err)
+	require.NoError(t, db.Close())
 }
 
 // ---------------------------------------------------------------------------
@@ -198,7 +187,7 @@ func TestWrap_ReadTransactionNilContext(t *testing.T) {
 	var nilCtx context.Context
 	err := db.ReadTransaction(nilCtx, func(Node) error { return nil })
 	require.ErrorIs(t, err, ErrNilContext)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm read transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "storm read transaction:"))
 }
 
 func TestWrap_ReadTransactionNilCallback(t *testing.T) {
@@ -207,7 +196,7 @@ func TestWrap_ReadTransactionNilCallback(t *testing.T) {
 
 	err := db.ReadTransaction(context.Background(), nil)
 	require.ErrorIs(t, err, ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm read transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "storm read transaction:"))
 }
 
 func TestWrap_WriteTransactionNilContext(t *testing.T) {
@@ -217,7 +206,7 @@ func TestWrap_WriteTransactionNilContext(t *testing.T) {
 	var nilCtx context.Context
 	err := db.WriteTransaction(nilCtx, func(Node) error { return nil })
 	require.ErrorIs(t, err, ErrNilContext)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm write transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "storm write transaction:"))
 }
 
 func TestWrap_WriteTransactionNilCallback(t *testing.T) {
@@ -226,7 +215,7 @@ func TestWrap_WriteTransactionNilCallback(t *testing.T) {
 
 	err := db.WriteTransaction(context.Background(), nil)
 	require.ErrorIs(t, err, ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm write transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "storm write transaction:"))
 }
 
 func TestWrap_WriteTransactionCallbackErrorDiscoverable(t *testing.T) {
@@ -238,7 +227,7 @@ func TestWrap_WriteTransactionCallbackErrorDiscoverable(t *testing.T) {
 		return errCallback
 	})
 	require.ErrorIs(t, err, errCallback)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm write transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "storm write transaction:"))
 }
 
 func TestWrap_WriteTransactionCallbackErrorBeatsCancel(t *testing.T) {
@@ -254,7 +243,7 @@ func TestWrap_WriteTransactionCallbackErrorBeatsCancel(t *testing.T) {
 	})
 	require.ErrorIs(t, err, errCallback)
 	require.NotErrorIs(t, err, context.Canceled, "callback error must take precedence")
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm write transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "storm write transaction:"))
 }
 
 func TestWrap_WriteTransactionPreCommitCancel(t *testing.T) {
@@ -271,7 +260,7 @@ func TestWrap_WriteTransactionPreCommitCancel(t *testing.T) {
 		return nil
 	})
 	require.ErrorIs(t, err, context.Canceled)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm write transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "storm write transaction:"))
 
 	var user User
 	err = db.One(context.Background(), "ID", 1, &user)
@@ -327,37 +316,37 @@ func TestWrap_CRUD_OperationPrefixes(t *testing.T) {
 	}{
 		{
 			name:   "init",
-			prefix: "rainstorm init:",
+			prefix: "storm init:",
 			op:     func() error { return db.Init(ctx, 10) },
 		},
 		{
 			name:   "reindex",
-			prefix: "rainstorm reindex:",
+			prefix: "storm reindex:",
 			op:     func() error { return db.ReIndex(ctx, 10) },
 		},
 		{
 			name:   "save",
-			prefix: "rainstorm save:",
+			prefix: "storm save:",
 			op:     func() error { return db.Save(ctx, nil) },
 		},
 		{
 			name:   "update",
-			prefix: "rainstorm update:",
+			prefix: "storm update:",
 			op:     func() error { return db.Update(ctx, nil) },
 		},
 		{
 			name:   "update field",
-			prefix: "rainstorm update field:",
+			prefix: "storm update field:",
 			op:     func() error { return db.UpdateField(ctx, nil, "", nil) },
 		},
 		{
 			name:   "drop",
-			prefix: "rainstorm drop:",
+			prefix: "storm drop:",
 			op:     func() error { return db.Drop(ctx, "nonexistent-bucket-xyz") },
 		},
 		{
 			name:   "delete struct",
-			prefix: "rainstorm delete struct:",
+			prefix: "storm delete struct:",
 			op:     func() error { return db.DeleteStruct(ctx, nil) },
 		},
 	}
@@ -384,67 +373,67 @@ func TestWrap_CRUD_Classification(t *testing.T) {
 	t.Run("InitBadType", func(t *testing.T) {
 		err := db.Init(ctx, 10)
 		require.ErrorIs(t, err, ErrBadType)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm init:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm init:"))
 	})
 
 	t.Run("ReIndexBadType", func(t *testing.T) {
 		err := db.ReIndex(ctx, 10)
 		require.ErrorIs(t, err, ErrStructPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm reindex:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm reindex:"))
 	})
 
 	t.Run("SaveNilData", func(t *testing.T) {
 		err := db.Save(ctx, nil)
 		require.ErrorIs(t, err, ErrStructPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm save:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm save:"))
 	})
 
 	t.Run("SaveDuplicateUnique", func(t *testing.T) {
 		err := db.Save(ctx, &UniqueNameUser{ID: 2, Name: "unique", Age: 20})
 		require.ErrorIs(t, err, ErrAlreadyExists)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm save:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm save:"))
 	})
 
 	t.Run("UpdateNilData", func(t *testing.T) {
 		err := db.Update(ctx, nil)
 		require.ErrorIs(t, err, ErrStructPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm update:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm update:"))
 	})
 
 	t.Run("UpdateNotFound", func(t *testing.T) {
 		err := db.Update(ctx, &User{ID: 999, Name: "nope"})
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm update:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm update:"))
 	})
 
 	t.Run("UpdateFieldNilData", func(t *testing.T) {
 		err := db.UpdateField(ctx, nil, "", nil)
 		require.ErrorIs(t, err, ErrStructPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm update field:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm update field:"))
 	})
 
 	t.Run("UpdateFieldIncompatibleValue", func(t *testing.T) {
 		err := db.UpdateField(ctx, &User{ID: 1}, "Name", 42)
 		require.ErrorIs(t, err, ErrIncompatibleValue)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm update field:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm update field:"))
 	})
 
 	t.Run("DropNonexistentBucket", func(t *testing.T) {
 		// Drop a bucket that doesn't exist -> bbolt BucketNotFound.
 		err := db.Drop(ctx, "nonexistent-bucket-xyz")
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm drop:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm drop:"))
 	})
 
 	t.Run("DeleteStructNilData", func(t *testing.T) {
 		err := db.DeleteStruct(ctx, nil)
 		require.ErrorIs(t, err, ErrStructPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm delete struct:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm delete struct:"))
 	})
 
 	t.Run("DeleteStructNotFound", func(t *testing.T) {
 		err := db.DeleteStruct(ctx, &User{ID: 999})
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm delete struct:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm delete struct:"))
 	})
 }
 
@@ -460,13 +449,13 @@ func TestWrap_CRUD_ContextErrors(t *testing.T) {
 		cancel()
 		err := db.Save(ctx, &User{ID: 2, Name: "x", Slug: "x"})
 		require.ErrorIs(t, err, context.Canceled)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm save:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm save:"))
 	})
 
 	t.Run("UpdateDeadlineExceeded", func(t *testing.T) {
 		err := db.Update(timedOutCtx(), &User{ID: 1, Name: "updated"})
 		require.ErrorIs(t, err, context.DeadlineExceeded)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm update:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm update:"))
 	})
 }
 
@@ -488,32 +477,32 @@ func TestWrap_KV_OperationPrefixes(t *testing.T) {
 	}{
 		{
 			name:   "kv get",
-			prefix: "rainstorm kv get:",
+			prefix: "storm kv get:",
 			op:     func() error { return db.Get(ctx, "bucket", "key", nil) },
 		},
 		{
 			name:   "kv set",
-			prefix: "rainstorm kv set:",
+			prefix: "storm kv set:",
 			op:     func() error { return db.Set(ctx, "bucket", nil, 100) },
 		},
 		{
 			name:   "kv delete",
-			prefix: "rainstorm kv delete:",
+			prefix: "storm kv delete:",
 			op:     func() error { return db.Delete(ctx, "nonexistent", "key") },
 		},
 		{
 			name:   "kv get bytes",
-			prefix: "rainstorm kv get bytes:",
+			prefix: "storm kv get bytes:",
 			op:     func() error { _, err := db.GetBytes(ctx, "bucket", 999); return err },
 		},
 		{
 			name:   "kv set bytes",
-			prefix: "rainstorm kv set bytes:",
+			prefix: "storm kv set bytes:",
 			op:     func() error { return db.SetBytes(ctx, "bucket", nil, []byte("x")) },
 		},
 		{
 			name:   "kv key exists",
-			prefix: "rainstorm kv key exists:",
+			prefix: "storm kv key exists:",
 			op:     func() error { _, err := db.KeyExists(ctx, "nonexistent", "key"); return err },
 		},
 	}
@@ -538,44 +527,44 @@ func TestWrap_KV_Classification(t *testing.T) {
 	t.Run("GetNilDest", func(t *testing.T) {
 		err := db.Get(ctx, "bucket", "key", nil)
 		require.ErrorIs(t, err, ErrPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm kv get:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm kv get:"))
 	})
 
 	t.Run("GetNotFound", func(t *testing.T) {
 		var s string
 		err := db.Get(ctx, "bucket", "missing", &s)
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm kv get:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm kv get:"))
 	})
 
 	t.Run("SetNilKey", func(t *testing.T) {
 		err := db.Set(ctx, "bucket", nil, 100)
 		require.ErrorIs(t, err, ErrNilParam)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm kv set:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm kv set:"))
 	})
 
 	t.Run("DeleteNotFound", func(t *testing.T) {
 		err := db.Delete(ctx, "nonexistent-b", "key")
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm kv delete:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm kv delete:"))
 	})
 
 	t.Run("GetBytesNotFound", func(t *testing.T) {
 		_, err := db.GetBytes(ctx, "bucket", 999)
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm kv get bytes:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm kv get bytes:"))
 	})
 
 	t.Run("SetBytesNilKey", func(t *testing.T) {
 		err := db.SetBytes(ctx, "bucket", nil, []byte("x"))
 		require.ErrorIs(t, err, ErrNilParam)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm kv set bytes:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm kv set bytes:"))
 	})
 
 	t.Run("KeyExistsNotFound", func(t *testing.T) {
 		_, err := db.KeyExists(ctx, "nonexistent-b", "key")
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm kv key exists:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm kv key exists:"))
 	})
 }
 
@@ -610,13 +599,13 @@ func TestWrap_KV_ContextErrors(t *testing.T) {
 		var s string
 		err := db.Get(canceledCtx(), "bucket", "key", &s)
 		require.ErrorIs(t, err, context.Canceled)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm kv get:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm kv get:"))
 	})
 
 	t.Run("SetBytesCanceled", func(t *testing.T) {
 		err := db.SetBytes(canceledCtx(), "bucket", "k", []byte("v"))
 		require.ErrorIs(t, err, context.Canceled)
-		require.True(t, strings.HasPrefix(err.Error(), "rainstorm kv set bytes:"))
+		require.True(t, strings.HasPrefix(err.Error(), "storm kv set bytes:"))
 	})
 }
 
@@ -705,14 +694,14 @@ func TestWrap_OpenNestedWrapping(t *testing.T) {
 		return mb.Put([]byte(metaCodec), []byte(gob.Codec.Name()))
 	})
 	require.NoError(t, err)
-	require.NoError(t, bDB.Close())
 
 	// Open with default json codec — checkVersion calls Set which calls SetBytes,
 	// triggering nested KV wrapping under the open prefix.
-	_, err = Open(context.Background(), path)
+	_, err = Open(context.Background(), bDB, nil, nil)
 	require.Error(t, err)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm open:"),
+	require.True(t, strings.HasPrefix(err.Error(), "storm open:"),
 		"outermost error must start with requested operation label")
+	require.NoError(t, bDB.Close())
 }
 
 // ---------------------------------------------------------------------------
@@ -753,23 +742,23 @@ func TestWrap_AllOperationLabelsCovered(t *testing.T) {
 		prefix string
 		op     func() error
 	}{
-		{"open", "rainstorm open:", func() error { _, err := Open(nilCtx, filepath.Join(t.TempDir(), "x.db")); return err }},
-		{"close", "rainstorm close:", func() error { return (*DB)(nil).Close() }},
-		{"read transaction", "rainstorm read transaction:", func() error { return db.ReadTransaction(nilCtx, nil) }},
-		{"write transaction", "rainstorm write transaction:", func() error { return db.WriteTransaction(nilCtx, nil) }},
-		{"init", "rainstorm init:", func() error { return db.Init(ctx, 10) }},
-		{"reindex", "rainstorm reindex:", func() error { return db.ReIndex(ctx, 10) }},
-		{"save", "rainstorm save:", func() error { return db.Save(ctx, nil) }},
-		{"update", "rainstorm update:", func() error { return db.Update(ctx, nil) }},
-		{"update field", "rainstorm update field:", func() error { return db.UpdateField(ctx, nil, "", nil) }},
-		{"drop", "rainstorm drop:", func() error { return db.Drop(ctx, "nonexistent") }},
-		{"delete struct", "rainstorm delete struct:", func() error { return db.DeleteStruct(ctx, nil) }},
-		{"kv get", "rainstorm kv get:", func() error { return db.Get(ctx, "b", "k", nil) }},
-		{"kv set", "rainstorm kv set:", func() error { return db.Set(ctx, "b", nil, 100) }},
-		{"kv delete", "rainstorm kv delete:", func() error { return db.Delete(ctx, "nx", "k") }},
-		{"kv get bytes", "rainstorm kv get bytes:", func() error { _, err := db.GetBytes(ctx, "b", 999); return err }},
-		{"kv set bytes", "rainstorm kv set bytes:", func() error { return db.SetBytes(ctx, "b", nil, []byte{}) }},
-		{"kv key exists", "rainstorm kv key exists:", func() error { _, err := db.KeyExists(ctx, "nx", "k"); return err }},
+		{"open", "storm open:", func() error { _, err := Open(nilCtx, nil, nil, nil); return err }},
+		{"close", "storm close:", func() error { return (*DB)(nil).Close() }},
+		{"read transaction", "storm read transaction:", func() error { return db.ReadTransaction(nilCtx, nil) }},
+		{"write transaction", "storm write transaction:", func() error { return db.WriteTransaction(nilCtx, nil) }},
+		{"init", "storm init:", func() error { return db.Init(ctx, 10) }},
+		{"reindex", "storm reindex:", func() error { return db.ReIndex(ctx, 10) }},
+		{"save", "storm save:", func() error { return db.Save(ctx, nil) }},
+		{"update", "storm update:", func() error { return db.Update(ctx, nil) }},
+		{"update field", "storm update field:", func() error { return db.UpdateField(ctx, nil, "", nil) }},
+		{"drop", "storm drop:", func() error { return db.Drop(ctx, "nonexistent") }},
+		{"delete struct", "storm delete struct:", func() error { return db.DeleteStruct(ctx, nil) }},
+		{"kv get", "storm kv get:", func() error { return db.Get(ctx, "b", "k", nil) }},
+		{"kv set", "storm kv set:", func() error { return db.Set(ctx, "b", nil, 100) }},
+		{"kv delete", "storm kv delete:", func() error { return db.Delete(ctx, "nx", "k") }},
+		{"kv get bytes", "storm kv get bytes:", func() error { _, err := db.GetBytes(ctx, "b", 999); return err }},
+		{"kv set bytes", "storm kv set bytes:", func() error { return db.SetBytes(ctx, "b", nil, []byte{}) }},
+		{"kv key exists", "storm kv key exists:", func() error { _, err := db.KeyExists(ctx, "nx", "k"); return err }},
 	}
 
 	for _, tc := range tests {
@@ -822,7 +811,11 @@ func TestWrap_ErrorClassificationTestCompatibility(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestWrap_BboltErrorClassification(t *testing.T) {
-	db, err := Open(context.Background(), filepath.Join(t.TempDir(), "bolt-err.db"))
+	dir := t.TempDir()
+	bDB, err := bolt.Open(filepath.Join(dir, "bolt-err.db"), 0600, &bolt.Options{Timeout: 10 * time.Second})
+	require.NoError(t, err)
+
+	db, err := Open(context.Background(), bDB, nil, nil)
 	require.NoError(t, err)
 
 	require.NoError(t, db.NativeDB().Close())
@@ -830,5 +823,5 @@ func TestWrap_BboltErrorClassification(t *testing.T) {
 	ctx := context.Background()
 	err = db.Save(ctx, &User{ID: 1, Name: "x", Slug: "x"})
 	require.ErrorIs(t, err, bolterrors.ErrDatabaseNotOpen)
-	require.True(t, strings.HasPrefix(err.Error(), "rainstorm save:"))
+	require.True(t, strings.HasPrefix(err.Error(), "storm save:"))
 }

@@ -1,4 +1,4 @@
-// Package benchmark provides cross-major benchmarks comparing rainstorm v5.3.0
+// Package benchmark provides cross-major benchmarks comparing storm v5.3.0
 // and the current local v6 implementation.
 //
 // Both major versions compile into the same benchmark binary. This proves
@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"testing"
 
-	rainstormv5 "github.com/AndersonBargas/rainstorm/v5"
-	rainstormv6 "github.com/AndersonBargas/rainstorm/v6"
+	stormv5 "github.com/malivvan/storm"
+	stormv6 "github.com/malivvan/storm"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -22,11 +22,11 @@ import (
 // ---------------------------------------------------------------------------
 
 // BenchmarkRecord is the shared schema for all benchmarks.
-// It uses the rainstorm tag syntax compatible with both v5 and v6.
+// It uses the storm tag syntax compatible with both v5 and v6.
 type BenchmarkRecord struct {
-	ID       uint64 `rainstorm:"id,increment"`
-	Key      string `rainstorm:"unique"`
-	Category string `rainstorm:"index"`
+	ID       uint64 `storm:"id,increment"`
+	Key      string `storm:"unique"`
+	Category string `storm:"index"`
 	Name     string
 	Revision int
 	Payload  string
@@ -39,10 +39,26 @@ const payload100 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789ab
 // benchBoltOptsV5 disables fsync for benchmark databases created in temp dirs.
 // This accelerates population and defines the write configuration measured by
 // this benchmark suite. Results do not characterize fsync-enabled writes.
-var benchBoltOptsV5 = rainstormv5.BoltOptions(0600, &bolt.Options{NoSync: true})
+var benchBoltOptsV5 = stormv5.BoltOptions(0600, &bolt.Options{NoSync: true})
 
-// benchBoltOptsV6 is the v6-equivalent NoSync option.
-var benchBoltOptsV6 = rainstormv6.BoltOptions(0600, &bolt.Options{NoSync: true})
+// openV6Bench opens a NoSync bbolt database and wraps it with Storm v6.
+func openV6Bench(b *testing.B, ctx context.Context, path string) *stormv6.DB {
+	b.Helper()
+	bdb, err := bolt.Open(path, 0600, &bolt.Options{NoSync: true})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() {
+		if cerr := bdb.Close(); cerr != nil {
+			b.Errorf("close native: %v", cerr)
+		}
+	})
+	db, err := stormv6.Open(ctx, bdb, nil, nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	return db
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -50,7 +66,7 @@ var benchBoltOptsV6 = rainstormv6.BoltOptions(0600, &bolt.Options{NoSync: true})
 
 // populateRecordsV5 saves n deterministic BenchmarkRecord instances into the
 // v5 database and returns the resulting slice (with IDs assigned).
-func populateRecordsV5(b *testing.B, db *rainstormv5.DB, n int) []BenchmarkRecord {
+func populateRecordsV5(b *testing.B, db *stormv5.DB, n int) []BenchmarkRecord {
 	b.Helper()
 	records := make([]BenchmarkRecord, n)
 	half := n / 2
@@ -78,7 +94,7 @@ func populateRecordsV5(b *testing.B, db *rainstormv5.DB, n int) []BenchmarkRecor
 
 // populateRecordsV6 saves n deterministic BenchmarkRecord instances into the
 // v6 database and returns the resulting slice (with IDs assigned).
-func populateRecordsV6(b *testing.B, db *rainstormv6.DB, n int) []BenchmarkRecord {
+func populateRecordsV6(b *testing.B, db *stormv6.DB, n int) []BenchmarkRecord {
 	b.Helper()
 	ctx := context.Background()
 	records := make([]BenchmarkRecord, n)
@@ -106,7 +122,7 @@ func populateRecordsV6(b *testing.B, db *rainstormv6.DB, n int) []BenchmarkRecor
 }
 
 // preflightReadV5 performs a correctness check on a populated v5 database.
-func preflightReadV5(b *testing.B, db *rainstormv5.DB, n int) {
+func preflightReadV5(b *testing.B, db *stormv5.DB, n int) {
 	b.Helper()
 
 	// All records must be present.
@@ -177,7 +193,7 @@ func preflightReadV5(b *testing.B, db *rainstormv5.DB, n int) {
 }
 
 // preflightReadV6 performs a correctness check on a populated v6 database.
-func preflightReadV6(b *testing.B, db *rainstormv6.DB, n int) {
+func preflightReadV6(b *testing.B, db *stormv6.DB, n int) {
 	b.Helper()
 	ctx := context.Background()
 
@@ -250,7 +266,7 @@ func BenchmarkV5(b *testing.B) {
 	// ---- OneByID ----
 	b.Run("OneByID/100", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv5.Open(dir+"/bench.db", benchBoltOptsV5)
+		db, err := stormv5.Open(dir+"/bench.db", benchBoltOptsV5)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -278,7 +294,7 @@ func BenchmarkV5(b *testing.B) {
 
 	b.Run("OneByID/1000", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv5.Open(dir+"/bench.db", benchBoltOptsV5)
+		db, err := stormv5.Open(dir+"/bench.db", benchBoltOptsV5)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -307,7 +323,7 @@ func BenchmarkV5(b *testing.B) {
 	// ---- OneByUnique ----
 	b.Run("OneByUnique/100", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv5.Open(dir+"/bench.db", benchBoltOptsV5)
+		db, err := stormv5.Open(dir+"/bench.db", benchBoltOptsV5)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -335,7 +351,7 @@ func BenchmarkV5(b *testing.B) {
 
 	b.Run("OneByUnique/1000", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv5.Open(dir+"/bench.db", benchBoltOptsV5)
+		db, err := stormv5.Open(dir+"/bench.db", benchBoltOptsV5)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -364,7 +380,7 @@ func BenchmarkV5(b *testing.B) {
 	// ---- FindIndexed ----
 	b.Run("FindIndexed/100", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv5.Open(dir+"/bench.db", benchBoltOptsV5)
+		db, err := stormv5.Open(dir+"/bench.db", benchBoltOptsV5)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -390,7 +406,7 @@ func BenchmarkV5(b *testing.B) {
 
 	b.Run("FindIndexed/1000", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv5.Open(dir+"/bench.db", benchBoltOptsV5)
+		db, err := stormv5.Open(dir+"/bench.db", benchBoltOptsV5)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -417,7 +433,7 @@ func BenchmarkV5(b *testing.B) {
 	// ---- FindUnindexed ----
 	b.Run("FindUnindexed/100", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv5.Open(dir+"/bench.db", benchBoltOptsV5)
+		db, err := stormv5.Open(dir+"/bench.db", benchBoltOptsV5)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -443,7 +459,7 @@ func BenchmarkV5(b *testing.B) {
 
 	b.Run("FindUnindexed/1000", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv5.Open(dir+"/bench.db", benchBoltOptsV5)
+		db, err := stormv5.Open(dir+"/bench.db", benchBoltOptsV5)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -470,7 +486,7 @@ func BenchmarkV5(b *testing.B) {
 	// ---- All ----
 	b.Run("All/100", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv5.Open(dir+"/bench.db", benchBoltOptsV5)
+		db, err := stormv5.Open(dir+"/bench.db", benchBoltOptsV5)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -496,7 +512,7 @@ func BenchmarkV5(b *testing.B) {
 
 	b.Run("All/1000", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv5.Open(dir+"/bench.db", benchBoltOptsV5)
+		db, err := stormv5.Open(dir+"/bench.db", benchBoltOptsV5)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -526,7 +542,7 @@ func BenchmarkV5(b *testing.B) {
 	// region identically for both v5 and v6.
 	b.Run("Save", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv5.Open(dir+"/bench.db", benchBoltOptsV5)
+		db, err := stormv5.Open(dir+"/bench.db", benchBoltOptsV5)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -567,7 +583,7 @@ func BenchmarkV5(b *testing.B) {
 	// ---- Update ----
 	b.Run("Update/100", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv5.Open(dir+"/bench.db", benchBoltOptsV5)
+		db, err := stormv5.Open(dir+"/bench.db", benchBoltOptsV5)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -603,7 +619,7 @@ func BenchmarkV5(b *testing.B) {
 
 	b.Run("Update/1000", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv5.Open(dir+"/bench.db", benchBoltOptsV5)
+		db, err := stormv5.Open(dir+"/bench.db", benchBoltOptsV5)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -640,7 +656,7 @@ func BenchmarkV5(b *testing.B) {
 	// ---- KVGet ----
 	b.Run("KVGet", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv5.Open(dir+"/bench.db", benchBoltOptsV5)
+		db, err := stormv5.Open(dir+"/bench.db", benchBoltOptsV5)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -675,7 +691,7 @@ func BenchmarkV5(b *testing.B) {
 	// Measures overwrite of the same key.
 	b.Run("KVSet", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv5.Open(dir+"/bench.db", benchBoltOptsV5)
+		db, err := stormv5.Open(dir+"/bench.db", benchBoltOptsV5)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -713,10 +729,7 @@ func BenchmarkV6(b *testing.B) {
 	// ---- OneByID ----
 	b.Run("OneByID/100", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-		if err != nil {
-			b.Fatal(err)
-		}
+		db := openV6Bench(b, ctx, dir+"/bench.db")
 		b.Cleanup(func() {
 			if cerr := db.Close(); cerr != nil {
 				b.Errorf("close: %v", cerr)
@@ -741,10 +754,7 @@ func BenchmarkV6(b *testing.B) {
 
 	b.Run("OneByID/1000", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-		if err != nil {
-			b.Fatal(err)
-		}
+		db := openV6Bench(b, ctx, dir+"/bench.db")
 		b.Cleanup(func() {
 			if cerr := db.Close(); cerr != nil {
 				b.Errorf("close: %v", cerr)
@@ -770,10 +780,7 @@ func BenchmarkV6(b *testing.B) {
 	// ---- OneByUnique ----
 	b.Run("OneByUnique/100", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-		if err != nil {
-			b.Fatal(err)
-		}
+		db := openV6Bench(b, ctx, dir+"/bench.db")
 		b.Cleanup(func() {
 			if cerr := db.Close(); cerr != nil {
 				b.Errorf("close: %v", cerr)
@@ -798,10 +805,7 @@ func BenchmarkV6(b *testing.B) {
 
 	b.Run("OneByUnique/1000", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-		if err != nil {
-			b.Fatal(err)
-		}
+		db := openV6Bench(b, ctx, dir+"/bench.db")
 		b.Cleanup(func() {
 			if cerr := db.Close(); cerr != nil {
 				b.Errorf("close: %v", cerr)
@@ -827,10 +831,7 @@ func BenchmarkV6(b *testing.B) {
 	// ---- FindIndexed ----
 	b.Run("FindIndexed/100", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-		if err != nil {
-			b.Fatal(err)
-		}
+		db := openV6Bench(b, ctx, dir+"/bench.db")
 		b.Cleanup(func() {
 			if cerr := db.Close(); cerr != nil {
 				b.Errorf("close: %v", cerr)
@@ -853,10 +854,7 @@ func BenchmarkV6(b *testing.B) {
 
 	b.Run("FindIndexed/1000", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-		if err != nil {
-			b.Fatal(err)
-		}
+		db := openV6Bench(b, ctx, dir+"/bench.db")
 		b.Cleanup(func() {
 			if cerr := db.Close(); cerr != nil {
 				b.Errorf("close: %v", cerr)
@@ -880,10 +878,7 @@ func BenchmarkV6(b *testing.B) {
 	// ---- FindUnindexed ----
 	b.Run("FindUnindexed/100", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-		if err != nil {
-			b.Fatal(err)
-		}
+		db := openV6Bench(b, ctx, dir+"/bench.db")
 		b.Cleanup(func() {
 			if cerr := db.Close(); cerr != nil {
 				b.Errorf("close: %v", cerr)
@@ -906,10 +901,7 @@ func BenchmarkV6(b *testing.B) {
 
 	b.Run("FindUnindexed/1000", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-		if err != nil {
-			b.Fatal(err)
-		}
+		db := openV6Bench(b, ctx, dir+"/bench.db")
 		b.Cleanup(func() {
 			if cerr := db.Close(); cerr != nil {
 				b.Errorf("close: %v", cerr)
@@ -933,10 +925,7 @@ func BenchmarkV6(b *testing.B) {
 	// ---- All ----
 	b.Run("All/100", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-		if err != nil {
-			b.Fatal(err)
-		}
+		db := openV6Bench(b, ctx, dir+"/bench.db")
 		b.Cleanup(func() {
 			if cerr := db.Close(); cerr != nil {
 				b.Errorf("close: %v", cerr)
@@ -959,10 +948,7 @@ func BenchmarkV6(b *testing.B) {
 
 	b.Run("All/1000", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-		if err != nil {
-			b.Fatal(err)
-		}
+		db := openV6Bench(b, ctx, dir+"/bench.db")
 		b.Cleanup(func() {
 			if cerr := db.Close(); cerr != nil {
 				b.Errorf("close: %v", cerr)
@@ -989,10 +975,7 @@ func BenchmarkV6(b *testing.B) {
 	// region identically for both v5 and v6.
 	b.Run("Save", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-		if err != nil {
-			b.Fatal(err)
-		}
+		db := openV6Bench(b, ctx, dir+"/bench.db")
 		b.Cleanup(func() {
 			if cerr := db.Close(); cerr != nil {
 				b.Errorf("close: %v", cerr)
@@ -1030,10 +1013,7 @@ func BenchmarkV6(b *testing.B) {
 	// ---- Update ----
 	b.Run("Update/100", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-		if err != nil {
-			b.Fatal(err)
-		}
+		db := openV6Bench(b, ctx, dir+"/bench.db")
 		b.Cleanup(func() {
 			if cerr := db.Close(); cerr != nil {
 				b.Errorf("close: %v", cerr)
@@ -1066,10 +1046,7 @@ func BenchmarkV6(b *testing.B) {
 
 	b.Run("Update/1000", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-		if err != nil {
-			b.Fatal(err)
-		}
+		db := openV6Bench(b, ctx, dir+"/bench.db")
 		b.Cleanup(func() {
 			if cerr := db.Close(); cerr != nil {
 				b.Errorf("close: %v", cerr)
@@ -1103,10 +1080,7 @@ func BenchmarkV6(b *testing.B) {
 	// ---- KVGet ----
 	b.Run("KVGet", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-		if err != nil {
-			b.Fatal(err)
-		}
+		db := openV6Bench(b, ctx, dir+"/bench.db")
 		b.Cleanup(func() {
 			if cerr := db.Close(); cerr != nil {
 				b.Errorf("close: %v", cerr)
@@ -1138,10 +1112,7 @@ func BenchmarkV6(b *testing.B) {
 	// Measures overwrite of the same key.
 	b.Run("KVSet", func(b *testing.B) {
 		dir := b.TempDir()
-		db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-		if err != nil {
-			b.Fatal(err)
-		}
+		db := openV6Bench(b, ctx, dir+"/bench.db")
 		b.Cleanup(func() {
 			if cerr := db.Close(); cerr != nil {
 				b.Errorf("close: %v", cerr)
@@ -1177,10 +1148,7 @@ func BenchmarkV6_ReadTransaction(b *testing.B) {
 	ctx := context.Background()
 
 	dir := b.TempDir()
-	db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-	if err != nil {
-		b.Fatal(err)
-	}
+	db := openV6Bench(b, ctx, dir+"/bench.db")
 	b.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
 			b.Errorf("close: %v", cerr)
@@ -1194,7 +1162,7 @@ func BenchmarkV6_ReadTransaction(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := db.ReadTransaction(ctx, func(tx rainstormv6.Node) error {
+		err := db.ReadTransaction(ctx, func(tx stormv6.Node) error {
 			var one BenchmarkRecord
 			if err := tx.One(ctx, "ID", uint64(1), &one); err != nil {
 				return err
@@ -1228,10 +1196,7 @@ func BenchmarkV6_WriteTransaction(b *testing.B) {
 	ctx := context.Background()
 
 	dir := b.TempDir()
-	db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-	if err != nil {
-		b.Fatal(err)
-	}
+	db := openV6Bench(b, ctx, dir+"/bench.db")
 	b.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
 			b.Errorf("close: %v", cerr)
@@ -1246,7 +1211,7 @@ func BenchmarkV6_WriteTransaction(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		n := i
-		err := db.WriteTransaction(ctx, func(tx rainstormv6.Node) error {
+		err := db.WriteTransaction(ctx, func(tx stormv6.Node) error {
 			if err := tx.Set(ctx, "bench_kv", "val", fmt.Sprintf("tx-val-%d", n)); err != nil {
 				return err
 			}
@@ -1268,10 +1233,7 @@ func BenchmarkV6_CanceledContext(b *testing.B) {
 	ctx := context.Background()
 
 	dir := b.TempDir()
-	db, err := rainstormv6.Open(ctx, dir+"/bench.db", benchBoltOptsV6)
-	if err != nil {
-		b.Fatal(err)
-	}
+	db := openV6Bench(b, ctx, dir+"/bench.db")
 	b.Cleanup(func() {
 		if cerr := db.Close(); cerr != nil {
 			b.Errorf("close: %v", cerr)

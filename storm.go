@@ -1,95 +1,70 @@
-// Package rainstorm is a toolkit for BoltDB that provides indexes, a wide range
+// Package storm is a toolkit for BoltDB that provides indexes, a wide range
 // of methods to store and fetch data, an advanced query system, and managed
 // transactions with context support.
-package rainstorm
+package storm
 
 import (
 	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
-	"time"
 
-	"github.com/AndersonBargas/rainstorm/v6/codec"
-	"github.com/AndersonBargas/rainstorm/v6/codec/json"
+	"github.com/malivvan/storm/codec"
+	"github.com/malivvan/storm/codec/json"
 	bolt "go.etcd.io/bbolt"
 )
 
 const (
-	dbinfo         = "__rainstorm_db"
-	metadataBucket = "__rainstorm_metadata"
+	dbinfo         = "__storm_db"
+	metadataBucket = "__storm_metadata"
 )
 
 // BucketNamer is an interface that can be implemented by structs to provide
 // a custom bucket name. This is essential for runtime-generated types
 // (via reflect.StructOf) that have no static type name.
 type BucketNamer interface {
-	RainstormBucketName() string
+	StormBucketName() string
 }
 
 // Defaults to json
 var defaultCodec = json.Codec
 
-// Open opens a database at the given path with optional Rainstorm options.
-func Open(ctx context.Context, path string, rainstormOptions ...OpenOption) (*DB, error) {
+// Open initializes Storm on an already-open bbolt database.
+//
+// The caller owns db and must keep it open for the lifetime of the returned
+// DB. Storm never closes db. root is the optional root bucket key; nil or an
+// empty slice means the database root. c is the codec used to encode and
+// decode entities; nil selects the default JSON codec.
+func Open(ctx context.Context, db *bolt.DB, root []byte, c codec.MarshalUnmarshaler) (*DB, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, wrapError("open", err)
 	}
+	if db == nil {
+		return nil, wrapError("open", ErrNilParam)
+	}
 
-	var err error
+	if c == nil {
+		c = defaultCodec
+	}
 
-	var opts Options
-	for _, option := range rainstormOptions {
-		if err = option(&opts); err != nil {
-			return nil, wrapError("open", err)
-		}
+	var rootBucket []string
+	if len(root) > 0 {
+		rootBucket = []string{string(root)}
 	}
 
 	s := DB{
-		bolt: opts.bolt,
+		bolt: db,
 	}
 
 	n := node{
 		s:          &s,
-		codec:      opts.codec,
-		rootBucket: opts.rootBucket,
-	}
-
-	if n.codec == nil {
-		n.codec = defaultCodec
-	}
-
-	if opts.boltMode == 0 {
-		opts.boltMode = 0600
-	}
-
-	if opts.boltOptions == nil {
-		opts.boltOptions = &bolt.Options{Timeout: 1 * time.Second}
+		codec:      c,
+		rootBucket: rootBucket,
 	}
 
 	s.Node = &n
 
-	// skip if UseDB option is used
-	if s.bolt == nil {
-		s.bolt, err = bolt.Open(path, opts.boltMode, opts.boltOptions)
-		if err != nil {
-			return nil, wrapError("open", err)
-		}
-		s.boltOwned = true
-		if opts.postOpenHook != nil {
-			opts.postOpenHook(ctx)
-		}
-	}
-
-	// Re-check the context after the (cooperative) bbolt open.
-	if err = checkContext(ctx); err != nil {
-		s.cleanupOwned()
-		return nil, wrapError("open", err)
-	}
-
-	err = s.checkVersion(ctx)
-	if err != nil {
-		s.cleanupOwned()
+	if err := s.checkVersion(ctx); err != nil {
 		return nil, wrapError("open", err)
 	}
 
@@ -102,23 +77,19 @@ type DB struct {
 	// The root node that points to the root bucket.
 	Node
 
-	// bolt is the underlying bbolt database.
+	// bolt is the underlying bbolt database. It is owned by the caller.
 	bolt *bolt.DB
-
-	// boltOwned records whether Rainstorm opened Bolt itself (true) or whether
-	// it was provided via UseDB (false).
-	boltOwned bool
 }
 
 // NativeDB returns the underlying bbolt database.
 //
 // This is an advanced interoperability escape hatch. Native operations bypass
-// Rainstorm context checkpoints. Native writes can bypass codecs, indexes,
-// metadata, and invariants. Rainstorm cannot guarantee cancellation, rollback
+// Storm context checkpoints. Native writes can bypass codecs, indexes,
+// metadata, and invariants. Storm cannot guarantee cancellation, rollback
 // composition, index consistency, or destination safety for native operations.
-// Callers must not close the returned database while Rainstorm is in use.
-// Callers are responsible for coordinating native transactions with Rainstorm
-// operations. Normal application code should prefer Rainstorm APIs and managed
+// Callers must not close the returned database while Storm is in use.
+// Callers are responsible for coordinating native transactions with Storm
+// operations. Normal application code should prefer Storm APIs and managed
 // transactions.
 func (db *DB) NativeDB() *bolt.DB {
 	if db == nil {
@@ -127,21 +98,8 @@ func (db *DB) NativeDB() *bolt.DB {
 	return db.bolt
 }
 
-// cleanupOwned closes a Rainstorm-owned bolt.DB. It is a no-op for databases
-// provided via UseDB, which remain owned by the caller.
-func (s *DB) cleanupOwned() {
-	if s.boltOwned && s.bolt != nil {
-		_ = s.bolt.Close()
-	}
-}
-
-// Close the database.
-//
-// For a Rainstorm-owned database (opened via Open without UseDB), Close closes
-// the underlying bbolt database and returns its error.
-//
-// For a borrowed database (opened via UseDB), Close returns nil and does not
-// close the underlying bbolt database. The caller retains ownership.
+// Close releases the Storm wrapper. The underlying bbolt database is owned by
+// the caller and is not closed.
 //
 // If the receiver is nil or the underlying bbolt database is nil, Close returns
 // ErrNilParam without panicking.
@@ -152,10 +110,7 @@ func (s *DB) Close() error {
 	if s.bolt == nil {
 		return wrapError("close", ErrNilParam)
 	}
-	if !s.boltOwned {
-		return nil
-	}
-	return wrapError("close", s.bolt.Close())
+	return nil
 }
 
 func (s *DB) checkVersion(ctx context.Context) error {

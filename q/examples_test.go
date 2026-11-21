@@ -12,14 +12,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/AndersonBargas/rainstorm/v6"
-	"github.com/AndersonBargas/rainstorm/v6/q"
+	"github.com/malivvan/storm"
+	"github.com/malivvan/storm/q"
+	bolt "go.etcd.io/bbolt"
 )
 
 func ExampleRe() {
-	dir, db := prepareDB()
+	dir, db, bdb := prepareDB()
 	defer os.RemoveAll(dir)
 	defer db.Close()
+	defer bdb.Close()
 
 	ctx := context.Background()
 
@@ -39,21 +41,25 @@ func ExampleRe() {
 }
 
 type User struct {
-	ID        int    `rainstorm:"id,increment"`
-	Group     string `rainstorm:"index"`
-	Email     string `rainstorm:"unique"`
+	ID        int    `storm:"id,increment"`
+	Group     string `storm:"index"`
+	Email     string `storm:"unique"`
 	Name      string
-	Age       int       `rainstorm:"index"`
-	CreatedAt time.Time `rainstorm:"index"`
+	Age       int       `storm:"index"`
+	CreatedAt time.Time `storm:"index"`
 }
 
-func prepareDB() (string, *rainstorm.DB) {
-	dir, err := os.MkdirTemp(os.TempDir(), "rainstorm")
+func prepareDB() (string, *storm.DB, *bolt.DB) {
+	dir, err := os.MkdirTemp(os.TempDir(), "storm")
 	if err != nil {
 		log.Fatal(err)
 	}
 	ctx := context.Background()
-	db, err := rainstorm.Open(ctx, filepath.Join(dir, "rainstorm.db"))
+	bdb, err := bolt.Open(filepath.Join(dir, "storm.db"), 0600, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	db, err := storm.Open(ctx, bdb, nil, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -74,5 +80,5 @@ func prepareDB() (string, *rainstorm.DB) {
 		}
 	}
 
-	return dir, db
+	return dir, db, bdb
 }

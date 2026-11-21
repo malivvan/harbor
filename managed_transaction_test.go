@@ -1,4 +1,4 @@
-package rainstorm
+package storm
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/AndersonBargas/rainstorm/v6/codec/gob"
+	"github.com/malivvan/storm/codec/gob"
 	"github.com/stretchr/testify/require"
 	bolterrors "go.etcd.io/bbolt/errors"
 )
@@ -327,7 +327,7 @@ func TestWriteTransaction_RollbackRemovesUncommittedWrites(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestManagedTransaction_PreservesRootAndCodec(t *testing.T) {
-	db, cleanup := createDB(t, Root("tenant", "ns"), Codec(gob.Codec))
+	db, cleanup := createDB(t, testRoot("tenant", "ns"), testCodec(gob.Codec))
 	defer cleanup()
 
 	err := db.WriteTransaction(context.Background(), func(txNode Node) error {
