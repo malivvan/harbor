@@ -262,3 +262,16 @@ verification + rotation).
   IDs/names/metadata keys, the full round trip under encrypted names (including
   root-scoped stores and reopen), and the rejection of multi-key providers when
   names are encrypted.
+- [x] **Phase 3 — rotation** — `vec/rotate.go` adds `withKey`/`adoptEnc`,
+  `ReEncryptCollection`, `RotateAll` and `VerifyAll`. A rotation runs in one
+  bbolt write transaction: collection buckets are renamed to the new SIV name
+  (create-copy-delete, since bbolt cannot rename), point IDs are re-derived,
+  point blobs and metadata are re-sealed, and the marker canary is rewritten;
+  the store adopts the new key after the commit. `ReEncryptCollection` is
+  documented as rotating a single collection only (the others then still need
+  the old key, so finished with `RotateAll`). `vec/rotate_test.go` covers a full
+  rotation (names, keys and blobs all change; old key rejected; new key
+  verifies), value-only rotation (names and IDs untouched), single-collection
+  rotation plus the documented `MultiKeyProvider` finish, preconditions, tamper
+  detection (point blob, metadata, encrypted ID, marker canary) and the
+  multi-key fallback path.

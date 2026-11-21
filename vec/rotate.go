@@ -1,0 +1,523 @@
+package vec
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+
+	"go.etcd.io/bbolt"
+)
+
+// withKey returns an encryption state that writes with newKey while keeping the
+// current cipher and flags.
+func (s *Store) withKey(newKey []byte) (*encState, error) {
+	if s.enc == nil {
+		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
+	}
+	if len(newKey) != KeySize {
+		return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, KeySize, len(newKey))
+	}
+
+	return resolveConfig(&Config{
+		Cipher:                 s.enc.cipher,
+		Key:                    append([]byte(nil), newKey...),
+		EncryptPoints:          s.enc.encPoints,
+		EncryptPointIDs:        s.enc.encIDs,
+		EncryptCollectionNames: s.enc.encNames,
+	})
+}
+
+// adoptEnc installs next as the encryption state of the store.
+func (s *Store) adoptEnc(next *encState) {
+	s.enc = next
+}
+
+// ReEncryptCollection rewrites one collection and its metadata under newKey and
+// rewrites the marker canary, then adopts newKey for the store.
+//
+// Every collection shares one key. When the store holds several collections,
+// use RotateAll so all of them are re-encrypted before the old key is retired:
+// after ReEncryptCollection only the named collection is readable with the new
+// key.
+//
+// Rotation must not run concurrently with other operations on the store.
+func (s *Store) ReEncryptCollection(ctx context.Context, name string, newKey []byte) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("%w: store is not open", ErrInvalidConfig)
+	}
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+	if name == "" {
+		return fmt.Errorf("%w: collection name is required", ErrInvalidConfig)
+	}
+
+	next, err := s.withKey(newKey)
+	if err != nil {
+		return err
+	}
+
+	err = s.db.Update(func(tx *bbolt.Tx) error {
+		r := &rotation{ctx: ctx, store: s, old: s.enc, next: next}
+
+		physical := s.bucketKey(name)
+		if len(physical) == 0 {
+			return fmt.Errorf("%w: failed to derive the bucket key for collection %q", ErrInvalidConfig, name)
+		}
+		if !r.bucketExists(tx, physical) {
+			return fmt.Errorf("collection bucket %s not found", name)
+		}
+		if err := r.collection(tx, string(physical)); err != nil {
+			return err
+		}
+		if err := r.metadataEntry(tx, name); err != nil {
+			return err
+		}
+		return r.writeMarker(tx)
+	})
+	if err != nil {
+		return err
+	}
+
+	s.adoptEnc(next)
+	return nil
+}
+
+// RotateAll re-encrypts every collection, all collection metadata and the marker
+// canary under newKey, then adopts the new key.
+func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("%w: store is not open", ErrInvalidConfig)
+	}
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	next, err := s.withKey(newKey)
+	if err != nil {
+		return err
+	}
+
+	err = s.db.Update(func(tx *bbolt.Tx) error {
+		r := &rotation{ctx: ctx, store: s, old: s.enc, next: next}
+
+		names, err := r.collectionNames(tx)
+		if err != nil {
+			return err
+		}
+		for _, name := range names {
+			if err := checkContext(ctx); err != nil {
+				return err
+			}
+			if err := r.collection(tx, name); err != nil {
+				return err
+			}
+		}
+		if err := r.metadata(tx); err != nil {
+			return err
+		}
+		return r.writeMarker(tx)
+	})
+	if err != nil {
+		return err
+	}
+
+	s.adoptEnc(next)
+	return nil
+}
+
+// VerifyAll re-reads the marker, every point, every collection metadata entry and
+// every encrypted name to confirm they decrypt with the configured keys.
+func (s *Store) VerifyAll(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("%w: store is not open", ErrInvalidConfig)
+	}
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+	if s.enc == nil {
+		return fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
+	}
+
+	return s.db.View(func(tx *bbolt.Tx) error {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		meta, err := s.metaBucket(tx, false)
+		if err != nil {
+			return err
+		}
+		if meta == nil {
+			return fmt.Errorf("%w: missing encryption marker", ErrWrongMode)
+		}
+		raw := meta.Get([]byte(markerKey))
+		if raw == nil {
+			return fmt.Errorf("%w: missing encryption marker", ErrWrongMode)
+		}
+		m, canary, err := decodeMarker(raw)
+		if err != nil {
+			return err
+		}
+		if !m.matches(s.enc) {
+			return fmt.Errorf("%w: encryption settings do not match the store", ErrWrongMode)
+		}
+		if err := s.enc.verifyCanary(canary); err != nil {
+			return err
+		}
+
+		r := &rotation{ctx: ctx, store: s, old: s.enc}
+
+		names, err := r.collectionNames(tx)
+		if err != nil {
+			return err
+		}
+		for _, name := range names {
+			if err := checkContext(ctx); err != nil {
+				return err
+			}
+			if err := r.collection(tx, name); err != nil {
+				return err
+			}
+		}
+
+		return r.metadata(tx)
+	})
+}
+
+// rotation walks every encrypted structure of a store. With next set it
+// re-encrypts; with next nil it only verifies that everything decrypts.
+type rotation struct {
+	ctx   context.Context
+	store *Store
+	old   *encState
+	next  *encState
+}
+
+// verify reports whether the walk is read-only.
+func (r *rotation) verify() bool {
+	return r.next == nil
+}
+
+// pair is an entry rewritten by a rotation.
+type pair struct {
+	key   []byte
+	value []byte
+}
+
+// collectionNames returns the stored (physical) names of all collection
+// buckets, skipping the metadata bucket.
+func (r *rotation) collectionNames(tx *bbolt.Tx) ([]string, error) {
+	var names []string
+
+	add := func(name []byte) error {
+		// The metadata bucket keeps its plain name: it is Storm-internal, not a
+		// collection name.
+		if string(name) == collectionsMetaBucket {
+			return nil
+		}
+		if r.verify() {
+			// Verification must also prove the stored name decrypts.
+			if _, err := r.old.openName(name, keyDomainName); err != nil {
+				return fmt.Errorf("failed to decrypt collection name %q: %w", name, err)
+			}
+		}
+		names = append(names, string(name))
+		return nil
+	}
+
+	if len(r.store.root) > 0 {
+		root := tx.Bucket(r.store.root)
+		if root == nil {
+			return nil, nil
+		}
+		if err := root.ForEach(func(name, value []byte) error {
+			if value != nil {
+				return nil
+			}
+			return add(name)
+		}); err != nil {
+			return nil, err
+		}
+		return names, nil
+	}
+
+	if err := tx.ForEach(func(name []byte, _ *bbolt.Bucket) error {
+		return add(name)
+	}); err != nil {
+		return nil, err
+	}
+	return names, nil
+}
+
+// collection rotates (or verifies) one collection bucket, renaming it when the
+// encrypted name changes.
+func (r *rotation) collection(tx *bbolt.Tx, physicalName string) error {
+	b := r.bucket(tx, []byte(physicalName))
+	if b == nil {
+		return nil
+	}
+
+	var (
+		changed []pair
+		drop    [][]byte
+	)
+
+	if err := b.ForEach(func(k, v []byte) error {
+		if v == nil {
+			return nil
+		}
+		if err := checkContext(r.ctx); err != nil {
+			return err
+		}
+
+		newKey := k
+		if r.old.encIDs {
+			plainID, err := r.old.openName(k, keyDomainID)
+			if err != nil {
+				return fmt.Errorf("failed to decrypt point ID %q: %w", k, err)
+			}
+			if !r.verify() {
+				newKey, err = r.next.sealName(plainID, keyDomainID)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		newValue := v
+		if r.old.encPoints {
+			plain, err := r.old.openPoints(v)
+			if err != nil {
+				return fmt.Errorf("failed to decrypt point %q: %w", k, err)
+			}
+			if !r.verify() {
+				newValue, err = r.next.sealPoints(plain)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		if r.verify() || (bytes.Equal(newKey, k) && bytes.Equal(newValue, v)) {
+			return nil
+		}
+
+		changed = append(changed, pair{key: append([]byte(nil), newKey...), value: append([]byte(nil), newValue...)})
+		drop = append(drop, append([]byte(nil), k...))
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if r.verify() {
+		return nil
+	}
+
+	// A renamed collection needs a new bucket: bbolt cannot rename one.
+	newPhysical := []byte(physicalName)
+	if r.old.encNames || r.next.encNames {
+		plainName, err := r.old.openName([]byte(physicalName), keyDomainName)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt collection name %q: %w", physicalName, err)
+		}
+		newPhysical, err = r.next.sealName(plainName, keyDomainName)
+		if err != nil {
+			return err
+		}
+	}
+
+	if bytes.Equal(newPhysical, []byte(physicalName)) {
+		return r.apply(b, drop, changed)
+	}
+
+	target, err := r.createBucket(tx, newPhysical)
+	if err != nil {
+		return err
+	}
+	if err := r.apply(target, drop, changed); err != nil {
+		return err
+	}
+	return r.deleteBucket(tx, []byte(physicalName))
+}
+
+// metadata rotates (or verifies) every collection metadata entry.
+func (r *rotation) metadata(tx *bbolt.Tx) error {
+	b, err := r.store.metaBucket(tx, false)
+	if err != nil || b == nil {
+		return err
+	}
+
+	var (
+		changed []pair
+		drop    [][]byte
+	)
+
+	if err := b.ForEach(func(k, v []byte) error {
+		if v == nil || string(k) == markerKey {
+			return nil
+		}
+		if err := checkContext(r.ctx); err != nil {
+			return err
+		}
+
+		newKey := k
+		if r.old.encNames {
+			plainName, err := r.old.openName(k, keyDomainName)
+			if err != nil {
+				return fmt.Errorf("failed to decrypt metadata name %q: %w", k, err)
+			}
+			if !r.verify() {
+				newKey, err = r.next.sealName(plainName, keyDomainName)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		newValue := v
+		if r.old.encPoints {
+			plain, err := r.old.openPoints(v)
+			if err != nil {
+				return fmt.Errorf("failed to decrypt metadata %q: %w", k, err)
+			}
+			if !r.verify() {
+				newValue, err = r.next.sealPoints(plain)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		if r.verify() || (bytes.Equal(newKey, k) && bytes.Equal(newValue, v)) {
+			return nil
+		}
+
+		changed = append(changed, pair{key: append([]byte(nil), newKey...), value: append([]byte(nil), newValue...)})
+		drop = append(drop, append([]byte(nil), k...))
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if r.verify() {
+		return nil
+	}
+
+	return r.apply(b, drop, changed)
+}
+
+// metadataEntry rotates one collection metadata entry by its logical name.
+func (r *rotation) metadataEntry(tx *bbolt.Tx, name string) error {
+	b, err := r.store.metaBucket(tx, false)
+	if err != nil || b == nil {
+		return err
+	}
+
+	oldKey, err := r.old.sealName(name, keyDomainName)
+	if err != nil {
+		return err
+	}
+	data := b.Get(oldKey)
+	if data == nil {
+		// Metadata is optional for a collection.
+		return nil
+	}
+
+	plain, err := r.old.openPoints(data)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt metadata for %s: %w", name, err)
+	}
+
+	newValue, err := r.next.sealPoints(plain)
+	if err != nil {
+		return err
+	}
+	newKey, err := r.next.sealName(name, keyDomainName)
+	if err != nil {
+		return err
+	}
+
+	if !bytes.Equal(newKey, oldKey) {
+		if err := b.Delete(oldKey); err != nil {
+			return err
+		}
+	}
+	return b.Put(newKey, newValue)
+}
+
+// writeMarker rewrites the marker canary with the new key.
+func (r *rotation) writeMarker(tx *bbolt.Tx) error {
+	if r.verify() {
+		return nil
+	}
+
+	b, err := r.store.metaBucket(tx, true)
+	if err != nil {
+		return err
+	}
+
+	marker, err := encodeMarker(r.next)
+	if err != nil {
+		return err
+	}
+	return b.Put([]byte(markerKey), marker)
+}
+
+// apply deletes and rewrites the staged entries of a bucket.
+func (r *rotation) apply(b *bbolt.Bucket, drop [][]byte, entries []pair) error {
+	for _, k := range drop {
+		if err := b.Delete(k); err != nil {
+			return err
+		}
+	}
+	for _, entry := range entries {
+		if err := b.Put(entry.key, entry.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// bucket returns a collection bucket by its physical name.
+func (r *rotation) bucket(tx *bbolt.Tx, name []byte) *bbolt.Bucket {
+	if len(r.store.root) == 0 {
+		return tx.Bucket(name)
+	}
+	root := tx.Bucket(r.store.root)
+	if root == nil {
+		return nil
+	}
+	return root.Bucket(name)
+}
+
+// bucketExists reports whether a collection bucket exists.
+func (r *rotation) bucketExists(tx *bbolt.Tx, name []byte) bool {
+	return r.bucket(tx, name) != nil
+}
+
+// createBucket creates a collection bucket by its physical name.
+func (r *rotation) createBucket(tx *bbolt.Tx, name []byte) (*bbolt.Bucket, error) {
+	if len(r.store.root) == 0 {
+		return tx.CreateBucketIfNotExists(name)
+	}
+	root, err := tx.CreateBucketIfNotExists(r.store.root)
+	if err != nil {
+		return nil, err
+	}
+	return root.CreateBucketIfNotExists(name)
+}
+
+// deleteBucket deletes a collection bucket by its physical name.
+func (r *rotation) deleteBucket(tx *bbolt.Tx, name []byte) error {
+	var err error
+	if len(r.store.root) == 0 {
+		err = tx.DeleteBucket(name)
+	} else if root := tx.Bucket(r.store.root); root != nil {
+		err = root.DeleteBucket(name)
+	}
+	if err != nil && err != bbolt.ErrBucketNotFound {
+		return err
+	}
+	return nil
+}
