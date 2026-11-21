@@ -101,7 +101,7 @@ func TestEncryptSeriesNamesStore(t *testing.T) {
 
 	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
-	store, err := OpenWithConfig(ctx, db, root, &Config{Key: key, EncryptSeriesNames: true})
+	store, err := Open(ctx, db, root, &Config{Secret: key, EncryptSeriesNames: true})
 	require.NoError(t, err)
 
 	se := store.Series("secret-series")
@@ -125,7 +125,7 @@ func TestEncryptSeriesNamesStore(t *testing.T) {
 	db, err = bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	defer db.Close()
-	store, err = OpenWithConfig(ctx, db, root, &Config{Key: key, EncryptSeriesNames: true})
+	store, err = Open(ctx, db, root, &Config{Secret: key, EncryptSeriesNames: true})
 	require.NoError(t, err)
 
 	se = store.Series("secret-series")
@@ -156,7 +156,7 @@ func TestEncryptSeriesNamesAndValues(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
 	store, db := openAEADTestStore(t, root, &Config{
-		Key:                testKey(3),
+		Secret:             testKey(3),
 		EncryptValues:      true,
 		EncryptSeriesNames: true,
 	})
@@ -187,9 +187,9 @@ func TestEncryptSeriesNamesAndValues(t *testing.T) {
 func TestEncryptSeriesNamesModeMismatch(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
-	store, db := openAEADTestStore(t, root, &Config{Key: testKey(4), EncryptSeriesNames: true})
+	store, db := openAEADTestStore(t, root, &Config{Secret: testKey(4), EncryptSeriesNames: true})
 	require.NoError(t, store.Series("cpu").Insert(ctx, Point{Timestamp: 1, Value: 1}))
 
-	_, err := OpenWithConfig(ctx, db, root, &Config{Key: testKey(4), EncryptValues: true})
+	_, err := Open(ctx, db, root, &Config{Secret: testKey(4), EncryptValues: true})
 	require.ErrorIs(t, err, ErrWrongMode)
 }

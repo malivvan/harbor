@@ -11,17 +11,17 @@ import (
 // KeySize is the required key length in bytes (256 bits).
 const KeySize = encryption.KeySize
 
-// Config enables optional encryption for a Store. A nil Config, or one with no
-// encryption feature enabled, keeps the plaintext on-disk format: the existing
-// Open constructor and every store opened without encryption behave exactly as
-// before.
+// Config configures a Store: it selects the codec and enables optional
+// encryption. A nil Config, or one with no encryption feature enabled, keeps
+// the plaintext on-disk format and uses the default JSON codec.
 type Config struct {
-	// Key is a raw 32-byte master key. Exactly one of Key and KeyProvider must
-	// be set when encryption is enabled.
-	Key []byte
+	// Codec encodes and decodes entities. A nil Codec selects the default JSON
+	// codec.
+	Codec Codec
 
-	// KeyProvider supplies the master key instead of Key.
-	KeyProvider KeyProvider
+	// Secret is a raw 32-byte master key. It must be set when encryption is
+	// enabled.
+	Secret []byte
 
 	// EncryptValues seals record values and typed key/value values. The codec
 	// name and bucket names stay readable.
@@ -39,35 +39,6 @@ type Config struct {
 
 func (c *Config) encryptionEnabled() bool {
 	return c != nil && (c.EncryptValues || c.EncryptMetadata || c.EncryptKeys)
-}
-
-// KeyProvider supplies the raw 32-byte master key used for encryption.
-type KeyProvider = encryption.KeyProvider
-
-// RawKeyProvider supplies a fixed 32-byte master key.
-type RawKeyProvider = encryption.RawKeyProvider
-
-// NewRawKeyProvider returns a provider that uses key directly.
-func NewRawKeyProvider(key []byte) (*RawKeyProvider, error) {
-	return encryption.NewRawKeyProvider(key)
-}
-
-// EnvKeyProvider reads a raw 32-byte master key from an environment variable.
-type EnvKeyProvider = encryption.EnvKeyProvider
-
-// NewEnvKeyProvider creates a key provider backed by an environment variable.
-func NewEnvKeyProvider(envVar string) *EnvKeyProvider {
-	return encryption.NewEnvKeyProvider(envVar)
-}
-
-// MultiKeyProvider supplies several keys for rotation: the first is used for
-// new writes, and every key is tried when decrypting existing data.
-type MultiKeyProvider = encryption.MultiKeyProvider
-
-// NewMultiKeyProvider creates a multi-key provider. At least one provider is
-// required; the first one is the primary key.
-func NewMultiKeyProvider(providers ...KeyProvider) (*MultiKeyProvider, error) {
-	return encryption.NewMultiKeyProvider(providers...)
 }
 
 // Key domains. Every deterministic key encryption is domain-separated, so the
@@ -372,12 +343,12 @@ func resolveConfig(cfg *Config) (*encState, error) {
 		return nil, nil
 	}
 
-	keys, err := encryption.ResolveKeys(cfg.Key, cfg.KeyProvider)
+	key, err := encryption.ResolveKey(cfg.Secret)
 	if err != nil {
 		return nil, err
 	}
 
-	kc, err := encryption.NewKeychain(keys)
+	kc, err := encryption.NewKeychain([][]byte{key})
 	if err != nil {
 		return nil, err
 	}
@@ -390,15 +361,9 @@ func resolveConfig(cfg *Config) (*encState, error) {
 	}
 
 	if state.encKeys {
-		// Deterministic key encryption is derived from a single master key: a
-		// fallback key could decrypt values but not reproduce the physical
-		// keys, so lookups would silently miss.
-		if err := encryption.RequireSingleKey(keys); err != nil {
-			return nil, fmt.Errorf("%w; use Store.ReEncrypt to rotate keys", err)
-		}
 		state.sivs = make(map[string]*encryption.SIVNameCipher, 3)
 		for _, domain := range []string{keyDomainID, keyDomainIndex, keyDomainKV} {
-			cipher, err := newNameCipher(keys[0], domain)
+			cipher, err := newNameCipher(key, domain)
 			if err != nil {
 				return nil, err
 			}

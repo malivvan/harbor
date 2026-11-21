@@ -12,13 +12,13 @@ import (
 func rotationConfig(name string, key []byte) *Config {
 	switch name {
 	case "content":
-		return &Config{Key: key, EncryptContent: true}
+		return &Config{Secret: key, EncryptContent: true}
 	case "metadata":
-		return &Config{Key: key, EncryptMetadata: true}
+		return &Config{Secret: key, EncryptMetadata: true}
 	case "chunked":
-		return &Config{Key: key, ChunkSize: 8}
+		return &Config{Secret: key, ChunkSize: 8}
 	default: // both
-		return &Config{Key: key, EncryptMetadata: true, EncryptContent: true}
+		return &Config{Secret: key, EncryptMetadata: true, EncryptContent: true}
 	}
 }
 
@@ -85,7 +85,7 @@ func TestRotateAll(t *testing.T) {
 	key1, key2 := testEncKey(50), testEncKey(51)
 	dbPath := filepath.Join(t.TempDir(), "rotate-all.db")
 
-	store, db, err := openEncStoreAt(t, dbPath, root, &Config{Key: key1, EncryptMetadata: true, EncryptContent: true})
+	store, db, err := openEncStoreAt(t, dbPath, root, &Config{Secret: key1, EncryptMetadata: true, EncryptContent: true})
 	require.NoError(t, err)
 	fsA, err := store.Open("a")
 	require.NoError(t, err)
@@ -107,7 +107,7 @@ func TestRotateAll(t *testing.T) {
 	require.NoError(t, store.Close())
 	require.NoError(t, db.Close())
 
-	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Key: key2, EncryptMetadata: true, EncryptContent: true})
+	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Secret: key2, EncryptMetadata: true, EncryptContent: true})
 	require.NoError(t, err)
 	fsA, err = store.Open("a")
 	require.NoError(t, err)
@@ -118,7 +118,7 @@ func TestRotateAll(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	// Old key fails.
-	oldStore, oldDB, err := openEncStoreAt(t, dbPath, root, &Config{Key: key1, EncryptMetadata: true, EncryptContent: true})
+	oldStore, oldDB, err := openEncStoreAt(t, dbPath, root, &Config{Secret: key1, EncryptMetadata: true, EncryptContent: true})
 	require.NoError(t, err)
 	_, err = oldStore.Open("a")
 	require.ErrorIs(t, err, ErrAuthFailed)
@@ -168,7 +168,7 @@ func TestVerifyAllTamper(t *testing.T) {
 	}
 
 	t.Run("inode", func(t *testing.T) {
-		store, db, _ := newStore(t, &Config{Key: testEncKey(52), EncryptMetadata: true, EncryptContent: true})
+		store, db, _ := newStore(t, &Config{Secret: testEncKey(52), EncryptMetadata: true, EncryptContent: true})
 		ino := firstUserIno(t, db, root, "fs")
 		require.NotZero(t, ino)
 		require.NoError(t, db.Update(func(tx *bolt.Tx) error {
@@ -185,75 +185,22 @@ func TestVerifyAllTamper(t *testing.T) {
 	})
 
 	t.Run("content", func(t *testing.T) {
-		store, db, _ := newStore(t, &Config{Key: testEncKey(53), EncryptContent: true})
+		store, db, _ := newStore(t, &Config{Secret: testEncKey(53), EncryptContent: true})
 		flipFirstValue(t, db, root, "fs", func(b *fsBucket) *bolt.Bucket { return b.data })
 		require.ErrorIs(t, store.VerifyAll(ctx), ErrAuthFailed)
 	})
 
 	t.Run("symlink", func(t *testing.T) {
-		store, db, _ := newStore(t, &Config{Key: testEncKey(54), EncryptContent: true})
+		store, db, _ := newStore(t, &Config{Secret: testEncKey(54), EncryptContent: true})
 		flipFirstValue(t, db, root, "fs", func(b *fsBucket) *bolt.Bucket { return b.symlinks })
 		require.ErrorIs(t, store.VerifyAll(ctx), ErrAuthFailed)
 	})
 
 	t.Run("chunk", func(t *testing.T) {
-		store, db, _ := newStore(t, &Config{Key: testEncKey(55), ChunkSize: 8})
+		store, db, _ := newStore(t, &Config{Secret: testEncKey(55), ChunkSize: 8})
 		flipFirstValue(t, db, root, "fs", func(b *fsBucket) *bolt.Bucket { return b.chunks })
 		require.ErrorIs(t, store.VerifyAll(ctx), ErrAuthFailed)
 	})
-}
-
-func TestRotationFallbackKeys(t *testing.T) {
-	ctx := context.Background()
-	root := []byte("ts")
-	key1, key2 := testEncKey(56), testEncKey(57)
-	dbPath := filepath.Join(t.TempDir(), "fallback.db")
-
-	store, db, err := openEncStoreAt(t, dbPath, root, &Config{Key: key1, EncryptMetadata: true, EncryptContent: true})
-	require.NoError(t, err)
-	fsys, err := store.Open("fs")
-	require.NoError(t, err)
-	writeTestFile(t, fsys, "/file.txt", "fallback content")
-	require.NoError(t, store.Close())
-	require.NoError(t, db.Close())
-
-	primary, err := NewRawKeyProvider(key2)
-	require.NoError(t, err)
-	fallback, err := NewRawKeyProvider(key1)
-	require.NoError(t, err)
-	multi, err := NewMultiKeyProvider(primary, fallback)
-	require.NoError(t, err)
-
-	store, db, err = openEncStoreAt(t, dbPath, root, &Config{KeyProvider: multi, EncryptMetadata: true, EncryptContent: true})
-	require.NoError(t, err)
-	fsys, err = store.Open("fs")
-	require.NoError(t, err)
-	got, err := fsys.ReadFile("/file.txt")
-	require.NoError(t, err)
-	require.Equal(t, "fallback content", string(got))
-
-	require.NoError(t, store.RotateAll(ctx, key2))
-	require.NoError(t, store.VerifyAll(ctx))
-	require.NoError(t, store.Close())
-	require.NoError(t, db.Close())
-
-	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Key: key2, EncryptMetadata: true, EncryptContent: true})
-	require.NoError(t, err)
-	fsys, err = store.Open("fs")
-	require.NoError(t, err)
-	got, err = fsys.ReadFile("/file.txt")
-	require.NoError(t, err)
-	require.Equal(t, "fallback content", string(got))
-	require.NoError(t, store.Close())
-	require.NoError(t, db.Close())
-
-	// The old key alone no longer opens the store.
-	oldStore, oldDB, err := openEncStoreAt(t, dbPath, root, &Config{Key: key1, EncryptMetadata: true, EncryptContent: true})
-	require.NoError(t, err)
-	_, err = oldStore.Open("fs")
-	require.ErrorIs(t, err, ErrAuthFailed)
-	require.NoError(t, oldStore.Close())
-	require.NoError(t, oldDB.Close())
 }
 
 func TestRotationErrors(t *testing.T) {
@@ -265,7 +212,7 @@ func TestRotationErrors(t *testing.T) {
 	require.ErrorIs(t, plain.RotateAll(ctx, testEncKey(58)), ErrInvalidConfig)
 	require.NoError(t, plain.VerifyAll(ctx))
 
-	store, _ := openEncStore(t, root, &Config{Key: testEncKey(59), EncryptContent: true})
+	store, _ := openEncStore(t, root, &Config{Secret: testEncKey(59), EncryptContent: true})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, fsys, "/file.txt", "data")
@@ -288,7 +235,7 @@ func TestReEncryptEmptyFS(t *testing.T) {
 	key1, key2 := testEncKey(61), testEncKey(62)
 	dbPath := filepath.Join(t.TempDir(), "empty.db")
 
-	store, db, err := openEncStoreAt(t, dbPath, root, &Config{Key: key1, EncryptMetadata: true})
+	store, db, err := openEncStoreAt(t, dbPath, root, &Config{Secret: key1, EncryptMetadata: true})
 	require.NoError(t, err)
 	_, err = store.Open("fs")
 	require.NoError(t, err)
@@ -296,7 +243,7 @@ func TestReEncryptEmptyFS(t *testing.T) {
 	require.NoError(t, store.Close())
 	require.NoError(t, db.Close())
 
-	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Key: key2, EncryptMetadata: true})
+	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Secret: key2, EncryptMetadata: true})
 	require.NoError(t, err)
 	defer db.Close()
 	defer store.Close()
@@ -313,7 +260,7 @@ func TestReEncryptFSKeepsOtherFileSystemsReadable(t *testing.T) {
 	var root []byte
 	key1, key2 := testEncKey(70), testEncKey(71)
 	dbPath := filepath.Join(t.TempDir(), "rotate-fallback.db")
-	cfg := &Config{Key: key1, EncryptContent: true, EncryptMetadata: true}
+	cfg := &Config{Secret: key1, EncryptContent: true, EncryptMetadata: true}
 
 	store, db, err := openEncStoreAt(t, dbPath, root, cfg)
 	require.NoError(t, err)
@@ -349,7 +296,7 @@ func TestReEncryptFSKeepsOtherFileSystemsReadable(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	// The new key alone opens both filesystems.
-	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Key: key2, EncryptContent: true, EncryptMetadata: true})
+	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Secret: key2, EncryptContent: true, EncryptMetadata: true})
 	require.NoError(t, err)
 	for name, want := range map[string]string{"a": "series a", "b": "series b"} {
 		fsys, err := store.Open(name)

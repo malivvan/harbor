@@ -26,7 +26,7 @@ func openEncStore(t *testing.T, root []byte, cfg *Config) (*Store, *bolt.DB) {
 	db, err := bolt.Open(filepath.Join(t.TempDir(), "fs-enc.db"), 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	store, err := OpenWithConfig(context.Background(), db, root, cfg)
+	store, err := Open(context.Background(), db, root, cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return store, db
@@ -36,7 +36,7 @@ func openEncStoreAt(t *testing.T, dbPath string, root []byte, cfg *Config) (*Sto
 	t.Helper()
 	db, err := bolt.Open(dbPath, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
-	store, err := OpenWithConfig(context.Background(), db, root, cfg)
+	store, err := Open(context.Background(), db, root, cfg)
 	if err != nil {
 		_ = db.Close()
 		return nil, nil, err
@@ -152,7 +152,7 @@ func TestEncryptionOptionalPlaintextFormat(t *testing.T) {
 	data := fsValue(t, db, root, "fs", func(b *fsBucket) *bolt.Bucket { return b.data }, ino)
 	require.Equal(t, []byte("plain hello"), data, "plaintext content is stored raw")
 
-	store2, err := OpenWithConfig(ctx, db, root, nil)
+	store2, err := Open(ctx, db, root, nil)
 	require.NoError(t, err)
 	fsys2, err := store2.Open("fs")
 	require.NoError(t, err)
@@ -164,7 +164,7 @@ func TestEncryptionOptionalPlaintextFormat(t *testing.T) {
 func TestEncryptMetadataAndContentRoundTrip(t *testing.T) {
 	root := []byte("ts")
 	store, db := openEncStore(t, root, &Config{
-		Key:             testEncKey(1),
+		Secret:          testEncKey(1),
 		EncryptMetadata: true,
 		EncryptContent:  true,
 	})
@@ -227,7 +227,7 @@ func TestEncryptMetadataAndContentRoundTrip(t *testing.T) {
 
 func TestEncryptContentOnly(t *testing.T) {
 	root := []byte("ts")
-	store, db := openEncStore(t, root, &Config{Key: testEncKey(2), EncryptContent: true})
+	store, db := openEncStore(t, root, &Config{Secret: testEncKey(2), EncryptContent: true})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, fsys, "/file.txt", "content-only")
@@ -239,7 +239,7 @@ func TestEncryptContentOnly(t *testing.T) {
 
 func TestEncryptMetadataOnly(t *testing.T) {
 	root := []byte("ts")
-	store, db := openEncStore(t, root, &Config{Key: testEncKey(3), EncryptMetadata: true})
+	store, db := openEncStore(t, root, &Config{Secret: testEncKey(3), EncryptMetadata: true})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, fsys, "/file.txt", "metadata-only")
@@ -253,7 +253,7 @@ func TestEncryptionWrongKey(t *testing.T) {
 	root := []byte("ts")
 	dbPath := filepath.Join(t.TempDir(), "wrong-key.db")
 
-	store, db, err := openEncStoreAt(t, dbPath, root, &Config{Key: testEncKey(4), EncryptMetadata: true, EncryptContent: true})
+	store, db, err := openEncStoreAt(t, dbPath, root, &Config{Secret: testEncKey(4), EncryptMetadata: true, EncryptContent: true})
 	require.NoError(t, err)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -261,14 +261,14 @@ func TestEncryptionWrongKey(t *testing.T) {
 	require.NoError(t, store.Close())
 	require.NoError(t, db.Close())
 
-	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Key: testEncKey(5), EncryptMetadata: true, EncryptContent: true})
+	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Secret: testEncKey(5), EncryptMetadata: true, EncryptContent: true})
 	require.NoError(t, err)
 	_, err = store.Open("fs")
 	require.ErrorIs(t, err, ErrAuthFailed)
 	require.NoError(t, store.Close())
 	require.NoError(t, db.Close())
 
-	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Key: testEncKey(4), EncryptMetadata: true, EncryptContent: true})
+	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Secret: testEncKey(4), EncryptMetadata: true, EncryptContent: true})
 	require.NoError(t, err)
 	defer db.Close()
 	defer store.Close()
@@ -282,7 +282,7 @@ func TestEncryptionWrongKey(t *testing.T) {
 func TestEncryptionTamper(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
-	cfg := &Config{Key: testEncKey(6), EncryptMetadata: true, EncryptContent: true}
+	cfg := &Config{Secret: testEncKey(6), EncryptMetadata: true, EncryptContent: true}
 	store, db := openEncStore(t, root, cfg)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -301,7 +301,7 @@ func TestEncryptionTamper(t *testing.T) {
 		raw[len(raw)-1] ^= 0xFF
 		return b.inodes.Put(i2b(ino), raw)
 	}))
-	store2, err := OpenWithConfig(ctx, db, root, cfg)
+	store2, err := Open(ctx, db, root, cfg)
 	require.NoError(t, err)
 	fsys2, err := store2.Open("fs")
 	require.NoError(t, err)
@@ -310,7 +310,7 @@ func TestEncryptionTamper(t *testing.T) {
 	require.NoError(t, store2.Close())
 
 	// Tamper with the sealed content.
-	store3, err := OpenWithConfig(ctx, db, root, cfg)
+	store3, err := Open(ctx, db, root, cfg)
 	require.NoError(t, err)
 	fsys3, err := store3.Open("fs")
 	require.NoError(t, err)
@@ -330,7 +330,7 @@ func TestEncryptionTamper(t *testing.T) {
 
 func TestEncryptionNonceFreshness(t *testing.T) {
 	root := []byte("ts")
-	store, db := openEncStore(t, root, &Config{Key: testEncKey(7), EncryptContent: true})
+	store, db := openEncStore(t, root, &Config{Secret: testEncKey(7), EncryptContent: true})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, fsys, "/a.txt", "same value")
@@ -365,24 +365,24 @@ func TestEncryptionModeDetection(t *testing.T) {
 	require.NoError(t, err)
 	writeTestFile(t, fsys, "/file.txt", "plain")
 
-	encStore, err := OpenWithConfig(ctx, db, root, &Config{Key: testEncKey(8), EncryptContent: true})
+	encStore, err := Open(ctx, db, root, &Config{Secret: testEncKey(8), EncryptContent: true})
 	require.NoError(t, err)
 	_, err = encStore.Open("fs")
 	require.ErrorIs(t, err, ErrWrongMode, "plaintext data must not be silently encrypted")
 
 	// Encrypted filesystem opened without a key is rejected.
 	root2 := []byte("ts2")
-	enc, db2 := openEncStore(t, root2, &Config{Key: testEncKey(9), EncryptContent: true})
+	enc, db2 := openEncStore(t, root2, &Config{Secret: testEncKey(9), EncryptContent: true})
 	fsys, err = enc.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, fsys, "/file.txt", "secret")
-	plainStore, err := Open(ctx, db2, root2)
+	plainStore, err := Open(ctx, db2, root2, nil)
 	require.NoError(t, err)
 	_, err = plainStore.Open("fs")
 	require.ErrorIs(t, err, ErrWrongMode)
 
 	// Different encryption settings are rejected.
-	other, err := OpenWithConfig(ctx, db2, root2, &Config{Key: testEncKey(9), EncryptMetadata: true})
+	other, err := Open(ctx, db2, root2, &Config{Secret: testEncKey(9), EncryptMetadata: true})
 	require.NoError(t, err)
 	_, err = other.Open("fs")
 	require.ErrorIs(t, err, ErrWrongMode)
@@ -397,7 +397,7 @@ func TestEncryptionEmptyPlaintextFSMigration(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, fsys.Close())
 
-	enc, err := OpenWithConfig(ctx, db, root, &Config{Key: testEncKey(10), EncryptMetadata: true, EncryptContent: true})
+	enc, err := Open(ctx, db, root, &Config{Secret: testEncKey(10), EncryptMetadata: true, EncryptContent: true})
 	require.NoError(t, err)
 	encFS, err := enc.Open("fs")
 	require.NoError(t, err)
@@ -418,58 +418,21 @@ func TestEncryptionConfigValidation(t *testing.T) {
 		want error
 	}{
 		{"missing key", &Config{EncryptContent: true}, ErrInvalidKey},
-		{"short key", &Config{Key: make([]byte, 16), EncryptContent: true}, ErrInvalidKey},
-		{
-			name: "key and provider",
-			cfg:  &Config{Key: testEncKey(11), KeyProvider: NewEnvKeyProvider("X"), EncryptContent: true},
-			want: ErrInvalidConfig,
-		},
-		{"negative chunk", &Config{Key: testEncKey(11), ChunkSize: -1}, ErrInvalidConfig},
+		{"short key", &Config{Secret: make([]byte, 16), EncryptContent: true}, ErrInvalidKey},
+		{"negative chunk", &Config{Secret: testEncKey(11), ChunkSize: -1}, ErrInvalidConfig},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := OpenWithConfig(ctx, db, root, tt.cfg)
+			_, err := Open(ctx, db, root, tt.cfg)
 			require.ErrorIs(t, err, tt.want)
 		})
 	}
 }
 
-func TestEncryptionKeyProviders(t *testing.T) {
-	key := testEncKey(12)
-	raw, err := NewRawKeyProvider(key)
-	require.NoError(t, err)
-	got, err := raw.Key()
-	require.NoError(t, err)
-	require.Equal(t, key, got)
-	_, err = NewRawKeyProvider(make([]byte, 16))
-	require.ErrorIs(t, err, ErrInvalidKey)
-
-	t.Setenv("FS_TEST_KEY", string(key))
-	envKey, err := NewEnvKeyProvider("FS_TEST_KEY").Key()
-	require.NoError(t, err)
-	require.Equal(t, key, envKey)
-	t.Setenv("FS_TEST_KEY", "")
-	_, err = NewEnvKeyProvider("FS_TEST_KEY").Key()
-	require.ErrorIs(t, err, ErrInvalidKey)
-
-	second, err := NewRawKeyProvider(testEncKey(13))
-	require.NoError(t, err)
-	multi, err := NewMultiKeyProvider(raw, second)
-	require.NoError(t, err)
-	primary, err := multi.Key()
-	require.NoError(t, err)
-	require.Equal(t, key, primary)
-	keys, err := multi.TryKeys()
-	require.NoError(t, err)
-	require.Len(t, keys, 2)
-	_, err = NewMultiKeyProvider()
-	require.ErrorIs(t, err, ErrInvalidConfig)
-}
-
 func TestEncryptionMarkerFlags(t *testing.T) {
 	root := []byte("ts")
 	store, db := openEncStore(t, root, &Config{
-		Key:             testEncKey(14),
+		Secret:          testEncKey(14),
 		EncryptMetadata: true,
 		EncryptContent:  true,
 	})

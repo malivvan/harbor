@@ -15,7 +15,7 @@
 // # Optional encryption
 //
 // A Store can be opened with an opt-in AEAD configuration through
-// [OpenWithConfig]. [Config.EncryptMetadata] seals inode blobs (hiding names,
+// [Open]. [Config.EncryptMetadata] seals inode blobs (hiding names,
 // modes, sizes and times), [Config.EncryptContent] seals file content and
 // symlink paths, and [Config.ChunkSize] stores content as independently sealed
 // chunks. Plaintext stores keep their existing on-disk format. Key rotation is

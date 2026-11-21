@@ -13,7 +13,7 @@ import (
 // aeadRotateConfig is the strongest configuration: values, metadata and keys.
 func aeadRotateConfig(key []byte) *Config {
 	return &Config{
-		Key:             key,
+		Secret:          key,
 		EncryptValues:   true,
 		EncryptMetadata: true,
 		EncryptKeys:     true,
@@ -101,7 +101,7 @@ func TestAEADRotateReEncryptsEverything(t *testing.T) {
 
 	// The old key must no longer open the store; the new key must.
 	bdb = aeadOpenBolt(t, path)
-	_, err = OpenWithConfig(ctx, bdb, nil, nil, aeadRotateConfig(keyA))
+	_, err = Open(ctx, bdb, nil, aeadRotateConfig(keyA))
 	require.ErrorIs(t, err, ErrAuthFailed)
 	require.NoError(t, bdb.Close())
 
@@ -133,7 +133,7 @@ func TestAEADRotateValuesOnly(t *testing.T) {
 
 	bdb := aeadOpenBolt(t, path)
 	defer bdb.Close()
-	st := aeadOpenStore(t, bdb, &Config{Key: keyA, EncryptValues: true, EncryptMetadata: true})
+	st := aeadOpenStore(t, bdb, &Config{Secret: keyA, EncryptValues: true, EncryptMetadata: true})
 
 	require.NoError(t, st.Save(ctx, &aeadUser{Name: "alice", Email: "alice@example.com", Group: "staff", Age: 30}))
 	require.NoError(t, st.Save(ctx, &aeadUser{Name: "bob", Email: "bob@example.com", Group: "staff", Age: 42}))
@@ -176,7 +176,7 @@ func TestAEADRotateRejectsInvalidInput(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidConfig)
 	require.ErrorIs(t, plain.VerifyAll(ctx), ErrInvalidConfig)
 
-	enc := aeadOpenStore(t, bdb, &Config{Key: aeadKey(35), EncryptValues: true})
+	enc := aeadOpenStore(t, bdb, &Config{Secret: aeadKey(35), EncryptValues: true})
 	err = enc.ReEncrypt(ctx, []byte("short"))
 	require.ErrorIs(t, err, ErrInvalidKey)
 }
@@ -257,78 +257,4 @@ func TestAEADVerifyAllDetectsTampering(t *testing.T) {
 
 		require.ErrorIs(t, st.VerifyAll(ctx), ErrAuthFailed)
 	})
-}
-
-// TestAEADMultiKeyProviderRotation proves a fallback key keeps an old store
-// readable until the rotation is done.
-func TestAEADMultiKeyProviderRotation(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "enc.db")
-	keyA, keyB := aeadKey(39), aeadKey(40)
-
-	bdb := aeadOpenBolt(t, path)
-	st := aeadOpenStore(t, bdb, &Config{Key: keyA, EncryptValues: true, EncryptMetadata: true})
-	require.NoError(t, st.Save(ctx, &aeadUser{ID: 1, Name: "alice", Email: "alice@example.com", Group: "staff", Age: 30}))
-	require.NoError(t, bdb.Close())
-
-	provA, err := NewRawKeyProvider(keyA)
-	require.NoError(t, err)
-	provB, err := NewRawKeyProvider(keyB)
-	require.NoError(t, err)
-	multi, err := NewMultiKeyProvider(provB, provA)
-	require.NoError(t, err)
-
-	keys, err := multi.TryKeys()
-	require.NoError(t, err)
-	require.Len(t, keys, 2)
-	require.Equal(t, keyB, keys[0])
-
-	bdb = aeadOpenBolt(t, path)
-	defer bdb.Close()
-	st = aeadOpenStore(t, bdb, &Config{KeyProvider: multi, EncryptValues: true, EncryptMetadata: true})
-
-	// The fallback key reads old data.
-	var u aeadUser
-	require.NoError(t, st.One(ctx, "ID", 1, &u))
-	require.Equal(t, "alice", u.Name)
-
-	// New writes use the primary key.
-	require.NoError(t, st.Save(ctx, &aeadUser{ID: 2, Name: "bob", Email: "bob@example.com", Group: "staff", Age: 42}))
-	require.NoError(t, st.VerifyAll(ctx))
-
-	// Rotating folds everything onto the primary key.
-	require.NoError(t, st.ReEncrypt(ctx, keyB))
-	require.NoError(t, st.VerifyAll(ctx))
-	require.NoError(t, bdb.Close())
-
-	bdb = aeadOpenBolt(t, path)
-	defer bdb.Close()
-	st = aeadOpenStore(t, bdb, &Config{Key: keyB, EncryptValues: true, EncryptMetadata: true})
-	require.NoError(t, st.VerifyAll(ctx))
-	require.NoError(t, st.One(ctx, "ID", 1, &u))
-	require.NoError(t, st.One(ctx, "ID", 2, &u))
-}
-
-// TestAEADMultipleKeysRejectedWithEncryptedKeys proves the combination that
-// cannot work is rejected instead of silently failing lookups.
-func TestAEADMultipleKeysRejectedWithEncryptedKeys(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "enc.db")
-
-	bdb := aeadOpenBolt(t, path)
-	defer bdb.Close()
-
-	provA, err := NewRawKeyProvider(aeadKey(41))
-	require.NoError(t, err)
-	provB, err := NewRawKeyProvider(aeadKey(42))
-	require.NoError(t, err)
-	multi, err := NewMultiKeyProvider(provB, provA)
-	require.NoError(t, err)
-
-	_, err = OpenWithConfig(ctx, bdb, nil, nil, &Config{
-		KeyProvider:   multi,
-		EncryptValues: true,
-		EncryptKeys:   true,
-	})
-	require.ErrorIs(t, err, ErrInvalidConfig)
 }

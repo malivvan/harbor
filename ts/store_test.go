@@ -23,7 +23,7 @@ func openTestStore(t *testing.T, root []byte) (*Store, *bolt.DB) {
 		_ = db.Close()
 	})
 
-	store, err := Open(context.Background(), db, root)
+	store, err := Open(context.Background(), db, root, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = store.Close()
@@ -34,17 +34,17 @@ func openTestStore(t *testing.T, root []byte) (*Store, *bolt.DB) {
 func TestOpen(t *testing.T) {
 	ctx := context.Background()
 
-	store, err := Open(nil, nil, nil)
+	store, err := Open(nil, nil, nil, nil)
 	require.ErrorIs(t, err, ErrNilContext)
 	require.Nil(t, store)
 
-	store, err = Open(ctx, nil, nil)
+	store, err = Open(ctx, nil, nil, nil)
 	require.ErrorIs(t, err, ErrNilParam)
 	require.Nil(t, store)
 
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	store, err = Open(canceled, nil, nil)
+	store, err = Open(canceled, nil, nil, nil)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, store)
 
@@ -251,7 +251,7 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 
 	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
-	store, err := Open(ctx, db, nil)
+	store, err := Open(ctx, db, nil, nil)
 	require.NoError(t, err)
 	cpu := store.Series("cpu")
 	require.NoError(t, cpu.InsertMany(ctx, []Point{{Timestamp: 10, Value: 1}, {Timestamp: 20, Value: 2}}))
@@ -262,7 +262,7 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	db, err = bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	defer db.Close()
-	store, err = Open(ctx, db, nil)
+	store, err = Open(ctx, db, nil, nil)
 	require.NoError(t, err)
 	cpu = store.Series("cpu")
 
@@ -988,7 +988,7 @@ func openBenchSeries(b *testing.B) *Series {
 		_ = db.Close()
 	})
 
-	store, err := Open(context.Background(), db, nil)
+	store, err := Open(context.Background(), db, nil, nil)
 	if err != nil {
 		b.Fatal(err)
 	}

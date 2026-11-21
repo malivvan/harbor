@@ -15,12 +15,9 @@ const KeySize = encryption.KeySize
 // one with no encryption feature enabled, leaves the store in its plaintext
 // format.
 type Config struct {
-	// Key is a raw 32-byte master key. Exactly one of Key and KeyProvider must
-	// be set when encryption is enabled.
-	Key []byte
-
-	// KeyProvider supplies the master key instead of Key.
-	KeyProvider KeyProvider
+	// Secret is a raw 32-byte master key. It must be set when encryption is
+	// enabled.
+	Secret []byte
 
 	// EncryptValues seals point values and series metadata.
 	EncryptValues bool
@@ -36,35 +33,6 @@ type Config struct {
 
 func (c *Config) encryptionEnabled() bool {
 	return c != nil && (c.EncryptValues || c.EncryptSeriesNames || c.BlockDuration > 0)
-}
-
-// KeyProvider supplies the raw 32-byte master key used for encryption.
-type KeyProvider = encryption.KeyProvider
-
-// RawKeyProvider supplies a fixed 32-byte master key.
-type RawKeyProvider = encryption.RawKeyProvider
-
-// NewRawKeyProvider returns a provider that uses key directly.
-func NewRawKeyProvider(key []byte) (*RawKeyProvider, error) {
-	return encryption.NewRawKeyProvider(key)
-}
-
-// EnvKeyProvider reads a raw 32-byte master key from an environment variable.
-type EnvKeyProvider = encryption.EnvKeyProvider
-
-// NewEnvKeyProvider creates a key provider backed by an environment variable.
-func NewEnvKeyProvider(envVar string) *EnvKeyProvider {
-	return encryption.NewEnvKeyProvider(envVar)
-}
-
-// MultiKeyProvider supplies several keys for rotation: the first is used for
-// new writes, and every key is tried when decrypting existing data.
-type MultiKeyProvider = encryption.MultiKeyProvider
-
-// NewMultiKeyProvider creates a multi-key provider. At least one provider is
-// required; the first one is the primary key.
-func NewMultiKeyProvider(providers ...KeyProvider) (*MultiKeyProvider, error) {
-	return encryption.NewMultiKeyProvider(providers...)
 }
 
 // encState is the resolved encryption state of a store: the cipher engines
@@ -102,21 +70,12 @@ func resolveConfig(cfg *Config) (*encState, error) {
 		return nil, fmt.Errorf("%w: block duration cannot be negative", ErrInvalidConfig)
 	}
 
-	keys, err := encryption.ResolveKeys(cfg.Key, cfg.KeyProvider)
+	key, err := encryption.ResolveKey(cfg.Secret)
 	if err != nil {
 		return nil, err
 	}
 
-	if cfg.EncryptSeriesNames {
-		// Deterministic series names derive from one master key: a fallback key
-		// could decrypt values but never reproduce the physical names, so
-		// lookups would silently miss.
-		if err := encryption.RequireSingleKey(keys); err != nil {
-			return nil, fmt.Errorf("%w; use ReEncryptSeries or RotateAll to rotate series names", err)
-		}
-	}
-
-	kc, err := encryption.NewKeychain(keys)
+	kc, err := encryption.NewKeychain([][]byte{key})
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +87,7 @@ func resolveConfig(cfg *Config) (*encState, error) {
 		blockDur:  cfg.BlockDuration,
 	}
 	if state.encNames {
-		state.siv, err = encryption.NewSIVNameCipher(keys[0], sivInfo)
+		state.siv, err = encryption.NewSIVNameCipher(key, sivInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -293,32 +252,35 @@ func (s *Store) hasData(db *bolt.DB) (bool, error) {
 	return found, err
 }
 
-// OpenWithConfig wraps an already-open bbolt database with the given optional
-// encryption configuration. A nil config, or one with no encryption enabled, is
-// equivalent to Open.
-func OpenWithConfig(ctx context.Context, db *bolt.DB, root []byte, cfg *Config) (*Store, error) {
+// Open wraps an already-open bbolt database in a time series Store.
+//
+// The caller owns db and must keep it open for the lifetime of the Store. The
+// Store never closes db. root is an optional root bucket key; nil or an empty
+// slice means the database root. cfg enables optional encryption; a nil config,
+// or one with no encryption enabled, creates a plaintext store.
+func Open(ctx context.Context, bdb *bolt.DB, key []byte, cfg Config) (*Store, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
-	if db == nil {
+	if bdb == nil {
 		return nil, ErrNilParam
 	}
 
-	settings, err := resolveConfig(cfg)
+	settings, err := resolveConfig(&cfg)
 	if err != nil {
 		return nil, err
 	}
 
 	s := &Store{
-		b:      db,
-		root:   append([]byte(nil), root...),
+		b:      bdb,
+		root:   append([]byte(nil), key...),
 		now:    defaultNow,
 		series: make(map[string]*Series),
 	}
 
 	s.enc = settings
 
-	existing, canary, found, err := s.readMarker(db)
+	existing, canary, found, err := s.readMarker(bdb)
 	if err != nil {
 		return nil, err
 	}
@@ -336,7 +298,7 @@ func OpenWithConfig(ctx context.Context, db *bolt.DB, root []byte, cfg *Config) 
 	}
 
 	if settings != nil {
-		hasData, err := s.hasData(db)
+		hasData, err := s.hasData(bdb)
 		if err != nil {
 			return nil, err
 		}

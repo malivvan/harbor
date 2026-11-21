@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 
+	"os"
+	"sync"
+
 	"github.com/google/uuid"
 	"github.com/malivvan/storm/fs"
 	"github.com/malivvan/storm/ts"
 	"github.com/malivvan/storm/vec"
-
-	"os"
-	"sync"
 
 	"github.com/malivvan/storm/db"
 	bolt "go.etcd.io/bbolt"
@@ -70,26 +70,39 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Opti
 		return nil
 	})
 
-	if s.db, err = db.OpenWithConfig(ctx, s.b, []byte{2}, db.JSONCodec, &db.Config{
+	secret := [32]byte{9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9}
+
+	if s.db, err = db.Open(ctx, s.b, []byte{1}, db.Config{
+		Secret:          secret[:],
+		Codec:           db.JSONCodec,
 		EncryptKeys:     true,
 		EncryptValues:   true,
 		EncryptMetadata: true,
 	}); err != nil {
 		return nil, err
 	}
-
-	s.vec, err = vec.OpenWithConfig(ctx, s.b, []byte{3}, false, nil, &vec.Config{})
-	if err != nil {
+	if s.fs, err = fs.Open(ctx, s.b, []byte{2}, fs.Config{
+		Secret:          secret[:],
+		EncryptMetadata: true,
+		EncryptContent:  true,
+	}); err != nil {
 		return nil, err
 	}
-
-	s.fs, err = fs.Open(ctx, s.b, []byte{4})
-	if err != nil {
+	if s.ts, err = ts.Open(ctx, s.b, []byte{3}, ts.Config{
+		Secret:             secret[:],
+		EncryptValues:      true,
+		EncryptSeriesNames: true,
+	}); err != nil {
 		return nil, err
 	}
-
-	s.ts, err = ts.Open(ctx, s.b, []byte{5})
-	if err != nil {
+	if s.vec, err = vec.Open(ctx, s.b, []byte{4}, vec.Config{
+		Secret:                 secret[:],
+		UseQuant:               false,
+		Quantizer:              nil,
+		EncryptPoints:          true,
+		EncryptPointIDs:        true,
+		EncryptCollectionNames: true,
+	}); err != nil {
 		return nil, err
 	}
 

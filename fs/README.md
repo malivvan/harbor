@@ -27,7 +27,7 @@ The inode cache provides significant performance improvements by caching frequen
 bdb, _ := bolt.Open("myfs.db", 0644, nil)
 defer bdb.Close()
 
-store, _ := fs.Open(ctx, bdb, nil)
+store, _ := fs.Open(ctx, bdb, nil, nil)
 filesystem, _ := store.Open("")
 defer filesystem.Close()
 
@@ -51,7 +51,7 @@ multiple named file systems beneath that root:
 bdb, _ := bolt.Open("myfs.db", 0644, nil)
 defer bdb.Close()
 
-store, _ := fs.Open(ctx, bdb, []byte("tenant"))
+store, _ := fs.Open(ctx, bdb, []byte("tenant"), nil)
 defer store.Close()
 
 docs, _ := store.Open("docs")
@@ -105,7 +105,7 @@ import (
 // Use default BoltDB storage.
 bdb, _ := bolt.Open("myfs.db", 0644, nil)
 defer bdb.Close()
-store, _ := fs.Open(ctx, bdb, nil)
+store, _ := fs.Open(ctx, bdb, nil, nil)
 filesystem, _ := store.Open("")
 defer filesystem.Close()
 
@@ -150,12 +150,12 @@ filesystem, _ := store.OpenWithContentFS("", osfs)
 ## Optional encryption
 
 Encryption is opt-in and leaves the plaintext bbolt format untouched when it is
-not configured. Open a Store with `OpenWithConfig`:
+not configured. Open a Store with `Open` and a `Config`:
 
 ```go
 key := loadKey() // exactly fs.KeySize (32) bytes
-store, err := fs.OpenWithConfig(ctx, bdb, nil, &fs.Config{
-    Key:             key,
+store, err := fs.Open(ctx, bdb, nil, &fs.Config{
+    Secret:          key,
     EncryptMetadata: true, // seal inode blobs: names, modes, sizes, times
     EncryptContent:  true, // seal file content and symlink paths
 })
@@ -172,7 +172,6 @@ filesystem, err := store.Open("vault")
 - Opening an encrypted filesystem without a key, changing the mode, or asking
   for encryption on a filesystem that already holds plaintext data returns
   `fs.ErrWrongMode`.
-- `RawKeyProvider`, `EnvKeyProvider` and `MultiKeyProvider` supply keys.
 - `ReEncryptFS`, `RotateAll` and `VerifyAll` rotate keys and verify data.
 
 External content filesystems configured with `SetContentFS` remain plaintext;

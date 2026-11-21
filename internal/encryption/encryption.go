@@ -5,10 +5,10 @@
 // Every encrypted store uses AES-256-GCM; keys are always raw 32-byte (256-bit)
 // values.
 //
-// This package also owns the pieces every store shares: the key providers and
-// key resolution, the Keychain (seal/open with rotation fallbacks), the
-// deterministic SIV name cipher, the marker framing with its canary, the
-// rotation rewrite helpers and the encryption sentinels.
+// This package also owns the pieces every store shares: key resolution, the
+// Keychain (seal/open with rotation fallbacks), the deterministic SIV name
+// cipher, the marker framing with its canary, the rotation rewrite helpers and
+// the encryption sentinels.
 //
 // Error convention: the sentinels in this package (ErrAuthFailed, ErrInvalidKey,
 // ErrInvalidConfig, ErrWrongMode, ErrEncryptedOrdering) are returned unwrapped.

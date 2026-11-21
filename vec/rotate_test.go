@@ -3,7 +3,6 @@ package vec
 import (
 	"bytes"
 	"context"
-	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -111,7 +110,7 @@ func TestAEADRotateAllReEncryptsEverything(t *testing.T) {
 	// The old key must no longer open the store; the new key must.
 	bdb, err = bbolt.Open(path, 0600, &bbolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
-	_, err = OpenWithConfig(ctx, bdb, nil, false, nil, aeadNamesConfig(keyA))
+	_, err = Open(ctx, bdb, nil, aeadNamesConfig(keyA))
 	require.ErrorIs(t, err, ErrAuthFailed)
 	require.NoError(t, bdb.Close())
 
@@ -119,7 +118,7 @@ func TestAEADRotateAllReEncryptsEverything(t *testing.T) {
 	require.NoError(t, err)
 	defer reopened.Close()
 
-	store, err = OpenWithConfig(ctx, reopened, nil, false, nil, aeadNamesConfig(keyB))
+	store, err = Open(ctx, reopened, nil, aeadNamesConfig(keyB))
 	require.NoError(t, err)
 	require.NoError(t, store.VerifyAll(ctx))
 
@@ -135,7 +134,7 @@ func TestAEADRotatePointsOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "enc.db")
 	keyA, keyB := aeadKey(33), aeadKey(34)
 
-	store, bdb := aeadOpenStore(t, path, false, &Config{Key: keyA, EncryptPoints: true})
+	store, bdb := aeadOpenStore(t, path, false, &Config{Secret: keyA, EncryptPoints: true})
 	defer store.Close()
 
 	require.NoError(t, store.EnsureCollection("invoices"))
@@ -171,7 +170,7 @@ func TestAEADReEncryptCollectionKeepsOthersReadable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "enc.db")
 	keyA, keyB := aeadKey(35), aeadKey(36)
 
-	store, _ := aeadOpenStore(t, path, false, &Config{Key: keyA, EncryptPoints: true})
+	store, _ := aeadOpenStore(t, path, false, &Config{Secret: keyA, EncryptPoints: true})
 	require.NoError(t, store.EnsureCollection("invoices"))
 	require.NoError(t, store.EnsureCollection("receipts"))
 	require.NoError(t, store.UpsertPoints("invoices", aeadTestPoints()))
@@ -205,7 +204,7 @@ func TestAEADReEncryptCollectionKeepsOthersReadable(t *testing.T) {
 	require.NoError(t, err)
 	defer bdb.Close()
 
-	store, err = OpenWithConfig(ctx, bdb, nil, false, nil, &Config{Key: keyB, EncryptPoints: true})
+	store, err = Open(ctx, bdb, nil, &Config{Secret: keyB, EncryptPoints: true})
 	require.NoError(t, err)
 	require.NoError(t, store.VerifyAll(ctx))
 
@@ -222,8 +221,8 @@ func TestAEADReEncryptCollectionKeepsOthersReadable(t *testing.T) {
 // rejected instead of leaving the store unrecoverable.
 func TestAEADReEncryptCollectionRejectedWithEncryptedKeys(t *testing.T) {
 	for name, cfg := range map[string]*Config{
-		"point ids":        {Key: aeadKey(47), EncryptPoints: true, EncryptPointIDs: true},
-		"collection names": {Key: aeadKey(48), EncryptPoints: true, EncryptCollectionNames: true},
+		"point ids":        {Secret: aeadKey(47), EncryptPoints: true, EncryptPointIDs: true},
+		"collection names": {Secret: aeadKey(48), EncryptPoints: true, EncryptCollectionNames: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
@@ -258,7 +257,7 @@ func TestAEADRotateRejectsInvalidInput(t *testing.T) {
 	require.ErrorIs(t, plain.ReEncryptCollection(ctx, "invoices", aeadKey(37)), ErrInvalidConfig)
 	require.NoError(t, plain.Close())
 
-	store, _ := aeadOpenStore(t, path, false, &Config{Key: aeadKey(37), EncryptPoints: true})
+	store, _ := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(37), EncryptPoints: true})
 	defer store.Close()
 
 	require.ErrorIs(t, store.RotateAll(ctx, []byte("short")), ErrInvalidKey)
@@ -274,7 +273,7 @@ func TestAEADVerifyAllDetectsTampering(t *testing.T) {
 		ctx := context.Background()
 		path := filepath.Join(t.TempDir(), "enc.db")
 
-		store, bdb := aeadOpenStore(t, path, false, &Config{Key: aeadKey(39), EncryptPoints: true})
+		store, bdb := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(39), EncryptPoints: true})
 		defer store.Close()
 		require.NoError(t, store.EnsureCollection("invoices"))
 		require.NoError(t, store.UpsertPoints("invoices", aeadTestPoints()))
@@ -294,7 +293,7 @@ func TestAEADVerifyAllDetectsTampering(t *testing.T) {
 		ctx := context.Background()
 		path := filepath.Join(t.TempDir(), "enc.db")
 
-		store, bdb := aeadOpenStore(t, path, false, &Config{Key: aeadKey(40), EncryptPoints: true})
+		store, bdb := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(40), EncryptPoints: true})
 		defer store.Close()
 		require.NoError(t, store.EnsureCollection("invoices"))
 		require.NoError(t, store.SaveCollectionMeta("invoices", CollectionMeta{Name: "invoices", VectorLen: 3, Metric: Cosine}))
@@ -314,7 +313,7 @@ func TestAEADVerifyAllDetectsTampering(t *testing.T) {
 		ctx := context.Background()
 		path := filepath.Join(t.TempDir(), "enc.db")
 
-		store, bdb := aeadOpenStore(t, path, false, &Config{Key: aeadKey(41), EncryptPoints: true, EncryptPointIDs: true})
+		store, bdb := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(41), EncryptPoints: true, EncryptPointIDs: true})
 		defer store.Close()
 		require.NoError(t, store.EnsureCollection("invoices"))
 		require.NoError(t, store.UpsertPoints("invoices", aeadTestPoints()))
@@ -341,7 +340,7 @@ func TestAEADVerifyAllDetectsTampering(t *testing.T) {
 		ctx := context.Background()
 		path := filepath.Join(t.TempDir(), "enc.db")
 
-		store, bdb := aeadOpenStore(t, path, false, &Config{Key: aeadKey(42), EncryptPoints: true})
+		store, bdb := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(42), EncryptPoints: true})
 		defer store.Close()
 		require.NoError(t, store.EnsureCollection("invoices"))
 
@@ -354,58 +353,4 @@ func TestAEADVerifyAllDetectsTampering(t *testing.T) {
 
 		require.ErrorIs(t, store.VerifyAll(ctx), ErrAuthFailed)
 	})
-}
-
-// TestAEADMultiKeyRotation proves a fallback key keeps an old store readable
-// until the rotation is done.
-func TestAEADMultiKeyRotation(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "enc.db")
-	keyA, keyB := aeadKey(43), aeadKey(44)
-
-	store, _ := aeadOpenStore(t, path, false, &Config{Key: keyA, EncryptPoints: true})
-	require.NoError(t, store.EnsureCollection("invoices"))
-	require.NoError(t, store.UpsertPoints("invoices", aeadTestPoints()))
-	require.NoError(t, store.Close())
-
-	provA, err := NewRawKeyProvider(keyA)
-	require.NoError(t, err)
-	provB, err := NewRawKeyProvider(keyB)
-	require.NoError(t, err)
-	multi, err := NewMultiKeyProvider(provB, provA)
-	require.NoError(t, err)
-
-	keys, err := multi.TryKeys()
-	require.NoError(t, err)
-	require.Len(t, keys, 2)
-	require.Equal(t, keyB, keys[0])
-
-	bdb, err := bbolt.Open(path, 0600, &bbolt.Options{Timeout: time.Second})
-	require.NoError(t, err)
-	defer bdb.Close()
-
-	store, err = OpenWithConfig(ctx, bdb, nil, false, nil, &Config{KeyProvider: multi, EncryptPoints: true})
-	require.NoError(t, err)
-
-	// The fallback key reads old data; new writes use the primary key.
-	loaded, err := store.LoadCollection("invoices")
-	require.NoError(t, err)
-	require.Equal(t, []string{"p1", "p2", "p3"}, aeadPointIDs(loaded))
-	require.NoError(t, store.VerifyAll(ctx))
-
-	require.NoError(t, store.RotateAll(ctx, keyB))
-	require.NoError(t, store.VerifyAll(ctx))
-	require.NoError(t, store.Close())
-
-	bdb2, err := bbolt.Open(path, 0600, &bbolt.Options{Timeout: time.Second})
-	require.NoError(t, err)
-	defer bdb2.Close()
-
-	store, err = OpenWithConfig(ctx, bdb2, nil, false, nil, &Config{Key: keyB, EncryptPoints: true})
-	require.NoError(t, err)
-	require.NoError(t, store.VerifyAll(ctx))
-	loaded, err = store.LoadCollection("invoices")
-	require.NoError(t, err)
-	require.Len(t, loaded, 3)
-	require.False(t, errors.Is(err, ErrAuthFailed))
 }

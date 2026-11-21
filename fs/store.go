@@ -36,32 +36,28 @@ type Store struct {
 // The caller owns db and must keep it open for the lifetime of the Store. The
 // Store never closes db. root is an optional parent bucket key for all file
 // systems; nil or an empty slice means the database root.
-func Open(ctx context.Context, db *bolt.DB, root []byte) (*Store, error) {
-	return OpenWithConfig(ctx, db, root, nil)
-}
-
-// OpenWithConfig wraps an already-open bbolt database with the given optional
-// encryption configuration. A nil config, or one with no encryption enabled, is
-// equivalent to Open.
-func OpenWithConfig(ctx context.Context, db *bolt.DB, root []byte, cfg *Config) (*Store, error) {
+//
+// cfg enables optional encryption. A nil config, or one with no encryption
+// enabled, creates a plaintext store.
+func Open(ctx context.Context, bdb *bolt.DB, key []byte, cfg Config) (*Store, error) {
 	if ctx == nil {
 		return nil, ErrNilContext
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if db == nil {
+	if bdb == nil {
 		return nil, ErrNilParam
 	}
 
-	enc, err := resolveConfig(cfg)
+	enc, err := resolveConfig(&cfg)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Store{
-		db:   db,
-		root: append([]byte(nil), root...),
+		db:   bdb,
+		root: append([]byte(nil), key...),
 		enc:  enc,
 	}, nil
 }

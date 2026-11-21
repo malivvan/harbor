@@ -19,7 +19,7 @@ type Codec interface {
 }
 
 // JSONCodec encodes and decodes entities with encoding/json. It is the codec
-// Storm uses when Open or OpenWithConfig receives a nil codec.
+// Storm uses when Open receives a nil codec.
 var JSONCodec Codec = jsonCodec{}
 
 // jsonCodec implements Codec on top of encoding/json.

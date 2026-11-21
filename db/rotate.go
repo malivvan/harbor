@@ -26,7 +26,7 @@ func (s *Store) withKey(newKey []byte) (*encState, error) {
 	}
 
 	return resolveConfig(&Config{
-		Key:             append([]byte(nil), newKey...),
+		Secret:          append([]byte(nil), newKey...),
 		EncryptValues:   s.enc.encValues,
 		EncryptMetadata: s.enc.encMetadata,
 		EncryptKeys:     s.enc.encKeys,

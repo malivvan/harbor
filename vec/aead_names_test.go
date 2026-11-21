@@ -13,7 +13,7 @@ import (
 // aeadNamesConfig returns a config that encrypts everything vec supports.
 func aeadNamesConfig(key []byte) *Config {
 	return &Config{
-		Key:                    key,
+		Secret:                 key,
 		EncryptPoints:          true,
 		EncryptPointIDs:        true,
 		EncryptCollectionNames: true,
@@ -169,7 +169,7 @@ func TestAEADEncryptedNamesRootScope(t *testing.T) {
 	require.NoError(t, err)
 	defer bdb.Close()
 
-	store, err := OpenWithConfig(context.Background(), bdb, []byte("tenant"), false, nil, aeadNamesConfig(aeadKey(24)))
+	store, err := Open(context.Background(), bdb, []byte("tenant"), aeadNamesConfig(aeadKey(24)))
 	require.NoError(t, err)
 
 	require.NoError(t, store.EnsureCollection("invoices"))
@@ -214,36 +214,4 @@ func TestAEADEncryptedNamesSurviveReopen(t *testing.T) {
 
 	var point = loaded["p1"]
 	require.Equal(t, float32(1), point.Vector[0])
-}
-
-// TestAEADMultipleKeysRejectedWithEncryptedNames proves the combination that
-// cannot work is rejected instead of silently failing lookups.
-func TestAEADMultipleKeysRejectedWithEncryptedNames(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "enc.db")
-	bdb, err := bbolt.Open(path, 0600, &bbolt.Options{Timeout: time.Second})
-	require.NoError(t, err)
-	defer bdb.Close()
-
-	provA, err := NewRawKeyProvider(aeadKey(26))
-	require.NoError(t, err)
-	provB, err := NewRawKeyProvider(aeadKey(27))
-	require.NoError(t, err)
-	multi, err := NewMultiKeyProvider(provB, provA)
-	require.NoError(t, err)
-
-	_, err = OpenWithConfig(context.Background(), bdb, nil, false, nil, &Config{
-		KeyProvider:     multi,
-		EncryptPoints:   true,
-		EncryptPointIDs: true,
-	})
-	require.ErrorIs(t, err, ErrInvalidConfig)
-
-	// A multi-key provider is still fine when names stay clear.
-	ok, err := OpenWithConfig(context.Background(), bdb, nil, false, nil, &Config{
-		KeyProvider:   multi,
-		EncryptPoints: true,
-	})
-	require.NoError(t, err)
-	require.NotNil(t, ok.enc)
-	require.Len(t, ok.enc.kc.Keys(), 2)
 }

@@ -100,7 +100,7 @@ func ExampleStore_Save() {
 		}
 	}()
 
-	db, err := storm.Open(ctx, bdb, nil, storm.JSONCodec)
+	db, err := storm.Open(ctx, bdb, nil, &storm.Config{Codec: storm.JSONCodec})
 	if err != nil {
 		log.Fatal(err)
 	}

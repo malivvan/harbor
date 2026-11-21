@@ -199,7 +199,7 @@ func TestNode_ConsumerCanUseNode(t *testing.T) {
 		require.NoError(t, bDB.Close())
 	})
 
-	db, err := Open(context.Background(), bDB, nil, altCodec)
+	db, err := Open(context.Background(), bDB, nil, &Config{Codec: altCodec})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, db.Close())

@@ -137,7 +137,7 @@ func NewStorageWithQuantization(path string, useQuant bool, quantizer Quantizer,
 		return nil, err
 	}
 
-	store, err := Open(context.Background(), bdb, nil, useQuant, quantizer)
+	store, err := Open(context.Background(), bdb, nil, Config{UseQuant: useQuant, Quantizer: quantizer})
 	if err != nil {
 		_ = bdb.Close()
 		return nil, err
@@ -145,23 +145,16 @@ func NewStorageWithQuantization(path string, useQuant bool, quantizer Quantizer,
 	return store, nil
 }
 
-// Open initializes a new BoltDB storage engine with optional vector quantization.
-// If useQuant is true, vectors will be compressed using the provided quantizer.
+// Open initializes a new BoltDB storage engine with optional vector quantization
+// and native AEAD encryption.
 // The root key, when non-empty, is used as the parent bucket for all collections
 // and collection metadata.
 // Returns an error if the context is invalid.
 //
-// Open always creates a plaintext store. Use OpenWithConfig to enable optional
-// encryption.
-func Open(ctx context.Context, bdb *bbolt.DB, root []byte, useQuant bool, quantizer Quantizer) (*Store, error) {
-	return OpenWithConfig(ctx, bdb, root, useQuant, quantizer, nil)
-}
-
-// OpenWithConfig initializes a BoltDB storage engine with optional native AEAD
-// encryption.
-//
-// A nil cfg, or a cfg that enables no encryption feature, behaves exactly like
-// Open: the store stays plaintext and its on-disk format is unchanged.
+// A nil cfg creates a plaintext store with no quantization and its on-disk
+// format is unchanged. cfg.UseQuant enables quantization; when cfg.Quantizer is
+// nil the default SQ8 quantizer is used. cfg.Secret and the Encrypt fields
+// enable optional encryption.
 //
 // When encryption is enabled the store writes an unencrypted marker into the
 // collections metadata bucket and verifies it with a sealed canary, so:
@@ -174,16 +167,22 @@ func Open(ctx context.Context, bdb *bbolt.DB, root []byte, useQuant bool, quanti
 //
 // Migrating an existing plaintext store to an encrypted one is not supported;
 // re-import the data instead.
-func OpenWithConfig(ctx context.Context, bdb *bbolt.DB, root []byte, useQuant bool, quantizer Quantizer, cfg *Config) (*Store, error) {
+func Open(ctx context.Context, bdb *bbolt.DB, key []byte, cfg Config) (*Store, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
 
+	var useQuant bool
+	var quantizer Quantizer
+	if cfg.UseQuant {
+		useQuant = cfg.UseQuant
+		quantizer = cfg.Quantizer
+	}
 	if useQuant && quantizer == nil {
 		quantizer = NewSQ8Quantizer()
 	}
 
-	enc, err := resolveConfig(cfg)
+	enc, err := resolveConfig(&cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +192,7 @@ func OpenWithConfig(ctx context.Context, bdb *bbolt.DB, root []byte, useQuant bo
 		closed:    false,
 		quantizer: quantizer,
 		useQuant:  useQuant,
-		root:      append([]byte(nil), root...),
+		root:      append([]byte(nil), key...),
 		enc:       enc,
 	}
 

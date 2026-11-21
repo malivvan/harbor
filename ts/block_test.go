@@ -44,7 +44,7 @@ func TestBlockStart(t *testing.T) {
 func openBlockStore(t *testing.T, root []byte, keySeed byte, blockDur int64) *Store {
 	t.Helper()
 	store, _ := openAEADTestStore(t, root, &Config{
-		Key:           testKey(keySeed),
+		Secret:        testKey(keySeed),
 		EncryptValues: true,
 		BlockDuration: blockDur,
 	})
@@ -69,7 +69,7 @@ func TestBlockModeRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
 	store, db := openAEADTestStore(t, root, &Config{
-		Key:           testKey(20),
+		Secret:        testKey(20),
 		EncryptValues: true,
 		BlockDuration: 10,
 	})
@@ -213,7 +213,7 @@ func TestBlockModeMatchesPlaintext(t *testing.T) {
 
 	plain, _ := openAEADTestStore(t, root, nil)
 	blocked, _ := openAEADTestStore(t, root, &Config{
-		Key:           testKey(24),
+		Secret:        testKey(24),
 		EncryptValues: true,
 		BlockDuration: 10,
 	})
@@ -253,7 +253,7 @@ func TestBlockModeTamper(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
 	store, db := openAEADTestStore(t, root, &Config{
-		Key:           testKey(25),
+		Secret:        testKey(25),
 		EncryptValues: true,
 		BlockDuration: 10,
 	})
@@ -284,26 +284,26 @@ func TestBlockModeConfigMismatch(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
 	store, db := openAEADTestStore(t, root, &Config{
-		Key:           testKey(26),
+		Secret:        testKey(26),
 		EncryptValues: true,
 		BlockDuration: 10,
 	})
 	require.NoError(t, store.Series("cpu").Insert(ctx, Point{Timestamp: 1, Value: 1}))
 
-	_, err := OpenWithConfig(ctx, db, root, &Config{
-		Key:           testKey(26),
+	_, err := Open(ctx, db, root, &Config{
+		Secret:        testKey(26),
 		EncryptValues: true,
 		BlockDuration: 20,
 	})
 	require.ErrorIs(t, err, ErrWrongMode)
 
-	_, err = OpenWithConfig(ctx, db, root, &Config{
-		Key:           testKey(26),
+	_, err = Open(ctx, db, root, &Config{
+		Secret:        testKey(26),
 		BlockDuration: 10,
 	})
 	require.ErrorIs(t, err, ErrWrongMode)
 
-	_, err = OpenWithConfig(ctx, db, root, &Config{
+	_, err = Open(ctx, db, root, &Config{
 		EncryptValues: true,
 		BlockDuration: 10,
 	})

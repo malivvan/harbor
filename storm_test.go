@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,8 +12,7 @@ import (
 )
 
 func TestStorm(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "storm.db")
-	s, err := Open(nil, dbPath, 0600, nil)
+	s, err := Open(nil, "storm.db", 0600, nil)
 	if err != nil {
 		t.Fatalf("failed to open storm: %v", err)
 	}

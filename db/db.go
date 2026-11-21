@@ -33,21 +33,13 @@ var defaultCodec = JSONCodec
 //
 // The caller owns db and must keep it open for the lifetime of the returned
 // Store. Storm never closes db. root is the optional root bucket key; nil or an
-// empty slice means the database root. c is the codec used to encode and
-// decode entities; nil selects the default JSON codec.
+// empty slice means the database root.
 //
-// Open always creates a plaintext store. Use OpenWithConfig to enable optional
-// encryption.
-func Open(ctx context.Context, db *bolt.DB, root []byte, c Codec) (*Store, error) {
-	return OpenWithConfig(ctx, db, root, c, nil)
-}
-
-// OpenWithConfig initializes Storm with optional native AEAD encryption.
+// cfg configures the store. A nil cfg selects the default JSON codec and
+// creates a plaintext store. cfg.Codec is the codec used to encode and decode
+// entities; a nil Codec selects the default JSON codec.
 //
-// A nil cfg, or a cfg that enables no encryption feature, behaves exactly like
-// Open: the store stays plaintext and its on-disk format is unchanged.
-//
-// When encryption is enabled the store writes an unencrypted marker into the
+// When cfg enables encryption the store writes an unencrypted marker into the
 // __database bucket and verifies it with a sealed canary, so:
 //
 //   - opening an encrypted store without a Config (or with the wrong settings)
@@ -58,30 +50,31 @@ func Open(ctx context.Context, db *bolt.DB, root []byte, c Codec) (*Store, error
 //
 // Migrating an existing plaintext store to an encrypted one is not supported
 // yet; export and re-import instead.
-func OpenWithConfig(ctx context.Context, db *bolt.DB, root []byte, c Codec, cfg *Config) (*Store, error) {
+func Open(ctx context.Context, bdb *bolt.DB, key []byte, cfg Config) (*Store, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, wrapError("open", err)
 	}
-	if db == nil {
+	if bdb == nil {
 		return nil, wrapError("open", ErrNilParam)
 	}
 
-	if c == nil {
-		c = defaultCodec
+	c := defaultCodec
+	if cfg.Codec != nil {
+		c = cfg.Codec
 	}
 
-	enc, err := resolveConfig(cfg)
+	enc, err := resolveConfig(&cfg)
 	if err != nil {
 		return nil, wrapError("open", err)
 	}
 
 	var rootBucket []string
-	if len(root) > 0 {
-		rootBucket = []string{string(root)}
+	if len(key) > 0 {
+		rootBucket = []string{string(key)}
 	}
 
 	s := Store{
-		bolt: db,
+		bolt: bdb,
 		enc:  enc,
 	}
 

@@ -36,15 +36,6 @@ func (s *Store) blockDuration() int64 {
 	return s.enc.blockDur
 }
 
-// Open wraps an already-open bbolt database in a time series Store.
-//
-// The caller owns db and must keep it open for the lifetime of the Store. The
-// Store never closes db. root is an optional root bucket key; nil or an empty
-// slice means the database root.
-func Open(ctx context.Context, db *bolt.DB, root []byte) (*Store, error) {
-	return OpenWithConfig(ctx, db, root, nil)
-}
-
 // NativeDB returns the underlying bbolt database.
 func (s *Store) NativeDB() *bolt.DB {
 	if s == nil {

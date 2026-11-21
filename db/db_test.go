@@ -58,7 +58,7 @@ func TestNewStormWithRootAndCodec(t *testing.T) {
 	bdb1, err := bolt.Open(filepath.Join(dir, "storm1.db"), 0660, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
 	defer bdb1.Close()
-	db1, err := Open(context.Background(), bdb1, []byte("a"), dc)
+	db1, err := Open(context.Background(), bdb1, []byte("a"), &Config{Codec: dc})
 	require.NoError(t, err)
 	require.Equal(t, dc, db1.Codec())
 	require.Equal(t, []string{"a"}, db1.Node.(*node).rootBucket)
@@ -69,7 +69,7 @@ func TestNewStormWithRootAndCodec(t *testing.T) {
 	bdb2, err := bolt.Open(filepath.Join(dir, "storm2.db"), 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
 	defer bdb2.Close()
-	db2, err := Open(context.Background(), bdb2, nil, dc)
+	db2, err := Open(context.Background(), bdb2, nil, &Config{Codec: dc})
 	require.NoError(t, err)
 	require.Equal(t, dc, db2.Codec())
 }
@@ -176,7 +176,7 @@ func createDB(t errorHandler, opts ...testOpenOption) (*Store, func()) {
 		root = []byte(cfg.root[0])
 	}
 
-	db, err := Open(context.Background(), bdb, root, cfg.codec)
+	db, err := Open(context.Background(), bdb, root, &Config{Codec: cfg.codec})
 	if err != nil {
 		t.Error(err)
 	}
@@ -255,7 +255,7 @@ func TestCheckVersion_ErrorChainPreservation(t *testing.T) {
 	require.NoError(t, seedDB.Close(), "close seed Store")
 
 	// Open with an incompatible codec that deliberately fails Unmarshal.
-	db, err := Open(context.Background(), bDB, nil, testDecodeCodec{})
+	db, err := Open(context.Background(), bDB, nil, &Config{Codec: testDecodeCodec{}})
 	require.Error(t, err)
 
 	// Must match ErrDifferentCodec.

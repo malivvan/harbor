@@ -8,6 +8,14 @@ import (
 
 const AppID = "com.github.malivvan.storm"
 
+var (
+	ID  = []byte{0}
+	DB  = []byte{1}
+	FS  = []byte{2}
+	TS  = []byte{3}
+	VEC = []byte{4}
+)
+
 // Cursor that can be reversed
 type Cursor struct {
 	C       *bolt.Cursor

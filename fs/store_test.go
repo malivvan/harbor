@@ -73,7 +73,7 @@ func assertFSBucket(t *testing.T, db *bolt.DB, parts ...string) {
 func TestStoreOpen(t *testing.T) {
 	ctx := context.Background()
 
-	store, err := Open(nil, nil, nil)
+	store, err := Open(nil, nil, nil, nil)
 	if !errors.Is(err, ErrNilContext) {
 		t.Fatalf("expected ErrNilContext, got %v", err)
 	}
@@ -82,7 +82,7 @@ func TestStoreOpen(t *testing.T) {
 	}
 
 	db := openStoreTestDB(t)
-	store, err = Open(ctx, nil, nil)
+	store, err = Open(ctx, nil, nil, nil)
 	if !errors.Is(err, ErrNilParam) {
 		t.Fatalf("expected ErrNilParam, got %v", err)
 	}
@@ -92,7 +92,7 @@ func TestStoreOpen(t *testing.T) {
 
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	store, err = Open(canceled, db, nil)
+	store, err = Open(canceled, db, nil, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
@@ -104,7 +104,7 @@ func TestStoreOpen(t *testing.T) {
 func TestStoreOpenAndDelete(t *testing.T) {
 	db := openStoreTestDB(t)
 	root := []byte("tenant")
-	store, err := Open(context.Background(), db, root)
+	store, err := Open(context.Background(), db, root, nil)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -182,11 +182,11 @@ func TestStoreOpenAndDelete(t *testing.T) {
 
 func TestStoreRootsAreIsolated(t *testing.T) {
 	db := openStoreTestDB(t)
-	storeA, err := Open(context.Background(), db, []byte("a"))
+	storeA, err := Open(context.Background(), db, []byte("a"), nil)
 	if err != nil {
 		t.Fatalf("open store a: %v", err)
 	}
-	storeB, err := Open(context.Background(), db, []byte("b"))
+	storeB, err := Open(context.Background(), db, []byte("b"), nil)
 	if err != nil {
 		t.Fatalf("open store b: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestStoreRootsAreIsolated(t *testing.T) {
 
 func TestStoreWithoutRoot(t *testing.T) {
 	db := openStoreTestDB(t)
-	store, err := Open(context.Background(), db, nil)
+	store, err := Open(context.Background(), db, nil, nil)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -556,7 +556,7 @@ func openFSForTest(tb testing.TB, path, bucketpath string) (*FileSystem, error) 
 		_ = db.Close()
 	})
 
-	store, err := Open(context.Background(), db, nil)
+	store, err := Open(context.Background(), db, nil, nil)
 	if err != nil {
 		return nil, err
 	}

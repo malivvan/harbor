@@ -15,7 +15,7 @@ func tryOpenStoreAtPath(t *testing.T, path string, root []byte, cfg *Config) (*S
 	t.Helper()
 	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
-	store, err := OpenWithConfig(context.Background(), db, root, cfg)
+	store, err := Open(context.Background(), db, root, cfg)
 	if err != nil {
 		_ = db.Close()
 		return nil, nil, err
@@ -38,7 +38,7 @@ func TestReEncryptSeries(t *testing.T) {
 			key1, key2 := testKey(30), testKey(31)
 			path := filepath.Join(t.TempDir(), "rotate.db")
 
-			cfg := &Config{Key: key1, EncryptValues: true, BlockDuration: blockDur}
+			cfg := &Config{Secret: key1, EncryptValues: true, BlockDuration: blockDur}
 			store, db := openStoreAtPath(t, path, root, cfg)
 			se := store.Series("cpu")
 			require.NoError(t, se.InsertMany(ctx, []Point{{Timestamp: 1, Value: 1}, {Timestamp: 5, Value: 5}, {Timestamp: 12, Value: 12}}))
@@ -68,7 +68,7 @@ func TestReEncryptSeries(t *testing.T) {
 			require.ErrorIs(t, err, ErrAuthFailed, "the old key must no longer open the store")
 
 			// New key opens and reads the rotated data.
-			store, db = openStoreAtPath(t, path, root, &Config{Key: key2, EncryptValues: true, BlockDuration: blockDur})
+			store, db = openStoreAtPath(t, path, root, &Config{Secret: key2, EncryptValues: true, BlockDuration: blockDur})
 			points, err = store.Series("cpu").Range(ctx, 0, 20)
 			require.NoError(t, err)
 			require.Len(t, points, 3)
@@ -84,7 +84,7 @@ func TestRotateAll(t *testing.T) {
 	key1, key2 := testKey(32), testKey(33)
 	path := filepath.Join(t.TempDir(), "rotate-all.db")
 
-	cfg := &Config{Key: key1, EncryptValues: true}
+	cfg := &Config{Secret: key1, EncryptValues: true}
 	store, db := openStoreAtPath(t, path, root, cfg)
 	require.NoError(t, store.Series("cpu").InsertMany(ctx, []Point{{Timestamp: 1, Value: 1}, {Timestamp: 2, Value: 2}}))
 	require.NoError(t, store.Series("mem").Insert(ctx, Point{Timestamp: 3, Value: 3}))
@@ -99,7 +99,7 @@ func TestRotateAll(t *testing.T) {
 	_, _, err := tryOpenStoreAtPath(t, path, root, cfg)
 	require.ErrorIs(t, err, ErrAuthFailed)
 
-	store, db = openStoreAtPath(t, path, root, &Config{Key: key2, EncryptValues: true})
+	store, db = openStoreAtPath(t, path, root, &Config{Secret: key2, EncryptValues: true})
 	defer db.Close()
 	defer store.Close()
 
@@ -117,7 +117,7 @@ func TestRotateAll(t *testing.T) {
 func TestVerifyAll(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
-	store, db := openAEADTestStore(t, root, &Config{Key: testKey(34), EncryptValues: true})
+	store, db := openAEADTestStore(t, root, &Config{Secret: testKey(34), EncryptValues: true})
 	se := store.Series("cpu")
 	require.NoError(t, se.InsertMany(ctx, []Point{{Timestamp: 1, Value: 1}, {Timestamp: 2, Value: 2}}))
 	require.NoError(t, store.VerifyAll(ctx))
@@ -139,14 +139,14 @@ func TestReEncryptSeriesMetadataOnly(t *testing.T) {
 	key1, key2 := testKey(35), testKey(36)
 	path := filepath.Join(t.TempDir(), "meta.db")
 
-	cfg := &Config{Key: key1, EncryptValues: true}
+	cfg := &Config{Secret: key1, EncryptValues: true}
 	store, db := openStoreAtPath(t, path, root, cfg)
 	require.NoError(t, store.Series("meta").SetLabels(ctx, map[string]string{"owner": "alice"}))
 	require.NoError(t, store.ReEncryptSeries(ctx, "meta", key2))
 	require.NoError(t, store.Close())
 	require.NoError(t, db.Close())
 
-	store, db = openStoreAtPath(t, path, root, &Config{Key: key2, EncryptValues: true})
+	store, db = openStoreAtPath(t, path, root, &Config{Secret: key2, EncryptValues: true})
 	defer db.Close()
 	defer store.Close()
 
@@ -161,7 +161,7 @@ func TestRotationWithEncryptedNames(t *testing.T) {
 	key1, key2 := testKey(37), testKey(38)
 	path := filepath.Join(t.TempDir(), "names-rotate.db")
 
-	cfg := &Config{Key: key1, EncryptValues: true, EncryptSeriesNames: true, BlockDuration: 10}
+	cfg := &Config{Secret: key1, EncryptValues: true, EncryptSeriesNames: true, BlockDuration: 10}
 	store, db := openStoreAtPath(t, path, root, cfg)
 	se := store.Series("cpu")
 	require.NoError(t, se.InsertMany(ctx, []Point{{Timestamp: 1, Value: 1}, {Timestamp: 12, Value: 12}}))
@@ -199,52 +199,12 @@ func TestRotationWithEncryptedNames(t *testing.T) {
 	_, _, err = tryOpenStoreAtPath(t, path, root, cfg)
 	require.ErrorIs(t, err, ErrAuthFailed)
 
-	store, db = openStoreAtPath(t, path, root, &Config{Key: key2, EncryptValues: true, EncryptSeriesNames: true, BlockDuration: 10})
+	store, db = openStoreAtPath(t, path, root, &Config{Secret: key2, EncryptValues: true, EncryptSeriesNames: true, BlockDuration: 10})
 	defer db.Close()
 	defer store.Close()
 	points, err = store.Series("cpu").Range(ctx, 0, 20)
 	require.NoError(t, err)
 	require.Equal(t, []Point{{1, 1}, {12, 12}}, points)
-}
-
-func TestMultiKeyProviderFallback(t *testing.T) {
-	ctx := context.Background()
-	root := []byte("ts")
-	key1, key2 := testKey(39), testKey(40)
-	path := filepath.Join(t.TempDir(), "fallback.db")
-
-	store, db := openStoreAtPath(t, path, root, &Config{Key: key1, EncryptValues: true})
-	require.NoError(t, store.Series("cpu").Insert(ctx, Point{Timestamp: 1, Value: 1}))
-	require.NoError(t, store.Close())
-	require.NoError(t, db.Close())
-
-	first, err := NewRawKeyProvider(key2)
-	require.NoError(t, err)
-	fallback, err := NewRawKeyProvider(key1)
-	require.NoError(t, err)
-	multi, err := NewMultiKeyProvider(first, fallback)
-	require.NoError(t, err)
-
-	store, db = openStoreAtPath(t, path, root, &Config{KeyProvider: multi, EncryptValues: true})
-	defer db.Close()
-
-	// Existing data decrypts with the fallback key; new writes use the primary.
-	point, err := store.Series("cpu").Get(ctx, 1)
-	require.NoError(t, err)
-	require.Equal(t, Point{Timestamp: 1, Value: 1}, point)
-	require.NoError(t, store.Series("cpu").Insert(ctx, Point{Timestamp: 2, Value: 2}))
-
-	require.NoError(t, store.RotateAll(ctx, key2))
-	require.NoError(t, store.VerifyAll(ctx))
-	require.NoError(t, store.Close())
-	require.NoError(t, db.Close())
-
-	store, db = openStoreAtPath(t, path, root, &Config{Key: key2, EncryptValues: true})
-	defer db.Close()
-	defer store.Close()
-	points, err := store.Series("cpu").Range(ctx, 0, 10)
-	require.NoError(t, err)
-	require.Equal(t, []Point{{1, 1}, {2, 2}}, points)
 }
 
 func TestRotationErrors(t *testing.T) {
@@ -256,7 +216,7 @@ func TestRotationErrors(t *testing.T) {
 	require.ErrorIs(t, plain.RotateAll(ctx, testKey(41)), ErrInvalidConfig)
 	require.NoError(t, plain.VerifyAll(ctx))
 
-	store, _ := openAEADTestStore(t, root, &Config{Key: testKey(42), EncryptValues: true})
+	store, _ := openAEADTestStore(t, root, &Config{Secret: testKey(42), EncryptValues: true})
 	require.NoError(t, store.Series("cpu").Insert(ctx, Point{Timestamp: 1, Value: 1}))
 
 	require.ErrorIs(t, store.ReEncryptSeries(ctx, "missing", testKey(43)), ErrNotFound)
@@ -279,7 +239,7 @@ func TestReEncryptSeriesRejectedWithEncryptedNames(t *testing.T) {
 	key1, key2 := testKey(50), testKey(51)
 	path := filepath.Join(t.TempDir(), "rotate-names.db")
 
-	cfg := &Config{Key: key1, EncryptValues: true, EncryptSeriesNames: true}
+	cfg := &Config{Secret: key1, EncryptValues: true, EncryptSeriesNames: true}
 	store, db := openStoreAtPath(t, path, root, cfg)
 	defer db.Close()
 	defer store.Close()

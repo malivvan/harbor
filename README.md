@@ -209,14 +209,14 @@ Use the same reconstructed runtime type and explicit node path for subsequent re
 `Open` wraps an already-open bbolt database:
 
 ```go
-func Open(ctx context.Context, db *bolt.DB, root []byte, c db.Codec) (*DB, error)
+func Open(ctx context.Context, db *bolt.DB, root []byte, cfg *db.Config) (*DB, error)
 ```
 
 The parameters are:
 
 - `db` — a caller-owned `*bolt.DB`. It must be non-nil and remain open while Storm is in use.
 - `root` — an optional root bucket key. Pass `nil` or an empty slice to operate from the database root.
-- `c` — the codec used for entities. Pass `nil` to use the default JSON codec.
+- `cfg` — optional store configuration. `cfg.Codec` selects the codec used for entities; pass a nil `cfg` (or a nil `Codec`) to use the default JSON codec.
 
 `Open` does not take ownership of `db`. `DB.Close()` releases the Storm wrapper but
 leaves the bbolt database open; the caller remains responsible for closing it.
@@ -593,7 +593,7 @@ series under a root bucket, and each point is stored as an order-preserving
 ```go
 import "github.com/malivvan/storm/ts"
 
-store, err := ts.Open(ctx, bDB, []byte("metrics"))
+store, err := ts.Open(ctx, bDB, []byte("metrics"), nil)
 if err != nil {
 	log.Fatal(err)
 }
@@ -615,7 +615,7 @@ err = cpu.SetRetention(ctx, ts.Retention{MaxAge: 24 * time.Hour, MaxPoints: 10_0
 removed, err := cpu.EnforceRetention(ctx, time.Now().UnixNano())
 ```
 
-`ts.Open(ctx, db, root)` borrows the caller-owned bbolt database and never
+`ts.Open(ctx, db, root, cfg)` borrows the caller-owned bbolt database and never
 closes it. Because keys are chronological, `Range` and `RangeEach` scan in time
 order without an in-memory index. Aggregations support `min`, `max`, `avg`,
 `sum`, `count`, `first`, and `last`; `DeleteRange`, `Drop`, and `DeleteSeries`
@@ -720,13 +720,15 @@ Normal application code should prefer the managed Storm APIs.
 ## Codecs
 
 Storm marshals data to BoltDB using a codec. The default is JSON, exposed as
-`db.JSONCodec`. Pass a codec as the fourth argument to `Open` to override it:
+`db.JSONCodec`. Set `Config.Codec` to override it:
 
 ```go
 import stormdb "github.com/malivvan/storm/db"
 
-store, err := storm.Open(ctx, bDB, nil, nil)               // JSON, the default
-store, err = storm.Open(ctx, bDB, nil, stormdb.JSONCodec)  // explicit
+store, err := storm.Open(ctx, bDB, nil, nil) // JSON, the default
+store, err = storm.Open(ctx, bDB, nil, &stormdb.Config{
+	Codec: stormdb.JSONCodec, // explicit
+})
 ```
 
 ### Built-in codec
@@ -735,12 +737,13 @@ store, err = storm.Open(ctx, bDB, nil, stormdb.JSONCodec)  // explicit
 |---------|-------------|----------------|
 | JSON (default) | `storm/db` | `db.JSONCodec` |
 
-Encryption is not a codec. Use `OpenWithConfig` with a `Config` to enable native,
-optional AEAD encryption for a store; `Open` keeps creating plaintext stores.
+Encryption is not a codec. Pass a `Config` with a `Secret` to `Open` to enable
+native, optional AEAD encryption for a store; a nil config keeps creating
+plaintext stores.
 
 ```go
-store, err := storm.OpenWithConfig(ctx, bDB, nil, nil, &storm.Config{
-	Key:             key, // raw 32-byte key
+store, err := storm.Open(ctx, bDB, nil, &storm.Config{
+	Secret:          key,  // raw 32-byte key
 	EncryptValues:   true, // seal record and key/value values
 	EncryptMetadata: true, // seal auto-increment counters
 	EncryptKeys:     true, // SIV-encrypt primary keys, index values and kv keys

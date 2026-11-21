@@ -27,7 +27,7 @@ func openAEADTestStore(t *testing.T, root []byte, cfg *Config) (*Store, *bolt.DB
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	store, err := OpenWithConfig(context.Background(), db, root, cfg)
+	store, err := Open(context.Background(), db, root, cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return store, db
@@ -91,14 +91,14 @@ func TestEncryptionIsOptional(t *testing.T) {
 	require.Nil(t, markerBytes(t, db, root), "plaintext stores must not write a marker")
 
 	// Reopening with an empty config is the plaintext path.
-	reopened, err := OpenWithConfig(ctx, db, root, &Config{})
+	reopened, err := Open(ctx, db, root, &Config{})
 	require.NoError(t, err)
 	points, err := reopened.Series("cpu").Range(ctx, 0, 10)
 	require.NoError(t, err)
 	require.Len(t, points, 2)
 }
 
-func TestOpenWithConfigMatchesOpen(t *testing.T) {
+func TestOpenEncryptionMatchesPlaintext(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
 
@@ -144,7 +144,7 @@ func dumpRoot(t *testing.T, db *bolt.DB, root []byte) map[string][]byte {
 func TestEncryptValuesRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
-	store, db := openAEADTestStore(t, root, &Config{Key: testKey(1), EncryptValues: true})
+	store, db := openAEADTestStore(t, root, &Config{Secret: testKey(1), EncryptValues: true})
 	se := store.Series("cpu")
 
 	require.NoError(t, se.InsertMany(ctx, []Point{
@@ -211,7 +211,7 @@ func TestEncryptValuesRoundTrip(t *testing.T) {
 func TestEncryptValuesMetadataAndMarker(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
-	store, db := openAEADTestStore(t, root, &Config{Key: testKey(2), EncryptValues: true})
+	store, db := openAEADTestStore(t, root, &Config{Secret: testKey(2), EncryptValues: true})
 	se := store.Series("cpu")
 	require.NoError(t, se.Insert(ctx, Point{Timestamp: 1, Value: 1}))
 	require.NoError(t, se.SetLabels(ctx, map[string]string{"secret-label": "value"}))
@@ -238,7 +238,7 @@ func TestEncryptValuesMetadataAndMarker(t *testing.T) {
 func TestEncryptValuesNoncesAreFresh(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
-	store, db := openAEADTestStore(t, root, &Config{Key: testKey(3), EncryptValues: true})
+	store, db := openAEADTestStore(t, root, &Config{Secret: testKey(3), EncryptValues: true})
 	se := store.Series("cpu")
 
 	require.NoError(t, se.Insert(ctx, Point{Timestamp: 1, Value: 42}))
@@ -259,7 +259,7 @@ func TestEncryptValuesWrongKey(t *testing.T) {
 
 	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
-	store, err := OpenWithConfig(ctx, db, root, &Config{Key: testKey(4), EncryptValues: true})
+	store, err := Open(ctx, db, root, &Config{Secret: testKey(4), EncryptValues: true})
 	require.NoError(t, err)
 	require.NoError(t, store.Series("cpu").Insert(ctx, Point{Timestamp: 1, Value: 1}))
 	require.NoError(t, store.Close())
@@ -269,10 +269,10 @@ func TestEncryptValuesWrongKey(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	_, err = OpenWithConfig(ctx, db, root, &Config{Key: testKey(5), EncryptValues: true})
+	_, err = Open(ctx, db, root, &Config{Secret: testKey(5), EncryptValues: true})
 	require.ErrorIs(t, err, ErrAuthFailed)
 
-	store, err = OpenWithConfig(ctx, db, root, &Config{Key: testKey(4), EncryptValues: true})
+	store, err = Open(ctx, db, root, &Config{Secret: testKey(4), EncryptValues: true})
 	require.NoError(t, err)
 	point, err := store.Series("cpu").Get(ctx, 1)
 	require.NoError(t, err)
@@ -282,7 +282,7 @@ func TestEncryptValuesWrongKey(t *testing.T) {
 func TestEncryptValuesTamper(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
-	store, db := openAEADTestStore(t, root, &Config{Key: testKey(6), EncryptValues: true})
+	store, db := openAEADTestStore(t, root, &Config{Secret: testKey(6), EncryptValues: true})
 	se := store.Series("cpu")
 	require.NoError(t, se.InsertMany(ctx, []Point{{Timestamp: 1, Value: 1}, {Timestamp: 2, Value: 2}}))
 
@@ -309,12 +309,12 @@ func TestEncryptValuesTamper(t *testing.T) {
 func TestEncryptedStoreRequiresKey(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
-	store, db := openAEADTestStore(t, root, &Config{Key: testKey(7), EncryptValues: true})
+	store, db := openAEADTestStore(t, root, &Config{Secret: testKey(7), EncryptValues: true})
 	require.NoError(t, store.Series("cpu").Insert(ctx, Point{Timestamp: 1, Value: 1}))
 
-	_, err := Open(ctx, db, root)
+	_, err := Open(ctx, db, root, nil)
 	require.ErrorIs(t, err, ErrWrongMode)
-	_, err = OpenWithConfig(ctx, db, root, nil)
+	_, err = Open(ctx, db, root, nil)
 	require.ErrorIs(t, err, ErrWrongMode)
 }
 
@@ -324,7 +324,7 @@ func TestEncryptionOnPlaintextDataIsRejected(t *testing.T) {
 	store, db := openAEADTestStore(t, root, nil)
 	require.NoError(t, store.Series("cpu").Insert(ctx, Point{Timestamp: 1, Value: 1}))
 
-	_, err := OpenWithConfig(ctx, db, root, &Config{Key: testKey(8), EncryptValues: true})
+	_, err := Open(ctx, db, root, &Config{Secret: testKey(8), EncryptValues: true})
 	require.ErrorIs(t, err, ErrWrongMode)
 }
 
@@ -344,17 +344,12 @@ func TestEncryptionConfigValidation(t *testing.T) {
 		},
 		{
 			name: "short key",
-			cfg:  &Config{Key: make([]byte, 16), EncryptValues: true},
+			cfg:  &Config{Secret: make([]byte, 16), EncryptValues: true},
 			want: ErrInvalidKey,
 		},
 		{
-			name: "key and provider",
-			cfg:  &Config{Key: testKey(9), KeyProvider: NewEnvKeyProvider("X"), EncryptValues: true},
-			want: ErrInvalidConfig,
-		},
-		{
 			name: "negative block duration",
-			cfg:  &Config{Key: testKey(9), EncryptValues: true, BlockDuration: -1},
+			cfg:  &Config{Secret: testKey(9), EncryptValues: true, BlockDuration: -1},
 			want: ErrInvalidConfig,
 		},
 	}
@@ -363,52 +358,16 @@ func TestEncryptionConfigValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			store, db := openAEADTestStore(t, root, nil)
 			_ = store
-			_, err := OpenWithConfig(ctx, db, root, tt.cfg)
+			_, err := Open(ctx, db, root, tt.cfg)
 			require.ErrorIs(t, err, tt.want)
 		})
 	}
 }
 
-func TestKeyProviders(t *testing.T) {
-	key := testKey(10)
-
-	raw, err := NewRawKeyProvider(key)
-	require.NoError(t, err)
-	got, err := raw.Key()
-	require.NoError(t, err)
-	require.Equal(t, key, got)
-
-	_, err = NewRawKeyProvider(make([]byte, 16))
-	require.ErrorIs(t, err, ErrInvalidKey)
-
-	t.Setenv("TS_TEST_KEY", string(key))
-	got, err = NewEnvKeyProvider("TS_TEST_KEY").Key()
-	require.NoError(t, err)
-	require.Equal(t, key, got)
-
-	t.Setenv("TS_TEST_KEY", "")
-	_, err = NewEnvKeyProvider("TS_TEST_KEY").Key()
-	require.ErrorIs(t, err, ErrInvalidKey)
-
-	second, err := NewRawKeyProvider(testKey(11))
-	require.NoError(t, err)
-	multi, err := NewMultiKeyProvider(raw, second)
-	require.NoError(t, err)
-	primary, err := multi.Key()
-	require.NoError(t, err)
-	require.Equal(t, key, primary)
-	keys, err := multi.TryKeys()
-	require.NoError(t, err)
-	require.Len(t, keys, 2)
-
-	_, err = NewMultiKeyProvider()
-	require.ErrorIs(t, err, ErrInvalidConfig)
-}
-
 func TestEncryptValuesRetention(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
-	store, _ := openAEADTestStore(t, root, &Config{Key: testKey(12), EncryptValues: true})
+	store, _ := openAEADTestStore(t, root, &Config{Secret: testKey(12), EncryptValues: true})
 	se := store.Series("cpu")
 
 	require.NoError(t, se.SetRetention(ctx, Retention{MaxPoints: 2}))
@@ -426,7 +385,7 @@ func TestEncryptValuesRetention(t *testing.T) {
 func TestEncryptedStoreDrop(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
-	store, _ := openAEADTestStore(t, root, &Config{Key: testKey(13), EncryptValues: true})
+	store, _ := openAEADTestStore(t, root, &Config{Secret: testKey(13), EncryptValues: true})
 	se := store.Series("cpu")
 	require.NoError(t, se.Insert(ctx, Point{Timestamp: 1, Value: 1}))
 	require.NoError(t, se.Drop(ctx))
