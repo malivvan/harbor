@@ -1,5 +1,4 @@
-// Package kv provides a bucket-oriented key/value store on top of Storm's db
-// package.
+// Package kv provides a bucket-oriented key/value store on top of bbolt.
 //
 // A Store manages multiple named Bucket values. Bucket instances are created
 // lazily and cached, so repeated calls to Store.Bucket return the same value.
@@ -10,13 +9,13 @@ import (
 	"sync"
 
 	"github.com/malivvan/storm/codec"
-	stormdb "github.com/malivvan/storm/db"
+	"github.com/malivvan/storm/codec/json"
 	bolt "go.etcd.io/bbolt"
 )
 
-// Store manages named key/value buckets backed by a Storm database.
+// Store manages named key/value buckets backed by a bbolt database.
 type Store struct {
-	db    *stormdb.DB
+	b     *bolt.DB
 	root  []byte
 	codec codec.MarshalUnmarshaler
 
@@ -28,42 +27,39 @@ type Store struct {
 // Open wraps an already-open bbolt database in a key/value Store.
 //
 // The caller owns bdb and must keep it open for the lifetime of the returned
-// Store. Storm never closes bdb. root is an optional root bucket key; nil or an
-// empty slice means the database root. c is the codec used for values; nil
-// selects the default JSON codec.
+// Store. The Store never closes bdb. root is an optional root bucket key; nil
+// or an empty slice means the database root. c is the codec used for values;
+// nil selects the default JSON codec.
 func Open(ctx context.Context, bdb *bolt.DB, root []byte, c codec.MarshalUnmarshaler) (*Store, error) {
-	d, err := stormdb.Open(ctx, bdb, root, c)
-	if err != nil {
+	if err := checkContext(ctx); err != nil {
 		return nil, err
+	}
+	if bdb == nil {
+		return nil, ErrNilParam
+	}
+	if c == nil {
+		c = json.Codec
 	}
 
 	return &Store{
-		db:      d,
+		b:       bdb,
 		root:    cloneBytes(root),
-		codec:   d.Codec(),
+		codec:   c,
 		buckets: make(map[string]*Bucket),
 	}, nil
 }
 
-// DB returns the underlying Storm database wrapper.
-func (s *Store) DB() *stormdb.DB {
+// NativeDB returns the underlying bbolt database.
+func (s *Store) NativeDB() *bolt.DB {
 	if s == nil {
 		return nil
 	}
-	return s.db
-}
-
-// NativeDB returns the underlying bbolt database.
-func (s *Store) NativeDB() *bolt.DB {
-	if s == nil || s.db == nil {
-		return nil
-	}
-	return s.db.NativeDB()
+	return s.b
 }
 
 // Codec returns the codec used by the store.
 func (s *Store) Codec() codec.MarshalUnmarshaler {
-	if s == nil || s.db == nil {
+	if s == nil {
 		return nil
 	}
 	return s.codec
@@ -80,17 +76,17 @@ func (s *Store) Root() []byte {
 // Close releases the Store wrapper. The underlying bbolt database remains open
 // and must be closed by its owner.
 func (s *Store) Close() error {
-	if s == nil || s.db == nil {
-		return stormdb.ErrNilParam
+	if s == nil || s.b == nil {
+		return ErrNilParam
 	}
-	return s.db.Close()
+	return nil
 }
 
 // Bucket returns the named bucket. Bucket values are created lazily and cached
 // by name; repeated calls return the same instance. An empty name addresses the
 // store's root bucket.
 func (s *Store) Bucket(name string) *Bucket {
-	if s == nil || s.db == nil {
+	if s == nil || s.b == nil {
 		return nil
 	}
 
@@ -101,15 +97,10 @@ func (s *Store) Bucket(name string) *Bucket {
 		return b
 	}
 
-	node := s.db.Node
-	if name != "" {
-		node = s.db.From(name)
-	}
-
 	b := &Bucket{
 		store: s,
 		name:  name,
-		node:  node,
+		codec: s.codec,
 	}
 	s.buckets[name] = b
 	s.order = append(s.order, name)
@@ -151,17 +142,17 @@ func (s *Store) BucketNames() []string {
 // DeleteBucket deletes a named bucket from the database and removes it from the
 // Store's cache. An empty name is rejected with ErrNilParam.
 func (s *Store) DeleteBucket(ctx context.Context, name string) error {
-	if s == nil || s.db == nil {
-		return stormdb.ErrNilParam
+	if s == nil || s.b == nil {
+		return ErrNilParam
 	}
 	if name == "" {
-		return stormdb.ErrNilParam
+		return ErrNilParam
 	}
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
 
-	err := s.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := s.b.Update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -170,19 +161,19 @@ func (s *Store) DeleteBucket(ctx context.Context, name string) error {
 		if len(s.root) > 0 {
 			parent = tx.Bucket(s.root)
 			if parent == nil {
-				return stormdb.ErrNotFound
+				return ErrNotFound
 			}
 		}
 
 		if parent == nil {
 			if tx.Bucket([]byte(name)) == nil {
-				return stormdb.ErrNotFound
+				return ErrNotFound
 			}
 			return tx.DeleteBucket([]byte(name))
 		}
 
 		if parent.Bucket([]byte(name)) == nil {
-			return stormdb.ErrNotFound
+			return ErrNotFound
 		}
 		return parent.DeleteBucket([]byte(name))
 	})
@@ -212,7 +203,7 @@ func cloneBytes(b []byte) []byte {
 
 func checkContext(ctx context.Context) error {
 	if ctx == nil {
-		return stormdb.ErrNilContext
+		return ErrNilContext
 	}
 	return ctx.Err()
 }

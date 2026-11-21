@@ -31,6 +31,7 @@ The module has no third-party codec dependencies.
 
 - Public database API: `github.com/malivvan/storm/db`
 - Bucket-oriented key/value store: `github.com/malivvan/storm/kv`
+  (uses bbolt and codecs directly; no dependency on `db`)
 - Query and index helpers: `github.com/malivvan/storm/q`,
   `github.com/malivvan/storm/index`
 - Codecs: `github.com/malivvan/storm/codec`

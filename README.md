@@ -578,9 +578,10 @@ err = users.Drop(ctx)
 ```
 
 `kv.Open` has the same database, root bucket, and codec parameters as
-`db.Open`. The `Store` borrows the bbolt database; closing it does not close
-the native database. `Bucket.Keys`, `Bucket.Len`, and `Bucket.ForEach` operate
-on raw encoded keys and skip nested metadata buckets.
+`db.Open`. The package uses bbolt and the selected codec directly and does not
+depend on the `db` package. The `Store` borrows the bbolt database; closing it
+does not close the native database. `Bucket.Keys`, `Bucket.Len`, and
+`Bucket.ForEach` operate on raw encoded keys and skip nested metadata buckets.
 
 ## Context and cancellation
 

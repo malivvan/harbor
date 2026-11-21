@@ -8,7 +8,6 @@ import (
 
 	"github.com/malivvan/storm/codec"
 	"github.com/malivvan/storm/codec/gob"
-	stormdb "github.com/malivvan/storm/db"
 	"github.com/malivvan/storm/kv"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
@@ -36,7 +35,7 @@ func TestOpen(t *testing.T) {
 	ctx := context.Background()
 
 	store, err := kv.Open(ctx, nil, nil, nil)
-	require.ErrorIs(t, err, stormdb.ErrNilParam)
+	require.ErrorIs(t, err, kv.ErrNilParam)
 	require.Nil(t, store)
 
 	canceled, cancel := context.WithCancel(ctx)
@@ -48,7 +47,6 @@ func TestOpen(t *testing.T) {
 	store, bdb := openStore(t, nil, nil)
 	require.NotNil(t, store)
 	require.Same(t, bdb, store.NativeDB())
-	require.NotNil(t, store.DB())
 	require.NotNil(t, store.Codec())
 	require.NoError(t, store.Close())
 
@@ -160,16 +158,16 @@ func TestBucketErrorsAndContext(t *testing.T) {
 	bucket := store.Bucket("missing")
 
 	var value string
-	require.ErrorIs(t, bucket.Get(ctx, "key", &value), stormdb.ErrNotFound)
+	require.ErrorIs(t, bucket.Get(ctx, "key", &value), kv.ErrNotFound)
 	_, err := bucket.GetBytes(ctx, "key")
-	require.ErrorIs(t, err, stormdb.ErrNotFound)
+	require.ErrorIs(t, err, kv.ErrNotFound)
 	_, err = bucket.Keys(ctx)
-	require.ErrorIs(t, err, stormdb.ErrNotFound)
+	require.ErrorIs(t, err, kv.ErrNotFound)
 
 	var nilCtx context.Context
-	require.ErrorIs(t, bucket.Get(nilCtx, "key", &value), stormdb.ErrNilContext)
-	require.ErrorIs(t, bucket.ForEach(nilCtx, func(_, _ []byte) error { return nil }), stormdb.ErrNilContext)
-	require.ErrorIs(t, store.DeleteBucket(nilCtx, "missing"), stormdb.ErrNilContext)
+	require.ErrorIs(t, bucket.Get(nilCtx, "key", &value), kv.ErrNilContext)
+	require.ErrorIs(t, bucket.ForEach(nilCtx, func(_, _ []byte) error { return nil }), kv.ErrNilContext)
+	require.ErrorIs(t, store.DeleteBucket(nilCtx, "missing"), kv.ErrNilContext)
 
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
@@ -187,10 +185,10 @@ func TestStoreDeleteBucket(t *testing.T) {
 	require.Empty(t, store.BucketNames())
 
 	_, err := users.Exists(ctx, "alice")
-	require.ErrorIs(t, err, stormdb.ErrNotFound)
+	require.ErrorIs(t, err, kv.ErrNotFound)
 
-	require.ErrorIs(t, store.DeleteBucket(ctx, "users"), stormdb.ErrNotFound)
-	require.ErrorIs(t, store.DeleteBucket(ctx, ""), stormdb.ErrNilParam)
+	require.ErrorIs(t, store.DeleteBucket(ctx, "users"), kv.ErrNotFound)
+	require.ErrorIs(t, store.DeleteBucket(ctx, ""), kv.ErrNilParam)
 }
 
 func TestBucketWithCodec(t *testing.T) {
