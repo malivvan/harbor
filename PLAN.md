@@ -263,3 +263,13 @@ rotation); `fs/aeadfs` is removed.
 7. Add Tier 2 tests (chunks, rotation).
 8. Delete `fs/aeadfs/`; confirm no importers (step in checklist).
 9. Run the full verification checklist; fix any gofmt/vet/test issues.
+
+## Progress log
+
+- [x] **Phase 1 — Tier 1** — `fs/aead.go`/`fs/errors.go`, `Store`/`FileSystem`/`fsBucket`
+  encryption state, `OpenWithConfig` + marker/canary + mode detection, sealed
+  inodes, content and symlink paths, snapshot decryption, empty-plaintext
+  system-inode migration; tests in `fs/aead_test.go`.
+- [ ] Phase 2 — chunked content (`ChunkSize`) and File range routing.
+- [ ] Phase 3 — rotation (`ReEncryptFS`, `RotateAll`, `VerifyAll`).
+- [ ] Merge `fs/aeadfs`, documentation and final verification.

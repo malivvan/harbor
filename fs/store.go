@@ -3,6 +3,7 @@ package fs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path"
 
@@ -23,6 +24,7 @@ var (
 type Store struct {
 	db   *bolt.DB
 	root []byte
+	enc  *encState // nil when encryption is disabled
 }
 
 // Open creates a Store over an already-open bbolt database.
@@ -31,6 +33,13 @@ type Store struct {
 // Store never closes db. root is an optional parent bucket key for all file
 // systems; nil or an empty slice means the database root.
 func Open(ctx context.Context, db *bolt.DB, root []byte) (*Store, error) {
+	return OpenWithConfig(ctx, db, root, nil)
+}
+
+// OpenWithConfig wraps an already-open bbolt database with the given optional
+// encryption configuration. A nil config, or one with no encryption enabled, is
+// equivalent to Open.
+func OpenWithConfig(ctx context.Context, db *bolt.DB, root []byte, cfg *Config) (*Store, error) {
 	if ctx == nil {
 		return nil, ErrNilContext
 	}
@@ -41,9 +50,15 @@ func Open(ctx context.Context, db *bolt.DB, root []byte) (*Store, error) {
 		return nil, ErrNilParam
 	}
 
+	enc, err := resolveConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Store{
 		db:   db,
 		root: append([]byte(nil), root...),
+		enc:  enc,
 	}, nil
 }
 
@@ -79,7 +94,11 @@ func (s *Store) Open(name string) (*FileSystem, error) {
 		return nil, ErrNilParam
 	}
 
-	filesystem, err := newFS(s.db, s.bucketPath(name))
+	if err := s.checkMode(name); err != nil {
+		return nil, err
+	}
+
+	filesystem, err := newFS(s.db, s.bucketPath(name), s.enc)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +112,11 @@ func (s *Store) OpenWithContentFS(name string, contentFS absfs.FileSystem) (*Fil
 		return nil, ErrNilParam
 	}
 
-	filesystem, err := newFS(s.db, s.bucketPath(name))
+	if err := s.checkMode(name); err != nil {
+		return nil, err
+	}
+
+	filesystem, err := newFS(s.db, s.bucketPath(name), s.enc)
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +195,113 @@ func (s *Store) DeleteFS(name string) error {
 		}
 		return parent.DeleteBucket([]byte(name))
 	})
+}
+
+// checkMode verifies the filesystem's encryption marker against the Store
+// configuration before any write happens.
+func (s *Store) checkMode(name string) error {
+	path := s.bucketPath(name)
+
+	var (
+		m      marker
+		canary []byte
+		found  bool
+	)
+	err := s.db.View(func(tx *bolt.Tx) error {
+		bb, err := openBucket(tx, path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		b := newFsBucket(bb)
+		if b == nil {
+			return nil
+		}
+		m, canary, found, err = readMarker(b)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+
+	if found {
+		if s.enc == nil {
+			return fmt.Errorf("%w: filesystem is encrypted", ErrWrongMode)
+		}
+		if !m.matches(s.enc) {
+			return fmt.Errorf("%w: encryption settings do not match the filesystem", ErrWrongMode)
+		}
+		return s.enc.verifyCanary(canary)
+	}
+
+	if s.enc == nil {
+		return nil
+	}
+
+	hasData, err := s.hasUserData(path)
+	if err != nil {
+		return err
+	}
+	if hasData {
+		return fmt.Errorf("%w: filesystem already contains plaintext data", ErrWrongMode)
+	}
+	return nil
+}
+
+// readMarker returns the filesystem encryption marker and its sealed canary.
+func readMarker(b *fsBucket) (marker, []byte, bool, error) {
+	if b == nil || b.state == nil {
+		return marker{}, nil, false, nil
+	}
+	raw := b.state.Get([]byte(markerKey))
+	if raw == nil {
+		return marker{}, nil, false, nil
+	}
+	m, canary, err := decodeMarker(raw)
+	if err != nil {
+		return marker{}, nil, false, err
+	}
+	return m, canary, true, nil
+}
+
+// hasUserData reports whether a filesystem already stores user data.
+func (s *Store) hasUserData(path string) (bool, error) {
+	var found bool
+	err := s.db.View(func(tx *bolt.Tx) error {
+		bb, err := openBucket(tx, path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		b := newFsBucket(bb)
+		if b == nil {
+			return nil
+		}
+
+		if err := b.inodes.ForEach(func(key, _ []byte) error {
+			if len(key) == 8 && b2i(key) > 1 {
+				found = true
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		if !found && b.data.Stats().KeyN > 0 {
+			found = true
+		}
+		if !found && b.symlinks.Stats().KeyN > 0 {
+			found = true
+		}
+		if !found && b.chunks != nil && b.chunks.Stats().KeyN > 0 {
+			found = true
+		}
+		return nil
+	})
+	return found, err
 }
 
 func (s *Store) bucketPath(name string) string {

@@ -1302,7 +1302,7 @@ func TestBoltFS(t *testing.T) {
 	var fs absfs.SymlinkFileSystem
 	var err error
 
-	fs, err = newFS(db, "")
+	fs, err = newFS(db, "", nil)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1326,7 +1326,7 @@ func TestFileSystem(t *testing.T) {
 		_ = db.Close()
 	}()
 
-	bfs, err := newFS(db, "")
+	bfs, err := newFS(db, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1453,7 +1453,7 @@ func TestFileSystem(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		bfs, err = newFS(db, "")
+		bfs, err = newFS(db, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1844,7 +1844,7 @@ func TestBoltFSSuite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bfs, err := newFS(db, "")
+	bfs, err := newFS(db, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

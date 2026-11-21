@@ -29,13 +29,14 @@ type FileSystem struct {
 	cwd       string
 	cache     *inodeCache
 	contentFS absfs.FileSystem // Optional external filesystem for storing file content
+	enc       *encState        // nil when encryption is disabled
 
 	// symlinks map[uint64]string
 }
 
 // newFS creates a new FileSystem in the convention of other `absfs`
 // implementations. It takes a bolt.DB pointer and a bucket path.
-func newFS(db *bolt.DB, bucketpath string) (*FileSystem, error) {
+func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FileSystem, error) {
 
 	// create buckets
 	err := db.Update(func(tx *bolt.Tx) error {
@@ -54,6 +55,7 @@ func newFS(db *bolt.DB, bucketpath string) (*FileSystem, error) {
 		cwd:       "/",
 		cache:     newInodeCache(1000), // Default cache size of 1000 inodes
 		contentFS: nil,                 // Use BoltDB by default (backward compatible)
+		enc:       enc,
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
 		bb, err := openBucket(tx, bucketpath)
@@ -61,6 +63,34 @@ func newFS(db *bolt.DB, bucketpath string) (*FileSystem, error) {
 			return err
 		}
 		b := newFsBucket(bb)
+		b.enc = enc
+		if enc != nil {
+			hadMarker := b.state.Get([]byte(markerKey)) != nil
+			raw, err := enc.encodeMarker()
+			if err != nil {
+				return err
+			}
+			if err := b.state.Put([]byte(markerKey), raw); err != nil {
+				return err
+			}
+			if !hadMarker {
+				// An otherwise empty plaintext filesystem may contain the two
+				// system inodes; re-encode them with the new encryption state.
+				for ino := uint64(0); ino <= 1; ino++ {
+					node := new(iNode)
+					err := b.decodeRawNode(ino, node)
+					if errors.Is(err, os.ErrNotExist) {
+						continue
+					}
+					if err != nil {
+						return err
+					}
+					if err := b.encodeNode(ino, node); err != nil {
+						return err
+					}
+				}
+			}
+		}
 
 		// create the `nil` node if it doesn't exist
 		err = b.InodeInit()
@@ -128,7 +158,9 @@ func (fs *FileSystem) openFsBucket(tx *bolt.Tx) (*fsBucket, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newFsBucket(bb), nil
+	b := newFsBucket(bb)
+	b.enc = fs.enc
+	return b, nil
 }
 
 // openFsBucketWithCache opens the filesystem buckets with cache support.
@@ -138,7 +170,9 @@ func (fs *FileSystem) openFsBucketWithCache(tx *bolt.Tx) (*fsBucket, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newFsBucketWithCache(bb, fs.cache), nil
+	b := newFsBucketWithCache(bb, fs.cache)
+	b.enc = fs.enc
+	return b, nil
 }
 
 // CacheStats returns statistics about the inode cache.
@@ -445,7 +479,7 @@ func (fs *FileSystem) loadInode(ino uint64) (*iNode, error) {
 		if err != nil {
 			return err
 		}
-		return decodeNode(b.inodes, ino, node)
+		return b.decodeNode(ino, node)
 	})
 
 	return node, err
@@ -481,12 +515,17 @@ func (fs *FileSystem) saveData(ino uint64, data []byte) error {
 		return nil
 	}
 
+	sealed, err := fs.enc.sealContent(data)
+	if err != nil {
+		return err
+	}
+
 	return fs.db.Update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucket(tx)
 		if err != nil {
 			return err
 		}
-		return b.data.Put(i2b(ino), data)
+		return b.data.Put(i2b(ino), sealed)
 	})
 }
 
@@ -527,8 +566,12 @@ func (fs *FileSystem) loadData(ino uint64) ([]byte, error) {
 		if d == nil {
 			d = []byte{}
 		}
-		data = make([]byte, len(d))
-		copy(data, d)
+		plain, err := fs.enc.openContent(d)
+		if err != nil {
+			return err
+		}
+		data = make([]byte, len(plain))
+		copy(data, plain)
 		return nil
 	})
 	if err != nil {

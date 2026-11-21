@@ -11,8 +11,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	bolt "go.etcd.io/bbolt"
 )
 
 var errNilNode = errors.New("nil node")
@@ -241,38 +239,56 @@ func (n *iNode) Unlink(name string) (uint64, error) {
 	return old, nil
 }
 
-func decodeNode(b *bolt.Bucket, ino uint64, node *iNode) error {
-	if b == nil {
+func (f *fsBucket) decodeNode(ino uint64, node *iNode) error {
+	if f == nil || f.inodes == nil {
 		panic("nil bucket")
 	}
 	if node == nil {
 		return errNilNode
 	}
-	data := b.Get(i2b(ino))
+	data := f.inodes.Get(i2b(ino))
 	if data == nil || len(data) == 0 {
 		return os.ErrNotExist
 	}
-	err := gob.NewDecoder(bytes.NewReader(data)).Decode(node)
+	plain, err := f.enc.openMetadata(data)
 	if err != nil {
 		return err
 	}
-	return nil
+	return gob.NewDecoder(bytes.NewReader(plain)).Decode(node)
 }
 
-func encodeNode(b *bolt.Bucket, ino uint64, node *iNode) error {
-	if b == nil {
+// decodeRawNode decodes an unsealed gob inode. It is used only to migrate the
+// system inodes of an otherwise empty plaintext filesystem.
+func (f *fsBucket) decodeRawNode(ino uint64, node *iNode) error {
+	if f == nil || f.inodes == nil {
+		panic("nil bucket")
+	}
+	if node == nil {
+		return errNilNode
+	}
+	data := f.inodes.Get(i2b(ino))
+	if data == nil || len(data) == 0 {
+		return os.ErrNotExist
+	}
+	return gob.NewDecoder(bytes.NewReader(data)).Decode(node)
+}
+
+func (f *fsBucket) encodeNode(ino uint64, node *iNode) error {
+	if f == nil || f.inodes == nil {
 		panic("nil bucket")
 	}
 	if node == nil {
 		return errNilNode
 	}
 	w := new(bytes.Buffer)
-	err := gob.NewEncoder(w).Encode(node)
+	if err := gob.NewEncoder(w).Encode(node); err != nil {
+		return err
+	}
+	data, err := f.enc.sealMetadata(w.Bytes())
 	if err != nil {
 		return err
 	}
-
-	return b.Put(i2b(ino), w.Bytes())
+	return f.inodes.Put(i2b(ino), data)
 }
 
 func (n *iNode) IsDir() bool {

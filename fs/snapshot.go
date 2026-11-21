@@ -181,6 +181,11 @@ func (s *Snapshot) ReadFile(name string) ([]byte, error) {
 		return []byte{}, nil
 	}
 
+	data, err = s.bucket.enc.openContent(data)
+	if err != nil {
+		return nil, &os.PathError{Op: "read", Path: name, Err: err}
+	}
+
 	// Return a copy to prevent modifications
 	result := make([]byte, len(data))
 	copy(result, data)
@@ -370,6 +375,12 @@ func (s *Snapshot) Open(name string) (absfs.File, error) {
 	data := s.bucket.data.Get(i2b(node.Ino))
 	if data == nil {
 		data = []byte{}
+	} else {
+		data, err = s.bucket.enc.openContent(data)
+		if err != nil {
+			s.tx.Rollback()
+			return nil, err
+		}
 	}
 
 	// Make a copy to prevent external modifications

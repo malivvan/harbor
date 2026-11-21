@@ -20,7 +20,9 @@ type fsBucket struct {
 	inodes   *bolt.Bucket
 	data     *bolt.Bucket
 	symlinks *bolt.Bucket
-	cache    *inodeCache // Optional cache for read operations
+	chunks   *bolt.Bucket // Optional chunked-content bucket
+	cache    *inodeCache  // Optional cache for read operations
+	enc      *encState    // nil when encryption is disabled
 }
 
 type bucketer interface {
@@ -57,6 +59,7 @@ func newFsBucketWithCache(b bucketer, cache *inodeCache) *fsBucket {
 		inodes:   inodes,
 		data:     data,
 		symlinks: symlinks,
+		chunks:   b.Bucket([]byte("chunks")),
 		cache:    cache,
 	}
 }
@@ -141,10 +144,11 @@ func openBucket(tx *bolt.Tx, bucketpath string) (bucketer, error) {
 		if name == "" || name == "." {
 			continue
 		}
-		b = b.Bucket([]byte(name))
-		if b == nil {
+		bucket := b.Bucket([]byte(name))
+		if bucket == nil {
 			return nil, os.ErrNotExist
 		}
+		b = bucket
 	}
 	return b, nil
 
@@ -175,7 +179,7 @@ func (f *fsBucket) PutInode(ino uint64, node *iNode) error {
 		}
 	}
 	node.Ino = ino
-	err = encodeNode(f.inodes, ino, node)
+	err = f.encodeNode(ino, node)
 	if err != nil {
 		return err
 	}
@@ -204,7 +208,7 @@ func (f *fsBucket) GetInode(ino uint64) (*iNode, error) {
 
 	// Load from disk
 	node := newInode(0)
-	err := decodeNode(f.inodes, ino, node)
+	err := f.decodeNode(ino, node)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +248,11 @@ func (f *fsBucket) Symlink(ino uint64, path string) error {
 	if path == "" {
 		return f.symlinks.Delete(i2b(ino))
 	}
-	return f.symlinks.Put(i2b(ino), []byte(path))
+	data, err := f.enc.sealContent([]byte(path))
+	if err != nil {
+		return err
+	}
+	return f.symlinks.Put(i2b(ino), data)
 }
 
 // Readlink reads the symbolic link string associated with `ino`. or an empty
@@ -259,5 +267,9 @@ func (f *fsBucket) Readlink(ino uint64) string {
 		return ""
 	}
 
-	return string(data)
+	plain, err := f.enc.openContent(data)
+	if err != nil {
+		return ""
+	}
+	return string(plain)
 }
