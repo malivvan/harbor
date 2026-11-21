@@ -27,7 +27,39 @@ type Series struct {
 }
 
 type seriesMeta struct {
-	Labels map[string]string `json:"labels"`
+	Labels    map[string]string `json:"labels,omitempty"`
+	Retention Retention         `json:"retention,omitempty"`
+}
+
+func (s *Store) readMeta(tx *bolt.Tx, name string) (seriesMeta, error) {
+	var meta seriesMeta
+	bucket, err := s.metaBucket(tx, false)
+	if err != nil {
+		return meta, err
+	}
+	if bucket == nil {
+		return meta, nil
+	}
+	raw := bucket.Get([]byte(name))
+	if raw == nil {
+		return meta, nil
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return seriesMeta{}, err
+	}
+	return meta, nil
+}
+
+func (s *Store) writeMeta(tx *bolt.Tx, name string, meta seriesMeta) error {
+	bucket, err := s.metaBucket(tx, true)
+	if err != nil {
+		return err
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	return bucket.Put([]byte(name), data)
 }
 
 // Name returns the series name.
@@ -62,20 +94,8 @@ func (se *Series) Labels(ctx context.Context) (map[string]string, error) {
 			return err
 		}
 
-		meta, err := se.store.metaBucket(tx, false)
+		stored, err := se.store.readMeta(tx, se.name)
 		if err != nil {
-			return err
-		}
-		if meta == nil {
-			return nil
-		}
-		raw := meta.Get([]byte(se.name))
-		if raw == nil {
-			return nil
-		}
-
-		var stored seriesMeta
-		if err := json.Unmarshal(raw, &stored); err != nil {
 			return err
 		}
 		for key, value := range stored.Labels {
@@ -101,20 +121,16 @@ func (se *Series) SetLabels(ctx context.Context, labels map[string]string) error
 		labels = make(map[string]string)
 	}
 
-	data, err := json.Marshal(seriesMeta{Labels: labels})
-	if err != nil {
-		return err
-	}
-
 	return se.store.b.Update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
-		meta, err := se.store.metaBucket(tx, true)
+		meta, err := se.store.readMeta(tx, se.name)
 		if err != nil {
 			return err
 		}
-		if err := meta.Put([]byte(se.name), data); err != nil {
+		meta.Labels = labels
+		if err := se.store.writeMeta(tx, se.name, meta); err != nil {
 			return err
 		}
 		return checkContext(ctx)
@@ -159,6 +175,13 @@ func (se *Series) InsertMany(ctx context.Context, points []Point) error {
 				return err
 			}
 		}
+
+		meta, err := se.store.readMeta(tx, se.name)
+		if err != nil {
+			return err
+		}
+		pruneBucket(bucket, meta.Retention, se.store.nowNanos())
+
 		return checkContext(ctx)
 	})
 }

@@ -20,6 +20,10 @@ var (
 
 	// ErrInvalidStep is returned when an aggregation step is not positive.
 	ErrInvalidStep = errors.New("ts: invalid step")
+
+	// ErrInvalidRetention is returned for a retention policy with a negative
+	// MaxAge or negative MaxPoints.
+	ErrInvalidRetention = errors.New("ts: invalid retention")
 )
 
 func checkContext(ctx context.Context) error {

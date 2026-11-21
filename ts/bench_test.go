@@ -95,3 +95,26 @@ func BenchmarkAggregate(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkEnforceRetention(b *testing.B) {
+	series := openBenchSeries(b)
+	ctx := context.Background()
+
+	points := make([]Point, 10_000)
+	for i := range points {
+		points[i] = Point{Timestamp: int64(i), Value: float64(i)}
+	}
+	if err := series.InsertMany(ctx, points); err != nil {
+		b.Fatal(err)
+	}
+	if err := series.SetRetention(ctx, Retention{MaxPoints: 5_000}); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := series.EnforceRetention(ctx, 0); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

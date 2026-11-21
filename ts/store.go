@@ -13,6 +13,7 @@ const metaBucketName = "__ts_meta__"
 type Store struct {
 	b      *bolt.DB
 	root   []byte
+	now    func() int64
 	mu     sync.RWMutex
 	series map[string]*Series
 	order  []string
@@ -34,6 +35,7 @@ func Open(ctx context.Context, db *bolt.DB, root []byte) (*Store, error) {
 	return &Store{
 		b:      db,
 		root:   append([]byte(nil), root...),
+		now:    defaultNow,
 		series: make(map[string]*Series),
 	}, nil
 }
