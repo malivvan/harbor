@@ -210,7 +210,6 @@ func (e *encState) openKey(cipherKey []byte, domain string) ([]byte, error) {
 const (
 	markerKey       = "\x00__db_enc__"
 	markerMagic     = "DENC"
-	markerVersion   = byte(1)
 	canaryPlaintext = "storm/db/aead/v1"
 )
 
@@ -219,6 +218,9 @@ const (
 	markerFlagMetadata = 1 << 1
 	markerFlagKeys     = 1 << 2
 )
+
+// markerSpec describes the on-disk marker framing shared by every store.
+var markerSpec = encryption.MarkerSpec{Magic: markerMagic}
 
 // marker describes the encryption mode recorded in a store.
 type marker struct {
@@ -254,45 +256,31 @@ func encodeMarker(e *encState) ([]byte, error) {
 		flags |= markerFlagKeys
 	}
 
-	raw := make([]byte, 0, 4+1+1+1+len(canary))
-	raw = append(raw, markerMagic...)
-	raw = append(raw, markerVersion, byte(e.cipher()), flags)
-	raw = append(raw, canary...)
-	return raw, nil
+	return encryption.EncodeMarker(markerSpec, encryption.Marker{
+		Cipher: e.cipher(),
+		Flags:  flags,
+		Canary: canary,
+	})
 }
 
 // decodeMarker parses a marker and returns its sealed canary.
 func decodeMarker(raw []byte) (marker, []byte, error) {
-	const fixedSize = 4 + 1 + 1 + 1
-	if len(raw) < fixedSize {
-		return marker{}, nil, fmt.Errorf("%w: corrupt encryption marker", ErrWrongMode)
-	}
-	if string(raw[:4]) != markerMagic {
-		return marker{}, nil, fmt.Errorf("%w: corrupt encryption marker", ErrWrongMode)
-	}
-	if raw[4] != markerVersion {
-		return marker{}, nil, fmt.Errorf("%w: unsupported encryption marker version", ErrWrongMode)
+	decoded, err := encryption.DecodeMarker(markerSpec, raw)
+	if err != nil {
+		return marker{}, nil, err
 	}
 
-	m := marker{
-		cipher:      CipherSuite(raw[5]),
-		encValues:   raw[6]&markerFlagValues != 0,
-		encMetadata: raw[6]&markerFlagMetadata != 0,
-		encKeys:     raw[6]&markerFlagKeys != 0,
-	}
-	return m, raw[fixedSize:], nil
+	return marker{
+		cipher:      decoded.Cipher,
+		encValues:   decoded.Flags&markerFlagValues != 0,
+		encMetadata: decoded.Flags&markerFlagMetadata != 0,
+		encKeys:     decoded.Flags&markerFlagKeys != 0,
+	}, decoded.Canary, nil
 }
 
 // verifyCanary confirms the configured keys decrypt the stored canary.
 func (e *encState) verifyCanary(canary []byte) error {
-	plain, err := e.open(canary)
-	if err != nil {
-		return err
-	}
-	if string(plain) != canaryPlaintext {
-		return ErrAuthFailed
-	}
-	return nil
+	return encryption.VerifyCanary(e.kc, canary, canaryPlaintext)
 }
 
 // loadMarker reads the store marker, if present, in its own read transaction.

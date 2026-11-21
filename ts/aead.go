@@ -2,7 +2,6 @@ package ts
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 
 	"github.com/malivvan/storm/internal/encryption"
@@ -174,7 +173,6 @@ func resolveConfig(cfg *Config) (*encState, error) {
 const (
 	markerKey       = "\x00__ts_enc__"
 	markerMagic     = "TENC"
-	markerVersion   = byte(1)
 	canaryPlaintext = "storm/ts/aead/v1"
 )
 
@@ -182,6 +180,9 @@ const (
 	markerFlagValues = 1 << 0
 	markerFlagNames  = 1 << 1
 )
+
+// markerSpec describes the on-disk marker framing shared by every store.
+var markerSpec = encryption.MarkerSpec{Magic: markerMagic, ExtraFieldSize: 8}
 
 // marker describes the encryption mode recorded in a store.
 type marker struct {
@@ -213,36 +214,27 @@ func (e *encState) encodeMarker() ([]byte, error) {
 		flags |= markerFlagNames
 	}
 
-	raw := make([]byte, 0, 4+1+1+1+8+len(canary))
-	raw = append(raw, markerMagic...)
-	raw = append(raw, markerVersion, byte(e.cipher()), flags)
-	var blockDur [8]byte
-	binary.LittleEndian.PutUint64(blockDur[:], uint64(e.blockDur))
-	raw = append(raw, blockDur[:]...)
-	raw = append(raw, canary...)
-	return raw, nil
+	return encryption.EncodeMarker(markerSpec, encryption.Marker{
+		Cipher: e.cipher(),
+		Flags:  flags,
+		Extra:  uint64(e.blockDur),
+		Canary: canary,
+	})
 }
 
-// decodeMarker parses a marker and returns the sealed canary.
+// decodeMarker parses a marker and returns its sealed canary.
 func decodeMarker(raw []byte) (marker, []byte, error) {
-	const fixedSize = 4 + 1 + 1 + 1 + 8
-	if len(raw) < fixedSize {
-		return marker{}, nil, fmt.Errorf("%w: corrupt encryption marker", ErrWrongMode)
-	}
-	if string(raw[:4]) != markerMagic {
-		return marker{}, nil, fmt.Errorf("%w: corrupt encryption marker", ErrWrongMode)
-	}
-	if raw[4] != markerVersion {
-		return marker{}, nil, fmt.Errorf("%w: unsupported encryption marker version", ErrWrongMode)
+	decoded, err := encryption.DecodeMarker(markerSpec, raw)
+	if err != nil {
+		return marker{}, nil, err
 	}
 
-	m := marker{
-		cipher:    CipherSuite(raw[5]),
-		encValues: raw[6]&markerFlagValues != 0,
-		encNames:  raw[6]&markerFlagNames != 0,
-		blockDur:  int64(binary.LittleEndian.Uint64(raw[7:15])),
-	}
-	return m, raw[fixedSize:], nil
+	return marker{
+		cipher:    decoded.Cipher,
+		encValues: decoded.Flags&markerFlagValues != 0,
+		encNames:  decoded.Flags&markerFlagNames != 0,
+		blockDur:  int64(decoded.Extra),
+	}, decoded.Canary, nil
 }
 
 // readMarker returns the marker and its sealed canary, if the store has one.
@@ -276,14 +268,7 @@ func (s *Store) readMarker(db *bolt.DB) (marker, []byte, bool, error) {
 
 // verifyCanary checks that at least one configured key can decrypt the canary.
 func (e *encState) verifyCanary(canary []byte) error {
-	plaintext, err := e.open(canary)
-	if err != nil {
-		return err
-	}
-	if string(plaintext) != canaryPlaintext {
-		return ErrAuthFailed
-	}
-	return nil
+	return encryption.VerifyCanary(e.kc, canary, canaryPlaintext)
 }
 
 // ensureMarker writes the encryption marker if the store does not have one yet.

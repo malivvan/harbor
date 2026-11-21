@@ -24,7 +24,7 @@ All four packages re-implement the same machinery. Extract it once.
 | `deriveSIV` (HKDF-SHA256 → 64-byte key → `NewSIVEngine`) | `db/aead.go`, `vec/aead.go`, `ts/siv.go` | `encryption.DeriveSIV(masterKey []byte, info string) (*SIVEngine, error)` |
 | base64url + SIV name/key seal/open (`sealName`/`openName`, `sealKey`/`openKey`, `EncryptName`/`DecryptName`) | `vec/aead.go`, `db/aead.go`, `ts/siv.go` | `encryption.SIVNameCipher` (`SealName`/`OpenName`) — also gives a single place to fix the error-swallowing (see B2) |
 | `verifyCanary` (decrypt + compare constant) | `fs/aead.go`, `db/aead.go`, `vec/aead.go`, `ts/aead.go` | `encryption.VerifyCanary(keychain, sealed, want)` |
-| marker encode/decode/`matches` (magic + version + cipher + flags + optional extra field + sealed canary) | same 4 (fs/ts have an 8-byte extra field; db/vec do not) | a generic marker codec parameterized by magic string + flag descriptor + optional extra field |
+| marker encode/decode/`matches` (magic + version + cipher + flags + optional extra field + sealed canary) | same 4 (fs/ts have an 8-byte extra field; db/vec do not) | **done** — `encryption.MarkerSpec`/`Marker` + `EncodeMarker`/`DecodeMarker` own the framing, version and error messages; each store keeps only its `MarkerSpec` (magic + extra size), its flag mapping and `matches` |
 | `withKey` / `adoptEnc` (build a same-flags/new-key state; swap it in) | `fs/rotate.go`, `db/rotate.go`, `vec/rotate.go`, `ts/rotate.go` | fold into the `Keychain` rebuild (`Keychain.WithKey`) |
 | `pair` + `applyEntries` (rotation rewrite helper) | `db/rotate.go`, `vec/rotate.go` | shared `internal/encryption` (or a small `internal/rotation`) helper |
 | `bucketKeys` (copy a bucket's keys) | `fs/rotate.go` | shared helper |
@@ -168,7 +168,7 @@ Status of each item as the consolidation lands. Commits reference the section.
 | `seal`/`open` + fallback loop | **done** — `encryption.Keychain.Seal`/`Open` (fresh nonce, try-each-engine fallback); `internal/encryption/keychain.go` + tests |
 | `deriveSIV` | **done** — `encryption.DeriveSIV(masterKey, info)`; each package passes its own info string |
 | base64 + SIV name/key seal/open | **done** — `encryption.SIVNameCipher` (`SealName`/`OpenName`); `db`, `vec` and `ts` share it, and their local base64/SIV wrappers are gone |
-| `verifyCanary` | pending |
+| `verifyCanary` | **done** — `encryption.VerifyCanary(keychain, sealed, want)`; the four packages keep a one-line wrapper |
 | marker encode/decode/matches | pending |
 | `withKey`/`adoptEnc` | **partly done** — `Keychain.WithKey` / `WithKeyKeepingFallbacks` exist and every package rebuilds its state through them; the per-entity rotation semantics follow in I2 |
 | `pair` + `applyEntries`, `bucketKeys` | pending |
