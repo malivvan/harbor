@@ -43,13 +43,17 @@ type Query interface {
 	// Count all the matching records
 	Count(ctx context.Context, kind any) (int, error)
 
-	// Raw returns all matching records without decoding them.
-	Raw(ctx context.Context) ([][]byte, error)
+	// Raw returns the raw values of all matching records without decoding them.
+	// kind is a sample record (a pointer to a struct) used to decode each value
+	// so matchers and ordering are evaluated. Pass nil only when the query has
+	// no matchers and no ordering; the bucket is then dumped as-is.
+	Raw(ctx context.Context, kind any) ([][]byte, error)
 
-	// RawEach executes fn for each matching raw key/value pair.
+	// RawEach executes fn for each matching raw key/value pair. kind has the
+	// same meaning as in Raw.
 	// If the callback returns an error, processing stops and that error is returned.
 	// Cancellation prevents further callbacks but does not undo callbacks already executed.
-	RawEach(ctx context.Context, fn func(key, value []byte) error) error
+	RawEach(ctx context.Context, kind any, fn func(key, value []byte) error) error
 
 	// Each decodes each matching record and executes fn.
 	// If the callback returns an error, processing stops and that error is returned.
@@ -159,22 +163,24 @@ func (q *query) Count(ctx context.Context, kind any) (int, error) {
 	return sink.counter, nil
 }
 
-func (q *query) Raw(ctx context.Context) ([][]byte, error) {
+func (q *query) Raw(ctx context.Context, kind any) ([][]byte, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, wrapError("query raw", err)
 	}
 
-	sink := newRawSink()
-
-	err := q.runQuery(ctx, sink)
+	raw, sink, err := newRawSink(kind)
 	if err != nil {
 		return nil, wrapError("query raw", err)
 	}
 
-	return sink.results, nil
+	if err := q.runQuery(ctx, sink); err != nil {
+		return nil, wrapError("query raw", err)
+	}
+
+	return raw.results, nil
 }
 
-func (q *query) RawEach(ctx context.Context, fn func(key, value []byte) error) error {
+func (q *query) RawEach(ctx context.Context, kind any, fn func(key, value []byte) error) error {
 	if err := checkContext(ctx); err != nil {
 		return wrapError("query raw each", err)
 	}
@@ -183,9 +189,12 @@ func (q *query) RawEach(ctx context.Context, fn func(key, value []byte) error) e
 		return wrapError("query raw each", ErrNilParam)
 	}
 
-	sink := newRawSink()
+	raw, sink, err := newRawSink(kind)
+	if err != nil {
+		return wrapError("query raw each", err)
+	}
 
-	sink.execFn = fn
+	raw.execFn = fn
 
 	return wrapError("query raw each", q.runQuery(ctx, sink))
 }

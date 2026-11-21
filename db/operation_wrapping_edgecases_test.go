@@ -258,14 +258,14 @@ func TestWrap_Query_LabelsAndClassification(t *testing.T) {
 		{
 			name:   "QueryRaw",
 			prefix: "storm query raw:",
-			op:     func() error { _, err := db.Select(q.True()).Raw(nilCtx); return err },
+			op:     func() error { _, err := db.Select(q.True()).Raw(nilCtx, nil); return err },
 			cause:  ErrNilContext,
 		},
 		{
 			name:   "QueryRawEach",
 			prefix: "storm query raw each:",
 			op: func() error {
-				return db.Select(q.True()).RawEach(ctx, nil)
+				return db.Select(q.True()).RawEach(ctx, nil, nil)
 			},
 			cause: ErrNilParam,
 		},
@@ -331,7 +331,7 @@ func TestWrap_Query_OutputSafety(t *testing.T) {
 
 	// Query.Raw returns nil on wrapped cancellation
 	t.Run("QueryRawReturnsNilOnCancel", func(t *testing.T) {
-		raw, err := db.Select(q.True()).Raw(canceledCtx())
+		raw, err := db.Select(q.True()).Raw(canceledCtx(), nil)
 		require.Error(t, err)
 		require.True(t, strings.HasPrefix(err.Error(), "storm query raw:"))
 		require.Nil(t, raw)
@@ -365,7 +365,7 @@ func TestWrap_Query_Callbacks(t *testing.T) {
 
 	// RawEach nil callback -> wrapped ErrNilParam
 	t.Run("RawEachNilCallback", func(t *testing.T) {
-		err := db.Select(q.True()).RawEach(ctx, nil)
+		err := db.Select(q.True()).RawEach(ctx, nil, nil)
 		require.ErrorIs(t, err, ErrNilParam)
 		require.True(t, strings.HasPrefix(err.Error(), "storm query raw each:"))
 	})
@@ -380,7 +380,7 @@ func TestWrap_Query_Callbacks(t *testing.T) {
 	// RawEach callback error remains discoverable
 	t.Run("RawEachCallbackErrorDiscoverable", func(t *testing.T) {
 		require.NoError(t, db.Save(ctx, &User{ID: 10, Name: "cb", Slug: "cb1"}))
-		err := db.Select().Bucket("User").RawEach(ctx, func(k, v []byte) error {
+		err := db.Select().Bucket("User").RawEach(ctx, &User{}, func(k, v []byte) error {
 			return errCallback
 		})
 		require.ErrorIs(t, err, errCallback)
@@ -401,7 +401,7 @@ func TestWrap_Query_Callbacks(t *testing.T) {
 	t.Run("RawEachCallbackErrorBeatsCancel", func(t *testing.T) {
 		require.NoError(t, db.Save(ctx, &User{ID: 12, Name: "cb3", Slug: "cb3"}))
 		callbackCtx, cancel := context.WithCancel(ctx)
-		err := db.Select().Bucket("User").RawEach(callbackCtx, func(k, v []byte) error {
+		err := db.Select().Bucket("User").RawEach(callbackCtx, &User{}, func(k, v []byte) error {
 			cancel()
 			return errCallback
 		})
@@ -418,7 +418,7 @@ func TestWrap_Query_Callbacks(t *testing.T) {
 		callCount := 0
 		qsc := newQueryStepContext(context.Background())
 		qsc.cancelAfter(2)
-		err := db.Select().Bucket("User").RawEach(qsc.context(), func(k, v []byte) error {
+		err := db.Select().Bucket("User").RawEach(qsc.context(), &User{}, func(k, v []byte) error {
 			callCount++
 			return qsc.step()
 		})
@@ -436,7 +436,7 @@ func TestWrap_Query_Callbacks(t *testing.T) {
 			defer func() {
 				recovered = recover()
 			}()
-			_ = db.Select().Bucket("User").RawEach(ctx, func(k, v []byte) error {
+			_ = db.Select().Bucket("User").RawEach(ctx, &User{}, func(k, v []byte) error {
 				panic("test panic")
 			})
 		}()
@@ -1284,7 +1284,7 @@ func TestWrap_SensitiveDataExclusion(t *testing.T) {
 
 	t.Run("QueryMatcher_NotLeaked", func(t *testing.T) {
 		// Use Raw with secret field name as matcher value; secret value should not leak
-		_, err := db.Select(q.Eq(secretField, secretValue)).Raw(canceledCtx())
+		_, err := db.Select(q.Eq(secretField, secretValue)).Raw(canceledCtx(), nil)
 		t.Logf("Query error: %v", err)
 		msg := err.Error()
 		require.NotContains(t, msg, secretField)
@@ -1368,8 +1368,8 @@ func TestWrap_AllLabels_C2B(t *testing.T) {
 		{"query first", "storm query first:", func() error { return db.Select(q.True()).First(nilCtx, &User{}) }},
 		{"query delete", "storm query delete:", func() error { return db.Select(q.True()).Delete(nilCtx, &User{}) }},
 		{"query count", "storm query count:", func() error { _, err := db.Select(q.True()).Count(nilCtx, &User{}); return err }},
-		{"query raw", "storm query raw:", func() error { _, err := db.Select(q.True()).Raw(nilCtx); return err }},
-		{"query raw each", "storm query raw each:", func() error { return db.Select(q.True()).RawEach(ctx, nil) }},
+		{"query raw", "storm query raw:", func() error { _, err := db.Select(q.True()).Raw(nilCtx, nil); return err }},
+		{"query raw each", "storm query raw each:", func() error { return db.Select(q.True()).RawEach(ctx, nil, nil) }},
 		{"query each", "storm query each:", func() error { return db.Select(q.True()).Each(ctx, &User{}, nil) }},
 
 		// Scanners

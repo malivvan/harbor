@@ -119,6 +119,9 @@ the encryption state (sections 4 and 6).
   are silently dropped.
   Fix: give `Raw`/`RawEach` a sample/kind parameter so records can be decoded and the matcher
   tree evaluated, or explicitly redesign them as unfiltered bucket dumps and document that.
+  **Status: FIXED** — `Raw(ctx, kind)` and `RawEach(ctx, kind, fn)` now decode into the sample
+  type and evaluate matchers/ordering; `nil` is documented as an unfiltered dump. Regression
+  test covers `Eq`/`Gt` filtering.
 
 - **`Query.Delete` deletes keys while iterating the same bbolt cursor**
   — `db/query.go:298-315` (cursor loop) and `db/sink.go:643` (`i.bucket.Delete(i.k)`)

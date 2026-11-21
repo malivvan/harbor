@@ -530,16 +530,16 @@ func TestSelectRaw(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	list, err := db.Select().Bucket("Score").Raw(ctx)
+	list, err := db.Select().Bucket("Score").Raw(ctx, &Score{})
 	require.NoError(t, err)
 	require.Len(t, list, 20)
 
-	list, err = db.Select().Bucket("Score").Skip(18).Limit(5).Raw(ctx)
+	list, err = db.Select().Bucket("Score").Skip(18).Limit(5).Raw(ctx, &Score{})
 	require.NoError(t, err)
 	require.Len(t, list, 2)
 
 	i := 0
-	err = db.Select().Bucket("Score").Skip(18).Limit(5).RawEach(ctx, func(k []byte, v []byte) error {
+	err = db.Select().Bucket("Score").Skip(18).Limit(5).RawEach(ctx, &Score{}, func(k []byte, v []byte) error {
 		i++
 		return nil
 	})
@@ -878,7 +878,7 @@ func TestQueryRaw_CancellationReturnsNil(t *testing.T) {
 		cancelAt: 12,
 	}
 
-	results, err := db.Select().Bucket("Score").Raw(stepCtx)
+	results, err := db.Select().Bucket("Score").Raw(stepCtx, &Score{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.Canceled))
 	require.Nil(t, results)
@@ -897,7 +897,7 @@ func TestQueryRaw_ReturnsDefensiveCopies(t *testing.T) {
 		require.NoError(t, db.Save(ctx, &Score{Value: i}))
 	}
 
-	results, err := db.Select().Bucket("Score").Raw(ctx)
+	results, err := db.Select().Bucket("Score").Raw(ctx, &Score{})
 	require.NoError(t, err)
 	require.NotEmpty(t, results)
 
@@ -905,7 +905,7 @@ func TestQueryRaw_ReturnsDefensiveCopies(t *testing.T) {
 	results[0][0] = 0xFF
 
 	// Read again — should be unaffected.
-	results2, err := db.Select().Bucket("Score").Raw(ctx)
+	results2, err := db.Select().Bucket("Score").Raw(ctx, &Score{})
 	require.NoError(t, err)
 	require.NotEmpty(t, results2)
 
@@ -935,7 +935,7 @@ func TestQueryRawEach_CancellationStopsFurtherCallbacks(t *testing.T) {
 	qsc.cancelAfter(4)
 
 	callCount := 0
-	err := db.Select().Bucket("Score").RawEach(qsc.context(), func(k, v []byte) error {
+	err := db.Select().Bucket("Score").RawEach(qsc.context(), &Score{}, func(k, v []byte) error {
 		callCount++
 		return qsc.step()
 	})
@@ -963,7 +963,7 @@ func TestQueryRawEach_CallbackErrorTakesPrecedence(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	callbackErr := errors.New("callback failure")
 
-	err := db.Select().Bucket("Score").RawEach(ctx, func(k, v []byte) error {
+	err := db.Select().Bucket("Score").RawEach(ctx, &Score{}, func(k, v []byte) error {
 		cancel()
 		return callbackErr
 	})
@@ -979,7 +979,7 @@ func TestQueryRawEach_NilCallbackRejected(t *testing.T) {
 
 	ctx := context.Background()
 
-	err := db.Select().Bucket("Score").RawEach(ctx, nil)
+	err := db.Select().Bucket("Score").RawEach(ctx, &Score{}, nil)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrNilParam))
 }
@@ -1274,8 +1274,36 @@ func TestQueryRawEach_CancelledContextTakesPrecedenceOverNilCallback(t *testing.
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := db.Select().Bucket("Score").RawEach(cancelCtx, nil)
+	err := db.Select().Bucket("Score").RawEach(cancelCtx, &Score{}, nil)
 	require.Error(t, err)
 	// Context check comes first, so we get context.Canceled.
 	require.True(t, errors.Is(err, context.Canceled))
+}
+
+// TestQueryRaw_AppliesMatchers verifies that Raw/RawEach decode values when a
+// sample kind is supplied, so matchers are not silently ignored.
+func TestQueryRaw_AppliesMatchers(t *testing.T) {
+	db, cleanup := createDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		require.NoError(t, db.Save(ctx, &Score{Value: i}))
+	}
+
+	all, err := db.Select().Bucket("Score").Raw(ctx, &Score{})
+	require.NoError(t, err)
+	require.Len(t, all, 5)
+
+	matched, err := db.Select(q.Eq("Value", 2)).Bucket("Score").Raw(ctx, &Score{})
+	require.NoError(t, err)
+	require.Len(t, matched, 1)
+
+	count := 0
+	err = db.Select(q.Gt("Value", 1)).Bucket("Score").RawEach(ctx, &Score{}, func(k, v []byte) error {
+		count++
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 3, count)
 }

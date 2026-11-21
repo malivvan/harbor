@@ -152,7 +152,7 @@ func TestNilContext_RootOperations(t *testing.T) {
 	})
 
 	t.Run("QueryRaw", func(t *testing.T) {
-		raw, err := db.Select().Bucket("User").Raw(nilCtx)
+		raw, err := db.Select().Bucket("User").Raw(nilCtx, &User{})
 		require.ErrorIs(t, err, ErrNilContext)
 		require.NotErrorIs(t, err, ErrNilParam)
 		require.Nil(t, raw, "Raw must return nil result on nil context")
@@ -288,7 +288,7 @@ func TestNilParam_DistinctFromNilContext(t *testing.T) {
 	})
 
 	t.Run("QueryRawEachNilCallback", func(t *testing.T) {
-		err := db.Select().Bucket("User").RawEach(ctx, nil)
+		err := db.Select().Bucket("User").RawEach(ctx, &User{}, nil)
 		require.ErrorIs(t, err, ErrNilParam)
 		require.NotErrorIs(t, err, ErrNilContext)
 	})

@@ -280,14 +280,14 @@ func TestQuery_CancelledContextPreventsTerminals(t *testing.T) {
 	})
 
 	t.Run("Raw", func(t *testing.T) {
-		_, err := db.Select().Bucket("Score").Raw(canceledCtx())
+		_, err := db.Select().Bucket("Score").Raw(canceledCtx(), &Score{})
 		require.Error(t, err)
 		require.True(t, errors.Is(err, context.Canceled))
 	})
 
 	t.Run("RawEach", func(t *testing.T) {
 		called := false
-		err := db.Select().Bucket("Score").RawEach(canceledCtx(), func(k, v []byte) error {
+		err := db.Select().Bucket("Score").RawEach(canceledCtx(), &Score{}, func(k, v []byte) error {
 			called = true
 			return nil
 		})

@@ -726,13 +726,43 @@ func (c *countSink) readOnly() bool {
 	return true
 }
 
-func newRawSink() *rawSink {
-	return &rawSink{}
+// newRawSink builds a raw sink. A non-nil kind makes the sink decode values
+// into a copy of that record type so matchers and ordering can be evaluated.
+func newRawSink(kind any) (*rawSink, sink, error) {
+	r := &rawSink{}
+	if kind == nil {
+		return r, r, nil
+	}
+	ref := reflect.ValueOf(kind)
+	if !ref.IsValid() || ref.Kind() != reflect.Ptr || ref.Elem().Kind() != reflect.Struct {
+		return nil, nil, ErrStructPtrNeeded
+	}
+	return r, &matchedRawSink{
+		rawSink:  r,
+		elemType: reflect.Indirect(ref).Type(),
+		name:     bucketName(kind),
+	}, nil
 }
 
 type rawSink struct {
 	results [][]byte
 	execFn  func([]byte, []byte) error
+}
+
+// matchedRawSink is a rawSink that decoder-filters values so query matchers
+// and ordering see real records.
+type matchedRawSink struct {
+	*rawSink
+	elemType reflect.Type
+	name     string
+}
+
+func (m *matchedRawSink) elem() reflect.Value {
+	return reflect.New(m.elemType)
+}
+
+func (m *matchedRawSink) bucketName() string {
+	return m.name
 }
 
 func (r *rawSink) add(ctx context.Context, i *item) error {
