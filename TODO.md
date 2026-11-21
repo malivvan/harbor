@@ -215,5 +215,76 @@ Status of each item as the consolidation lands. Commits reference the section.
   aliases with constructor wrappers, and the changed signatures
   (`vec.keyBytes`/`bucketKey`/`collectionBucket`, `ts.bucketKey`/`seriesBucket`)
   are unexported, so the public API of the four packages is unchanged.
-- **Item 3 — re-run in the final step** (`gofmt`, `go vet ./...`,
-  `go test -count=1 ./...`, `go test -race` on the four stores).
+- **Item 3 — done.**
+  - `gofmt -l internal/encryption fs db vec ts` → empty for everything this
+    change touched. `gofmt -l .` still lists five files that predate the work and
+    are unrelated to encryption (`fs/absfs/*.go` ×4, `fs/inode/store_examples.go`);
+    they are left alone to keep the diff focused.
+  - `go vet ./...`, `go build ./...` → clean.
+  - `go test -count=1 ./...` → every package passes (root, db + subpackages, fs +
+    subpackages, internal/*, ts, vec + subpackages).
+  - `go test -race -count=1 ./internal/encryption/ ./fs/ ./db/ ./vec/ ./ts/` →
+    all pass.
+
+## 6. Result
+
+`internal/encryption` is now the single home for the machinery that had been
+copied into the four stores:
+
+| Shared piece | API |
+|---|---|
+| Key sources | `KeyProvider`, `RawKeyProvider`, `EnvKeyProvider`, `MultiKeyProvider` (+ `Providers`, `TryKeys`), `ResolveKeys`, `RequireSingleKey` |
+| Engines | `CipherSuite`, `CipherEngine`, `Keychain` (`Seal`, `Open`, `WithKey`, `WithKeyKeepingFallbacks`, `Cipher`, `Keys`, `PrimaryEngine`) |
+| Deterministic names | `DeriveSIV`, `SIVNameCipher` (`SealName`, `OpenName`, base64 `RawStdEncoding`) |
+| Marker | `MarkerSpec`, `Marker`, `EncodeMarker`, `DecodeMarker`, `VerifyCanary` |
+| Rotation | `Pair`, `EntryWriter`/`ApplyEntries`, `EntryReader`/`KeysOf` |
+| Errors | `ErrAuthFailed`, `ErrUnsupportedCipher`, `ErrInvalidKey`, `ErrInvalidConfig`, `ErrWrongMode`, `ErrEncryptedOrdering` |
+
+What each store keeps is genuinely store-specific: its `Config`, its `encState`
+(feature flags plus the `Keychain` and, where needed, per-domain name ciphers),
+its marker magic/flags/`matches`, and the storage walk that applies them.
+
+**Bugs fixed**
+
+- **B1** — `ts` rejects `EncryptSeriesNames` with more than one key.
+- **B2** — SIV name/key helpers return errors and the packages propagate them;
+  `vec.keyBytes`/`bucketKey`/`collectionBucket` and `ts.bucketKey`/`seriesBucket`
+  no longer hand back a nil key.
+- **B3** — encrypted keys and names use base64 `RawStdEncoding`, whose alphabet
+  has no `_`, so `db` composite index keys are self-delimiting.
+
+**Issues resolved**
+
+- **I1** — `ts` keeps one `encState` wrapping a `Keychain`, like the others.
+- **I2** — per-entity rotation keeps the previous key as a decryption fallback
+  (`Keychain.WithKeyKeepingFallbacks`); only `RotateAll` drops it. When
+  deterministic keys are encrypted, single-entity rotation is rejected with
+  `ErrInvalidConfig` instead of leaving the store unrecoverable.
+- **I3** — empty payloads pass through on both seal and open, so `fs` matches
+  `db`/`vec`.
+- **I4** — sentinels and `ResolveKeys` moved together, so the shared function
+  produces the shared errors.
+- **I5** — the error-wrapping convention is documented in the package doc.
+- **I6** — `ErrEncryptedOrdering` lives in `internal/encryption`, re-exported by
+  `db`.
+
+**Compatibility**
+
+- Plaintext formats are untouched: every new helper is a passthrough when its
+  state is nil, and the plaintext regression tests still pass.
+- The four packages keep their public API: the moved types are re-export aliases
+  with constructor wrappers, and the changed signatures are on unexported
+  helpers.
+- Encrypted names/keys produced by the pre-consolidation build (base64url) are
+  not readable after B3; that format was unreleased, and no migration is
+  provided.
+
+**Deliberately left out**
+
+- A single shared `encState` skeleton: the feature flags and the extra marker
+  field differ per store, and the four `encState` types are already thin.
+- Key-checked SIV names (trying several master keys on lookup) would let
+  per-entity rotation work with encrypted names; today that combination is
+  rejected instead.
+- A shared conformance test suite across the four stores; each store's existing
+  tests were kept and extended in place.
