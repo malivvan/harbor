@@ -23,8 +23,23 @@ type KeyValueStore interface {
 	KeyExists(ctx context.Context, bucketName string, key any) (bool, error)
 }
 
-// GetBytes gets a raw value from a bucket.
+// GetBytes gets a raw value from a bucket. The returned bytes are exactly what
+// SetBytes stored: encrypted stores seal and open them transparently.
 func (n *node) GetBytes(ctx context.Context, bucketName string, key any) ([]byte, error) {
+	raw, err := n.getBytesRaw(ctx, bucketName, key)
+	if err != nil {
+		return nil, err
+	}
+
+	val, err := n.open(raw)
+	if err != nil {
+		return nil, wrapError("kv get bytes", err)
+	}
+	return val, nil
+}
+
+// getBytesRaw returns the stored value of a key without opening it.
+func (n *node) getBytesRaw(ctx context.Context, bucketName string, key any) ([]byte, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, wrapError("kv get bytes", err)
 	}
@@ -104,8 +119,15 @@ func (n *node) SetBytes(ctx context.Context, bucketName string, key any, value [
 		return wrapError("kv set bytes", err)
 	}
 
+	// Values are sealed at rest; GetBytes opens them again, so a SetBytes /
+	// GetBytes round trip is unchanged.
+	sealed, err := n.seal(value)
+	if err != nil {
+		return wrapError("kv set bytes", err)
+	}
+
 	return wrapError("kv set bytes", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
-		return n.setBytes(ctx, tx, bucketName, id, value)
+		return n.setBytes(ctx, tx, bucketName, id, sealed)
 	}))
 }
 
@@ -197,7 +219,7 @@ func (n *node) Set(ctx context.Context, bucketName string, key any, value any) e
 		if err := checkContext(ctx); err != nil {
 			return wrapError("kv set", err)
 		}
-		data, err = n.marshal(value)
+		data, err = n.codec.Marshal(value)
 		if err != nil {
 			return wrapError("kv set", err)
 		}

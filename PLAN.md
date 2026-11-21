@@ -278,3 +278,30 @@ records + indexed values via SIV, authenticated, fresh nonces, key verification
   trusting key order. `db/aead_keys_test.go` covers SIV determinism and domain
   separation, hidden ids/keys, exact lookups, ordered-query rejection, reopen
   stability and tampered-key authentication.
+- [x] **Phase 3 — rotation** — `db/rotate.go` adds `MultiKeyProvider` (primary
+  first, fallbacks after), `Store.ReEncrypt`, `Store.RotateAll` (alias, one key
+  space) and `Store.VerifyAll`. Rotation walks every bucket in one bbolt write
+  transaction: record/kv keys are re-derived per domain, values are re-sealed,
+  list/unique index entries are rebuilt (`value ++ "__" ++ id`, plus the nested
+  `storm__ids` bucket), counters are re-sealed and the marker canary is
+  rewritten; the store adopts the new key only after the commit. `db/rotate_test.go`
+  covers full rotation (bytes change, old key rejected, new key verifies),
+  value-only rotation (keys untouched, `Range`/`Prefix` keep working),
+  preconditions, tamper detection for values/index entries/counters, and the
+  `MultiKeyProvider` fallback path.
+- [x] **Design notes recorded during implementation**
+  - `SetBytes` seals the value and `GetBytes` opens it, so a
+    `SetBytes`/`GetBytes` round trip is unchanged while every stored value stays
+    authenticated; rotation and verification therefore never have to treat
+    "unsealable" values as data. An empty value stays empty so `Set(key, nil)`
+    still reads back as `ErrNotFound`.
+  - `MultiKeyProvider` lives next to the other providers in `db/aead.go`;
+    `ReEncrypt`/`RotateAll`/`VerifyAll` live in `db/rotate.go`. Combining several
+    keys with `EncryptKeys` is rejected with `ErrInvalidConfig`: deterministic
+    key encryption is derived from one master key, so a fallback could decrypt
+    values but never reproduce the physical keys, and lookups would silently
+    miss. Key rotation with `EncryptKeys` is done with `ReEncrypt`.
+  - `ErrEncryptedOrdering` guards the index-backed paths (`Range`, `Prefix`,
+    `AllByIndex`, `Find` with `Reverse`). Scan-based lookups (`All`, `Each`,
+    `Count`, `Select`, `Find` on a non-indexed field) keep working: they decode
+    records instead of trusting key order.

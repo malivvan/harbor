@@ -223,7 +223,7 @@ func (e *encState) open(raw []byte) ([]byte, error) {
 
 // sealValues seals a marshaled value when EncryptValues is enabled.
 func (e *encState) sealValues(plain []byte) ([]byte, error) {
-	if e == nil || !e.encValues {
+	if e == nil || !e.encValues || len(plain) == 0 {
 		return plain, nil
 	}
 	return e.seal(plain)
@@ -231,7 +231,7 @@ func (e *encState) sealValues(plain []byte) ([]byte, error) {
 
 // openValues reverses sealValues.
 func (e *encState) openValues(raw []byte) ([]byte, error) {
-	if e == nil || !e.encValues {
+	if e == nil || !e.encValues || len(raw) == 0 {
 		return raw, nil
 	}
 	return e.open(raw)
@@ -530,6 +530,12 @@ func resolveConfig(cfg *Config) (*encState, error) {
 	state.engine = state.engines[0]
 
 	if state.encKeys {
+		// Deterministic key encryption is derived from a single master key:
+		// a fallback key could decrypt values but not reproduce the physical
+		// keys, so lookups would silently miss. Rotate instead.
+		if len(keys) > 1 {
+			return nil, fmt.Errorf("%w: multiple keys cannot be combined with EncryptKeys; use Store.ReEncrypt to rotate", ErrInvalidConfig)
+		}
 		state.sivs = make(map[string]*encryption.SIVEngine, 3)
 		for _, domain := range []string{keyDomainID, keyDomainIndex, keyDomainKV} {
 			engine, err := deriveSIV(keys[0], domain)

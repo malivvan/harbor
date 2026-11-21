@@ -154,17 +154,17 @@ func (s *Store) Close() error {
 func (s *Store) checkVersion(ctx context.Context) error {
 	// Read the encoded value separately so a decode failure can be classified
 	// as an incompatible codec while preserving the underlying codec error.
-	raw, err := s.GetBytes(ctx, databaseInfo, versionKey)
+	root, ok := s.Node.(*node)
+	if !ok {
+		return ErrBadType
+	}
+
+	raw, err := root.getBytesRaw(ctx, databaseInfo, versionKey)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return s.Set(ctx, databaseInfo, versionKey, Version)
 		}
 		return err
-	}
-
-	root, ok := s.Node.(*node)
-	if !ok {
-		return ErrBadType
 	}
 
 	var v string

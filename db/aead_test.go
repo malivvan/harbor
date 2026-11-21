@@ -327,6 +327,8 @@ func TestAEADTamperedValueFails(t *testing.T) {
 		"truncated": func(raw []byte) []byte {
 			return append([]byte(nil), raw[:len(raw)-4]...)
 		},
+		// An emptied value stays empty so Set(key, nil) keeps reading back as
+		// not found; it fails the codec instead of the MAC.
 		"empty": func([]byte) []byte {
 			return []byte{}
 		},
@@ -356,7 +358,10 @@ func TestAEADTamperedValueFails(t *testing.T) {
 			var u aeadUser
 			err := st.One(ctx, "ID", 1, &u)
 			require.Error(t, err)
-			require.ErrorIs(t, err, ErrAuthFailed)
+			if name != "empty" {
+				require.ErrorIs(t, err, ErrAuthFailed)
+			}
+			require.Equal(t, aeadUser{}, u, "a corrupt value must never surface as data")
 			require.NoError(t, bdb.Close())
 		})
 	}
