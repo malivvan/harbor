@@ -237,3 +237,19 @@ verification + rotation).
    `VerifyAll`.
 8. Add Tier 2 + rotation tests.
 9. Run the full verification checklist; fix any gofmt/vet/test issues.
+
+## Progress log
+
+- [x] **Phase 1 — Tier 1 (`EncryptPoints`)** — `vec/errors.go` sentinels,
+  `vec/aead.go` (Config, key providers, `encState`, seal/open + SIV helpers,
+  `VENC` marker + canary, mode-detection helpers), `Store.enc` +
+  `OpenWithConfig` (with `Open` delegating), and the Tier 1 seams:
+  `UpsertPoints` seals the binco blob at `keyBytes(ID)`, `LoadCollection` opens
+  the blob and keys points by their real ID, `SaveCollectionMeta`/
+  `LoadCollectionMeta`/`ListCollectionMetas` seal and open the JSON (listing
+  skips the marker), and the bucket helpers use `bucketKey`/`logicalName`.
+  `vec/aead_test.go` covers optionality/byte-identity (bare binco blobs decoded
+  directly, no marker), plaintext-vs-encrypted round-trip including
+  `NewCollection`+`Search`, confidentiality, wrong key, tampering, fresh nonces,
+  quantization, mode mismatch, empty-store adoption and invalid config.
+  `go vet ./vec/...` and `go test ./vec/...` pass.

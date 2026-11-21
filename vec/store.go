@@ -27,6 +27,9 @@ type Store struct {
 	closed    bool
 	quantizer Quantizer
 	useQuant  bool
+
+	// enc is the optional encryption state. nil means a plaintext store.
+	enc *encState
 }
 
 func toStoredPoint(p *PointStruct) *StoredPoint {
@@ -147,7 +150,31 @@ func NewStorageWithQuantization(path string, useQuant bool, quantizer Quantizer,
 // The root key, when non-empty, is used as the parent bucket for all collections
 // and collection metadata.
 // Returns an error if the context is invalid.
+//
+// Open always creates a plaintext store. Use OpenWithConfig to enable optional
+// encryption.
 func Open(ctx context.Context, bdb *bbolt.DB, root []byte, useQuant bool, quantizer Quantizer) (*Store, error) {
+	return OpenWithConfig(ctx, bdb, root, useQuant, quantizer, nil)
+}
+
+// OpenWithConfig initializes a BoltDB storage engine with optional native AEAD
+// encryption.
+//
+// A nil cfg, or a cfg that enables no encryption feature, behaves exactly like
+// Open: the store stays plaintext and its on-disk format is unchanged.
+//
+// When encryption is enabled the store writes an unencrypted marker into the
+// collections metadata bucket and verifies it with a sealed canary, so:
+//
+//   - opening an encrypted store without a Config (or with the wrong settings)
+//     fails with ErrWrongMode,
+//   - opening an encrypted store with the wrong key fails with ErrAuthFailed,
+//   - opening a store that already holds plaintext collections with encryption
+//     requested fails with ErrWrongMode.
+//
+// Migrating an existing plaintext store to an encrypted one is not supported;
+// re-import the data instead.
+func OpenWithConfig(ctx context.Context, bdb *bbolt.DB, root []byte, useQuant bool, quantizer Quantizer, cfg *Config) (*Store, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
@@ -156,13 +183,73 @@ func Open(ctx context.Context, bdb *bbolt.DB, root []byte, useQuant bool, quanti
 		quantizer = NewSQ8Quantizer()
 	}
 
-	return &Store{
+	enc, err := resolveConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	store := &Store{
 		db:        bdb,
 		closed:    false,
 		quantizer: quantizer,
 		useQuant:  useQuant,
 		root:      append([]byte(nil), root...),
-	}, nil
+		enc:       enc,
+	}
+
+	// A nil database cannot be inspected; keep the historical behavior of
+	// returning a usable handle without touching storage.
+	if bdb == nil {
+		if enc != nil {
+			return nil, fmt.Errorf("%w: encryption requires a database", ErrInvalidConfig)
+		}
+		return store, nil
+	}
+
+	if err := store.checkMode(ctx); err != nil {
+		return nil, err
+	}
+
+	return store, nil
+}
+
+// checkMode reconciles the encryption settings of the Store with the marker
+// stored on disk. A plaintext store has no marker; an encrypted store always
+// has one, which also proves the configured key can decrypt the store.
+func (s *Store) checkMode(ctx context.Context) error {
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	m, canary, found, err := s.loadMarker()
+	if err != nil {
+		return err
+	}
+
+	if s.enc == nil {
+		if found {
+			return fmt.Errorf("%w: store is encrypted", ErrWrongMode)
+		}
+		return nil
+	}
+
+	if found {
+		if !m.matches(s.enc) {
+			return fmt.Errorf("%w: encryption settings do not match the store", ErrWrongMode)
+		}
+		return s.enc.verifyCanary(canary)
+	}
+
+	// No marker: only a store without data may be initialized as encrypted.
+	hasData, err := s.hasData()
+	if err != nil {
+		return err
+	}
+	if hasData {
+		return fmt.Errorf("%w: store already contains plaintext data", ErrWrongMode)
+	}
+
+	return s.storeMarker(s.enc)
 }
 
 var ErrNilContext = fmt.Errorf("context is nil")
@@ -186,29 +273,39 @@ func (s *Store) rootBucket(tx *bbolt.Tx) *bbolt.Bucket {
 // collectionBucket returns the bucket for a collection under the configured
 // root, or nil when either the root or collection bucket does not exist.
 func (s *Store) collectionBucket(tx *bbolt.Tx, name string) *bbolt.Bucket {
+	key := s.bucketKey(name)
+	if len(key) == 0 {
+		return nil
+	}
+
 	if len(s.root) == 0 {
-		return tx.Bucket([]byte(name))
+		return tx.Bucket(key)
 	}
 
 	root := s.rootBucket(tx)
 	if root == nil {
 		return nil
 	}
-	return root.Bucket([]byte(name))
+	return root.Bucket(key)
 }
 
 // createCollectionBucket creates the collection bucket under the configured
 // root, creating the root bucket when necessary.
 func (s *Store) createCollectionBucket(tx *bbolt.Tx, name string) (*bbolt.Bucket, error) {
+	key := s.bucketKey(name)
+	if len(key) == 0 {
+		return nil, fmt.Errorf("%w: failed to derive the bucket key for collection %q", ErrInvalidConfig, name)
+	}
+
 	if len(s.root) == 0 {
-		return tx.CreateBucketIfNotExists([]byte(name))
+		return tx.CreateBucketIfNotExists(key)
 	}
 
 	root, err := tx.CreateBucketIfNotExists(s.root)
 	if err != nil {
 		return nil, err
 	}
-	return root.CreateBucketIfNotExists([]byte(name))
+	return root.CreateBucketIfNotExists(key)
 }
 
 // metaBucket returns the collection metadata bucket under the configured root.
@@ -303,7 +400,17 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 			}
 
 			data := binco.Encode(StoredPointBinco, *toStoredPoint(p))
-			if err := b.Put([]byte(p.ID), data); err != nil {
+			sealed, err := s.sealBytes(data)
+			if err != nil {
+				return fmt.Errorf("failed to encrypt point %s: %w", p.ID, err)
+			}
+
+			key := s.keyBytes(p.ID)
+			if len(key) == 0 {
+				return fmt.Errorf("%w: failed to derive the key for point %q", ErrInvalidConfig, p.ID)
+			}
+
+			if err := b.Put(key, sealed); err != nil {
 				return fmt.Errorf("failed to write point %s to bbolt: %w", p.ID, err)
 			}
 		}
@@ -330,7 +437,12 @@ func (s *Store) LoadCollection(colName string) (map[string]*PointStruct, error) 
 		}
 
 		return b.ForEach(func(k, v []byte) error {
-			stored, err := binco.DecodeExact(StoredPointBinco, v)
+			plain, err := s.openBytes(v)
+			if err != nil {
+				return fmt.Errorf("failed to decrypt point %q: %w", k, err)
+			}
+
+			stored, err := binco.DecodeExact(StoredPointBinco, plain)
 			if err != nil {
 				return err
 			}
@@ -348,7 +460,7 @@ func (s *Store) LoadCollection(colName string) (map[string]*PointStruct, error) 
 				}
 			}
 
-			points[string(k)] = p
+			points[p.ID] = p
 			return nil
 		})
 	})
@@ -368,10 +480,16 @@ func (s *Store) ListCollections() ([]string, error) {
 
 	var collections []string
 	addCollection := func(name []byte) error {
-		colName := string(name)
-		if colName != collectionsMetaBucket {
-			collections = append(collections, colName)
+		if string(name) == collectionsMetaBucket {
+			return nil
 		}
+
+		colName, err := s.logicalName(name)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt collection name %q: %w", name, err)
+		}
+
+		collections = append(collections, colName)
 		return nil
 	}
 
@@ -416,7 +534,17 @@ func (s *Store) SaveCollectionMeta(name string, meta CollectionMeta) error {
 			return err
 		}
 
-		return b.Put([]byte(name), data)
+		sealed, err := s.sealBytes(data)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt metadata for %s: %w", name, err)
+		}
+
+		key := s.bucketKey(name)
+		if len(key) == 0 {
+			return fmt.Errorf("%w: failed to derive the metadata key for %q", ErrInvalidConfig, name)
+		}
+
+		return b.Put(key, sealed)
 	})
 }
 
@@ -436,12 +564,17 @@ func (s *Store) LoadCollectionMeta(name string) (*CollectionMeta, error) {
 			return fmt.Errorf("metadata bucket not found")
 		}
 
-		data := b.Get([]byte(name))
+		data := b.Get(s.bucketKey(name))
 		if data == nil {
 			return fmt.Errorf("metadata for collection %s not found", name)
 		}
 
-		return json.Unmarshal(data, &meta)
+		plain, err := s.openBytes(data)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt metadata for %s: %w", name, err)
+		}
+
+		return json.Unmarshal(plain, &meta)
 	})
 
 	if err != nil {
@@ -467,8 +600,17 @@ func (s *Store) ListCollectionMetas() ([]CollectionMeta, error) {
 		}
 
 		return b.ForEach(func(k, v []byte) error {
+			if string(k) == markerKey {
+				return nil // the encryption marker is not collection metadata
+			}
+
+			plain, err := s.openBytes(v)
+			if err != nil {
+				return fmt.Errorf("failed to decrypt metadata %q: %w", k, err)
+			}
+
 			var meta CollectionMeta
-			if err := json.Unmarshal(v, &meta); err != nil {
+			if err := json.Unmarshal(plain, &meta); err != nil {
 				return err
 			}
 			metas = append(metas, meta)
@@ -497,7 +639,11 @@ func (s *Store) DeletePoints(colName string, ids []string) error {
 		}
 
 		for _, id := range ids {
-			if err := b.Delete([]byte(id)); err != nil {
+			key := s.keyBytes(id)
+			if len(key) == 0 {
+				return fmt.Errorf("%w: failed to derive the key for point %q", ErrInvalidConfig, id)
+			}
+			if err := b.Delete(key); err != nil {
 				return fmt.Errorf("failed to delete point %s from bbolt: %w", id, err)
 			}
 		}
@@ -511,15 +657,20 @@ func (s *Store) DropCollection(name string) error {
 		return fmt.Errorf("storage is closed")
 	}
 
+	key := s.bucketKey(name)
+	if len(key) == 0 {
+		return fmt.Errorf("%w: failed to derive the bucket key for collection %q", ErrInvalidConfig, name)
+	}
+
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		// Delete collection bucket under the configured root.
 		if len(s.root) > 0 {
 			if root := tx.Bucket(s.root); root != nil {
-				if err := root.DeleteBucket([]byte(name)); err != nil && err != bbolt.ErrBucketNotFound {
+				if err := root.DeleteBucket(key); err != nil && err != bbolt.ErrBucketNotFound {
 					return fmt.Errorf("failed to delete bucket: %w", err)
 				}
 			}
-		} else if err := tx.DeleteBucket([]byte(name)); err != nil && err != bbolt.ErrBucketNotFound {
+		} else if err := tx.DeleteBucket(key); err != nil && err != bbolt.ErrBucketNotFound {
 			return fmt.Errorf("failed to delete bucket: %w", err)
 		}
 
@@ -529,7 +680,7 @@ func (s *Store) DropCollection(name string) error {
 			return err
 		}
 		if metaBucket != nil {
-			if err := metaBucket.Delete([]byte(name)); err != nil {
+			if err := metaBucket.Delete(key); err != nil {
 				return fmt.Errorf("failed to delete metadata: %w", err)
 			}
 		}
