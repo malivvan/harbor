@@ -253,3 +253,12 @@ verification + rotation).
   `NewCollection`+`Search`, confidentiality, wrong key, tampering, fresh nonces,
   quantization, mode mismatch, empty-store adoption and invalid config.
   `go vet ./vec/...` and `go test ./vec/...` pass.
+- [x] **Phase 2 — Tier 2 (`EncryptPointIDs` + `EncryptCollectionNames`)** —
+  `keyBytes` seals point IDs (domain `id`), `bucketKey` seals collection bucket
+  and metadata names (domain `name`), and `logicalName` decrypts names for
+  `ListCollections`, so listing still returns the caller's names. Exact deletes,
+  reloads and searches keep working through the deterministic SIV keys.
+  `vec/aead_names_test.go` covers SIV determinism and domain separation, hidden
+  IDs/names/metadata keys, the full round trip under encrypted names (including
+  root-scoped stores and reopen), and the rejection of multi-key providers when
+  names are encrypted.
