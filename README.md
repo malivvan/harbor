@@ -26,6 +26,7 @@ Storm is a simple and powerful toolkit for [BoltDB](https://github.com/etcd-io/b
 - [Nodes and nested buckets](#nodes-and-nested-buckets)
 - [Key/value store](#keyvalue-store)
   - [Bucket store (kv)](#bucket-store-kv)
+  - [Time series store (ts)](#time-series-store-ts)
 - [Context and cancellation](#context-and-cancellation)
 - [Error handling](#error-handling)
 - [Database lifecycle](#database-lifecycle)
@@ -582,6 +583,37 @@ err = users.Drop(ctx)
 depend on the `db` package. The `Store` borrows the bbolt database; closing it
 does not close the native database. `Bucket.Keys`, `Bucket.Len`, and
 `Bucket.ForEach` operate on raw encoded keys and skip nested metadata buckets.
+
+### Time series store (ts)
+
+The `ts` package stores named series of timestamped points. A `Store` manages
+series under a root bucket, and each point is stored as an order-preserving
+8-byte timestamp key with an 8-byte `float64` value:
+
+```go
+import "github.com/malivvan/storm/ts"
+
+store, err := ts.Open(ctx, bDB, []byte("metrics"))
+if err != nil {
+	log.Fatal(err)
+}
+defer store.Close()
+
+cpu := store.Series("cpu")
+now := time.Now().UnixNano()
+
+err = cpu.Insert(ctx, ts.Point{Timestamp: now, Value: 0.5})
+err = cpu.SetLabels(ctx, map[string]string{"host": "web-1"})
+
+points, err := cpu.Range(ctx, now, now)
+samples, err := cpu.Aggregate(ctx, now, now, int64(time.Second), ts.AggAvg)
+```
+
+`ts.Open(ctx, db, root)` borrows the caller-owned bbolt database and never
+closes it. Because keys are chronological, `Range` and `RangeEach` scan in time
+order without an in-memory index. Aggregations support `min`, `max`, `avg`,
+`sum`, `count`, `first`, and `last`; `DeleteRange`, `Drop`, and `DeleteSeries`
+remove points or entire series.
 
 ## Context and cancellation
 

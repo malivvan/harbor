@@ -15,6 +15,8 @@ No other functional changes are made; the only edits outside the new `ts/`
 package are the minimal integration points (top-level store wiring, tests, and
 docs) required to make `ts` a first-class store.
 
+**Implementation status:** complete. See [Execution log](#execution-log).
+
 ## Context: how the existing stores are structured
 
 All four sibling stores share the same shape, which `ts` must follow:
@@ -388,19 +390,51 @@ Acceptance criteria:
 
 ## Ordered task list
 
-1. **Scaffold the package** — create `ts/` with `doc.go`, `errors.go`, `encode.go`,
+1. [x] **Scaffold the package** — create `ts/` with `doc.go`, `errors.go`, `encode.go`,
    `store.go`, `series.go`, `aggregate.go`.
-2. **Implement encoding + errors** — `encodeKey`/`decodeKey`/`encodeValue`/
+2. [x] **Implement encoding + errors** — `encodeKey`/`decodeKey`/`encodeValue`/
    `decodeValue` and the sentinel errors, with unit coverage.
-3. **Implement `Store`** — `Open`, `NativeDB`, `Root`, `Close`, `Series`,
+3. [x] **Implement `Store`** — `Open`, `NativeDB`, `Root`, `Close`, `Series`,
    `SeriesNames`, `DeleteSeries`, and the internal root/series/meta bucket
    helpers.
-4. **Implement `Series` CRUD** — labels, `Insert`/`InsertMany`, `Get`/`First`/
+4. [x] **Implement `Series` CRUD** — labels, `Insert`/`InsertMany`, `Get`/`First`/
    `Last`, `Range`/`RangeEach`, `Count`, `DeleteRange`, `Drop`.
-5. **Implement aggregation** — `AggregateFunc` constants and `Aggregate`.
-6. **Wire into `storm.go`** — import, field, `ts.Open(ctx, s.b, []byte{5})`, and
+5. [x] **Implement aggregation** — `AggregateFunc` constants and `Aggregate`.
+6. [x] **Wire into `storm.go`** — import, field, `ts.Open(ctx, s.b, []byte{5})`, and
    `TS()` accessor.
-7. **Add tests** — `ts/ts_test.go` and `ts/bench_test.go`.
-8. **Extend integration test** — `storm_test.go` exercises `s.TS()`.
-9. **Document** — README section and CHANGELOG bullet.
-10. **Verify** — run the verification checklist; fix any gofmt/vet/test issues.
+7. [x] **Add tests** — `ts/ts_test.go` and `ts/bench_test.go`.
+8. [x] **Extend integration test** — `storm_test.go` exercises `s.TS()`.
+9. [x] **Document** — README section and CHANGELOG bullet.
+10. [x] **Verify** — final verification is recorded in the execution log.
+
+## Execution log
+
+- `855d25c` — **feat(ts): add time series store**. Added the complete `ts`
+  package, unit tests, and benchmarks.
+- `85f82f6` — **feat: wire time series store into root Store**. Added the
+  `ts.Open(ctx, s.b, []byte{5})` wiring, `Store.TS()`, and the integration test.
+  Also renamed stale `ExampleDB_*` examples to `ExampleStore_*` so the db test
+  suite compiles.
+- Documentation commit — README, CHANGELOG, this plan update, and `POST.md`.
+
+### Verification results
+
+- `gofmt -l ts storm.go storm_test.go db/examples_test.go`: clean.
+- `go vet ./...`: pass.
+- `go build ./...`: pass.
+- `go test -count=1 -timeout 180s ./...`: pass.
+- `go test -race -count=1 -timeout 300s ./ts/...`: pass.
+
+### Implementation notes
+
+- `Range`, `RangeEach`, and `DeleteRange` reject `start > end` with
+  `ErrInvalidRange`, consistent with `Aggregate`.
+- `Store.SeriesNames` returns names created through the current Store in
+  creation order, matching `kv.Store.BucketNames`.
+- `InsertMany` creates the series bucket lazily. `SetLabels` can create metadata
+  independently; `DeleteSeries` treats either a point bucket or a metadata entry
+  as evidence that the series exists.
+- Point records are exactly 8-byte timestamp keys plus 8-byte float64 values;
+  malformed records are skipped during scans and reported as errors for direct
+  point lookup when the value width is wrong.
+- `ts` depends only on bbolt and the standard library.
