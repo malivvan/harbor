@@ -1,6 +1,7 @@
 package storm
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -12,7 +13,7 @@ import (
 )
 
 func TestStorm(t *testing.T) {
-	s, err := Open(nil, "storm.db", 0600, nil)
+	s, err := Open(nil, "storm.db", 0600, nil, Config{Secret: bytes.Repeat([]byte{9}, 32)})
 	if err != nil {
 		t.Fatalf("failed to open storm: %v", err)
 	}
@@ -105,4 +106,13 @@ func TestStorm(t *testing.T) {
 		log.Fatalf("FS ReadFile error: %v", err)
 	}
 	log.Printf("Current content of blob.txt: %s", string(content))
+}
+
+func TestOpenRejectsInvalidSecret(t *testing.T) {
+	path := t.TempDir() + "/invalid-key.db"
+	for _, secret := range [][]byte{nil, make([]byte, 16), make([]byte, 33)} {
+		if _, err := Open(context.Background(), path, 0600, nil, Config{Secret: secret}); err == nil {
+			t.Fatalf("Open accepted a %d-byte secret", len(secret))
+		}
+	}
 }

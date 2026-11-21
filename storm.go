@@ -3,6 +3,7 @@ package storm
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"os"
 	"sync"
@@ -15,6 +16,13 @@ import (
 	"github.com/malivvan/storm/db"
 	bolt "go.etcd.io/bbolt"
 )
+
+// Config configures a Store.
+type Config struct {
+	// Secret is the raw 32-byte master key shared by the db, fs, ts and vec
+	// sub-stores. It is required: every sub-store is opened encrypted.
+	Secret []byte
+}
 
 type Store struct {
 	b   *bolt.DB
@@ -32,9 +40,12 @@ var _zero = []byte{0} // kv
 var _one = []byte{1}  // db
 var _two = []byte{2}
 
-func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Options) (s *Store, err error) {
+func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Options, cfg Config) (s *Store, err error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if len(cfg.Secret) != db.KeySize {
+		return nil, fmt.Errorf("storm: master key must be %d bytes, got %d", db.KeySize, len(cfg.Secret))
 	}
 	s = &Store{ctx: ctx}
 	s.b, err = bolt.Open(path, mode, options)
@@ -70,10 +81,10 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Opti
 		return nil
 	})
 
-	secret := [32]byte{9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9}
+	secret := append([]byte(nil), cfg.Secret...)
 
 	if s.db, err = db.Open(ctx, s.b, []byte{1}, db.Config{
-		Secret:          secret[:],
+		Secret:          secret,
 		Codec:           db.JSONCodec,
 		EncryptKeys:     true,
 		EncryptValues:   true,
@@ -82,21 +93,21 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Opti
 		return nil, err
 	}
 	if s.fs, err = fs.Open(ctx, s.b, []byte{2}, fs.Config{
-		Secret:          secret[:],
+		Secret:          secret,
 		EncryptMetadata: true,
 		EncryptContent:  true,
 	}); err != nil {
 		return nil, err
 	}
 	if s.ts, err = ts.Open(ctx, s.b, []byte{3}, ts.Config{
-		Secret:             secret[:],
+		Secret:             secret,
 		EncryptValues:      true,
 		EncryptSeriesNames: true,
 	}); err != nil {
 		return nil, err
 	}
 	if s.vec, err = vec.Open(ctx, s.b, []byte{4}, vec.Config{
-		Secret:                 secret[:],
+		Secret:                 secret,
 		UseQuant:               false,
 		Quantizer:              nil,
 		EncryptPoints:          true,

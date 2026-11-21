@@ -32,6 +32,8 @@ each entry lists a concrete location and a suggested fix. Severity is High / Med
   Fix: accept a caller-supplied key (e.g. a `Key []byte`/`Secret` parameter on `Open`, or a
   `Config` struct), reject lengths other than 32, and fail loud if encryption is requested
   without a key. Remove the hard-coded constant.
+  **Status: FIXED** — `Open` now takes `Config{Secret []byte}`, rejects any length other than
+  `db.KeySize`, and the hard-coded constant is gone.
 
 - **Top-level `Get`/`Set` target a bucket that is never created**
   — `storm.go:30-33, 44-71, 132-169`
