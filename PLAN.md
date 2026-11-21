@@ -275,3 +275,12 @@ verification + rotation).
   rotation plus the documented `MultiKeyProvider` finish, preconditions, tamper
   detection (point blob, metadata, encrypted ID, marker canary) and the
   multi-key fallback path.
+- [x] **Phase 4 — verification and docs** — `gofmt -l vec internal/encryption` is
+  empty (one pre-existing indentation issue in `vec/hnsw/graph.go` was fixed:
+  whitespace only), `go vet ./vec/... ./internal/encryption/...`,
+  `go build ./vec/...`, `go test -count=1 ./vec/...` and
+  `go test -race -count=1 ./vec/...` all pass, and the full repository suite
+  (`go test -count=1 ./...`) shows no regressions. `POST.md` records the design
+  decisions and the follow-ups (owned-DB encrypted constructors, plaintext
+  migration, chunked/online rotation, multi-key with encrypted names, leak
+  surface, docs, extra tests).

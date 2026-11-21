@@ -78,7 +78,7 @@ func (s searchCandidate[K]) Less(o searchCandidate[K]) bool {
 // search returns the layer node closest to the target node
 // within the same layer.
 func (n *layerNode[K]) search(
-// k is the number of candidates in the result set.
+	// k is the number of candidates in the result set.
 	k int,
 	efSearch int,
 	target Vector,
