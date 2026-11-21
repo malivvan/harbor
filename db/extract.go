@@ -10,7 +10,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// Storm tags
+// DB tags
 const (
 	tagID        = "id"
 	tagIdx       = "index"
@@ -119,7 +119,7 @@ func extractField(value *reflect.Value, field *reflect.StructField, m *structCon
 	var f *fieldConfig
 	var err error
 
-	tag := field.Tag.Get("storm")
+	tag := field.Tag.Get("db")
 	if tag != "" {
 		f = &fieldConfig{
 			Name:           field.Name,

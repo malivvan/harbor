@@ -14,9 +14,9 @@ import (
 
 // attachUser exercises the record, index, and unique-index paths.
 type attachUser struct {
-	ID   int    `storm:"id"`
-	Name string `storm:"index"`
-	Tag  string `storm:"unique"`
+	ID   int    `db:"id"`
+	Name string `db:"index"`
+	Tag  string `db:"unique"`
 }
 
 // attachDB opens a Storm database in a temporary directory.
@@ -31,7 +31,7 @@ func attachDB(t *testing.T) *Store {
 	t.Cleanup(func() {
 		require.NoError(t, bDB.Close())
 	})
-	db, err := Open(context.Background(), bDB, nil, nil)
+	db, err := Open(context.Background(), bDB, nil, Config{})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, db.Close())

@@ -11,7 +11,7 @@ import (
 const KeySize = encryption.KeySize
 
 // Config configures a Store: it enables optional vector quantization and
-// optional encryption. A nil Config, or one with no quantization and no
+// optional encryption. A zero Config, or one with no quantization and no
 // encryption feature enabled, keeps the plaintext on-disk format.
 type Config struct {
 	// UseQuant enables vector quantization. When true and Quantizer is nil,
@@ -39,8 +39,8 @@ type Config struct {
 	EncryptCollectionNames bool
 }
 
-func (c *Config) encryptionEnabled() bool {
-	return c != nil && (c.EncryptPoints || c.EncryptPointIDs || c.EncryptCollectionNames)
+func (c Config) encryptionEnabled() bool {
+	return c.EncryptPoints || c.EncryptPointIDs || c.EncryptCollectionNames
 }
 
 // Key domains. Deterministic key encryption is domain-separated, so the same
@@ -331,8 +331,8 @@ func (s *Store) metaBucketForRead() ([]string, error) {
 }
 
 // resolveConfig turns a Config into an encryption state. It returns nil for a
-// nil Config and for a Config that enables no encryption feature.
-func resolveConfig(cfg *Config) (*encState, error) {
+// zero Config and for a Config that enables no encryption feature.
+func resolveConfig(cfg Config) (*encState, error) {
 	if !cfg.encryptionEnabled() {
 		return nil, nil
 	}

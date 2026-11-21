@@ -50,7 +50,7 @@ func ExampleOpen() {
 		}
 	}()
 
-	db, err := storm.Open(ctx, bdb, nil, nil)
+	db, err := storm.Open(ctx, bdb, nil, storm.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -80,12 +80,12 @@ func ExampleStore_Save() {
 	ctx := context.Background()
 
 	type User struct {
-		ID        int    `storm:"id,increment"` // the increment tag will auto-increment integer IDs without existing values.
-		Group     string `storm:"index"`
-		Email     string `storm:"unique"`
+		ID        int    `db:"id,increment"` // the increment tag will auto-increment integer IDs without existing values.
+		Group     string `db:"index"`
+		Email     string `db:"unique"`
 		Name      string
-		Age       int       `storm:"index"`
-		CreatedAt time.Time `storm:"index"`
+		Age       int       `db:"index"`
+		CreatedAt time.Time `db:"index"`
 	}
 
 	// Open the underlying bbolt database, then wrap it with a codec. JSON is
@@ -100,7 +100,7 @@ func ExampleStore_Save() {
 		}
 	}()
 
-	db, err := storm.Open(ctx, bdb, nil, &storm.Config{Codec: storm.JSONCodec})
+	db, err := storm.Open(ctx, bdb, nil, storm.Config{Codec: storm.JSONCodec})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func ExampleOpen_existingDB() {
 		log.Fatal(err)
 	}
 
-	db, err := storm.Open(ctx, bDB, nil, nil)
+	db, err := storm.Open(ctx, bDB, nil, storm.Config{})
 	if err != nil {
 		if closeErr := bDB.Close(); closeErr != nil {
 			log.Println("native close after open failure:", closeErr)
@@ -676,21 +676,21 @@ func ExampleNode_RangeScan() {
 }
 
 type User struct {
-	ID        int    `storm:"id,increment"`
-	Group     string `storm:"index"`
-	Email     string `storm:"unique"`
+	ID        int    `db:"id,increment"`
+	Group     string `db:"index"`
+	Email     string `db:"unique"`
 	Name      string
-	Age       int       `storm:"index"`
-	CreatedAt time.Time `storm:"index"`
+	Age       int       `db:"index"`
+	CreatedAt time.Time `db:"index"`
 }
 
 type Account struct {
-	ID     int   `storm:"id,increment"`
+	ID     int   `db:"id,increment"`
 	Amount int64 // amount in cents
 }
 
 type Note struct {
-	ID   string `storm:"id"`
+	ID   string `db:"id"`
 	Text string
 }
 
@@ -706,7 +706,7 @@ func prepareDB() (string, *storm.Store) {
 	}
 	exampleBoltDBs = append(exampleBoltDBs, bdb)
 
-	db, err := storm.Open(ctx, bdb, nil, nil)
+	db, err := storm.Open(ctx, bdb, nil, storm.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -11,8 +11,8 @@ import (
 )
 
 // aeadNamesConfig returns a config that encrypts everything vec supports.
-func aeadNamesConfig(key []byte) *Config {
-	return &Config{
+func aeadNamesConfig(key []byte) Config {
+	return Config{
 		Secret:                 key,
 		EncryptPoints:          true,
 		EncryptPointIDs:        true,
@@ -50,7 +50,7 @@ func TestAEADDeterministicNameEncryption(t *testing.T) {
 	require.ErrorIs(t, err, ErrAuthFailed, "a key of another domain must not authenticate")
 
 	// A plaintext store must not touch names at all.
-	plain, err := resolveConfig(nil)
+	plain, err := resolveConfig(Config{})
 	require.NoError(t, err)
 	require.Nil(t, plain)
 	raw, err := plain.sealName("point-1", keyDomainID)

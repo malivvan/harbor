@@ -17,7 +17,7 @@ func openStormDB(tb testing.TB, path string) *storm.Store {
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = bdb.Close() })
 
-	db, err := storm.Open(context.Background(), bdb, nil, nil)
+	db, err := storm.Open(context.Background(), bdb, nil, storm.Config{})
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = db.Close() })
 

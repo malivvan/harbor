@@ -1,7 +1,4 @@
-# Storm
-
-[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/storm/db.svg)](https://pkg.go.dev/github.com/malivvan/storm/db)
-[![CI](https://github.com/malivvan/storm/actions/workflows/main.yml/badge.svg)](https://github.com/malivvan/storm/actions/workflows/main.yml)
+# storm [![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/storm/db.svg)](https://pkg.go.dev/github.com/malivvan/storm/db)
 
 Storm is a simple and powerful toolkit for [BoltDB](https://github.com/etcd-io/bbolt), forked from [Storm](https://github.com/asdine/storm). It provides indexes, a wide range of methods to store and fetch data, an advanced query system, and much more.
 
@@ -66,10 +63,10 @@ import (
 )
 
 type User struct {
-	ID    int    `storm:"id,increment"`
-	Name  string `storm:"index"`
-	Email string `storm:"unique"`
-	Age   int    `storm:"index"`
+	ID    int    `db:"id,increment"`
+	Name  string `db:"index"`
+	Email string `db:"unique"`
+	Age   int    `db:"index"`
 }
 
 func main() {
@@ -85,7 +82,7 @@ func main() {
 		}
 	}()
 
-	db, err := storm.Open(ctx, bDB, nil, nil)
+	db, err := storm.Open(ctx, bDB, nil, storm.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -117,12 +114,12 @@ Storm maps Go structs to BoltDB buckets. The struct name becomes the bucket name
 
 ```go
 type User struct {
-	ID        int       `storm:"id,increment"`
-	Group     string    `storm:"index"`
-	Email     string    `storm:"unique"`
+	ID        int       `db:"id,increment"`
+	Group     string    `db:"index"`
+	Email     string    `db:"unique"`
 	Name      string
-	Age       int       `storm:"index"`
-	CreatedAt time.Time `storm:"index"`
+	Age       int       `db:"index"`
+	CreatedAt time.Time `db:"index"`
 }
 ```
 
@@ -134,15 +131,15 @@ Use the `inline` tag to flatten embedded structs. The container's bucket name is
 
 ```go
 type Base struct {
-	Ident string `storm:"id"`
+	Ident string `db:"id"`
 }
 
 type User struct {
-	Base      `storm:"inline"`
-	Group     string `storm:"index"`
-	Email     string `storm:"unique"`
+	Base      `db:"inline"`
+	Group     string `db:"index"`
+	Email     string `db:"unique"`
 	Name      string
-	CreatedAt time.Time `storm:"index"`
+	CreatedAt time.Time `db:"index"`
 }
 ```
 
@@ -156,7 +153,7 @@ type User struct {
 | `unique`     | Creates a unique index for the field. |
 | `inline`     | Flattens an embedded struct into the parent. |
 
-All tags belong to the `storm` struct-tag namespace: `` `storm:"id,increment"` ``.
+All tags belong to the `db` struct-tag namespace: `` `db:"id,increment"` ``.
 
 ## Custom bucket names
 
@@ -166,8 +163,8 @@ Structs can implement `BucketNamer` to provide a custom bucket name:
 
 ```go
 type User struct {
-	ID   int    `storm:"id,increment"`
-	Name string `storm:"index"`
+	ID   int    `db:"id,increment"`
+	Name string `db:"index"`
 }
 
 func (u User) StormBucketName() string {
@@ -186,12 +183,12 @@ dynType := reflect.StructOf([]reflect.StructField{
 	{
 		Name: "ID",
 		Type: reflect.TypeOf(uint64(0)),
-		Tag:  reflect.StructTag(`storm:"id,increment"`),
+		Tag:  reflect.StructTag(`db:"id,increment"`),
 	},
 	{
 		Name: "Name",
 		Type: reflect.TypeOf(""),
-		Tag:  reflect.StructTag(`storm:"index"`),
+		Tag:  reflect.StructTag(`db:"index"`),
 	},
 })
 
@@ -209,14 +206,14 @@ Use the same reconstructed runtime type and explicit node path for subsequent re
 `Open` wraps an already-open bbolt database:
 
 ```go
-func Open(ctx context.Context, db *bolt.DB, root []byte, cfg *db.Config) (*DB, error)
+func Open(ctx context.Context, db *bolt.DB, root []byte, cfg db.Config) (*DB, error)
 ```
 
 The parameters are:
 
 - `db` — a caller-owned `*bolt.DB`. It must be non-nil and remain open while Storm is in use.
 - `root` — an optional root bucket key. Pass `nil` or an empty slice to operate from the database root.
-- `cfg` — optional store configuration. `cfg.Codec` selects the codec used for entities; pass a nil `cfg` (or a nil `Codec`) to use the default JSON codec.
+- `cfg` — optional store configuration. `cfg.Codec` selects the codec used for entities; pass a zero `Config` (or a nil `Codec`) to use the default JSON codec.
 
 `Open` does not take ownership of `db`. `DB.Close()` releases the Storm wrapper but
 leaves the bbolt database open; the caller remains responsible for closing it.
@@ -232,7 +229,7 @@ defer func() {
 	}
 }()
 
-db, err := storm.Open(ctx, bDB, nil, nil)
+db, err := storm.Open(ctx, bDB, nil, storm.Config{})
 if err != nil {
 	log.Fatal(err)
 }
@@ -265,11 +262,11 @@ err := db.Save(ctx, &user)
 
 ```go
 type Product struct {
-	ID                 int    `storm:"id,increment"`
+	ID                 int    `db:"id,increment"`
 	Name               string
-	Count              uint64 `storm:"increment"`
-	IndexedCount       uint32 `storm:"index,increment"`
-	UniqueCount        int16  `storm:"unique,increment=100"`
+	Count              uint64 `db:"increment"`
+	IndexedCount       uint32 `db:"index,increment"`
+	UniqueCount        int16  `db:"unique,increment=100"`
 }
 
 p := Product{Name: "Widget"}
@@ -593,7 +590,7 @@ series under a root bucket, and each point is stored as an order-preserving
 ```go
 import "github.com/malivvan/storm/ts"
 
-store, err := ts.Open(ctx, bDB, []byte("metrics"), nil)
+store, err := ts.Open(ctx, bDB, []byte("metrics"), ts.Config{})
 if err != nil {
 	log.Fatal(err)
 }
@@ -725,8 +722,8 @@ Storm marshals data to BoltDB using a codec. The default is JSON, exposed as
 ```go
 import stormdb "github.com/malivvan/storm/db"
 
-store, err := storm.Open(ctx, bDB, nil, nil) // JSON, the default
-store, err = storm.Open(ctx, bDB, nil, &stormdb.Config{
+store, err := storm.Open(ctx, bDB, nil, storm.Config{}) // JSON, the default
+store, err = storm.Open(ctx, bDB, nil, stormdb.Config{
 	Codec: stormdb.JSONCodec, // explicit
 })
 ```
@@ -738,11 +735,11 @@ store, err = storm.Open(ctx, bDB, nil, &stormdb.Config{
 | JSON (default) | `storm/db` | `db.JSONCodec` |
 
 Encryption is not a codec. Pass a `Config` with a `Secret` to `Open` to enable
-native, optional AEAD encryption for a store; a nil config keeps creating
+native, optional AEAD encryption for a store; a zero config keeps creating
 plaintext stores.
 
 ```go
-store, err := storm.Open(ctx, bDB, nil, &storm.Config{
+store, err := storm.Open(ctx, bDB, nil, storm.Config{
 	Secret:          key,  // raw 32-byte key
 	EncryptValues:   true, // seal record and key/value values
 	EncryptMetadata: true, // seal auto-increment counters

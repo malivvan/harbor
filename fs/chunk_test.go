@@ -15,7 +15,7 @@ import (
 
 func chunkedStore(t *testing.T, root []byte, keySeed byte, chunkSize int) (*Store, *bolt.DB) {
 	t.Helper()
-	return openEncStore(t, root, &Config{Secret: testEncKey(keySeed), ChunkSize: chunkSize})
+	return openEncStore(t, root, Config{Secret: testEncKey(keySeed), ChunkSize: chunkSize})
 }
 
 type chunkEntry struct {
@@ -209,7 +209,7 @@ func TestChunkedEmptyFile(t *testing.T) {
 
 func TestChunkedTamper(t *testing.T) {
 	root := []byte("ts")
-	cfg := &Config{Secret: testEncKey(23), ChunkSize: 8}
+	cfg := Config{Secret: testEncKey(23), ChunkSize: 8}
 	store, db := openEncStore(t, root, cfg)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -247,7 +247,7 @@ func TestChunkedTamper(t *testing.T) {
 func TestChunkedMatchesPlaintext(t *testing.T) {
 	root := []byte("ts")
 
-	plain, _ := openEncStore(t, root, nil)
+	plain, _ := openEncStore(t, root, Config{})
 	chunked, _ := chunkedStore(t, root, 24, 5)
 
 	for _, store := range []*Store{plain, chunked} {
@@ -311,7 +311,7 @@ func TestChunkedConfigMismatch(t *testing.T) {
 	root := []byte("ts")
 	dbPath := filepath.Join(t.TempDir(), "chunk-mode.db")
 
-	store, db, err := openEncStoreAt(t, dbPath, root, &Config{Secret: testEncKey(26), ChunkSize: 8})
+	store, db, err := openEncStoreAt(t, dbPath, root, Config{Secret: testEncKey(26), ChunkSize: 8})
 	require.NoError(t, err)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -320,7 +320,7 @@ func TestChunkedConfigMismatch(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	// Different chunk size.
-	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Secret: testEncKey(26), ChunkSize: 16})
+	store, db, err = openEncStoreAt(t, dbPath, root, Config{Secret: testEncKey(26), ChunkSize: 16})
 	require.NoError(t, err)
 	_, err = store.Open("fs")
 	require.ErrorIs(t, err, ErrWrongMode)
@@ -328,7 +328,7 @@ func TestChunkedConfigMismatch(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	// Whole-blob content mode instead of chunks.
-	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Secret: testEncKey(26), EncryptContent: true})
+	store, db, err = openEncStoreAt(t, dbPath, root, Config{Secret: testEncKey(26), EncryptContent: true})
 	require.NoError(t, err)
 	_, err = store.Open("fs")
 	require.ErrorIs(t, err, ErrWrongMode)
@@ -336,7 +336,7 @@ func TestChunkedConfigMismatch(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	// Wrong key.
-	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Secret: testEncKey(27), ChunkSize: 8})
+	store, db, err = openEncStoreAt(t, dbPath, root, Config{Secret: testEncKey(27), ChunkSize: 8})
 	require.NoError(t, err)
 	_, err = store.Open("fs")
 	require.ErrorIs(t, err, ErrAuthFailed)
@@ -344,7 +344,7 @@ func TestChunkedConfigMismatch(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	// Correct settings still read the data.
-	store, db, err = openEncStoreAt(t, dbPath, root, &Config{Secret: testEncKey(26), ChunkSize: 8})
+	store, db, err = openEncStoreAt(t, dbPath, root, Config{Secret: testEncKey(26), ChunkSize: 8})
 	require.NoError(t, err)
 	defer db.Close()
 	defer store.Close()
@@ -357,7 +357,7 @@ func TestChunkedConfigMismatch(t *testing.T) {
 
 func TestChunkedOptionalWhenDisabled(t *testing.T) {
 	root := []byte("ts")
-	store, db := openEncStore(t, root, &Config{Secret: testEncKey(28), EncryptContent: true})
+	store, db := openEncStore(t, root, Config{Secret: testEncKey(28), EncryptContent: true})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, fsys, "/file.txt", "whole blob")

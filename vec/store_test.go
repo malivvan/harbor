@@ -389,7 +389,7 @@ func openRootTestStore(t *testing.T, root []byte) (*Store, *bolt.DB) {
 		_ = bdb.Close()
 	})
 
-	store, err := Open(context.Background(), bdb, root, nil)
+	store, err := Open(context.Background(), bdb, root, Config{})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -501,11 +501,11 @@ func TestStoreRootsAreIsolated(t *testing.T) {
 	}
 	defer bdb.Close()
 
-	storeA, err := Open(context.Background(), bdb, []byte("a"), nil)
+	storeA, err := Open(context.Background(), bdb, []byte("a"), Config{})
 	if err != nil {
 		t.Fatalf("open store a: %v", err)
 	}
-	storeB, err := Open(context.Background(), bdb, []byte("b"), nil)
+	storeB, err := Open(context.Background(), bdb, []byte("b"), Config{})
 	if err != nil {
 		t.Fatalf("open store b: %v", err)
 	}

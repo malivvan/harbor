@@ -9,7 +9,7 @@ import (
 // KeySize is the required key length in bytes (256 bits).
 const KeySize = encryption.KeySize
 
-// Config enables optional encryption for a Store and its file systems. A nil
+// Config enables optional encryption for a Store and its file systems. A zero
 // Config, or one with no encryption feature enabled, keeps the plaintext
 // on-disk format.
 type Config struct {
@@ -28,8 +28,8 @@ type Config struct {
 	ChunkSize int
 }
 
-func (c *Config) encryptionEnabled() bool {
-	return c != nil && (c.EncryptContent || c.EncryptMetadata || c.ChunkSize != 0)
+func (c Config) encryptionEnabled() bool {
+	return c.EncryptContent || c.EncryptMetadata || c.ChunkSize != 0
 }
 
 // encState is the shared encryption configuration of a Store. A nil encState
@@ -162,7 +162,7 @@ func (e *encState) verifyCanary(canary []byte) error {
 	return encryption.VerifyCanary(e.kc, canary, canaryPlaintext)
 }
 
-func resolveConfig(cfg *Config) (*encState, error) {
+func resolveConfig(cfg Config) (*encState, error) {
 	if !cfg.encryptionEnabled() {
 		return nil, nil
 	}

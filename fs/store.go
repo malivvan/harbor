@@ -37,7 +37,7 @@ type Store struct {
 // Store never closes db. root is an optional parent bucket key for all file
 // systems; nil or an empty slice means the database root.
 //
-// cfg enables optional encryption. A nil config, or one with no encryption
+// cfg enables optional encryption. A zero Config, or one with no encryption
 // enabled, creates a plaintext store.
 func Open(ctx context.Context, bdb *bolt.DB, key []byte, cfg Config) (*Store, error) {
 	if ctx == nil {
@@ -50,7 +50,7 @@ func Open(ctx context.Context, bdb *bolt.DB, key []byte, cfg Config) (*Store, er
 		return nil, ErrNilParam
 	}
 
-	enc, err := resolveConfig(&cfg)
+	enc, err := resolveConfig(cfg)
 	if err != nil {
 		return nil, err
 	}

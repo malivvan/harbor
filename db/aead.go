@@ -12,7 +12,7 @@ import (
 const KeySize = encryption.KeySize
 
 // Config configures a Store: it selects the codec and enables optional
-// encryption. A nil Config, or one with no encryption feature enabled, keeps
+// encryption. A zero Config, or one with no encryption feature enabled, keeps
 // the plaintext on-disk format and uses the default JSON codec.
 type Config struct {
 	// Codec encodes and decodes entities. A nil Codec selects the default JSON
@@ -37,8 +37,8 @@ type Config struct {
 	EncryptKeys bool
 }
 
-func (c *Config) encryptionEnabled() bool {
-	return c != nil && (c.EncryptValues || c.EncryptMetadata || c.EncryptKeys)
+func (c Config) encryptionEnabled() bool {
+	return c.EncryptValues || c.EncryptMetadata || c.EncryptKeys
 }
 
 // Key domains. Every deterministic key encryption is domain-separated, so the
@@ -337,8 +337,8 @@ func (n *node) hasUserData(ctx context.Context) (bool, error) {
 }
 
 // resolveConfig turns a Config into an encryption state. It returns nil for a
-// nil Config and for a Config that enables no encryption feature.
-func resolveConfig(cfg *Config) (*encState, error) {
+// zero Config and for a Config that enables no encryption feature.
+func resolveConfig(cfg Config) (*encState, error) {
 	if !cfg.encryptionEnabled() {
 		return nil, nil
 	}

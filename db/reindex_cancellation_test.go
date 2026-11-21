@@ -115,10 +115,10 @@ func (c *marshalErrorCancelingCodec) Unmarshal(raw []byte, to interface{}) error
 // ---------------------------------------------------------------------------
 
 type reindexUser struct {
-	ID    int    `storm:"id"`
-	Name  string `storm:"index"`
-	Group string `storm:"unique"`
-	Score int    `storm:"index"`
+	ID    int    `db:"id"`
+	Name  string `db:"index"`
+	Group string `db:"unique"`
+	Score int    `db:"index"`
 }
 
 // ============================================================================

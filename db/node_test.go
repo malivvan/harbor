@@ -75,7 +75,7 @@ func TestNodeWithCodec(t *testing.T) {
 
 		type User struct {
 			ID   int
-			Name string `storm:"index"`
+			Name string `db:"index"`
 		}
 
 		requireBytesEqual := func(raw []byte, expected interface{}) {
@@ -185,8 +185,8 @@ func defaultTestOpenOptions() testOpenOptions {
 
 // testUser is used in external-package consumer tests.
 type testUser struct {
-	ID   int    `storm:"id"`
-	Name string `storm:"index"`
+	ID   int    `db:"id"`
+	Name string `db:"index"`
 }
 
 // TestNode_ConsumerCanUseNode verifies that an external consumer can declare
@@ -199,7 +199,7 @@ func TestNode_ConsumerCanUseNode(t *testing.T) {
 		require.NoError(t, bDB.Close())
 	})
 
-	db, err := Open(context.Background(), bDB, nil, &Config{Codec: altCodec})
+	db, err := Open(context.Background(), bDB, nil, Config{Codec: altCodec})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, db.Close())

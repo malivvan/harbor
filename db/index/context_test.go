@@ -67,7 +67,7 @@ func openTestDB(t *testing.T) *testDB {
 	require.NoError(t, err)
 	bdb, err := bolt.Open(filepath.Join(dir, "storm.db"), 0600, nil)
 	require.NoError(t, err)
-	db, err := storm.Open(context.Background(), bdb, nil, nil)
+	db, err := storm.Open(context.Background(), bdb, nil, storm.Config{})
 	require.NoError(t, err)
 	return &testDB{db: db, bdb: bdb, dir: dir}
 }

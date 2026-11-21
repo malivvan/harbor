@@ -11,8 +11,8 @@ import (
 )
 
 // aeadRotateConfig is the strongest configuration: values, metadata and keys.
-func aeadRotateConfig(key []byte) *Config {
-	return &Config{
+func aeadRotateConfig(key []byte) Config {
+	return Config{
 		Secret:          key,
 		EncryptValues:   true,
 		EncryptMetadata: true,
@@ -133,7 +133,7 @@ func TestAEADRotateValuesOnly(t *testing.T) {
 
 	bdb := aeadOpenBolt(t, path)
 	defer bdb.Close()
-	st := aeadOpenStore(t, bdb, &Config{Secret: keyA, EncryptValues: true, EncryptMetadata: true})
+	st := aeadOpenStore(t, bdb, Config{Secret: keyA, EncryptValues: true, EncryptMetadata: true})
 
 	require.NoError(t, st.Save(ctx, &aeadUser{Name: "alice", Email: "alice@example.com", Group: "staff", Age: 30}))
 	require.NoError(t, st.Save(ctx, &aeadUser{Name: "bob", Email: "bob@example.com", Group: "staff", Age: 42}))
@@ -171,12 +171,12 @@ func TestAEADRotateRejectsInvalidInput(t *testing.T) {
 	defer bdb.Close()
 
 	// Plaintext stores have nothing to rotate.
-	plain := aeadOpenStore(t, bdb, nil)
+	plain := aeadOpenStore(t, bdb, Config{})
 	err := plain.ReEncrypt(ctx, aeadKey(35))
 	require.ErrorIs(t, err, ErrInvalidConfig)
 	require.ErrorIs(t, plain.VerifyAll(ctx), ErrInvalidConfig)
 
-	enc := aeadOpenStore(t, bdb, &Config{Secret: aeadKey(35), EncryptValues: true})
+	enc := aeadOpenStore(t, bdb, Config{Secret: aeadKey(35), EncryptValues: true})
 	err = enc.ReEncrypt(ctx, []byte("short"))
 	require.ErrorIs(t, err, ErrInvalidKey)
 }

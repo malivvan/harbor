@@ -15,11 +15,11 @@ import (
 
 // aeadUser is the record type used by the encryption tests.
 type aeadUser struct {
-	ID    int    `storm:"id,increment"`
-	Name  string `storm:"index"`
-	Email string `storm:"unique"`
+	ID    int    `db:"id,increment"`
+	Name  string `db:"index"`
+	Email string `db:"unique"`
 	Group string
-	Age   int `storm:"index"`
+	Age   int `db:"index"`
 }
 
 // aeadPayload is the key/value payload used by the encryption tests.
@@ -40,7 +40,7 @@ func aeadOpenBolt(t *testing.T, path string) *bolt.DB {
 }
 
 // aeadOpenStore opens a Storm store on bdb with the given encryption config.
-func aeadOpenStore(t *testing.T, bdb *bolt.DB, cfg *Config) *Store {
+func aeadOpenStore(t *testing.T, bdb *bolt.DB, cfg Config) *Store {
 	t.Helper()
 	st, err := Open(context.Background(), bdb, nil, cfg)
 	require.NoError(t, err)
@@ -184,7 +184,7 @@ func TestAEADOptionalityKeepsPlaintextFormat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plain.db")
 
 	bdb := aeadOpenBolt(t, path)
-	st := aeadOpenStore(t, bdb, nil)
+	st := aeadOpenStore(t, bdb, Config{})
 	require.Nil(t, st.enc)
 
 	u := &aeadUser{ID: 7, Name: "alice", Email: "alice@example.com", Group: "staff", Age: 30}
@@ -218,7 +218,7 @@ func TestAEADOptionalityKeepsPlaintextFormat(t *testing.T) {
 	// must leave the bytes untouched.
 	bdb = aeadOpenBolt(t, path)
 	defer bdb.Close()
-	st = aeadOpenStore(t, bdb, &Config{})
+	st = aeadOpenStore(t, bdb, Config{})
 	require.Nil(t, st.enc)
 
 	records = aeadRawEntries(t, bdb, "aeadUser")
@@ -234,12 +234,12 @@ func TestAEADRoundTripMatchesPlaintext(t *testing.T) {
 	dir := t.TempDir()
 
 	plainDB := aeadOpenBolt(t, filepath.Join(dir, "plain.db"))
-	plain := aeadOpenStore(t, plainDB, nil)
+	plain := aeadOpenStore(t, plainDB, Config{})
 	want := aeadExercise(t, plain)
 	require.NoError(t, plainDB.Close())
 
 	encDB := aeadOpenBolt(t, filepath.Join(dir, "enc.db"))
-	enc := aeadOpenStore(t, encDB, &Config{
+	enc := aeadOpenStore(t, encDB, Config{
 		Secret:          aeadKey(1),
 		EncryptValues:   true,
 		EncryptMetadata: true,
@@ -259,7 +259,7 @@ func TestAEADHidesValuesAndCounters(t *testing.T) {
 
 	bdb := aeadOpenBolt(t, path)
 	defer bdb.Close()
-	st := aeadOpenStore(t, bdb, &Config{Secret: aeadKey(3), EncryptValues: true, EncryptMetadata: true})
+	st := aeadOpenStore(t, bdb, Config{Secret: aeadKey(3), EncryptValues: true, EncryptMetadata: true})
 
 	require.NoError(t, st.Save(ctx, &aeadUser{Name: "alice", Email: "alice@example.com", Group: "staff", Age: 30}))
 
@@ -293,7 +293,7 @@ func TestAEADHidesValuesAndCounters(t *testing.T) {
 func TestAEADWrongKeyFails(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "enc.db")
-	cfg := &Config{Secret: aeadKey(1), EncryptValues: true}
+	cfg := Config{Secret: aeadKey(1), EncryptValues: true}
 
 	bdb := aeadOpenBolt(t, path)
 	st := aeadOpenStore(t, bdb, cfg)
@@ -301,7 +301,7 @@ func TestAEADWrongKeyFails(t *testing.T) {
 	require.NoError(t, bdb.Close())
 
 	bdb = aeadOpenBolt(t, path)
-	_, err := Open(ctx, bdb, nil, &Config{Secret: aeadKey(2), EncryptValues: true})
+	_, err := Open(ctx, bdb, nil, Config{Secret: aeadKey(2), EncryptValues: true})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrAuthFailed)
 	require.NoError(t, bdb.Close())
@@ -339,7 +339,7 @@ func TestAEADTamperedValueFails(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "enc.db")
 
 			bdb := aeadOpenBolt(t, path)
-			st := aeadOpenStore(t, bdb, &Config{Secret: aeadKey(4), EncryptValues: true})
+			st := aeadOpenStore(t, bdb, Config{Secret: aeadKey(4), EncryptValues: true})
 			require.NoError(t, st.Save(ctx, &aeadUser{ID: 1, Name: "alice", Email: "alice@example.com"}))
 
 			require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
@@ -374,7 +374,7 @@ func TestAEADFreshNoncePerWrite(t *testing.T) {
 
 	bdb := aeadOpenBolt(t, path)
 	defer bdb.Close()
-	st := aeadOpenStore(t, bdb, &Config{Secret: aeadKey(5), EncryptValues: true})
+	st := aeadOpenStore(t, bdb, Config{Secret: aeadKey(5), EncryptValues: true})
 
 	require.NoError(t, st.Set(ctx, "aeadnonce", "a", "same"))
 	require.NoError(t, st.Set(ctx, "aeadnonce", "b", "same"))
@@ -394,13 +394,13 @@ func TestAEADModeMismatch(t *testing.T) {
 	t.Run("plaintext open of encrypted store", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "enc.db")
 		bdb := aeadOpenBolt(t, path)
-		st := aeadOpenStore(t, bdb, &Config{Secret: aeadKey(6), EncryptValues: true})
+		st := aeadOpenStore(t, bdb, Config{Secret: aeadKey(6), EncryptValues: true})
 		require.NoError(t, st.Save(ctx, &aeadUser{ID: 1, Name: "alice", Email: "alice@example.com"}))
 		require.NoError(t, bdb.Close())
 
 		bdb = aeadOpenBolt(t, path)
 		defer bdb.Close()
-		_, err := Open(ctx, bdb, nil, nil)
+		_, err := Open(ctx, bdb, nil, Config{})
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrWrongMode)
 	})
@@ -408,13 +408,13 @@ func TestAEADModeMismatch(t *testing.T) {
 	t.Run("encrypted open of plaintext store with data", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "plain.db")
 		bdb := aeadOpenBolt(t, path)
-		st := aeadOpenStore(t, bdb, nil)
+		st := aeadOpenStore(t, bdb, Config{})
 		require.NoError(t, st.Save(ctx, &aeadUser{ID: 1, Name: "alice", Email: "alice@example.com"}))
 		require.NoError(t, bdb.Close())
 
 		bdb = aeadOpenBolt(t, path)
 		defer bdb.Close()
-		_, err := Open(ctx, bdb, nil, &Config{Secret: aeadKey(6), EncryptValues: true})
+		_, err := Open(ctx, bdb, nil, Config{Secret: aeadKey(6), EncryptValues: true})
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrWrongMode)
 	})
@@ -422,13 +422,13 @@ func TestAEADModeMismatch(t *testing.T) {
 	t.Run("settings mismatch", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "enc.db")
 		bdb := aeadOpenBolt(t, path)
-		st := aeadOpenStore(t, bdb, &Config{Secret: aeadKey(6), EncryptValues: true})
+		st := aeadOpenStore(t, bdb, Config{Secret: aeadKey(6), EncryptValues: true})
 		require.NoError(t, st.Save(ctx, &aeadUser{ID: 1, Name: "alice", Email: "alice@example.com"}))
 		require.NoError(t, bdb.Close())
 
 		bdb = aeadOpenBolt(t, path)
 		defer bdb.Close()
-		_, err := Open(ctx, bdb, nil, &Config{
+		_, err := Open(ctx, bdb, nil, Config{
 			Secret:          aeadKey(6),
 			EncryptValues:   true,
 			EncryptMetadata: true,
@@ -446,11 +446,11 @@ func TestAEADEmptyPlaintextStoreAdoptsEncryption(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "store.db")
 
 	bdb := aeadOpenBolt(t, path)
-	require.NoError(t, aeadOpenStore(t, bdb, nil).Close())
+	require.NoError(t, aeadOpenStore(t, bdb, Config{}).Close())
 	require.NoError(t, bdb.Close())
 
 	bdb = aeadOpenBolt(t, path)
-	st := aeadOpenStore(t, bdb, &Config{Secret: aeadKey(7), EncryptValues: true})
+	st := aeadOpenStore(t, bdb, Config{Secret: aeadKey(7), EncryptValues: true})
 
 	info := aeadRawEntries(t, bdb, databaseInfo)
 	require.Contains(t, info, markerKey)
@@ -467,7 +467,7 @@ func TestAEADEmptyPlaintextStoreAdoptsEncryption(t *testing.T) {
 
 	bdb = aeadOpenBolt(t, path)
 	defer bdb.Close()
-	_, err = Open(ctx, bdb, nil, nil)
+	_, err = Open(ctx, bdb, nil, Config{})
 	require.ErrorIs(t, err, ErrWrongMode)
 }
 
@@ -479,6 +479,6 @@ func TestAEADInvalidConfig(t *testing.T) {
 	bdb := aeadOpenBolt(t, path)
 	defer bdb.Close()
 
-	_, err := Open(ctx, bdb, nil, &Config{Secret: []byte("short"), EncryptValues: true})
+	_, err := Open(ctx, bdb, nil, Config{Secret: []byte("short"), EncryptValues: true})
 	require.ErrorIs(t, err, ErrInvalidKey)
 }

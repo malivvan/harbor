@@ -24,7 +24,7 @@ func newFastWalkTestFS(t *testing.T) *fs.FileSystem {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	store, err := fs.Open(context.Background(), db, nil, nil)
+	store, err := fs.Open(context.Background(), db, nil, fs.Config{})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

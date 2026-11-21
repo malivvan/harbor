@@ -99,7 +99,7 @@ func TestNilContext_RootOperations(t *testing.T) {
 	require.NoError(t, db.Save(ctx, &User{ID: 1, Name: "test", Slug: "t1"}))
 
 	t.Run("Open", func(t *testing.T) {
-		db2, err := Open(nilCtx, nil, nil, nil)
+		db2, err := Open(nilCtx, nil, nil, Config{})
 		require.ErrorIs(t, err, ErrNilContext)
 		require.NotErrorIs(t, err, ErrNilParam)
 		require.Nil(t, db2)
@@ -426,7 +426,7 @@ func TestClassification_ClosedNativeDB(t *testing.T) {
 	bDB, err := bolt.Open(filepath.Join(t.TempDir(), "closed.db"), 0600, nil)
 	require.NoError(t, err)
 
-	db, err := Open(context.Background(), bDB, nil, nil)
+	db, err := Open(context.Background(), bDB, nil, Config{})
 	require.NoError(t, err)
 
 	// Close the underlying bolt.Store.

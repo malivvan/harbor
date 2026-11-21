@@ -35,7 +35,7 @@ var defaultCodec = JSONCodec
 // Store. Storm never closes db. root is the optional root bucket key; nil or an
 // empty slice means the database root.
 //
-// cfg configures the store. A nil cfg selects the default JSON codec and
+// cfg configures the store. A zero cfg selects the default JSON codec and
 // creates a plaintext store. cfg.Codec is the codec used to encode and decode
 // entities; a nil Codec selects the default JSON codec.
 //
@@ -63,7 +63,7 @@ func Open(ctx context.Context, bdb *bolt.DB, key []byte, cfg Config) (*Store, er
 		c = cfg.Codec
 	}
 
-	enc, err := resolveConfig(&cfg)
+	enc, err := resolveConfig(cfg)
 	if err != nil {
 		return nil, wrapError("open", err)
 	}

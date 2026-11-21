@@ -38,7 +38,7 @@ func TestOpen_CancelledContextDoesNotInitializeDatabase(t *testing.T) {
 	require.NoError(t, err)
 	defer bDB.Close()
 
-	db, err := Open(canceledCtx(), bDB, nil, nil)
+	db, err := Open(canceledCtx(), bDB, nil, Config{})
 	require.Error(t, err)
 	require.Nil(t, db)
 	require.True(t, errors.Is(err, context.Canceled))
@@ -81,7 +81,7 @@ func TestOpen_InitializationErrorDoesNotCloseBorrowedDatabase(t *testing.T) {
 	// checkVersion will call Set on __database, which builds the data
 	// bucket via setBytes -> newMeta, and newMeta will compare codec names and
 	// return ErrDifferentCodec. That is our deterministic initialization error.
-	db, err := Open(context.Background(), bDB, nil, nil)
+	db, err := Open(context.Background(), bDB, nil, Config{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrDifferentCodec), "expected ErrDifferentCodec, got %v", err)
 	require.Nil(t, db)

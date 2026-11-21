@@ -28,7 +28,7 @@ type ClassicNoTags struct {
 
 type ClassicBadTags struct {
 	ID          string
-	PublicField int `storm:"mrots"`
+	PublicField int `db:"mrots"`
 	//lint:ignore U1000 Private fields are deliberate reflection fixtures.
 	privateField string
 	Date         time.Time
@@ -41,49 +41,49 @@ type ClassicBadTags struct {
 
 type ClassicUnique struct {
 	ID          string
-	PublicField int `storm:"unique"`
+	PublicField int `db:"unique"`
 	//lint:ignore U1000 Private tagged fields verify reflection visibility rules.
-	privateField string `storm:"unique"`
+	privateField string `db:"unique"`
 	//lint:ignore U1000 Private tagged fields verify reflection visibility rules.
-	privateField2 string    `storm:"unique"`
-	Date          time.Time `storm:"unique"`
+	privateField2 string    `db:"unique"`
+	Date          time.Time `db:"unique"`
 	InlineStruct  struct {
 		A float32
 		B float64
-	} `storm:"unique"`
-	Interf io.Writer `storm:"unique"`
+	} `db:"unique"`
+	Interf io.Writer `db:"unique"`
 }
 
 type ClassicIndex struct {
 	ID          string
-	PublicField int `storm:"index"`
+	PublicField int `db:"index"`
 	//lint:ignore U1000 Private tagged fields verify reflection visibility rules.
-	privateField string    `storm:"index"`
-	Date         time.Time `storm:"index"`
+	privateField string    `db:"index"`
+	Date         time.Time `db:"index"`
 	InlineStruct struct {
 		a float32
 		B float64
-	} `storm:"index"`
-	InlineStructPtr *UserWithNoID `storm:"index"`
-	Interf          io.Writer     `storm:"index"`
+	} `db:"index"`
+	InlineStructPtr *UserWithNoID `db:"index"`
+	Interf          io.Writer     `db:"index"`
 }
 
 type ClassicInline struct {
-	PublicField  int `storm:"unique"`
-	ClassicIndex `storm:"inline"`
-	*ToEmbed     `storm:"inline"`
-	Date         time.Time `storm:"unique"`
+	PublicField  int `db:"unique"`
+	ClassicIndex `db:"inline"`
+	*ToEmbed     `db:"inline"`
+	Date         time.Time `db:"unique"`
 }
 
 type User struct {
-	ID          int       `storm:"id,increment"`
-	Name        string    `storm:"index"`
-	Age         int       `storm:"index,increment"`
-	DateOfBirth time.Time `storm:"index"`
+	ID          int       `db:"id,increment"`
+	Name        string    `db:"index"`
+	Age         int       `db:"index,increment"`
+	DateOfBirth time.Time `db:"index"`
 	Group       string
 	//lint:ignore U1000 Private fields are deliberate reflection fixtures.
 	unexportedField int
-	Slug            string `storm:"unique"`
+	Slug            string `db:"unique"`
 }
 
 type ToEmbed struct {
@@ -91,12 +91,12 @@ type ToEmbed struct {
 }
 
 type NestedID struct {
-	ToEmbed `storm:"inline"`
+	ToEmbed `db:"inline"`
 	Name    string
 }
 
 type SimpleUser struct {
-	ID   int `storm:"id"`
+	ID   int `db:"id"`
 	Name string
 	age  int
 }
@@ -121,34 +121,34 @@ type UserWithStringIDField struct {
 }
 
 type UserWithEmbeddedIDField struct {
-	UserWithIDField `storm:"inline"`
+	UserWithIDField `db:"inline"`
 	Age             int
 }
 
 type UserWithEmbeddedField struct {
-	UserWithNoID `storm:"inline"`
+	UserWithNoID `db:"inline"`
 	ID           uint64
 }
 
 type UserWithIncrementField struct {
 	ID   int
 	Name string
-	Age  int `storm:"unique,increment"`
+	Age  int `db:"unique,increment"`
 }
 
 type IndexedNameUser struct {
-	ID          int    `storm:"id"`
-	Name        string `storm:"index"`
-	Score       int    `storm:"index,increment"`
+	ID          int    `db:"id"`
+	Name        string `db:"index"`
+	Score       int    `db:"index,increment"`
 	age         int
-	DateOfBirth time.Time `storm:"index"`
+	DateOfBirth time.Time `db:"index"`
 	Group       string
 }
 
 type UniqueNameUser struct {
-	ID   int    `storm:"id"`
-	Name string `storm:"unique"`
-	Age  int    `storm:"index,increment"`
+	ID   int    `db:"id"`
+	Name string `db:"unique"`
+	Age  int    `db:"index,increment"`
 }
 
 // ===================================================
@@ -157,8 +157,8 @@ type UniqueNameUser struct {
 
 // CustomBucketUser demonstrates a struct with a custom bucket name.
 type CustomBucketUser struct {
-	ID   int    `storm:"id,increment"`
-	Name string `storm:"index"`
+	ID   int    `db:"id,increment"`
+	Name string `db:"index"`
 }
 
 func (c CustomBucketUser) StormBucketName() string {
@@ -167,9 +167,9 @@ func (c CustomBucketUser) StormBucketName() string {
 
 // NamerUser is used for update/updatefield tests with BucketNamer.
 type NamerUser struct {
-	ID    int    `storm:"id,increment"`
-	Name  string `storm:"index"`
-	Email string `storm:"unique"`
+	ID    int    `db:"id,increment"`
+	Name  string `db:"index"`
+	Email string `db:"unique"`
 }
 
 func (n NamerUser) StormBucketName() string {
@@ -178,8 +178,8 @@ func (n NamerUser) StormBucketName() string {
 
 // DropUser is used for drop tests with BucketNamer.
 type DropUser struct {
-	ID   int    `storm:"id"`
-	Name string `storm:"index"`
+	ID   int    `db:"id"`
+	Name string `db:"index"`
 }
 
 func (d DropUser) StormBucketName() string {
@@ -197,8 +197,8 @@ func TestBucketNamerSaveAndOne(t *testing.T) {
 	ctx := context.Background()
 
 	type User struct {
-		ID   int    `storm:"id,increment"`
-		Name string `storm:"index"`
+		ID   int    `db:"id,increment"`
+		Name string `db:"index"`
 	}
 
 	u := User{Name: "Alice"}
@@ -223,17 +223,17 @@ func TestDynamicStructSaveAndOneViaFrom(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Build a runtime struct: { ID int `storm:"id,increment"`, Name string `storm:"index"` }
+	// Build a runtime struct: { ID int `db:"id,increment"`, Name string `db:"index"` }
 	dynType := reflect.StructOf([]reflect.StructField{
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`storm:"id,increment"`),
+			Tag:  reflect.StructTag(`db:"id,increment"`),
 		},
 		{
 			Name: "Name",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`storm:"index"`),
+			Tag:  reflect.StructTag(`db:"index"`),
 		},
 	})
 
@@ -265,17 +265,17 @@ func TestDynamicStructAllViaFrom(t *testing.T) {
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`storm:"id,increment"`),
+			Tag:  reflect.StructTag(`db:"id,increment"`),
 		},
 		{
 			Name: "Name",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`storm:"index"`),
+			Tag:  reflect.StructTag(`db:"index"`),
 		},
 		{
 			Name: "Score",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`storm:"index"`),
+			Tag:  reflect.StructTag(`db:"index"`),
 		},
 	})
 
@@ -317,17 +317,17 @@ func TestDynamicStructFindByIndexViaFrom(t *testing.T) {
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`storm:"id,increment"`),
+			Tag:  reflect.StructTag(`db:"id,increment"`),
 		},
 		{
 			Name: "Name",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`storm:"index"`),
+			Tag:  reflect.StructTag(`db:"index"`),
 		},
 		{
 			Name: "Score",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`storm:"index"`),
+			Tag:  reflect.StructTag(`db:"index"`),
 		},
 	})
 
@@ -369,7 +369,7 @@ func TestDynamicStructBucketIsolation(t *testing.T) {
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`storm:"id,increment"`),
+			Tag:  reflect.StructTag(`db:"id,increment"`),
 		},
 		{
 			Name: "Value",
@@ -422,17 +422,17 @@ func TestDynamicStructSelectCombined(t *testing.T) {
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`storm:"id,increment"`),
+			Tag:  reflect.StructTag(`db:"id,increment"`),
 		},
 		{
 			Name: "Category",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`storm:"index"`),
+			Tag:  reflect.StructTag(`db:"index"`),
 		},
 		{
 			Name: "Price",
 			Type: reflect.TypeOf(0),
-			Tag:  reflect.StructTag(`storm:"index"`),
+			Tag:  reflect.StructTag(`db:"index"`),
 		},
 	})
 
@@ -486,7 +486,7 @@ func TestDynamicStructDelete(t *testing.T) {
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`storm:"id"`),
+			Tag:  reflect.StructTag(`db:"id"`),
 		},
 		{
 			Name: "Data",
@@ -526,17 +526,17 @@ func TestDynamicStructInit(t *testing.T) {
 		{
 			Name: "ID",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`storm:"id"`),
+			Tag:  reflect.StructTag(`db:"id"`),
 		},
 		{
 			Name: "Email",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`storm:"unique"`),
+			Tag:  reflect.StructTag(`db:"unique"`),
 		},
 		{
 			Name: "Group",
 			Type: reflect.TypeOf(""),
-			Tag:  reflect.StructTag(`storm:"index"`),
+			Tag:  reflect.StructTag(`db:"index"`),
 		},
 	})
 
@@ -572,13 +572,13 @@ func TestExplicitBucketFromSave(t *testing.T) {
 	bDB, err := bolt.Open(file, 0600, nil)
 	require.NoError(t, err)
 	defer bDB.Close()
-	db, err := Open(ctx, bDB, nil, nil)
+	db, err := Open(ctx, bDB, nil, Config{})
 	require.NoError(t, err)
 	defer db.Close()
 
 	type User struct {
-		ID   int    `storm:"id,increment"`
-		Name string `storm:"index"`
+		ID   int    `db:"id,increment"`
+		Name string `db:"index"`
 	}
 
 	// Save with explicit bucket using db.From
@@ -611,7 +611,7 @@ func TestBucketNamerInterface(t *testing.T) {
 	bDB, err := bolt.Open(file, 0600, nil)
 	require.NoError(t, err)
 	defer bDB.Close()
-	db, err := Open(ctx, bDB, nil, nil)
+	db, err := Open(ctx, bDB, nil, Config{})
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -642,7 +642,7 @@ func TestBucketNamerUpdate(t *testing.T) {
 	bDB, err := bolt.Open(file, 0600, nil)
 	require.NoError(t, err)
 	defer bDB.Close()
-	db, err := Open(ctx, bDB, nil, nil)
+	db, err := Open(ctx, bDB, nil, Config{})
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -677,7 +677,7 @@ func TestBucketNamerDrop(t *testing.T) {
 	bDB, err := bolt.Open(file, 0600, nil)
 	require.NoError(t, err)
 	defer bDB.Close()
-	db, err := Open(ctx, bDB, nil, nil)
+	db, err := Open(ctx, bDB, nil, Config{})
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -709,7 +709,7 @@ func TestBucketNamerListSinkResolution(t *testing.T) {
 	bDB, err := bolt.Open(file, 0600, nil)
 	require.NoError(t, err)
 	defer bDB.Close()
-	db, err := Open(ctx, bDB, nil, nil)
+	db, err := Open(ctx, bDB, nil, Config{})
 	require.NoError(t, err)
 	defer func() {
 		err := db.Close()

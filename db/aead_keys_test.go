@@ -10,8 +10,8 @@ import (
 )
 
 // aeadKeyConfig returns a config that encrypts everything the db supports.
-func aeadKeyConfig() *Config {
-	return &Config{
+func aeadKeyConfig() Config {
+	return Config{
 		Secret:          aeadKey(11),
 		EncryptValues:   true,
 		EncryptMetadata: true,
@@ -22,7 +22,7 @@ func aeadKeyConfig() *Config {
 // TestAEADDeterministicKeyEncryption covers the SIV helper directly:
 // determinism, domain separation and authentication.
 func TestAEADDeterministicKeyEncryption(t *testing.T) {
-	enc, err := resolveConfig(&Config{Secret: aeadKey(9), EncryptKeys: true})
+	enc, err := resolveConfig(Config{Secret: aeadKey(9), EncryptKeys: true})
 	require.NoError(t, err)
 	require.NotNil(t, enc)
 
@@ -56,7 +56,7 @@ func TestAEADDeterministicKeyEncryption(t *testing.T) {
 	require.ErrorIs(t, err, ErrAuthFailed, "a key of another domain must not authenticate")
 
 	// A plaintext store must not touch keys at all.
-	plainEnc, err := resolveConfig(nil)
+	plainEnc, err := resolveConfig(Config{})
 	require.NoError(t, err)
 	require.Nil(t, plainEnc)
 	raw, err := plainEnc.sealKey(plain, keyDomainID)
@@ -231,7 +231,7 @@ func TestAEADEncryptedKeysRejectOrderedQueries(t *testing.T) {
 	plainPath := filepath.Join(t.TempDir(), "plain.db")
 	plainDB := aeadOpenBolt(t, plainPath)
 	defer plainDB.Close()
-	plain := aeadOpenStore(t, plainDB, nil)
+	plain := aeadOpenStore(t, plainDB, Config{})
 	require.NoError(t, plain.Save(ctx, &aeadUser{ID: 1, Name: "alice", Email: "alice@example.com", Group: "staff", Age: 30}))
 	require.NoError(t, plain.Range(ctx, "Age", 20, 50, &ranged))
 	require.NoError(t, plain.Prefix(ctx, "Name", "al", &prefixed))
@@ -270,7 +270,7 @@ func TestAEADEncryptedKeysSurviveReopen(t *testing.T) {
 	otherPath := filepath.Join(t.TempDir(), "other.db")
 	otherDB := aeadOpenBolt(t, otherPath)
 	defer otherDB.Close()
-	_, err := Open(ctx, otherDB, nil, &Config{
+	_, err := Open(ctx, otherDB, nil, Config{
 		Secret:          aeadKey(12),
 		EncryptValues:   true,
 		EncryptMetadata: true,
@@ -318,7 +318,7 @@ func TestAEADBucketScannerWithEncryptedKeys(t *testing.T) {
 // TestAEADEncryptedKeysRejectTamperedKeys proves a corrupted index key fails
 // authentication rather than silently matching nothing.
 func TestAEADEncryptedKeysRejectTamperedKeys(t *testing.T) {
-	enc, err := resolveConfig(&Config{Secret: aeadKey(13), EncryptKeys: true})
+	enc, err := resolveConfig(Config{Secret: aeadKey(13), EncryptKeys: true})
 	require.NoError(t, err)
 
 	sealed, err := enc.sealKey([]byte("value"), keyDomainID)

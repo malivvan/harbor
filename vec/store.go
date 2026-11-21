@@ -151,7 +151,7 @@ func NewStorageWithQuantization(path string, useQuant bool, quantizer Quantizer,
 // and collection metadata.
 // Returns an error if the context is invalid.
 //
-// A nil cfg creates a plaintext store with no quantization and its on-disk
+// A zero cfg creates a plaintext store with no quantization and its on-disk
 // format is unchanged. cfg.UseQuant enables quantization; when cfg.Quantizer is
 // nil the default SQ8 quantizer is used. cfg.Secret and the Encrypt fields
 // enable optional encryption.
@@ -182,7 +182,7 @@ func Open(ctx context.Context, bdb *bbolt.DB, key []byte, cfg Config) (*Store, e
 		quantizer = NewSQ8Quantizer()
 	}
 
-	enc, err := resolveConfig(&cfg)
+	enc, err := resolveConfig(cfg)
 	if err != nil {
 		return nil, err
 	}

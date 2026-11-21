@@ -37,7 +37,7 @@ func (s *Store) withKey(newKey []byte) (*encState, error) {
 		return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, KeySize, len(newKey))
 	}
 
-	return resolveConfig(&Config{
+	return resolveConfig(Config{
 		Secret:                 append([]byte(nil), newKey...),
 		EncryptPoints:          s.enc.encPoints,
 		EncryptPointIDs:        s.enc.encIDs,

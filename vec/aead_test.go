@@ -18,16 +18,13 @@ import (
 func aeadKey(fill byte) []byte { return bytes.Repeat([]byte{fill}, KeySize) }
 
 // aeadOpenStore opens a vec Store on a temporary database file.
-func aeadOpenStore(t *testing.T, path string, useQuant bool, cfg *Config) (*Store, *bbolt.DB) {
+func aeadOpenStore(t *testing.T, path string, useQuant bool, cfg Config) (*Store, *bbolt.DB) {
 	t.Helper()
 
 	bdb, err := bbolt.Open(path, 0600, &bbolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bdb.Close() })
 
-	if cfg == nil {
-		cfg = &Config{}
-	}
 	cfg.UseQuant = useQuant
 
 	store, err := Open(context.Background(), bdb, nil, cfg)
@@ -87,7 +84,7 @@ func aeadTestPoints() []PointStruct {
 // blobs, raw JSON metadata, raw ID/name keys and no encryption marker.
 func TestAEADOptionalityKeepsPlaintextFormat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plain.db")
-	store, bdb := aeadOpenStore(t, path, false, nil)
+	store, bdb := aeadOpenStore(t, path, false, Config{})
 	require.Nil(t, store.enc)
 
 	require.NoError(t, store.EnsureCollection("docs"))
@@ -119,7 +116,7 @@ func TestAEADOptionalityKeepsPlaintextFormat(t *testing.T) {
 
 	// Reopening with an explicit Config that enables no feature must leave the
 	// bytes untouched.
-	store, bdb = aeadOpenStore(t, path, false, &Config{})
+	store, bdb = aeadOpenStore(t, path, false, Config{})
 	require.Nil(t, store.enc)
 	require.Equal(t, rawPoints, aeadRawEntries(t, bdb, "docs"))
 	rawMeta = aeadRawEntries(t, bdb, collectionsMetaBucket)
@@ -199,11 +196,11 @@ func aeadScoredIDs(points []ScoredPoint) []string {
 func TestAEADRoundTripMatchesPlaintext(t *testing.T) {
 	dir := t.TempDir()
 
-	plain, _ := aeadOpenStore(t, filepath.Join(dir, "plain.db"), false, nil)
+	plain, _ := aeadOpenStore(t, filepath.Join(dir, "plain.db"), false, Config{})
 	want := aeadExercise(t, plain)
 	require.NoError(t, plain.Close())
 
-	enc, encDB := aeadOpenStore(t, filepath.Join(dir, "enc.db"), false, &Config{
+	enc, encDB := aeadOpenStore(t, filepath.Join(dir, "enc.db"), false, Config{
 		Secret:        aeadKey(1),
 		EncryptPoints: true,
 	})
@@ -222,7 +219,7 @@ func TestAEADRoundTripMatchesPlaintext(t *testing.T) {
 // sealed metadata.
 func TestAEADHidesPointsAndMetadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "enc.db")
-	store, bdb := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(2), EncryptPoints: true})
+	store, bdb := aeadOpenStore(t, path, false, Config{Secret: aeadKey(2), EncryptPoints: true})
 
 	require.NoError(t, store.EnsureCollection("docs"))
 	require.NoError(t, store.UpsertPoints("docs", aeadTestPoints()))
@@ -247,7 +244,7 @@ func TestAEADHidesPointsAndMetadata(t *testing.T) {
 // right key keeps working.
 func TestAEADWrongKeyFails(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "enc.db")
-	cfg := &Config{Secret: aeadKey(3), EncryptPoints: true}
+	cfg := Config{Secret: aeadKey(3), EncryptPoints: true}
 
 	store, _ := aeadOpenStore(t, path, false, cfg)
 	require.NoError(t, store.EnsureCollection("docs"))
@@ -256,7 +253,7 @@ func TestAEADWrongKeyFails(t *testing.T) {
 
 	bdb, err := bbolt.Open(path, 0600, &bbolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
-	_, err = Open(context.Background(), bdb, nil, &Config{Secret: aeadKey(4), EncryptPoints: true})
+	_, err = Open(context.Background(), bdb, nil, Config{Secret: aeadKey(4), EncryptPoints: true})
 	require.ErrorIs(t, err, ErrAuthFailed)
 	require.NoError(t, bdb.Close())
 
@@ -288,7 +285,7 @@ func TestAEADTamperedPointFails(t *testing.T) {
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "enc.db")
-			store, bdb := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(5), EncryptPoints: true})
+			store, bdb := aeadOpenStore(t, path, false, Config{Secret: aeadKey(5), EncryptPoints: true})
 			require.NoError(t, store.EnsureCollection("docs"))
 			require.NoError(t, store.UpsertPoints("docs", aeadTestPoints()))
 
@@ -313,7 +310,7 @@ func TestAEADTamperedPointFails(t *testing.T) {
 // ciphertext.
 func TestAEADFreshNoncePerWrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "enc.db")
-	store, bdb := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(6), EncryptPoints: true})
+	store, bdb := aeadOpenStore(t, path, false, Config{Secret: aeadKey(6), EncryptPoints: true})
 
 	meta := CollectionMeta{Name: "docs", VectorLen: 3, Metric: Cosine}
 	require.NoError(t, store.SaveCollectionMeta("docs", meta))
@@ -330,7 +327,7 @@ func TestAEADFreshNoncePerWrite(t *testing.T) {
 func TestAEADQuantizationRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
-	plain, _ := aeadOpenStore(t, filepath.Join(dir, "plain.db"), true, nil)
+	plain, _ := aeadOpenStore(t, filepath.Join(dir, "plain.db"), true, Config{})
 	require.NoError(t, plain.EnsureCollection("docs"))
 	require.NoError(t, plain.UpsertPoints("docs", aeadTestPoints()))
 	plainLoaded, err := plain.LoadCollection("docs")
@@ -338,7 +335,7 @@ func TestAEADQuantizationRoundTrip(t *testing.T) {
 	require.NoError(t, plain.Close())
 	require.NotEmpty(t, plainLoaded["p1"].Vector)
 
-	enc, _ := aeadOpenStore(t, filepath.Join(dir, "enc.db"), true, &Config{Secret: aeadKey(7), EncryptPoints: true})
+	enc, _ := aeadOpenStore(t, filepath.Join(dir, "enc.db"), true, Config{Secret: aeadKey(7), EncryptPoints: true})
 	require.NoError(t, enc.EnsureCollection("docs"))
 	require.NoError(t, enc.UpsertPoints("docs", aeadTestPoints()))
 	encLoaded, err := enc.LoadCollection("docs")
@@ -356,7 +353,7 @@ func TestAEADModeMismatch(t *testing.T) {
 
 	t.Run("plaintext open of encrypted store", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "enc.db")
-		store, _ := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(8), EncryptPoints: true})
+		store, _ := aeadOpenStore(t, path, false, Config{Secret: aeadKey(8), EncryptPoints: true})
 		require.NoError(t, store.EnsureCollection("docs"))
 		require.NoError(t, store.Close())
 
@@ -364,13 +361,13 @@ func TestAEADModeMismatch(t *testing.T) {
 		require.NoError(t, err)
 		defer bdb.Close()
 
-		_, err = Open(ctx, bdb, nil, nil)
+		_, err = Open(ctx, bdb, nil, Config{})
 		require.ErrorIs(t, err, ErrWrongMode)
 	})
 
 	t.Run("encrypted open of plaintext store with data", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "plain.db")
-		store, _ := aeadOpenStore(t, path, false, nil)
+		store, _ := aeadOpenStore(t, path, false, Config{})
 		require.NoError(t, store.EnsureCollection("docs"))
 		require.NoError(t, store.UpsertPoints("docs", aeadTestPoints()))
 		require.NoError(t, store.Close())
@@ -379,13 +376,13 @@ func TestAEADModeMismatch(t *testing.T) {
 		require.NoError(t, err)
 		defer bdb.Close()
 
-		_, err = Open(ctx, bdb, nil, &Config{Secret: aeadKey(8), EncryptPoints: true})
+		_, err = Open(ctx, bdb, nil, Config{Secret: aeadKey(8), EncryptPoints: true})
 		require.ErrorIs(t, err, ErrWrongMode)
 	})
 
 	t.Run("settings mismatch", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "enc.db")
-		store, _ := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(8), EncryptPoints: true})
+		store, _ := aeadOpenStore(t, path, false, Config{Secret: aeadKey(8), EncryptPoints: true})
 		require.NoError(t, store.EnsureCollection("docs"))
 		require.NoError(t, store.Close())
 
@@ -393,7 +390,7 @@ func TestAEADModeMismatch(t *testing.T) {
 		require.NoError(t, err)
 		defer bdb.Close()
 
-		_, err = Open(ctx, bdb, nil, &Config{
+		_, err = Open(ctx, bdb, nil, Config{
 			Secret:                 aeadKey(8),
 			EncryptPoints:          true,
 			EncryptCollectionNames: true,
@@ -407,10 +404,10 @@ func TestAEADModeMismatch(t *testing.T) {
 func TestAEADEmptyStoreAdoptsEncryption(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "store.db")
 
-	plain, _ := aeadOpenStore(t, path, false, nil)
+	plain, _ := aeadOpenStore(t, path, false, Config{})
 	require.NoError(t, plain.Close())
 
-	enc, bdb := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(9), EncryptPoints: true})
+	enc, bdb := aeadOpenStore(t, path, false, Config{Secret: aeadKey(9), EncryptPoints: true})
 	require.NotNil(t, enc.enc)
 	require.Contains(t, aeadRawEntries(t, bdb, collectionsMetaBucket), markerKey)
 
@@ -425,7 +422,7 @@ func TestAEADEmptyStoreAdoptsEncryption(t *testing.T) {
 	require.NoError(t, err)
 	defer bdb.Close()
 
-	_, err = Open(context.Background(), bdb, nil, nil)
+	_, err = Open(context.Background(), bdb, nil, Config{})
 	require.ErrorIs(t, err, ErrWrongMode)
 }
 
@@ -438,11 +435,11 @@ func TestAEADInvalidConfig(t *testing.T) {
 
 	ctx := context.Background()
 
-	_, err = Open(ctx, bdb, nil, &Config{Secret: []byte("short"), EncryptPoints: true})
+	_, err = Open(ctx, bdb, nil, Config{Secret: []byte("short"), EncryptPoints: true})
 	require.ErrorIs(t, err, ErrInvalidKey)
 
 	// A valid config still works after the rejected ones above.
-	valid, err := Open(ctx, bdb, nil, &Config{
+	valid, err := Open(ctx, bdb, nil, Config{
 		Secret:        aeadKey(10),
 		EncryptPoints: true,
 	})

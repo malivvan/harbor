@@ -134,7 +134,7 @@ func TestAEADRotatePointsOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "enc.db")
 	keyA, keyB := aeadKey(33), aeadKey(34)
 
-	store, bdb := aeadOpenStore(t, path, false, &Config{Secret: keyA, EncryptPoints: true})
+	store, bdb := aeadOpenStore(t, path, false, Config{Secret: keyA, EncryptPoints: true})
 	defer store.Close()
 
 	require.NoError(t, store.EnsureCollection("invoices"))
@@ -170,7 +170,7 @@ func TestAEADReEncryptCollectionKeepsOthersReadable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "enc.db")
 	keyA, keyB := aeadKey(35), aeadKey(36)
 
-	store, _ := aeadOpenStore(t, path, false, &Config{Secret: keyA, EncryptPoints: true})
+	store, _ := aeadOpenStore(t, path, false, Config{Secret: keyA, EncryptPoints: true})
 	require.NoError(t, store.EnsureCollection("invoices"))
 	require.NoError(t, store.EnsureCollection("receipts"))
 	require.NoError(t, store.UpsertPoints("invoices", aeadTestPoints()))
@@ -204,7 +204,7 @@ func TestAEADReEncryptCollectionKeepsOthersReadable(t *testing.T) {
 	require.NoError(t, err)
 	defer bdb.Close()
 
-	store, err = Open(ctx, bdb, nil, &Config{Secret: keyB, EncryptPoints: true})
+	store, err = Open(ctx, bdb, nil, Config{Secret: keyB, EncryptPoints: true})
 	require.NoError(t, err)
 	require.NoError(t, store.VerifyAll(ctx))
 
@@ -220,7 +220,7 @@ func TestAEADReEncryptCollectionKeepsOthersReadable(t *testing.T) {
 // key could neither find nor decrypt the remaining collections, so the call is
 // rejected instead of leaving the store unrecoverable.
 func TestAEADReEncryptCollectionRejectedWithEncryptedKeys(t *testing.T) {
-	for name, cfg := range map[string]*Config{
+	for name, cfg := range map[string]Config{
 		"point ids":        {Secret: aeadKey(47), EncryptPoints: true, EncryptPointIDs: true},
 		"collection names": {Secret: aeadKey(48), EncryptPoints: true, EncryptCollectionNames: true},
 	} {
@@ -251,13 +251,13 @@ func TestAEADRotateRejectsInvalidInput(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "store.db")
 
-	plain, _ := aeadOpenStore(t, path, false, nil)
+	plain, _ := aeadOpenStore(t, path, false, Config{})
 	require.ErrorIs(t, plain.RotateAll(ctx, aeadKey(37)), ErrInvalidConfig)
 	require.ErrorIs(t, plain.VerifyAll(ctx), ErrInvalidConfig)
 	require.ErrorIs(t, plain.ReEncryptCollection(ctx, "invoices", aeadKey(37)), ErrInvalidConfig)
 	require.NoError(t, plain.Close())
 
-	store, _ := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(37), EncryptPoints: true})
+	store, _ := aeadOpenStore(t, path, false, Config{Secret: aeadKey(37), EncryptPoints: true})
 	defer store.Close()
 
 	require.ErrorIs(t, store.RotateAll(ctx, []byte("short")), ErrInvalidKey)
@@ -273,7 +273,7 @@ func TestAEADVerifyAllDetectsTampering(t *testing.T) {
 		ctx := context.Background()
 		path := filepath.Join(t.TempDir(), "enc.db")
 
-		store, bdb := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(39), EncryptPoints: true})
+		store, bdb := aeadOpenStore(t, path, false, Config{Secret: aeadKey(39), EncryptPoints: true})
 		defer store.Close()
 		require.NoError(t, store.EnsureCollection("invoices"))
 		require.NoError(t, store.UpsertPoints("invoices", aeadTestPoints()))
@@ -293,7 +293,7 @@ func TestAEADVerifyAllDetectsTampering(t *testing.T) {
 		ctx := context.Background()
 		path := filepath.Join(t.TempDir(), "enc.db")
 
-		store, bdb := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(40), EncryptPoints: true})
+		store, bdb := aeadOpenStore(t, path, false, Config{Secret: aeadKey(40), EncryptPoints: true})
 		defer store.Close()
 		require.NoError(t, store.EnsureCollection("invoices"))
 		require.NoError(t, store.SaveCollectionMeta("invoices", CollectionMeta{Name: "invoices", VectorLen: 3, Metric: Cosine}))
@@ -313,7 +313,7 @@ func TestAEADVerifyAllDetectsTampering(t *testing.T) {
 		ctx := context.Background()
 		path := filepath.Join(t.TempDir(), "enc.db")
 
-		store, bdb := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(41), EncryptPoints: true, EncryptPointIDs: true})
+		store, bdb := aeadOpenStore(t, path, false, Config{Secret: aeadKey(41), EncryptPoints: true, EncryptPointIDs: true})
 		defer store.Close()
 		require.NoError(t, store.EnsureCollection("invoices"))
 		require.NoError(t, store.UpsertPoints("invoices", aeadTestPoints()))
@@ -340,7 +340,7 @@ func TestAEADVerifyAllDetectsTampering(t *testing.T) {
 		ctx := context.Background()
 		path := filepath.Join(t.TempDir(), "enc.db")
 
-		store, bdb := aeadOpenStore(t, path, false, &Config{Secret: aeadKey(42), EncryptPoints: true})
+		store, bdb := aeadOpenStore(t, path, false, Config{Secret: aeadKey(42), EncryptPoints: true})
 		defer store.Close()
 		require.NoError(t, store.EnsureCollection("invoices"))
 

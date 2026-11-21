@@ -43,7 +43,7 @@ func TestBlockStart(t *testing.T) {
 
 func openBlockStore(t *testing.T, root []byte, keySeed byte, blockDur int64) *Store {
 	t.Helper()
-	store, _ := openAEADTestStore(t, root, &Config{
+	store, _ := openAEADTestStore(t, root, Config{
 		Secret:        testKey(keySeed),
 		EncryptValues: true,
 		BlockDuration: blockDur,
@@ -68,7 +68,7 @@ func blockPoints() []Point {
 func TestBlockModeRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
-	store, db := openAEADTestStore(t, root, &Config{
+	store, db := openAEADTestStore(t, root, Config{
 		Secret:        testKey(20),
 		EncryptValues: true,
 		BlockDuration: 10,
@@ -211,8 +211,8 @@ func TestBlockModeMatchesPlaintext(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
 
-	plain, _ := openAEADTestStore(t, root, nil)
-	blocked, _ := openAEADTestStore(t, root, &Config{
+	plain, _ := openAEADTestStore(t, root, Config{})
+	blocked, _ := openAEADTestStore(t, root, Config{
 		Secret:        testKey(24),
 		EncryptValues: true,
 		BlockDuration: 10,
@@ -252,7 +252,7 @@ func TestBlockModeMatchesPlaintext(t *testing.T) {
 func TestBlockModeTamper(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
-	store, db := openAEADTestStore(t, root, &Config{
+	store, db := openAEADTestStore(t, root, Config{
 		Secret:        testKey(25),
 		EncryptValues: true,
 		BlockDuration: 10,
@@ -283,27 +283,27 @@ func TestBlockModeTamper(t *testing.T) {
 func TestBlockModeConfigMismatch(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
-	store, db := openAEADTestStore(t, root, &Config{
+	store, db := openAEADTestStore(t, root, Config{
 		Secret:        testKey(26),
 		EncryptValues: true,
 		BlockDuration: 10,
 	})
 	require.NoError(t, store.Series("cpu").Insert(ctx, Point{Timestamp: 1, Value: 1}))
 
-	_, err := Open(ctx, db, root, &Config{
+	_, err := Open(ctx, db, root, Config{
 		Secret:        testKey(26),
 		EncryptValues: true,
 		BlockDuration: 20,
 	})
 	require.ErrorIs(t, err, ErrWrongMode)
 
-	_, err = Open(ctx, db, root, &Config{
+	_, err = Open(ctx, db, root, Config{
 		Secret:        testKey(26),
 		BlockDuration: 10,
 	})
 	require.ErrorIs(t, err, ErrWrongMode)
 
-	_, err = Open(ctx, db, root, &Config{
+	_, err = Open(ctx, db, root, Config{
 		EncryptValues: true,
 		BlockDuration: 10,
 	})

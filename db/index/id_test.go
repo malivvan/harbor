@@ -15,13 +15,13 @@ import (
 
 // SimpleLogin represents a simple login model
 type SimpleLogin struct {
-	Email    string `storm:"id"`
+	Email    string `db:"id"`
 	Password string
 }
 
 // SimpleProduct represents a simple product model
 type SimpleProduct struct {
-	Barcode     int `storm:"id,increment"`
+	Barcode     int `db:"id,increment"`
 	Description string
 }
 
@@ -206,7 +206,7 @@ func TestIDIndexParams(t *testing.T) {
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
 	bDB, _ := bolt.Open(filepath.Join(dir, "storm.db"), 0600, nil)
-	db, _ := storm.Open(ctx, bDB, nil, nil)
+	db, _ := storm.Open(ctx, bDB, nil, storm.Config{})
 	defer db.Close()
 
 	err := db.NativeDB().Update(func(tx *bolt.Tx) error {

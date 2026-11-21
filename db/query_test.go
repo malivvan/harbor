@@ -15,7 +15,7 @@ import (
 )
 
 type Score struct {
-	ID    int `storm:"increment"`
+	ID    int `db:"increment"`
 	Value int
 }
 
@@ -224,7 +224,7 @@ func TestSelectFindOrderBy(t *testing.T) {
 	ctx := context.Background()
 
 	type T struct {
-		ID  int `storm:"increment"`
+		ID  int `db:"increment"`
 		Str string
 		Int int
 		Rnd int
@@ -379,7 +379,7 @@ func TestSelectFirstOrderBy(t *testing.T) {
 	ctx := context.Background()
 
 	type T struct {
-		ID  int `storm:"increment"`
+		ID  int `db:"increment"`
 		Str string
 		Int int
 	}
@@ -1058,9 +1058,9 @@ func TestQueryDelete_CancellationRollsBackRecordsAndIndexes(t *testing.T) {
 
 	// Use a type with an index so we can verify index integrity.
 	type IndexedScore struct {
-		ID    int    `storm:"id,increment"`
-		Value int    `storm:"index"`
-		Name  string `storm:"unique"`
+		ID    int    `db:"id,increment"`
+		Value int    `db:"index"`
+		Name  string `db:"unique"`
 	}
 	require.NoError(t, db.Init(ctx, &IndexedScore{}))
 
@@ -1117,7 +1117,7 @@ func TestQueryFind_CancellationDuringSortPreservesDestination(t *testing.T) {
 	ctx := context.Background()
 
 	type Sortable struct {
-		ID    int `storm:"id,increment"`
+		ID    int `db:"id,increment"`
 		Value int
 	}
 	for i := 0; i < 20; i++ {
@@ -1152,7 +1152,7 @@ func TestQueryFind_SortErrorPreservesDestination(t *testing.T) {
 	ctx := context.Background()
 
 	type Simple struct {
-		ID    int `storm:"id,increment"`
+		ID    int `db:"id,increment"`
 		Value int
 	}
 	for i := 0; i < 5; i++ {
@@ -1178,7 +1178,7 @@ func TestQueryFind_OrderedSuccessPublishesCompleteResult(t *testing.T) {
 	ctx := context.Background()
 
 	type Item struct {
-		ID    int `storm:"id,increment"`
+		ID    int `db:"id,increment"`
 		Value int
 	}
 	for i := 0; i < 10; i++ {

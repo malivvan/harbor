@@ -11,8 +11,8 @@ import (
 // KeySize is the required key length in bytes (256 bits).
 const KeySize = encryption.KeySize
 
-// Config enables optional encryption for a time series Store. A nil Config, or
-// one with no encryption feature enabled, leaves the store in its plaintext
+// Config enables optional encryption for a time series Store. A zero Config,
+// or one with no encryption feature enabled, leaves the store in its plaintext
 // format.
 type Config struct {
 	// Secret is a raw 32-byte master key. It must be set when encryption is
@@ -31,8 +31,8 @@ type Config struct {
 	BlockDuration int64
 }
 
-func (c *Config) encryptionEnabled() bool {
-	return c != nil && (c.EncryptValues || c.EncryptSeriesNames || c.BlockDuration > 0)
+func (c Config) encryptionEnabled() bool {
+	return c.EncryptValues || c.EncryptSeriesNames || c.BlockDuration > 0
 }
 
 // encState is the resolved encryption state of a store: the cipher engines
@@ -62,7 +62,7 @@ func (e *encState) open(raw []byte) ([]byte, error) {
 	return e.kc.Open(raw)
 }
 
-func resolveConfig(cfg *Config) (*encState, error) {
+func resolveConfig(cfg Config) (*encState, error) {
 	if !cfg.encryptionEnabled() {
 		return nil, nil
 	}
@@ -256,8 +256,8 @@ func (s *Store) hasData(db *bolt.DB) (bool, error) {
 //
 // The caller owns db and must keep it open for the lifetime of the Store. The
 // Store never closes db. root is an optional root bucket key; nil or an empty
-// slice means the database root. cfg enables optional encryption; a nil config,
-// or one with no encryption enabled, creates a plaintext store.
+// slice means the database root. cfg enables optional encryption; a zero
+// Config, or one with no encryption enabled, creates a plaintext store.
 func Open(ctx context.Context, bdb *bolt.DB, key []byte, cfg Config) (*Store, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
@@ -266,7 +266,7 @@ func Open(ctx context.Context, bdb *bolt.DB, key []byte, cfg Config) (*Store, er
 		return nil, ErrNilParam
 	}
 
-	settings, err := resolveConfig(&cfg)
+	settings, err := resolveConfig(cfg)
 	if err != nil {
 		return nil, err
 	}

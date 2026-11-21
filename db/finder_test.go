@@ -125,9 +125,9 @@ func TestFindNil(t *testing.T) {
 	ctx := context.Background()
 
 	type User struct {
-		ID        int        `storm:"increment"`
-		CreatedAt *time.Time `storm:"index"`
-		DeletedAt *time.Time `storm:"unique"`
+		ID        int        `db:"increment"`
+		CreatedAt *time.Time `db:"index"`
+		DeletedAt *time.Time `db:"unique"`
 	}
 
 	t1 := time.Now()
@@ -167,8 +167,8 @@ func TestFindIntIndex(t *testing.T) {
 	ctx := context.Background()
 
 	type Score struct {
-		ID    int    `storm:"increment"`
-		Score uint64 `storm:"index"`
+		ID    int    `db:"increment"`
+		Score uint64 `db:"index"`
 	}
 
 	for i := 0; i < 10; i++ {
@@ -521,7 +521,7 @@ func TestOneNotWritable(t *testing.T) {
 
 	bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
-	db, err := Open(ctx, bDB, nil, nil)
+	db, err := Open(ctx, bDB, nil, Config{})
 	require.NoError(t, err)
 
 	err = db.Save(ctx, &User{ID: 10, Name: "John"})
@@ -533,7 +533,7 @@ func TestOneNotWritable(t *testing.T) {
 	roBDB, err := bolt.Open(path, 0660, &bolt.Options{ReadOnly: true})
 	require.NoError(t, err)
 	defer roBDB.Close()
-	db, err = Open(ctx, roBDB, nil, nil)
+	db, err = Open(ctx, roBDB, nil, Config{})
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -1342,8 +1342,8 @@ func TestOne_IndexedRuntimeStructStillWorks(t *testing.T) {
 
 	ctx := context.Background()
 	dynamicType := reflect.StructOf([]reflect.StructField{
-		{Name: "ID", Type: reflect.TypeOf(0), Tag: reflect.StructTag(`storm:"id"`)},
-		{Name: "Name", Type: reflect.TypeOf(""), Tag: reflect.StructTag(`storm:"index"`)},
+		{Name: "ID", Type: reflect.TypeOf(0), Tag: reflect.StructTag(`db:"id"`)},
+		{Name: "Name", Type: reflect.TypeOf(""), Tag: reflect.StructTag(`db:"index"`)},
 	})
 
 	n := db.From("runtime_one_indexed")

@@ -21,7 +21,7 @@ import (
 const maxInt = 1<<(bits.UintSize-1) - 1
 
 func TestNewStorm(t *testing.T) {
-	db, err := Open(context.Background(), nil, nil, nil)
+	db, err := Open(context.Background(), nil, nil, Config{})
 
 	require.Error(t, err)
 	require.Nil(t, db)
@@ -35,7 +35,7 @@ func TestNewStorm(t *testing.T) {
 	require.NoError(t, err)
 	defer bdb.Close()
 
-	db, err = Open(context.Background(), bdb, nil, nil)
+	db, err = Open(context.Background(), bdb, nil, Config{})
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -58,7 +58,7 @@ func TestNewStormWithRootAndCodec(t *testing.T) {
 	bdb1, err := bolt.Open(filepath.Join(dir, "storm1.db"), 0660, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
 	defer bdb1.Close()
-	db1, err := Open(context.Background(), bdb1, []byte("a"), &Config{Codec: dc})
+	db1, err := Open(context.Background(), bdb1, []byte("a"), Config{Codec: dc})
 	require.NoError(t, err)
 	require.Equal(t, dc, db1.Codec())
 	require.Equal(t, []string{"a"}, db1.Node.(*node).rootBucket)
@@ -69,7 +69,7 @@ func TestNewStormWithRootAndCodec(t *testing.T) {
 	bdb2, err := bolt.Open(filepath.Join(dir, "storm2.db"), 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
 	defer bdb2.Close()
-	db2, err := Open(context.Background(), bdb2, nil, &Config{Codec: dc})
+	db2, err := Open(context.Background(), bdb2, nil, Config{Codec: dc})
 	require.NoError(t, err)
 	require.Equal(t, dc, db2.Codec())
 }
@@ -81,7 +81,7 @@ func TestBoltDB(t *testing.T) {
 	require.NoError(t, err)
 	defer bDB.Close()
 
-	sDB, err := Open(context.Background(), bDB, nil, nil)
+	sDB, err := Open(context.Background(), bDB, nil, Config{})
 	require.NoError(t, err)
 	defer sDB.Close()
 	err = sDB.Save(context.Background(), &SimpleUser{ID: 10})
@@ -176,7 +176,7 @@ func createDB(t errorHandler, opts ...testOpenOption) (*Store, func()) {
 		root = []byte(cfg.root[0])
 	}
 
-	db, err := Open(context.Background(), bdb, root, &Config{Codec: cfg.codec})
+	db, err := Open(context.Background(), bdb, root, Config{Codec: cfg.codec})
 	if err != nil {
 		t.Error(err)
 	}
@@ -223,12 +223,12 @@ func TestCheckVersion_EmptyVersionIsInitialized(t *testing.T) {
 	require.NoError(t, err)
 	defer bDB.Close()
 
-	db, err := Open(ctx, bDB, nil, nil)
+	db, err := Open(ctx, bDB, nil, Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.Set(ctx, databaseInfo, "version", ""))
 	require.NoError(t, db.Close())
 
-	db, err = Open(ctx, bDB, nil, nil)
+	db, err = Open(ctx, bDB, nil, Config{})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, db.Close()) }()
 
@@ -250,12 +250,12 @@ func TestCheckVersion_ErrorChainPreservation(t *testing.T) {
 
 	// Create a database with the default JSON codec. This writes
 	// __database/version using the JSON codec.
-	seedDB, err := Open(context.Background(), bDB, nil, nil)
+	seedDB, err := Open(context.Background(), bDB, nil, Config{})
 	require.NoError(t, err, "create seed Store")
 	require.NoError(t, seedDB.Close(), "close seed Store")
 
 	// Open with an incompatible codec that deliberately fails Unmarshal.
-	db, err := Open(context.Background(), bDB, nil, &Config{Codec: testDecodeCodec{}})
+	db, err := Open(context.Background(), bDB, nil, Config{Codec: testDecodeCodec{}})
 	require.Error(t, err)
 
 	// Must match ErrDifferentCodec.
@@ -270,14 +270,14 @@ func TestCheckVersion_ErrorChainPreservation(t *testing.T) {
 	assert.Nil(t, db, "returned Store must be nil on initialization failure")
 
 	// Reopening with the correct codec must succeed and data must be intact.
-	db2, err := Open(context.Background(), bDB, nil, nil)
+	db2, err := Open(context.Background(), bDB, nil, Config{})
 	require.NoError(t, err, "reopen with correct codec")
 	require.NoError(t, db2.Close())
 }
 
 // TestOpenNilDBRejected verifies Open rejects a nil bbolt database.
 func TestOpenNilDBRejected(t *testing.T) {
-	db, err := Open(context.Background(), nil, nil, nil)
+	db, err := Open(context.Background(), nil, nil, Config{})
 	require.ErrorIs(t, err, ErrNilParam)
 	require.Nil(t, db)
 }
@@ -290,7 +290,7 @@ func TestCallerOwnsLifecycle(t *testing.T) {
 	bDB, err := bolt.Open(bDBPath, 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
 
-	db, err := Open(context.Background(), bDB, nil, nil)
+	db, err := Open(context.Background(), bDB, nil, Config{})
 	require.NoError(t, err)
 
 	// NativeDB returns the exact pointer supplied to Open.
@@ -329,7 +329,7 @@ func TestInitFailureDoesNotClose(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	db, err := Open(context.Background(), bDB, nil, nil)
+	db, err := Open(context.Background(), bDB, nil, Config{})
 	require.ErrorIs(t, err, ErrDifferentCodec)
 	require.Nil(t, db)
 
@@ -351,7 +351,7 @@ func TestCancellationDoesNotClose(t *testing.T) {
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	db, err := Open(cancelCtx, bDB, nil, nil)
+	db, err := Open(cancelCtx, bDB, nil, Config{})
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, db)
 
@@ -385,7 +385,7 @@ func TestNativeKVInteroperability(t *testing.T) {
 	require.NoError(t, err)
 	defer bDB.Close()
 
-	db, err := Open(context.Background(), bDB, nil, nil)
+	db, err := Open(context.Background(), bDB, nil, Config{})
 	require.NoError(t, err)
 
 	ctx := context.Background()

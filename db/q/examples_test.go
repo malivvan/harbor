@@ -41,12 +41,12 @@ func ExampleRe() {
 }
 
 type User struct {
-	ID        int    `storm:"id,increment"`
-	Group     string `storm:"index"`
-	Email     string `storm:"unique"`
+	ID        int    `db:"id,increment"`
+	Group     string `db:"index"`
+	Email     string `db:"unique"`
 	Name      string
-	Age       int       `storm:"index"`
-	CreatedAt time.Time `storm:"index"`
+	Age       int       `db:"index"`
+	CreatedAt time.Time `db:"index"`
 }
 
 func prepareDB() (string, *storm.Store, *bolt.DB) {
@@ -59,7 +59,7 @@ func prepareDB() (string, *storm.Store, *bolt.DB) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	db, err := storm.Open(ctx, bdb, nil, nil)
+	db, err := storm.Open(ctx, bdb, nil, storm.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
