@@ -28,22 +28,41 @@ func NewSQ8Quantizer() *SQ8Quantizer {
 	return &SQ8Quantizer{}
 }
 
-// Quantize compresses a float32 vector to 8-bit integers
+// Quantize compresses a float32 vector to 8-bit integers.
+//
+// Non-finite components (NaN, +Inf, -Inf) cannot be quantized: they are
+// excluded from the min/max scan and stored as the minimum of the vector. A
+// vector with no finite component quantizes to all-zero bytes, so dequantizing
+// always yields finite values instead of NaN.
 func (q *SQ8Quantizer) Quantize(vector []float32) []byte {
 	if len(vector) == 0 {
 		return []byte{}
 	}
 
-	// Find min and max values
-	min := vector[0]
-	max := vector[0]
+	// Find min and max values among the finite components.
+	var (
+		min      float32
+		max      float32
+		hasValue bool
+	)
 	for _, v := range vector {
+		if !isFinite(v) {
+			continue
+		}
+		if !hasValue {
+			min, max, hasValue = v, v, true
+			continue
+		}
 		if v < min {
 			min = v
 		}
 		if v > max {
 			max = v
 		}
+	}
+	if !hasValue {
+		// Nothing finite to scale against: everything becomes the origin.
+		min, max = 0, 0
 	}
 
 	// Calculate scale factor
@@ -62,6 +81,11 @@ func (q *SQ8Quantizer) Quantize(vector []float32) []byte {
 
 	// Quantize each element
 	for i, v := range vector {
+		if !isFinite(v) {
+			// Sanitize non-finite components to the representable minimum.
+			result[i+8] = 0
+			continue
+		}
 		// Scale to [0, 255], then shift to [-128, 127]
 		qval := (v - min) * float32(scale)
 		if qval < 0 {
@@ -75,6 +99,12 @@ func (q *SQ8Quantizer) Quantize(vector []float32) []byte {
 	return result
 }
 
+// isFinite reports whether v is neither NaN nor an infinity.
+func isFinite(v float32) bool {
+	f := float64(v)
+	return !math.IsNaN(f) && !math.IsInf(f, 0)
+}
+
 // Dequantize decompresses an 8-bit integer vector back to float32
 func (q *SQ8Quantizer) Dequantize(data []byte) []float32 {
 	if len(data) < 8 {
@@ -84,6 +114,11 @@ func (q *SQ8Quantizer) Dequantize(data []byte) []float32 {
 	// Read min and max
 	min := readFloat32(data[0:4])
 	max := readFloat32(data[4:8])
+	if !isFinite(min) || !isFinite(max) {
+		// Corrupt or legacy non-finite bounds: fall back to a degenerate range
+		// so that dequantization cannot produce NaN.
+		min, max = 0, 0
+	}
 
 	// Calculate scale factor
 	range_ := max - min

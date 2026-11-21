@@ -42,6 +42,10 @@ func (f *FlatIndex) Upsert(points []PointStruct) error {
 // filters by payload if specified, and returns the topK results.
 // Results are sorted by relevance: descending for Cosine/Dot, ascending for Euclidean.
 func (f *FlatIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredPoint, error) {
+	if topK <= 0 {
+		return nil, fmt.Errorf("topK must be greater than 0, got %d", topK)
+	}
+
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
@@ -54,6 +58,7 @@ func (f *FlatIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 		dist := CalculateDistance(f.metric, query, point.Vector)
 		results = append(results, ScoredPoint{
 			ID:      id,
+			Version: point.Version,
 			Score:   dist,
 			Payload: point.Payload,
 		})
@@ -115,7 +120,7 @@ func (f *FlatIndex) GetPointsByFilter(filter *Filter) []PointStruct {
 	var results []PointStruct
 	for _, point := range f.points {
 		if MatchFilter(point.Payload, filter) {
-			results = append(results, *point)
+			results = append(results, clonePoint(point))
 		}
 	}
 	return results
@@ -123,6 +128,11 @@ func (f *FlatIndex) GetPointsByFilter(filter *Filter) []PointStruct {
 
 // DeleteByFilter removes all points that match the given filter and returns their IDs.
 func (f *FlatIndex) DeleteByFilter(filter *Filter) ([]string, error) {
+	if filter == nil {
+		// A nil filter matches everything: deleting on it would wipe the index.
+		return nil, fmt.Errorf("filter cannot be nil")
+	}
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 

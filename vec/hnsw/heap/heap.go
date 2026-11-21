@@ -70,8 +70,11 @@ func (h *Heap[T]) Pop() T {
 	return heap.Pop(&h.inner).(T)
 }
 
+// PopLast removes and returns the maximum element in the heap.
+// The heap is a min-heap, so the maximum is searched for instead of being
+// assumed to live at the end of the backing array. The complexity is O(n).
 func (h *Heap[T]) PopLast() T {
-	return h.Remove(h.Len() - 1)
+	return h.Remove(h.maxIndex())
 }
 
 // Remove removes and returns the element at index i from the heap.
@@ -86,8 +89,27 @@ func (h *Heap[T]) Min() T {
 }
 
 // Max returns the maximum element in the heap.
+//
+// The heap is a min-heap, so the maximum is not the last element of the
+// backing array: it is found by scanning. The complexity is O(n).
 func (h *Heap[T]) Max() T {
-	return h.inner.data[h.inner.Len()-1]
+	return h.inner.data[h.maxIndex()]
+}
+
+// maxIndex returns the index of the maximum element in the heap.
+// It panics on an empty heap, like Min does.
+func (h *Heap[T]) maxIndex() int {
+	if len(h.inner.data) == 0 {
+		panic("heap: Max called on an empty heap")
+	}
+
+	maxIdx := 0
+	for i := 1; i < len(h.inner.data); i++ {
+		if h.inner.data[maxIdx].Less(h.inner.data[i]) {
+			maxIdx = i
+		}
+	}
+	return maxIdx
 }
 
 func (h *Heap[T]) Slice() []T {

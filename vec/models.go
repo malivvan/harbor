@@ -1,6 +1,9 @@
 package vec
 
-import "regexp"
+import (
+	"reflect"
+	"regexp"
+)
 
 // Payload mimics Qdrant's payload structure, storing metadata as a map of string keys to any values.
 // It is used for filtering points based on their associated metadata.
@@ -114,7 +117,7 @@ func matchCondition(payload Payload, cond Condition) bool {
 
 	switch cond.Type {
 	case MatchTypeExact:
-		return val == cond.Match.Value
+		return matchExact(val, cond.Match.Value)
 	case MatchTypeRange:
 		return matchRange(val, cond.Range)
 	case MatchTypePrefix:
@@ -124,70 +127,148 @@ func matchCondition(payload Payload, cond Condition) bool {
 	case MatchTypeRegex:
 		return matchRegex(val, cond.Match.Value)
 	default:
-		return val == cond.Match.Value
+		return matchExact(val, cond.Match.Value)
 	}
 }
 
-// matchRange evaluates a range condition
+// matchExact reports whether the payload value equals the filter target.
+//
+// Numbers are compared across the concrete types a payload can hold (int,
+// int64, float32, float64, ...): a filter built with MatchValue{Value: 5} keeps
+// matching after a round-trip through storage, which returns integers as int64.
+func matchExact(val, target any) bool {
+	if val == nil || target == nil {
+		return val == target
+	}
+
+	if fv, ok := asFloat64(val); ok {
+		ft, ok := asFloat64(target)
+		if !ok {
+			return false
+		}
+		// Compare integral values exactly to avoid losing precision above 2^53.
+		if iv, ok := asInt64(val); ok {
+			if it, ok := asInt64(target); ok {
+				return iv == it
+			}
+		}
+		return fv == ft
+	}
+
+	valType := reflect.TypeOf(val)
+	if valType != reflect.TypeOf(target) {
+		// Different, incomparable/opaque dynamic types; fall back to a deep
+		// comparison so that maps and slices do not panic.
+		return reflect.DeepEqual(val, target)
+	}
+	if !valType.Comparable() {
+		return reflect.DeepEqual(val, target)
+	}
+	return val == target
+}
+
+// asFloat64 converts a numeric payload value to float64.
+// It reports false for non-numeric values.
+func asFloat64(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int8:
+		return float64(n), true
+	case int16:
+		return float64(n), true
+	case int32:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint:
+		return float64(n), true
+	case uint8:
+		return float64(n), true
+	case uint16:
+		return float64(n), true
+	case uint32:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	default:
+		return 0, false
+	}
+}
+
+// asInt64 converts an integral payload value to int64 without losing precision.
+func asInt64(v any) (int64, bool) {
+	switch n := v.(type) {
+	case int:
+		return int64(n), true
+	case int8:
+		return int64(n), true
+	case int16:
+		return int64(n), true
+	case int32:
+		return int64(n), true
+	case int64:
+		return n, true
+	case uint:
+		return int64(n), true
+	case uint8:
+		return int64(n), true
+	case uint16:
+		return int64(n), true
+	case uint32:
+		return int64(n), true
+	case uint64:
+		if n > uint64(1<<63-1) {
+			return 0, false
+		}
+		return int64(n), true
+	default:
+		return 0, false
+	}
+}
+
+// matchRange evaluates a range condition.
+//
+// Comparison is numeric and type-agnostic: any numeric payload value (int,
+// int64, float32, float64, ...) can be ranged against any numeric bound.
+// Non-numeric payload values, and conditions whose bound is not numeric, never
+// match: a range filter must not silently accept values it cannot compare.
 func matchRange(val any, r *RangeValue) bool {
 	if r == nil {
 		return false
 	}
 
-	switch v := val.(type) {
-	case float64:
-		if r.GT != nil {
-			if gt, ok := r.GT.(float64); ok && v <= gt {
-				return false
-			}
+	v, ok := asFloat64(val)
+	if !ok {
+		return false
+	}
+
+	if r.GT != nil {
+		gt, ok := asFloat64(r.GT)
+		if !ok || v <= gt {
+			return false
 		}
-		if r.GTE != nil {
-			if gte, ok := r.GTE.(float64); ok && v < gte {
-				return false
-			}
+	}
+	if r.GTE != nil {
+		gte, ok := asFloat64(r.GTE)
+		if !ok || v < gte {
+			return false
 		}
-		if r.LT != nil {
-			if lt, ok := r.LT.(float64); ok && v >= lt {
-				return false
-			}
+	}
+	if r.LT != nil {
+		lt, ok := asFloat64(r.LT)
+		if !ok || v >= lt {
+			return false
 		}
-		if r.LTE != nil {
-			if lte, ok := r.LTE.(float64); ok && v > lte {
-				return false
-			}
-		}
-	case int:
-		if r.GT != nil {
-			if gt, ok := r.GT.(int); ok && v <= gt {
-				return false
-			}
-			if gt, ok := r.GT.(float64); ok && float64(v) <= gt {
-				return false
-			}
-		}
-		if r.GTE != nil {
-			if gte, ok := r.GTE.(int); ok && v < gte {
-				return false
-			}
-			if gte, ok := r.GTE.(float64); ok && float64(v) < gte {
-				return false
-			}
-		}
-		if r.LT != nil {
-			if lt, ok := r.LT.(int); ok && v >= lt {
-				return false
-			}
-			if lt, ok := r.LT.(float64); ok && float64(v) >= lt {
-				return false
-			}
-		}
-		if r.LTE != nil {
-			if lte, ok := r.LTE.(int); ok && v > lte {
-				return false
-			}
-			if lte, ok := r.LTE.(float64); ok && float64(v) > lte {
-				return false
-			}
+	}
+	if r.LTE != nil {
+		lte, ok := asFloat64(r.LTE)
+		if !ok || v > lte {
+			return false
 		}
 	}
 

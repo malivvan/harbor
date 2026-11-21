@@ -246,7 +246,20 @@ func TestMatchRange(t *testing.T) {
 		{"int LTE match", 10, &RangeValue{LTE: 10}, true},
 		{"int LTE float match", 10, &RangeValue{LTE: 10.0}, true},
 		{"int LTE no match", 10, &RangeValue{LTE: 9}, false},
-		{"unsupported type", "string", &RangeValue{GT: 5}, true}, // matchRange returns true for unsupported types if r != nil and it falls through
+		// Payload types the range cannot interpret must not match: the old
+		// behavior returned true for every value that fell through the switch.
+		{"unsupported string type", "string", &RangeValue{GT: 5}, false},
+		{"unsupported bool type", true, &RangeValue{GT: 5}, false},
+		{"unsupported nil type", nil, &RangeValue{GT: 5}, false},
+		{"non-numeric bound", 10, &RangeValue{GT: "5"}, false},
+		// Persisted integers come back as int64 and must still be comparable.
+		{"int64 GT match", int64(10), &RangeValue{GT: int64(5)}, true},
+		{"int64 GT no match", int64(10), &RangeValue{GT: int64(15)}, false},
+		{"int64 GTE float match", int64(10), &RangeValue{GTE: 10.0}, true},
+		{"int64 LTE no match", int64(10), &RangeValue{LTE: int64(9)}, false},
+		{"float32 GT match", float32(10), &RangeValue{GT: float32(5)}, true},
+		{"float32 LT no match", float32(10), &RangeValue{LT: float32(5)}, false},
+		{"uint GT match", uint(10), &RangeValue{GT: uint(5)}, true},
 	}
 
 	for _, tt := range tests {

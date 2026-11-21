@@ -16,8 +16,11 @@ const (
 	KindDouble
 	// KindBool stores a bool.
 	KindBool
-	// KindBytes stores a byte slice.
+	// KindBytes stores a raw byte slice.
 	KindBytes
+	// KindJSON stores a JSON document (maps, slices and other complex payload
+	// values).
+	KindJSON
 )
 
 // Value is a payload value. Only the field selected by Kind is meaningful.
@@ -70,9 +73,39 @@ func (v *Value) GetBytesValue() []byte {
 	return v.BytesValue
 }
 
+// GetJSONValue returns the JSON document when Kind is KindJSON.
+func (v *Value) GetJSONValue() []byte {
+	if v == nil || v.Kind != KindJSON {
+		return nil
+	}
+	return v.BytesValue
+}
+
 // StoredPoint is the persisted representation of a vector point.
 type StoredPoint struct {
 	ID      string
 	Vector  []float32
 	Payload map[string]*Value
+	Version uint64
+}
+
+// clonePoint returns a copy of p that shares nothing mutable with it: the
+// vector slice and the payload map are duplicated so that callers mutating a
+// returned point cannot corrupt the index.
+func clonePoint(p *PointStruct) PointStruct {
+	cp := *p
+
+	if p.Vector != nil {
+		cp.Vector = make([]float32, len(p.Vector))
+		copy(cp.Vector, p.Vector)
+	}
+
+	if p.Payload != nil {
+		cp.Payload = make(Payload, len(p.Payload))
+		for k, v := range p.Payload {
+			cp.Payload[k] = v
+		}
+	}
+
+	return cp
 }

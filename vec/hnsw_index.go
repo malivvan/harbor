@@ -3,6 +3,7 @@ package vec
 import (
 	"fmt"
 	"math"
+	"sort"
 	"sync"
 
 	"github.com/malivvan/storm/vec/hnsw"
@@ -23,8 +24,12 @@ type HNSWParams struct {
 	// Default: 64
 	EfSearch int
 
-	// K is the number of nearest neighbors to return
+	// K is the number of nearest neighbors to return.
 	// Default: 10
+	//
+	// K is advisory: index searches always return the number of results
+	// requested by the caller (the topK argument of Search). The parameter is
+	// validated, so a non-positive value is replaced by the default.
 	K int
 }
 
@@ -56,9 +61,32 @@ func NewHNSWIndex(metric Distance) *HNSWIndex {
 	return NewHNSWIndexWithParams(metric, DefaultHNSWParams())
 }
 
+// normalizeHNSWParams replaces non-positive parameters with their defaults so
+// that the graph is never built with degenerate settings.
+func normalizeHNSWParams(params HNSWParams) HNSWParams {
+	def := DefaultHNSWParams()
+	if params.M <= 0 {
+		params.M = def.M
+	}
+	if params.EfConstruction <= 0 {
+		params.EfConstruction = def.EfConstruction
+	}
+	if params.EfSearch <= 0 {
+		params.EfSearch = def.EfSearch
+	}
+	if params.K <= 0 {
+		params.K = def.K
+	}
+	return params
+}
+
 // NewHNSWIndexWithParams creates a new HNSW index engine with custom parameters.
-// It allows fine-tuning of HNSW parameters for specific use cases.
+// It allows fine-tuning of HNSW parameters for specific use cases: M sizes the
+// neighbor lists, EfConstruction is used while inserting nodes, EfSearch while
+// querying and K is validated (see HNSWParams.K).
 func NewHNSWIndexWithParams(metric Distance, params HNSWParams) *HNSWIndex {
+	params = normalizeHNSWParams(params)
+
 	g := hnsw.NewGraph[string]()
 
 	// Configure Distance Function based on our definitions
@@ -89,13 +117,11 @@ func NewHNSWIndexWithParams(metric Distance, params HNSWParams) *HNSWIndex {
 		g.Distance = hnsw.CosineDistance
 	}
 
-	// Set HNSW parameters
-	if params.M > 0 {
-		g.M = params.M
-	}
-	if params.EfSearch > 0 {
-		g.EfSearch = params.EfSearch
-	}
+	// Set HNSW parameters. EfConstruction is what Graph.Add uses to pick the
+	// neighbors of a new node; EfSearch keeps its role on the query path.
+	g.M = params.M
+	g.EfSearch = params.EfSearch
+	g.EfConstruction = params.EfConstruction
 
 	return &HNSWIndex{
 		graph:  g,
@@ -115,15 +141,29 @@ func (h *HNSWIndex) Upsert(points []PointStruct) error {
 		return fmt.Errorf("HNSW graph is nil, cannot upsert points")
 	}
 
-	var nodes []hnsw.Node[string]
+	// Validate the dimensions up front: Graph.Add panics on a mismatch, which
+	// would leave the points map holding IDs the graph does not know about.
+	if dims := h.graph.Dims(); dims > 0 {
+		for i := range points {
+			if got := len(points[i].Vector); got != dims {
+				return fmt.Errorf("point %s has invalid vector dimension %d (expected %d)", points[i].ID, got, dims)
+			}
+		}
+	}
+
+	nodes := make([]hnsw.Node[string], 0, len(points))
 	for i := range points {
 		p := &points[i]
-		h.points[p.ID] = p
 		nodes = append(nodes, hnsw.MakeNode(p.ID, p.Vector))
 	}
 
-	// Batch add to graph
+	// Batch add to graph first: only mirror the points that really made it into
+	// the graph, so that Count and Search cannot disagree with the graph.
 	h.graph.Add(nodes...)
+
+	for i := range points {
+		h.points[points[i].ID] = &points[i]
+	}
 	return nil
 }
 
@@ -131,6 +171,10 @@ func (h *HNSWIndex) Upsert(points []PointStruct) error {
 // It uses a post-filtering strategy: over-fetches results to account for filtered points,
 // then applies the payload filter and returns the topK matches.
 func (h *HNSWIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredPoint, error) {
+	if topK <= 0 {
+		return nil, fmt.Errorf("topK must be greater than 0, got %d", topK)
+	}
+
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -171,6 +215,7 @@ func (h *HNSWIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 
 		results = append(results, ScoredPoint{
 			ID:      point.ID,
+			Version: point.Version,
 			Score:   score,
 			Payload: point.Payload,
 		})
@@ -179,6 +224,15 @@ func (h *HNSWIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 			break
 		}
 	}
+
+	// Rank the results with the collection's metric so callers can rely on the
+	// order regardless of how the graph ranked the over-fetched candidates.
+	sort.SliceStable(results, func(i, j int) bool {
+		if h.metric == Euclid {
+			return results[i].Score < results[j].Score
+		}
+		return results[i].Score > results[j].Score
+	})
 
 	return results, nil
 }
@@ -229,7 +283,7 @@ func (h *HNSWIndex) GetPointsByFilter(filter *Filter) []PointStruct {
 	var results []PointStruct
 	for _, point := range h.points {
 		if MatchFilter(point.Payload, filter) {
-			results = append(results, *point)
+			results = append(results, clonePoint(point))
 		}
 	}
 	return results
@@ -238,6 +292,11 @@ func (h *HNSWIndex) GetPointsByFilter(filter *Filter) []PointStruct {
 // DeleteByFilter removes all points that match the given filter from both
 // the HNSW graph and the local points map. Returns the IDs of deleted points.
 func (h *HNSWIndex) DeleteByFilter(filter *Filter) ([]string, error) {
+	if filter == nil {
+		// A nil filter matches everything: deleting on it would wipe the index.
+		return nil, fmt.Errorf("filter cannot be nil")
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 

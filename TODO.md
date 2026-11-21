@@ -527,6 +527,7 @@ the encryption state (sections 4 and 6).
   Fix: implement `Max()`/`PopLast()` by scanning for the true maximum (or maintain a max-heap /
   use `container/heap` against negated distances).
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **HNSW search returns results in heap-array order, not sorted by distance**
   — `vec/hnsw/graph.go:147` and `vec/hnsw/graph.go:467-474`
   Problem: `search()` returns `result.Slice()`, the underlying min-heap array, which is not
@@ -535,6 +536,7 @@ the encryption state (sections 4 and 6).
   ordering is wrong.
   Fix: sort `result.Slice()` by `dist` before returning (or drain the heap into a sorted slice).
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **Replacing a node can drop the newly computed higher layers**
   — `vec/hnsw/graph.go:400-404`
   Problem: in `Graph.Add`, when a key already exists in the current layer the code calls
@@ -545,6 +547,7 @@ the encryption state (sections 4 and 6).
   Fix: delete the old node from each layer once before the insertion loop (or remove only the
   old node in the current layer), then insert at all levels `0..insertLevel` without re-deleting.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **Range filter silently matches payload values it does not understand**
   — `vec/models.go:137-194` (`matchRange`)
   Problem: `matchRange` only handles `float64` and `int`; for any other payload type (`string`,
@@ -555,6 +558,7 @@ the encryption state (sections 4 and 6).
   Fix: add `default: return false` (and add `int64`/`float32` cases), or normalize payload
   numbers to `float64` before comparison.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **`replenish` always uses cosine distance regardless of the graph metric**
   — `vec/hnsw/graph.go:167`
   Problem: `layerNode.replenish` hard-codes `CosineDistance` when choosing replacement
@@ -564,6 +568,7 @@ the encryption state (sections 4 and 6).
   Fix: pass the graph's `Distance` function into `replenish`/`addNeighbor`/`isolate` instead of
   hard-coding `CosineDistance`.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 ### Medium
 
 - **Zero vectors produce NaN cosine distances in the HNSW graph**
@@ -576,6 +581,7 @@ the encryption state (sections 4 and 6).
   Fix: make `hnsw.CosineDistance` return a defined value (e.g. 1.0) when either norm is zero,
   or fix `vek32.CosineSimilarity` to guard zero norms.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **`topK <= 0` is unvalidated: negative topK panics and topK 0 returns a result in HNSW**
   — `vec/collection.go:182-190`, `vec/flat_index.go:69-73`, `vec/hnsw_index.go:143-150`
   Problem: `FlatIndex.Search` does `results[:topK]` (negative panics); HNSW passes `topK` into
@@ -584,6 +590,7 @@ the encryption state (sections 4 and 6).
   `topK`.
   Fix: reject `topK <= 0` in `Collection.Search` (or clamp) before dispatching to the index.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **Exact filter matching is type-fragile for persisted numeric payloads**
   — `vec/models.go:116-117` with `vec/store.go:99-101`
   Problem: `matchCondition` uses Go interface equality (`val == cond.Match.Value`).
@@ -593,6 +600,7 @@ the encryption state (sections 4 and 6).
   Fix: compare numerics by converting to a common numeric type (e.g. `float64`/`int64`), or
   normalize payload numbers consistently at ingestion.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **Stale empty layers cause nodes to be inserted above their assigned level**
   — `vec/hnsw/graph.go:363-367`
   Problem: the empty-layer branch inserts the new node unconditionally, without checking
@@ -603,6 +611,7 @@ the encryption state (sections 4 and 6).
   Fix: guard the empty-layer insertion with `insertLevel >= i` (or prune empty layers in
   `Delete`).
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **`Open(ctx, nil, nil, …)` returns a Store whose methods panic with nil DB**
   — `vec/store.go:199-206` and `vec/store.go:357-364`
   Problem: `Open` returns a usable-looking store when `bdb == nil`, but `EnsureCollection`
@@ -610,6 +619,7 @@ the encryption state (sections 4 and 6).
   check, so `NewCollectionWithParams` → `EnsureCollection` panics.
   Fix: either reject nil DB in `Open`, or guard every DB access (return "storage not open").
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **`fromStoredPoint` JSON-decodes raw byte payloads, changing their type**
   — `vec/store.go:106-115`
   Problem: any `KindBytes` value is first tried with `json.Unmarshal`, so a stored
@@ -620,6 +630,7 @@ the encryption state (sections 4 and 6).
   Fix: add a distinct kind for JSON vs raw bytes (or wrap raw bytes), and preserve integer types
   for JSON-serialized complex values.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **Import fills missing neighbor references with nil, enabling later nil-pointer panics**
   — `vec/hnsw/encode.go:247-255`
   Problem: after reading each layer, `node.neighbors[key] = nodes[key]` blindly assigns the map
@@ -628,6 +639,7 @@ the encryption state (sections 4 and 6).
   `neighbor.Value` and panic. The import path returns no error for this corrupt/mismatched input.
   Fix: after filling, verify every neighbor pointer is non-nil and return an error otherwise.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **`Graph.Dims` panics on an empty graph with leftover layers**
   — `vec/hnsw/graph.go:320-325`
   Problem: `Dims()` does `len(g.layers[0].entry().Value)` without checking that `entry()` is
@@ -635,6 +647,7 @@ the encryption state (sections 4 and 6).
   `entry()` returns nil and `Dims` nil-dereferences. `assertDims` handles this; `Dims` does not.
   Fix: return 0 when `g.layers[0].entry() == nil`.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **`PointStruct.Version` is never persisted and never returned in search results**
   — `vec/point.go:74-78`, `vec/store.go:35-39`, `vec/flat_index.go:55-59`, `vec/hnsw_index.go:172-176`
   Problem: `StoredPoint` has no `Version` field and `toStoredPoint` drops it, so versions set by
@@ -643,6 +656,7 @@ the encryption state (sections 4 and 6).
   Fix: add `Version` to `StoredPoint` (and regenerate `binco.gen.go`), copy it in
   `toStoredPoint`/`fromStoredPoint`, and set it in search results.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **`NewCollectionWithParams` overwrites collection metadata before validating loaded points**
   — `vec/collection.go:70-100`
   Problem: `SaveCollectionMeta` is called before `LoadCollection`/dimension validation. If a
@@ -651,6 +665,7 @@ the encryption state (sections 4 and 6).
   Fix: load and validate points first, then persist metadata (or persist metadata only when the
   collection is newly created).
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **`EfConstruction` and `K` HNSW params are silently ignored**
   — `vec/hnsw_index.go:92-99`
   Problem: `NewHNSWIndexWithParams` applies only `M` and `EfSearch`.
@@ -659,6 +674,7 @@ the encryption state (sections 4 and 6).
   Fix: add a construction `ef` field to the graph and wire `EfConstruction` into `Add`; validate
   or document `K`.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **HNSW upsert mutates the points map before the graph add can fail**
   — `vec/hnsw_index.go:119-126`
   Problem: `h.points[p.ID] = p` is set for all points before `h.graph.Add(nodes...)`. If
@@ -667,6 +683,7 @@ the encryption state (sections 4 and 6).
   Fix: build nodes first, add them to the graph, and only update `h.points` after insertion
   succeeds (or validate dimensions in `Upsert` and return an error instead of panicking).
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **`Collection.Delete` drops buffered points before the storage delete succeeds**
   — `vec/collection.go:243-259`
   Problem: `writeBuf` is filtered first, then `storage.DeletePoints` runs. If the storage delete
@@ -676,6 +693,7 @@ the encryption state (sections 4 and 6).
   Fix: delete from storage and index first; filter `writeBuf` last (or only after all deletions
   succeed).
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 ### Low
 
 - **Unsynchronized `Store.closed` flag**
@@ -685,6 +703,7 @@ the encryption state (sections 4 and 6).
   (bbolt itself is safe, the flag is not).
   Fix: guard with `sync.Mutex`/`atomic.Bool`.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **SQ8 quantizer mangles non-finite values**
   — `vec/quant.go:50-72`
   Problem: for vectors containing `+Inf`/`-Inf`, `range_` becomes `+Inf` and `scale` becomes 0,
@@ -692,6 +711,7 @@ the encryption state (sections 4 and 6).
   Dequantization then returns NaN for all components, silently destroying the vector.
   Fix: reject or sanitize non-finite values (or define fallback scale/min) before quantizing.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **HNSW import panics on negative encoded lengths**
   — `vec/hnsw/encode.go:41-42` and `vec/hnsw/encode.go:53-54`
   Problem: `binaryRead` decodes a varint length and immediately does `make([]byte, ln)` /
@@ -699,12 +719,14 @@ the encryption state (sections 4 and 6).
   instead of an error.
   Fix: validate `ln` (e.g. `ln >= 0` and a sane cap) and return an error.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **`GetPointsByFilter` returns shallow copies (shared vectors/payload maps)**
   — `vec/flat_index.go:115-121`, `vec/hnsw_index.go:229-235`
   Problem: both index implementations copy the `PointStruct` struct but not its `Vector` slice
   or `Payload` map, so callers mutating a returned point silently mutate the index.
   Fix: deep-copy `Vector` and `Payload` (or document that callers must not mutate).
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **`DeleteByFilter(nil)` deletes every point in the index implementations**
   — `vec/flat_index.go:125-136`, `vec/hnsw_index.go:240-257`
   Problem: `MatchFilter` treats a nil filter as "match all", so calling the index-level
@@ -713,12 +735,14 @@ the encryption state (sections 4 and 6).
   Fix: reject nil filters in `DeleteByFilter` (return an error) to match the destructive
   semantics.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **Distance functions iterate only over `a`, panicking on length mismatch**
   — `vec/math.go:42-47`, `vec/math.go:53-59`, `vec/math.go:69-77`
   Problem: `dotProduct`/`cosineSimilarity`/`euclideanDistance` all use `for i := range a` and
   index `b[i]`. `CalculateDistance` is public with no length check, so mismatched slices panic.
   Fix: check `len(a) == len(b)` in `CalculateDistance` and return an error/defined value.
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 - **`hnsw.RegisterDistanceFunc` / `distanceFuncs` map has no synchronization**
   — `vec/hnsw/distance.go:29-49`
   Problem: `RegisterDistanceFunc` writes to the global `distanceFuncs` map while
@@ -728,6 +752,7 @@ the encryption state (sections 4 and 6).
 
 ---
 
+  **Status: FIXED** — fixed with regression tests in commit `fix(vec): address review findings`.
 ## 7. Cross-cutting / maintainability
 
 ### Medium

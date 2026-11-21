@@ -67,19 +67,9 @@ func (store *Store) NewCollectionWithParams(name string, vectorLen int, metric D
 			return nil, fmt.Errorf("failed to ensure storage collection %s: %w", name, err)
 		}
 
-		// Save collection metadata
-		meta := CollectionMeta{
-			Name:       name,
-			VectorLen:  vectorLen,
-			Metric:     metric,
-			UseHNSW:    useHNSW,
-			HNSWParams: hnswParams,
-		}
-		if err := store.SaveCollectionMeta(name, meta); err != nil {
-			return nil, fmt.Errorf("failed to save metadata for %s: %w", name, err)
-		}
-
-		// Load existing points into memory index
+		// Load and validate existing points before persisting the metadata:
+		// opening an existing collection with the wrong configuration must not
+		// overwrite the configuration already stored on disk.
 		loadedPoints, err := store.LoadCollection(name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load points for %s: %w", name, err)
@@ -98,6 +88,19 @@ func (store *Store) NewCollectionWithParams(name string, vectorLen int, metric D
 			if err := col.index.Upsert(batch); err != nil {
 				return nil, fmt.Errorf("failed to load initial points into index: %w", err)
 			}
+		}
+
+		// Save collection metadata last, once the configuration is known to be
+		// consistent with what is stored.
+		meta := CollectionMeta{
+			Name:       name,
+			VectorLen:  vectorLen,
+			Metric:     metric,
+			UseHNSW:    useHNSW,
+			HNSWParams: hnswParams,
+		}
+		if err := store.SaveCollectionMeta(name, meta); err != nil {
+			return nil, fmt.Errorf("failed to save metadata for %s: %w", name, err)
 		}
 	}
 
@@ -183,6 +186,11 @@ func (c *Collection) Search(queryVector []float32, filter *Filter, topK int) ([]
 	if len(queryVector) != c.VectorLen {
 		return nil, fmt.Errorf("query vector length mismatch: expected %d, got %d", c.VectorLen, len(queryVector))
 	}
+	if topK <= 0 {
+		// Reject before dispatching: a negative topK used to panic in the
+		// indexes and a zero topK still returned a point from HNSW.
+		return nil, fmt.Errorf("topK must be greater than 0, got %d", topK)
+	}
 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -240,17 +248,6 @@ func (c *Collection) Delete(points []string, filter *Filter) (int, error) {
 		targetSet[id] = struct{}{}
 	}
 
-	// 0. Remove deleted IDs from write buffer（防止刷盘时重写已删数据）
-	if len(c.writeBuf) > 0 {
-		filtered := make([]PointStruct, 0, len(c.writeBuf))
-		for _, p := range c.writeBuf {
-			if _, ok := targetSet[p.ID]; !ok {
-				filtered = append(filtered, p)
-			}
-		}
-		c.writeBuf = filtered
-	}
-
 	// 1. Delete from storage first (if configured)
 	if c.storage != nil {
 		if err := c.storage.DeletePoints(c.Name, targetIDs); err != nil {
@@ -264,6 +261,19 @@ func (c *Collection) Delete(points []string, filter *Filter) (int, error) {
 		if err := c.index.Delete(id); err == nil {
 			successCount++
 		}
+	}
+
+	// 3. Only now drop the IDs from the write buffer（防止刷盘时重写已删数据）:
+	// dropping them first would lose the points still present in the index when
+	// the storage delete fails.
+	if len(c.writeBuf) > 0 {
+		filtered := make([]PointStruct, 0, len(c.writeBuf))
+		for _, p := range c.writeBuf {
+			if _, ok := targetSet[p.ID]; !ok {
+				filtered = append(filtered, p)
+			}
+		}
+		c.writeBuf = filtered
 	}
 
 	return successCount, nil

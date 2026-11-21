@@ -14,6 +14,22 @@ import (
 
 var byteOrder = binary.LittleEndian
 
+// maxEncodedLength caps the number of elements/size read from an encoded
+// stream. It keeps a corrupt or malicious length prefix from triggering a huge
+// allocation (or a panic) instead of an error.
+const maxEncodedLength = 1 << 30
+
+// checkEncodedLength validates a length prefix read from an encoded stream.
+func checkEncodedLength(ln int) error {
+	if ln < 0 {
+		return fmt.Errorf("invalid encoded length %d: must not be negative", ln)
+	}
+	if ln > maxEncodedLength {
+		return fmt.Errorf("invalid encoded length %d: exceeds the maximum of %d", ln, maxEncodedLength)
+	}
+	return nil
+}
+
 func binaryRead(r io.Reader, data interface{}) (int, error) {
 	switch v := data.(type) {
 	case *int:
@@ -37,6 +53,9 @@ func binaryRead(r io.Reader, data interface{}) (int, error) {
 		if err != nil {
 			return 0, err
 		}
+		if err := checkEncodedLength(ln); err != nil {
+			return 0, err
+		}
 
 		s := make([]byte, ln)
 		_, err = binaryRead(r, &s)
@@ -47,6 +66,9 @@ func binaryRead(r io.Reader, data interface{}) (int, error) {
 		var ln int
 		_, err := binaryRead(r, &ln)
 		if err != nil {
+			return 0, err
+		}
+		if err := checkEncodedLength(ln); err != nil {
 			return 0, err
 		}
 
@@ -176,6 +198,11 @@ func (h *Graph[K]) Export(w io.Writer) error {
 // T must implement io.ReaderFrom.
 // The imported graph does not have to match the exported graph's parameters (except for
 // dimensionality). The graph will converge onto the new parameters.
+//
+// EfConstruction is not part of the encoding: the receiver keeps whatever value
+// it was configured with (NewGraph sets a default).
+// Import returns an error, instead of panicking, for malformed input such as
+// negative length prefixes or neighbor keys that are missing from a layer.
 func (h *Graph[K]) Import(r io.Reader) error {
 	var (
 		version int
@@ -189,7 +216,7 @@ func (h *Graph[K]) Import(r io.Reader) error {
 	}
 
 	var ok bool
-	h.Distance, ok = distanceFuncs[dist]
+	h.Distance, ok = lookupDistanceFunc(dist)
 	if !ok {
 		return fmt.Errorf("unknown distance function %q", dist)
 	}
@@ -206,6 +233,9 @@ func (h *Graph[K]) Import(r io.Reader) error {
 	if err != nil {
 		return err
 	}
+	if err := checkEncodedLength(nLayers); err != nil {
+		return fmt.Errorf("decoding the number of layers: %w", err)
+	}
 
 	h.layers = make([]*layer[K], nLayers)
 	for i := 0; i < nLayers; i++ {
@@ -213,6 +243,9 @@ func (h *Graph[K]) Import(r io.Reader) error {
 		_, err = binaryRead(r, &nNodes)
 		if err != nil {
 			return err
+		}
+		if err := checkEncodedLength(nNodes); err != nil {
+			return fmt.Errorf("decoding the number of nodes in layer %d: %w", i, err)
 		}
 
 		nodes := make(map[K]*layerNode[K], nNodes)
@@ -223,6 +256,10 @@ func (h *Graph[K]) Import(r io.Reader) error {
 			_, err = multiBinaryRead(r, &key, &vec, &nNeighbors)
 			if err != nil {
 				return fmt.Errorf("decoding node %d: %w", j, err)
+			}
+
+			if err := checkEncodedLength(nNeighbors); err != nil {
+				return fmt.Errorf("decoding the number of neighbors of node %d: %w", j, err)
 			}
 
 			neighbors := make([]K, nNeighbors)
@@ -248,10 +285,16 @@ func (h *Graph[K]) Import(r io.Reader) error {
 				node.neighbors[neighbor] = nil
 			}
 		}
-		// Fill in neighbor pointers
+		// Fill in neighbor pointers, rejecting references to keys that are not
+		// present in this layer: leaving nil pointers behind would make later
+		// searches, inserts and isolates panic.
 		for _, node := range nodes {
 			for key := range node.neighbors {
-				node.neighbors[key] = nodes[key]
+				neighbor, ok := nodes[key]
+				if !ok || neighbor == nil {
+					return fmt.Errorf("layer %d: node %v references the missing neighbor %v", i, node.Key, key)
+				}
+				node.neighbors[key] = neighbor
 			}
 		}
 		h.layers[i] = &layer[K]{nodes: nodes}

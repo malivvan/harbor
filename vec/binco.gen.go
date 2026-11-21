@@ -133,7 +133,7 @@ func (s valueBinco) Skip(bs []byte) (n int, err error) {
 // of its field names and types in declaration order. The format is positional,
 // so reordering fields silently changes what a stored payload means; compare
 // this constant with the value the writer used to detect that.
-const StoredPointSchemaFingerprint = "d1ae8e6a74b0b81ec4565d29fdaf7f342dd4cbd94bf26a714e45da26b14586f6"
+const StoredPointSchemaFingerprint = "db5cd98c3f20c465cfc1e4105595a1605ca073e8b262fb95cb71889fbec92bf4"
 
 var StoredPointBinco = storedPointBinco{}
 
@@ -142,7 +142,8 @@ type storedPointBinco struct{}
 func (s storedPointBinco) Marshal(v StoredPoint, bs []byte) (n int) {
 	n = composite.String.Marshal(v.ID, bs)
 	n += sliceCVLMZl9wFhJ0aP0iΣtu6KwΞΞ.Marshal(v.Vector, bs[n:])
-	return n + mapY2C3Σv3O2AzΔxQwSYLNyΔwΞΞ.Marshal(v.Payload, bs[n:])
+	n += mapY2C3Σv3O2AzΔxQwSYLNyΔwΞΞ.Marshal(v.Payload, bs[n:])
+	return n + varnum.Uint64.Marshal(v.Version, bs[n:])
 }
 
 func (s storedPointBinco) Unmarshal(bs []byte) (v StoredPoint, n int, err error) {
@@ -158,13 +159,19 @@ func (s storedPointBinco) Unmarshal(bs []byte) (v StoredPoint, n int, err error)
 	}
 	v.Payload, n1, err = mapY2C3Σv3O2AzΔxQwSYLNyΔwΞΞ.Unmarshal(bs[n:])
 	n += n1
+	if err != nil {
+		return
+	}
+	v.Version, n1, err = varnum.Uint64.Unmarshal(bs[n:])
+	n += n1
 	return
 }
 
 func (s storedPointBinco) Size(v StoredPoint) (size int) {
 	size = composite.String.Size(v.ID)
 	size += sliceCVLMZl9wFhJ0aP0iΣtu6KwΞΞ.Size(v.Vector)
-	return size + mapY2C3Σv3O2AzΔxQwSYLNyΔwΞΞ.Size(v.Payload)
+	size += mapY2C3Σv3O2AzΔxQwSYLNyΔwΞΞ.Size(v.Payload)
+	return size + varnum.Uint64.Size(v.Version)
 }
 
 func (s storedPointBinco) Skip(bs []byte) (n int, err error) {
@@ -179,6 +186,11 @@ func (s storedPointBinco) Skip(bs []byte) (n int, err error) {
 		return
 	}
 	n1, err = mapY2C3Σv3O2AzΔxQwSYLNyΔwΞΞ.Skip(bs[n:])
+	n += n1
+	if err != nil {
+		return
+	}
+	n1, err = varnum.Uint64.Skip(bs[n:])
 	n += n1
 	return
 }

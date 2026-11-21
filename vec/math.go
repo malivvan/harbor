@@ -24,7 +24,18 @@ const (
 // CalculateDistance computes the similarity or distance between two vectors
 // based on the specified metric. For Cosine and Dot, higher values indicate
 // greater similarity. For Euclidean, lower values indicate greater similarity.
+//
+// Vectors of different length cannot be compared: Euclidean distance returns
+// +Inf (infinitely far) and the similarity metrics return 0 (no similarity)
+// instead of panicking on an out-of-range index.
 func CalculateDistance(metric Distance, a, b []float32) float32 {
+	if len(a) != len(b) {
+		if metric == Euclid {
+			return float32(math.Inf(1))
+		}
+		return 0
+	}
+
 	switch metric {
 	case Cosine:
 		return cosineSimilarity(a, b)
@@ -41,7 +52,8 @@ func CalculateDistance(metric Distance, a, b []float32) float32 {
 // It is the sum of element-wise products. Higher values indicate more similar vectors.
 func dotProduct(a, b []float32) float32 {
 	var sum float32
-	for i := range a {
+	n := min(len(a), len(b))
+	for i := 0; i < n; i++ {
 		sum += a[i] * b[i]
 	}
 	return sum
@@ -52,7 +64,8 @@ func dotProduct(a, b []float32) float32 {
 // Returns a value between -1 (opposite) and 1 (identical), with 0 indicating orthogonality.
 func cosineSimilarity(a, b []float32) float32 {
 	var dot, normA, normB float32
-	for i := range a {
+	n := min(len(a), len(b))
+	for i := 0; i < n; i++ {
 		dot += a[i] * b[i]
 		normA += a[i] * a[i]
 		normB += b[i] * b[i]
@@ -68,7 +81,8 @@ func cosineSimilarity(a, b []float32) float32 {
 // more similar vectors. Returns the actual distance (not squared).
 func euclideanDistance(a, b []float32) float32 {
 	var sum float32
-	for i := range a {
+	n := min(len(a), len(b))
+	for i := 0; i < n; i++ {
 		diff := a[i] - b[i]
 		sum += diff * diff
 	}

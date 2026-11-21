@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -24,7 +26,9 @@ type Store struct {
 	// metadata. An empty root means the database root.
 	root []byte
 
-	closed    bool
+	// closed reports whether Close has been called. It is an atomic so that
+	// Close can race safely with the other Store methods.
+	closed    atomic.Bool
 	quantizer Quantizer
 	useQuant  bool
 
@@ -34,8 +38,9 @@ type Store struct {
 
 func toStoredPoint(p *PointStruct) *StoredPoint {
 	stored := &StoredPoint{
-		ID:     p.ID,
-		Vector: p.Vector,
+		ID:      p.ID,
+		Vector:  p.Vector,
+		Version: p.Version,
 	}
 
 	if p.Payload != nil {
@@ -68,9 +73,11 @@ func toStoredPoint(p *PointStruct) *StoredPoint {
 				value.Kind = KindBytes
 				value.BytesValue = val
 			default:
-				// For complex types (map, slice, etc.), JSON-serialize and store as bytes
+				// For complex types (map, slice, etc.), JSON-serialize and keep
+				// the document in a dedicated kind so that raw byte payloads are
+				// not mistaken for JSON on the way back.
 				if jsonBytes, err := json.Marshal(val); err == nil {
-					value.Kind = KindBytes
+					value.Kind = KindJSON
 					value.BytesValue = jsonBytes
 				}
 				// If JSON marshal fails, skip the value
@@ -84,8 +91,9 @@ func toStoredPoint(p *PointStruct) *StoredPoint {
 
 func fromStoredPoint(stored *StoredPoint) *PointStruct {
 	p := &PointStruct{
-		ID:     stored.ID,
-		Vector: stored.Vector,
+		ID:      stored.ID,
+		Vector:  stored.Vector,
+		Version: stored.Version,
 	}
 
 	if stored.Payload != nil {
@@ -104,19 +112,59 @@ func fromStoredPoint(stored *StoredPoint) *PointStruct {
 			case KindBool:
 				p.Payload[k] = v.BoolValue
 			case KindBytes:
-				// Try to deserialize as JSON for complex nested objects (map, slice, etc.)
-				// If it's not valid JSON, return raw bytes
-				var obj any
-				if err := json.Unmarshal(v.BytesValue, &obj); err == nil {
-					p.Payload[k] = obj
-				} else {
-					p.Payload[k] = v.BytesValue
-				}
+				// Raw bytes round-trip as raw bytes: never reinterpret them as
+				// JSON, which used to change their type.
+				p.Payload[k] = v.BytesValue
+			case KindJSON:
+				// Complex values are JSON documents. Numbers are decoded with
+				// json.Number and normalized so that integers stay integers.
+				p.Payload[k] = decodeJSONPayload(v.BytesValue)
 			}
 		}
 	}
 
 	return p
+}
+
+// decodeJSONPayload decodes a JSON payload document, preserving integer types
+// instead of turning every number into a float64. Invalid documents are
+// returned as raw bytes.
+func decodeJSONPayload(data []byte) any {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+
+	var obj any
+	if err := dec.Decode(&obj); err != nil {
+		return data
+	}
+	return normalizeJSONValue(obj)
+}
+
+// normalizeJSONValue converts json.Number values into int64 when they are
+// integral, and float64 otherwise, recursively.
+func normalizeJSONValue(v any) any {
+	switch n := v.(type) {
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return i
+		}
+		if f, err := n.Float64(); err == nil {
+			return f
+		}
+		return n.String()
+	case map[string]any:
+		for k, item := range n {
+			n[k] = normalizeJSONValue(item)
+		}
+		return n
+	case []any:
+		for i, item := range n {
+			n[i] = normalizeJSONValue(item)
+		}
+		return n
+	default:
+		return v
+	}
 }
 
 // NewStorage opens a bbolt database at path and returns a Store with default
@@ -147,6 +195,9 @@ func NewStorageWithQuantization(path string, useQuant bool, quantizer Quantizer,
 
 // Open initializes a new BoltDB storage engine with optional vector quantization
 // and native AEAD encryption.
+//
+// A nil database is rejected with ErrInvalidConfig: the returned Store would
+// have no way to persist anything and every method would otherwise panic.
 // The root key, when non-empty, is used as the parent bucket for all collections
 // and collection metadata.
 // Returns an error if the context is invalid.
@@ -187,22 +238,18 @@ func Open(ctx context.Context, bdb *bbolt.DB, key []byte, cfg Config) (*Store, e
 		return nil, err
 	}
 
+	if bdb == nil {
+		// A nil database cannot store anything: every method would panic. Fail
+		// fast instead of handing out a handle that explodes on first use.
+		return nil, fmt.Errorf("%w: database handle is nil", ErrInvalidConfig)
+	}
+
 	store := &Store{
 		db:        bdb,
-		closed:    false,
 		quantizer: quantizer,
 		useQuant:  useQuant,
 		root:      append([]byte(nil), key...),
 		enc:       enc,
-	}
-
-	// A nil database cannot be inspected; keep the historical behavior of
-	// returning a usable handle without touching storage.
-	if bdb == nil {
-		if enc != nil {
-			return nil, fmt.Errorf("%w: encryption requires a database", ErrInvalidConfig)
-		}
-		return store, nil
 	}
 
 	if err := store.checkMode(ctx); err != nil {
@@ -210,6 +257,23 @@ func Open(ctx context.Context, bdb *bbolt.DB, key []byte, cfg Config) (*Store, e
 	}
 
 	return store, nil
+}
+
+// ErrStorageNotOpen is returned when a Store method is called on a store that
+// has no underlying database (for example a zero-value Store).
+var ErrStorageNotOpen = errors.New("storage is not open")
+
+// checkOpen reports whether the store can serve requests. Every exported
+// method calls it before touching the database so that a Store without a
+// database returns an error instead of panicking.
+func (s *Store) checkOpen() error {
+	if s.closed.Load() {
+		return fmt.Errorf("storage is closed")
+	}
+	if s.db == nil {
+		return ErrStorageNotOpen
+	}
+	return nil
 }
 
 // checkMode reconciles the encryption settings of the Store with the marker
@@ -341,22 +405,27 @@ func (s *Store) metaBucket(tx *bbolt.Tx, create bool) (*bbolt.Bucket, error) {
 // It is important to call this when done to ensure all data is flushed to disk.
 // This method is idempotent and can be called multiple times.
 func (s *Store) Close() error {
-	if s.closed {
+	if !s.closed.CompareAndSwap(false, true) {
+		return nil // already closed
+	}
+
+	if s.db == nil {
 		return nil
 	}
 
-	err := s.db.Close()
-	if err == nil {
-		s.closed = true
+	if err := s.db.Close(); err != nil {
+		// The database may still be usable: allow a retry.
+		s.closed.Store(false)
+		return err
 	}
-	return err
+	return nil
 }
 
 // EnsureCollection creates a bucket for the collection if it doesn't already exist.
 // Each collection is stored as a separate bucket in BoltDB.
 func (s *Store) EnsureCollection(colName string) error {
-	if s.closed {
-		return fmt.Errorf("storage is closed")
+	if err := s.checkOpen(); err != nil {
+		return err
 	}
 
 	return s.db.Update(func(tx *bbolt.Tx) error {
@@ -370,8 +439,8 @@ func (s *Store) EnsureCollection(colName string) error {
 // If quantization is enabled, vectors are compressed before storage.
 // Returns an error if the collection doesn't exist or if serialization fails.
 func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
-	if s.closed {
-		return fmt.Errorf("storage is closed")
+	if err := s.checkOpen(); err != nil {
+		return err
 	}
 
 	return s.db.Update(func(tx *bbolt.Tx) error {
@@ -425,8 +494,8 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 // If quantization is enabled, compressed vectors are decompressed during loading.
 // If the collection doesn't exist, returns an empty map without error.
 func (s *Store) LoadCollection(colName string) (map[string]*PointStruct, error) {
-	if s.closed {
-		return nil, fmt.Errorf("storage is closed")
+	if err := s.checkOpen(); err != nil {
+		return nil, err
 	}
 
 	points := make(map[string]*PointStruct)
@@ -479,8 +548,8 @@ func (s *Store) LoadCollection(colName string) (map[string]*PointStruct, error) 
 // ListCollections returns all collection names (bucket names) in the storage.
 // It excludes the internal metadata bucket.
 func (s *Store) ListCollections() ([]string, error) {
-	if s.closed {
-		return nil, fmt.Errorf("storage is closed")
+	if err := s.checkOpen(); err != nil {
+		return nil, err
 	}
 
 	var collections []string
@@ -524,8 +593,8 @@ func (s *Store) ListCollections() ([]string, error) {
 
 // SaveCollectionMeta persists collection metadata to a special bucket.
 func (s *Store) SaveCollectionMeta(name string, meta CollectionMeta) error {
-	if s.closed {
-		return fmt.Errorf("storage is closed")
+	if err := s.checkOpen(); err != nil {
+		return err
 	}
 
 	return s.db.Update(func(tx *bbolt.Tx) error {
@@ -555,8 +624,8 @@ func (s *Store) SaveCollectionMeta(name string, meta CollectionMeta) error {
 
 // LoadCollectionMeta retrieves collection metadata from the special bucket.
 func (s *Store) LoadCollectionMeta(name string) (*CollectionMeta, error) {
-	if s.closed {
-		return nil, fmt.Errorf("storage is closed")
+	if err := s.checkOpen(); err != nil {
+		return nil, err
 	}
 
 	var meta CollectionMeta
@@ -595,8 +664,8 @@ func (s *Store) LoadCollectionMeta(name string) (*CollectionMeta, error) {
 
 // ListCollectionMetas returns all collection metadata stored in the database.
 func (s *Store) ListCollectionMetas() ([]CollectionMeta, error) {
-	if s.closed {
-		return nil, fmt.Errorf("storage is closed")
+	if err := s.checkOpen(); err != nil {
+		return nil, err
 	}
 
 	var metas []CollectionMeta
@@ -638,8 +707,8 @@ func (s *Store) ListCollectionMetas() ([]CollectionMeta, error) {
 // If a point ID doesn't exist, it is silently skipped.
 // Returns an error if the collection doesn't exist.
 func (s *Store) DeletePoints(colName string, ids []string) error {
-	if s.closed {
-		return fmt.Errorf("storage is closed")
+	if err := s.checkOpen(); err != nil {
+		return err
 	}
 
 	return s.db.Update(func(tx *bbolt.Tx) error {
@@ -666,8 +735,8 @@ func (s *Store) DeletePoints(colName string, ids []string) error {
 
 // DropCollection removes a collection and its metadata from the storage.
 func (s *Store) DropCollection(name string) error {
-	if s.closed {
-		return fmt.Errorf("storage is closed")
+	if err := s.checkOpen(); err != nil {
+		return err
 	}
 
 	key, err := s.bucketKey(name)

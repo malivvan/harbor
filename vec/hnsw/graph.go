@@ -63,7 +63,7 @@ func (n *layerNode[K]) addNeighbor(newNode *layerNode[K], m int, dist DistanceFu
 	delete(n.neighbors, worst.Key)
 	// Delete backlink from the worst neighbor.
 	delete(worst.neighbors, n.Key)
-	worst.replenish(m)
+	worst.replenish(m, dist)
 }
 
 type searchCandidate[K cmp.Ordered] struct {
@@ -77,6 +77,10 @@ func (s searchCandidate[K]) Less(o searchCandidate[K]) bool {
 
 // search returns the layer node closest to the target node
 // within the same layer.
+//
+// The returned candidates are ordered by ascending distance, so callers can
+// rely on index 0 being the nearest neighbor and the last element being the
+// farthest of the retained set.
 func (n *layerNode[K]) search(
 	// k is the number of candidates in the result set.
 	k int,
@@ -105,10 +109,13 @@ func (n *layerNode[K]) search(
 	visited[n.Key] = true
 
 	for candidates.Len() > 0 {
-		var (
-			current  = candidates.Pop().node
-			improved = false
-		)
+		// Standard HNSW termination: stop once the closest unexplored
+		// candidate is farther away than the worst retained result.
+		if result.Len() >= k && candidates.Min().dist > result.Max().dist {
+			break
+		}
+
+		current := candidates.Pop().node
 
 		// We iterate the map in a sorted, deterministic fashion for
 		// tests.
@@ -122,10 +129,10 @@ func (n *layerNode[K]) search(
 			visited[neighborID] = true
 
 			dist := distance(neighbor.Value, target)
-			improved = improved || dist < result.Min().dist
 			if result.Len() < k {
 				result.Push(searchCandidate[K]{node: neighbor, dist: dist})
 			} else if dist < result.Max().dist {
+				// Evict the farthest candidate, not an arbitrary heap leaf.
 				result.PopLast()
 				result.Push(searchCandidate[K]{node: neighbor, dist: dist})
 			}
@@ -136,48 +143,84 @@ func (n *layerNode[K]) search(
 				candidates.PopLast()
 			}
 		}
-
-		// Termination condition: no improvement in distance and at least
-		// kMin candidates in the result set.
-		if !improved && result.Len() >= k {
-			break
-		}
 	}
 
-	return result.Slice()
+	// The result set is a min-heap: only its root is guaranteed to be the
+	// nearest candidate. Sort it so callers get a properly ranked list.
+	out := result.Slice()
+	slices.SortStableFunc(out, func(a, b searchCandidate[K]) int {
+		switch {
+		case a.dist < b.dist:
+			return -1
+		case a.dist > b.dist:
+			return 1
+		default:
+			return 0
+		}
+	})
+	return out
 }
 
-func (n *layerNode[K]) replenish(m int) {
+// replenish restores connectivity for a node that lost a neighbor, using the
+// same distance function as the graph so that the replacement edges are ranked
+// with the graph's metric instead of an arbitrary one.
+func (n *layerNode[K]) replenish(m int, dist DistanceFunc) {
 	if len(n.neighbors) >= m {
 		return
 	}
 
-	// Restore connectivity by adding new neighbors.
-	// This is a naive implementation that could be improved by
-	// using a priority queue to find the best candidates.
+	// Gather the second-degree candidates, ordered by their distance to n so
+	// that the closest replacements are reconnected first.
+	type candidate struct {
+		node *layerNode[K]
+		dist float32
+	}
+
+	candidates := make([]candidate, 0, m)
+	seen := make(map[K]bool, len(n.neighbors))
+	for key := range n.neighbors {
+		// do not add duplicates
+		seen[key] = true
+	}
+
 	for _, neighbor := range n.neighbors {
-		for key, candidate := range neighbor.neighbors {
-			if _, ok := n.neighbors[key]; ok {
-				// do not add duplicates
+		for key, c := range neighbor.neighbors {
+			if seen[key] {
 				continue
 			}
-			if candidate == n {
+			if c == nil || c == n {
 				continue
 			}
-			n.addNeighbor(candidate, m, CosineDistance)
-			if len(n.neighbors) >= m {
-				return
-			}
+			seen[key] = true
+			candidates = append(candidates, candidate{node: c, dist: dist(c.Value, n.Value)})
 		}
+	}
+
+	slices.SortStableFunc(candidates, func(a, b candidate) int {
+		switch {
+		case a.dist < b.dist:
+			return -1
+		case a.dist > b.dist:
+			return 1
+		default:
+			return 0
+		}
+	})
+
+	for _, c := range candidates {
+		if len(n.neighbors) >= m {
+			return
+		}
+		n.addNeighbor(c.node, m, dist)
 	}
 }
 
 // isolates remove the node from the graph by removing all connections
 // to neighbors.
-func (n *layerNode[K]) isolate(m int) {
+func (n *layerNode[K]) isolate(m int, dist DistanceFunc) {
 	for _, neighbor := range n.neighbors {
 		delete(neighbor.neighbors, n.Key)
-		neighbor.replenish(m)
+		neighbor.replenish(m, dist)
 	}
 }
 
@@ -236,6 +279,11 @@ type Graph[K cmp.Ordered] struct {
 	// the expense of memory.
 	EfSearch int
 
+	// EfConstruction is the number of nodes to consider while connecting a
+	// newly inserted node. When zero, EfSearch is used instead. Higher values
+	// produce better connected graphs at the expense of insertion time.
+	EfConstruction int
+
 	// layers is a slice of layers in the graph.
 	layers []*layer[K]
 }
@@ -248,12 +296,24 @@ func defaultRand() *rand.Rand {
 // storing OpenAI embeddings.
 func NewGraph[K cmp.Ordered]() *Graph[K] {
 	return &Graph[K]{
-		M:        16,
-		Ml:       0.25,
-		Distance: CosineDistance,
-		EfSearch: 20,
-		Rng:      defaultRand(),
+		M:              16,
+		Ml:             0.25,
+		Distance:       CosineDistance,
+		EfSearch:       20,
+		EfConstruction: 200,
+		Rng:            defaultRand(),
 	}
+}
+
+// constructionEf returns the candidate-list size used while inserting nodes.
+func (g *Graph[K]) constructionEf() int {
+	if g.EfConstruction > 0 {
+		return g.EfConstruction
+	}
+	if g.EfSearch > 0 {
+		return g.EfSearch
+	}
+	return 20
 }
 
 // maxLevel returns an upper-bound on the number of levels in the graph
@@ -321,7 +381,13 @@ func (g *Graph[K]) Dims() int {
 	if len(g.layers) == 0 {
 		return 0
 	}
-	return len(g.layers[0].entry().Value)
+	entry := g.layers[0].entry()
+	if entry == nil {
+		// The base layer may be non-nil but empty (all nodes deleted), in
+		// which case there is no dimension reference to report.
+		return 0
+	}
+	return len(entry.Value)
 }
 
 func ptr[T any](v T) *T {
@@ -336,6 +402,13 @@ func (g *Graph[K]) Add(nodes ...Node[K]) {
 		vec := node.Value
 
 		g.assertDims(vec)
+
+		// Remove an existing node with the same key from every layer exactly
+		// once, before the insertion loop. Doing this from inside the loop
+		// would drop the higher layers that were just created for the new node
+		// whenever the new level exceeds the level of the node being replaced.
+		g.remove(key)
+
 		insertLevel := g.randomLevel()
 		// Create layers that don't exist yet.
 		for insertLevel >= len(g.layers) {
@@ -349,6 +422,7 @@ func (g *Graph[K]) Add(nodes ...Node[K]) {
 		var elevator *K
 
 		preLen := g.Len()
+		efConstruction := g.constructionEf()
 
 		// Insert node at each layer, beginning with the highest.
 		for i := len(g.layers) - 1; i >= 0; i-- {
@@ -362,7 +436,15 @@ func (g *Graph[K]) Add(nodes ...Node[K]) {
 
 			// Insert the new node into the layer.
 			if layer.entry() == nil {
-				layer.nodes = map[K]*layerNode[K]{key: newNode}
+				// Only host the new node when its level covers this layer:
+				// layers may be left empty by deletions, and inserting there
+				// unconditionally would place nodes above their assigned level.
+				if insertLevel >= i {
+					if layer.nodes == nil {
+						layer.nodes = make(map[K]*layerNode[K], 1)
+					}
+					layer.nodes[key] = newNode
+				}
 				continue
 			}
 
@@ -386,7 +468,7 @@ func (g *Graph[K]) Add(nodes ...Node[K]) {
 				panic("(*Graph).Distance must be set")
 			}
 
-			neighborhood := searchPoint.search(g.M, g.EfSearch, vec, g.Distance)
+			neighborhood := searchPoint.search(g.M, efConstruction, vec, g.Distance)
 			if len(neighborhood) == 0 {
 				// This should never happen because the searchPoint itself
 				// should be in the result set.
@@ -397,9 +479,6 @@ func (g *Graph[K]) Add(nodes ...Node[K]) {
 			elevator = ptr(neighborhood[0].node.Key)
 
 			if insertLevel >= i {
-				if _, ok := layer.nodes[key]; ok {
-					g.Delete(key)
-				}
 				// Insert the new node into the layer.
 				layer.nodes[key] = newNode
 				for _, node := range neighborhood {
@@ -410,17 +489,22 @@ func (g *Graph[K]) Add(nodes ...Node[K]) {
 			}
 		}
 
-		// Invariant check: the node should have been added to or replaced in the graph.
-		// preLen+1 means a new node was inserted; preLen means an existing node was
-		// replaced (re-index scenario where the same key was deleted and re-added).
-		if g.Len() != preLen && g.Len() != preLen+1 {
+		// Invariant check: a node was removed first (for replacements) and one
+		// node is added, so the graph must have grown by exactly one node.
+		if g.Len() != preLen+1 {
 			panic("node not added")
 		}
 	}
 }
 
 // Search finds the k nearest neighbors from the target node.
+// The returned nodes are ordered by ascending distance according to the
+// graph's Distance function.
 func (h *Graph[K]) Search(near Vector, k int) []Node[K] {
+	if k <= 0 {
+		return nil
+	}
+
 	h.assertDims(near)
 	if len(h.layers) == 0 {
 		return nil
@@ -492,15 +576,29 @@ func (h *Graph[K]) Delete(key K) bool {
 	if len(h.layers) == 0 {
 		return false
 	}
+	return h.remove(key)
+}
 
-	var deleted bool
+// remove deletes the node with the given key from every layer, repairing the
+// connectivity of its former neighbors, and reports whether a node was found.
+func (h *Graph[K]) remove(key K) bool {
+	var (
+		deleted bool
+		dist    = h.Distance
+	)
+	if dist == nil {
+		dist = CosineDistance
+	}
+
 	for _, layer := range h.layers {
 		node, ok := layer.nodes[key]
 		if !ok {
 			continue
 		}
 		delete(layer.nodes, key)
-		node.isolate(h.M)
+		if node != nil {
+			node.isolate(h.M, dist)
+		}
 		deleted = true
 	}
 
