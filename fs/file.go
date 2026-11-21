@@ -46,6 +46,9 @@ func (f *File) Read(p []byte) (int, error) {
 	if f.node.IsDir() && f.node.Size == 0 {
 		return 0, &os.PathError{Op: "read", Path: f.name, Err: syscall.EISDIR} //os.ErrPermission
 	}
+	if f.fs.chunked() && f.fs.contentFS == nil {
+		return f.readChunked(p)
+	}
 	offset := int(f.offset)
 
 	data, err := f.fs.loadData(f.node.Ino)
@@ -76,6 +79,29 @@ func (f *File) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+// readChunked reads from encrypted chunks without loading the whole file.
+func (f *File) readChunked(p []byte) (int, error) {
+	if f.offset >= f.node.Size {
+		return 0, io.EOF
+	}
+
+	want := int64(len(p))
+	if f.offset+want > f.node.Size {
+		want = f.node.Size - f.offset
+	}
+	data, err := f.fs.readRange(f.node.Ino, f.offset, want)
+	if err != nil {
+		return 0, err
+	}
+
+	n := copy(p, data)
+	f.offset += int64(n)
+	if n < len(p) {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
 // ReadAt reads len(b) bytes from the File starting at byte offset off. It
 // returns the number of bytes read and the error, if any. ReadAt always
 // returns a non-nil error when n < len(b). At end of file, that error is
@@ -91,6 +117,20 @@ func (f *File) ReadAt(b []byte, off int64) (n int, err error) {
 func (f *File) Write(p []byte) (int, error) {
 	if f.flags&absfs.O_ACCESS == os.O_RDONLY {
 		return 0, &os.PathError{Op: "write", Path: f.name, Err: syscall.EBADF}
+	}
+
+	if f.fs.chunked() && f.fs.contentFS == nil {
+		if err := f.fs.writeRange(f.node.Ino, f.offset, p); err != nil {
+			return 0, err
+		}
+		f.offset += int64(len(p))
+		if f.offset > f.node.Size {
+			f.node.Size = f.offset
+		}
+		if _, err := f.fs.saveInode(f.node); err != nil {
+			return 0, err
+		}
+		return len(p), nil
 	}
 
 	size := len(p) + int(f.offset)
@@ -294,6 +334,20 @@ func (f *File) Truncate(size int64) error {
 	if f.flags&absfs.O_ACCESS == os.O_RDONLY {
 		return os.ErrPermission
 	}
+
+	if f.fs.chunked() && f.fs.contentFS == nil {
+		if err := f.fs.truncateRange(f.node.Ino, size); err != nil {
+			return err
+		}
+		if f.node.Size != size {
+			f.node.Size = size
+			if _, err := f.fs.saveInode(f.node); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	data, err := f.fs.loadData(f.node.Ino)
 	if err != nil {
 		return err

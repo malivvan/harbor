@@ -345,7 +345,12 @@ func (fs *FileSystem) ReadFile(name string) ([]byte, error) {
 		return nil, &os.PathError{Op: "readfile", Path: name, Err: syscall.EISDIR}
 	}
 
-	data, err := fs.loadData(node.Ino)
+	var data []byte
+	if fs.chunked() && fs.contentFS == nil {
+		data, err = fs.readRange(node.Ino, 0, node.Size)
+	} else {
+		data, err = fs.loadData(node.Ino)
+	}
 	if err != nil {
 		return nil, &os.PathError{Op: "readfile", Path: name, Err: err}
 	}
@@ -515,6 +520,10 @@ func (fs *FileSystem) saveData(ino uint64, data []byte) error {
 		return nil
 	}
 
+	if fs.chunked() {
+		return fs.saveChunkedData(ino, data)
+	}
+
 	sealed, err := fs.enc.sealContent(data)
 	if err != nil {
 		return err
@@ -554,6 +563,10 @@ func (fs *FileSystem) loadData(ino uint64) ([]byte, error) {
 		}
 
 		return data, nil
+	}
+
+	if fs.chunked() {
+		return fs.loadChunkedData(ino)
 	}
 
 	var data []byte

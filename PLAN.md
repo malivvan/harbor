@@ -270,6 +270,8 @@ rotation); `fs/aeadfs` is removed.
   encryption state, `OpenWithConfig` + marker/canary + mode detection, sealed
   inodes, content and symlink paths, snapshot decryption, empty-plaintext
   system-inode migration; tests in `fs/aead_test.go`.
-- [ ] Phase 2 — chunked content (`ChunkSize`) and File range routing.
+- [x] **Phase 2 — chunked content** — `fs/chunk.go` chunk bucket keyed by
+  inode+index, range read/write/truncate touching only affected chunks,
+  File/ReadFile/snapshot routing; tests in `fs/chunk_test.go`.
 - [ ] Phase 3 — rotation (`ReEncryptFS`, `RotateAll`, `VerifyAll`).
 - [ ] Merge `fs/aeadfs`, documentation and final verification.

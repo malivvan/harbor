@@ -175,6 +175,10 @@ func (s *Snapshot) ReadFile(name string) ([]byte, error) {
 		return nil, &os.PathError{Op: "read", Path: name, Err: syscall.EISDIR}
 	}
 
+	if s.fs.chunked() {
+		return s.bucket.readDataRange(node.Ino, 0, node.Size, s.fs.chunkSize())
+	}
+
 	data := s.bucket.data.Get(i2b(node.Ino))
 	if data == nil {
 		// File exists but has no data (empty file)
@@ -372,14 +376,23 @@ func (s *Snapshot) Open(name string) (absfs.File, error) {
 	}
 
 	// Load file data
-	data := s.bucket.data.Get(i2b(node.Ino))
-	if data == nil {
-		data = []byte{}
-	} else {
-		data, err = s.bucket.enc.openContent(data)
+	var data []byte
+	if s.fs.chunked() {
+		data, err = s.bucket.readDataRange(node.Ino, 0, node.Size, s.fs.chunkSize())
 		if err != nil {
 			s.tx.Rollback()
 			return nil, err
+		}
+	} else {
+		data = s.bucket.data.Get(i2b(node.Ino))
+		if data == nil {
+			data = []byte{}
+		} else {
+			data, err = s.bucket.enc.openContent(data)
+			if err != nil {
+				s.tx.Rollback()
+				return nil, err
+			}
 		}
 	}
 
