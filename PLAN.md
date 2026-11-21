@@ -279,8 +279,10 @@ verification + rotation).
 - [x] **Phase 1 — Tier 1 (`EncryptValues`)** — `ts/aead.go` (Config, key providers,
   marker/canary, `OpenWithConfig`), value and metadata sealing, mode detection;
   tests in `ts/aead_test.go`.
-- [ ] Phase 2a — Tier 2 (`EncryptSeriesNames`, SIV bucket keys) and rotation
-  primitives (`internal/encryption/siv.go`, `ts/siv.go`).
+- [x] **Phase 2a — Tier 2 (`EncryptSeriesNames`)** — shared
+  `internal/encryption/siv.go`, HKDF-derived SIV keys in `ts/siv.go`,
+  deterministic bucket/meta keys, rotation provider primitive (`ts/rotate.go`);
+  tests in `ts/siv_test.go`.
 - [ ] Phase 2b — `BlockDuration` time blocks.
 - [ ] Phase 3 — key rotation (`ReEncryptSeries`, `RotateAll`, `VerifyAll`).
 - [ ] Final verification and `POST.md`.
