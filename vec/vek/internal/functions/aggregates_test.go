@@ -2,8 +2,8 @@ package functions
 
 import (
 	"fmt"
-	"github.com/malivvan/storm/internal/rand"
 	"github.com/stretchr/testify/require"
+	"math/rand"
 	"testing"
 )
 

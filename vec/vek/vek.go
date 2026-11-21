@@ -2,10 +2,10 @@ package vek
 
 import (
 	"github.com/malivvan/storm/internal/constraints"
-	"github.com/malivvan/storm/internal/slices"
 	"github.com/malivvan/storm/vec/vek/internal/functions"
 	"golang.org/x/sys/cpu"
 	"math"
+	"slices"
 	"unsafe"
 )
 

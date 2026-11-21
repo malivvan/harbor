@@ -2,7 +2,7 @@ package functions
 
 import (
 	"github.com/malivvan/storm/internal/constraints"
-	"github.com/malivvan/storm/internal/rand"
+	"math/rand"
 )
 
 func Random[T constraints.Integer | constraints.Float](size int) []T {

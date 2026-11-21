@@ -2,8 +2,8 @@ package functions
 
 import (
 	"github.com/malivvan/storm/internal/partial"
-	"github.com/malivvan/storm/internal/slices"
 	"math"
+	"slices"
 )
 
 func Mean_AVX2_F64(x []float64) float64 {

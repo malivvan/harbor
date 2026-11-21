@@ -2,7 +2,7 @@ package partial
 
 import (
 	"github.com/malivvan/storm/internal/constraints"
-	"github.com/malivvan/storm/internal/slices"
+	"slices"
 )
 
 // Sort partially sorts a slice of any ordered type in ascending order.

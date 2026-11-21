@@ -3,8 +3,8 @@ package functions
 import (
 	"github.com/malivvan/storm/internal/constraints"
 	"github.com/malivvan/storm/internal/partial"
-	"github.com/malivvan/storm/internal/slices"
 	"math"
+	"slices"
 )
 
 func Sum_Go[T constraints.Float](x []T) T {

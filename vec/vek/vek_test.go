@@ -1,9 +1,9 @@
 package vek
 
 import (
-	"github.com/malivvan/storm/internal/slices"
 	"github.com/stretchr/testify/require"
 	"math"
+	"slices"
 	"testing"
 )
 

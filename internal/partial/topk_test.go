@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/malivvan/storm/internal/slices"
+	"slices"
 )
 
 func checkTopKInvariants[E any](x []E, k int, cmp func(E, E) int) bool {

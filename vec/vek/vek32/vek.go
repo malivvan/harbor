@@ -3,9 +3,9 @@ package vek32
 import (
 	"github.com/malivvan/storm/internal/constraints"
 	"github.com/malivvan/storm/internal/math32"
-	"github.com/malivvan/storm/internal/slices"
 	"github.com/malivvan/storm/vec/vek"
 	"github.com/malivvan/storm/vec/vek/internal/functions"
+	"slices"
 	"unsafe"
 )
 

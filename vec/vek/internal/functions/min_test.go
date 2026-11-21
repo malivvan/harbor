@@ -1,9 +1,9 @@
 package functions
 
 import (
-	"github.com/malivvan/storm/internal/rand"
-	"github.com/malivvan/storm/internal/slices"
 	"github.com/stretchr/testify/require"
+	"math/rand"
+	"slices"
 	"testing"
 )
 

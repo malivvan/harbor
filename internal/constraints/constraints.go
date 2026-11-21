@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package constraints defines a set of useful constraints to be used
-// with type parameters.
+// Package constraints defines the numeric type sets used by the vector
+// packages. The standard library provides cmp.Ordered (aliased below) but no
+// equivalent for Float, Integer, Signed or Unsigned, so this small, stable file
+// is kept instead of taking an external dependency.
 package constraints
 
 import "cmp"

@@ -3,9 +3,9 @@ package functions
 import (
 	"bytes"
 	"fmt"
-	"github.com/malivvan/storm/internal/rand"
 	"github.com/stretchr/testify/require"
 	"math"
+	"math/rand"
 	"testing"
 )
 

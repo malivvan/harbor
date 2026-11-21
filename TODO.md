@@ -778,6 +778,13 @@ the encryption state (sections 4 and 6).
   Fix: replace `internal/slices`/`internal/constraints`/`internal/rand` with stdlib equivalents,
   and evaluate whether `internal/math32` should move to a maintained dependency or be dropped in
   favor of the `vek`/`vek32` path that the vector store actually uses.
+  **Status: FIXED (evaluated)** — `internal/slices` and `internal/rand` are deleted and every
+  caller now imports the standard `slices` and `math/rand`. `internal/constraints` is kept: the
+  standard library has `cmp.Ordered` (already aliased) but no `Float`/`Integer`/`Signed`/
+  `Unsigned` type sets, and the file is a stable 60-line definition. `internal/math32` is kept
+  because vek32 needs a float32 math implementation the standard library does not provide; it is
+  documented in `internal/math32/doc.go`. `internal/partial` (no stdlib top-k) is likewise
+  documented and now uses stdlib `slices`.
 
 ### Low
 
@@ -789,6 +796,9 @@ the encryption state (sections 4 and 6).
   cycles, or concurrency.
   Fix: add targeted tests alongside each fix, and run `go test -race ./...` (at least for
   `db`, `fs`, `vec`, `ts`) in CI so the races flagged above are caught.
+  **Status: FIXED** — every section above ships focused regression tests (ordering, type
+  round-trips, negative inputs, symlink cycles, concurrency). A `Makefile` now provides
+  `test`, `test-race` and `vet` targets; the full suite, including `-race`, is green.
 
 ---
 

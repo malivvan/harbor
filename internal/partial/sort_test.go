@@ -6,7 +6,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/malivvan/storm/internal/slices"
+	"slices"
 )
 
 func TestSort(t *testing.T) {
