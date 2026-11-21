@@ -132,6 +132,8 @@ the encryption state (sections 4 and 6).
   while it is being walked".
   Fix: collect matching keys during the scan and delete them after the loop (or use
   `Cursor.Delete` where available and re-verify behavior).
+  **Status: FIXED** — `deleteSink` buffers matches and applies index/key deletions in `flush`
+  after the cursor loop. Regression test deletes every match in a large bucket.
 
 ### Medium
 

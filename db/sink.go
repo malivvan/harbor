@@ -582,6 +582,10 @@ type deleteSink struct {
 	node    Node
 	ref     reflect.Value
 	removed int
+
+	// pending holds the matched records. Deletions are applied in flush so the
+	// bbolt cursor that produced them is never mutated while being walked.
+	pending []*item
 }
 
 func (d *deleteSink) elem() reflect.Value {
@@ -597,63 +601,7 @@ func (d *deleteSink) add(ctx context.Context, i *item) error {
 		return err
 	}
 
-	info, err := extract(&d.ref)
-	if err != nil {
-		return err
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	for fieldName, fieldCfg := range info.Fields {
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-
-		if fieldCfg.Index == "" {
-			continue
-		}
-		idx, err := getIndex(i.bucket, fieldCfg.Index, fieldName)
-		if err != nil {
-			return err
-		}
-
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-
-		err = idx.RemoveID(ctx, i.k)
-		if err != nil {
-			if errors.Is(err, index.ErrNotFound) {
-				return ErrNotFound
-			}
-			return err
-		}
-
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	if err := i.bucket.Delete(i.k); err != nil {
-		return err
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	d.removed++
-
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
+	d.pending = append(d.pending, i)
 	return nil
 }
 
@@ -662,8 +610,57 @@ func (d *deleteSink) flush(ctx context.Context) error {
 		return err
 	}
 
-	if d.removed == 0 {
+	if len(d.pending) == 0 {
 		return ErrNotFound
+	}
+
+	info, err := extract(&d.ref)
+	if err != nil {
+		return err
+	}
+
+	// The scan is over at this point, so deleting keys no longer mutates a
+	// live cursor.
+	for _, i := range d.pending {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		for fieldName, fieldCfg := range info.Fields {
+			if err := checkContext(ctx); err != nil {
+				return err
+			}
+
+			if fieldCfg.Index == "" {
+				continue
+			}
+			idx, err := getIndex(i.bucket, fieldCfg.Index, fieldName)
+			if err != nil {
+				return err
+			}
+
+			err = idx.RemoveID(ctx, i.k)
+			if err != nil {
+				if errors.Is(err, index.ErrNotFound) {
+					return ErrNotFound
+				}
+				return err
+			}
+
+			if err := checkContext(ctx); err != nil {
+				return err
+			}
+		}
+
+		if err := i.bucket.Delete(i.k); err != nil {
+			return err
+		}
+
+		d.removed++
+
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
 	}
 
 	return nil

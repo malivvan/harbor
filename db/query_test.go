@@ -1307,3 +1307,23 @@ func TestQueryRaw_AppliesMatchers(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 3, count)
 }
+
+// TestQueryDelete_RemovesEveryMatchAtOnce verifies that a delete query removes
+// all matches even though the bucket cursor is walked: deletions are applied
+// only after the scan completes.
+func TestQueryDelete_RemovesEveryMatchAtOnce(t *testing.T) {
+	db, cleanup := createDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	for i := 0; i < 50; i++ {
+		require.NoError(t, db.Save(ctx, &Score{Value: i}))
+	}
+
+	require.NoError(t, db.Select(q.Lt("Value", 30)).Delete(ctx, &Score{}))
+	require.NoError(t, db.Select().Bucket("Score").Delete(ctx, &Score{}))
+
+	var left []Score
+	require.NoError(t, db.All(ctx, &left))
+	require.Empty(t, left)
+}
