@@ -8,33 +8,14 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// CipherSuite selects the AEAD cipher used by an encrypted store.
-type CipherSuite = encryption.CipherSuite
-
-// CipherEngine performs AEAD encryption and decryption.
-type CipherEngine = encryption.CipherEngine
-
-const (
-	// CipherAuto selects AES-256-GCM.
-	CipherAuto = encryption.CipherAuto
-	// CipherAES256GCM uses AES-256-GCM.
-	CipherAES256GCM = encryption.CipherAES256GCM
-	// CipherXChaCha20Poly1305 uses XChaCha20-Poly1305.
-	CipherXChaCha20Poly1305 = encryption.CipherXChaCha20Poly1305
-
-	// KeySize is the required key length in bytes (256 bits).
-	KeySize = encryption.KeySize
-)
+// KeySize is the required key length in bytes (256 bits).
+const KeySize = encryption.KeySize
 
 // Config enables optional encryption for a Store. A nil Config, or one with no
 // encryption feature enabled, keeps the plaintext on-disk format: the existing
 // Open constructor and every store opened without encryption behave exactly as
 // before.
 type Config struct {
-	// Cipher selects the AEAD cipher. CipherAuto (the default) resolves to
-	// AES-256-GCM.
-	Cipher CipherSuite
-
 	// Key is a raw 32-byte master key. Exactly one of Key and KeyProvider must
 	// be set when encryption is enabled.
 	Key []byte
@@ -120,14 +101,6 @@ type encState struct {
 // enabled reports whether the state encrypts anything.
 func (e *encState) enabled() bool {
 	return e != nil
-}
-
-// cipher returns the resolved cipher suite of an encrypted state.
-func (e *encState) cipher() CipherSuite {
-	if e == nil {
-		return CipherAuto
-	}
-	return e.kc.Cipher()
 }
 
 // seal encrypts plain with the primary engine, prefixing a fresh random nonce.
@@ -224,15 +197,13 @@ var markerSpec = encryption.MarkerSpec{Magic: markerMagic}
 
 // marker describes the encryption mode recorded in a store.
 type marker struct {
-	cipher      CipherSuite
 	encValues   bool
 	encMetadata bool
 	encKeys     bool
 }
 
 func (m marker) matches(e *encState) bool {
-	return m.cipher == e.cipher() &&
-		m.encValues == e.encValues &&
+	return m.encValues == e.encValues &&
 		m.encMetadata == e.encMetadata &&
 		m.encKeys == e.encKeys
 }
@@ -257,7 +228,6 @@ func encodeMarker(e *encState) ([]byte, error) {
 	}
 
 	return encryption.EncodeMarker(markerSpec, encryption.Marker{
-		Cipher: e.cipher(),
 		Flags:  flags,
 		Canary: canary,
 	})
@@ -271,7 +241,6 @@ func decodeMarker(raw []byte) (marker, []byte, error) {
 	}
 
 	return marker{
-		cipher:      decoded.Cipher,
 		encValues:   decoded.Flags&markerFlagValues != 0,
 		encMetadata: decoded.Flags&markerFlagMetadata != 0,
 		encKeys:     decoded.Flags&markerFlagKeys != 0,
@@ -403,17 +372,12 @@ func resolveConfig(cfg *Config) (*encState, error) {
 		return nil, nil
 	}
 
-	cipherSuite, err := encryption.Resolve(cfg.Cipher)
-	if err != nil {
-		return nil, ErrUnsupportedCipher
-	}
-
 	keys, err := encryption.ResolveKeys(cfg.Key, cfg.KeyProvider)
 	if err != nil {
 		return nil, err
 	}
 
-	kc, err := encryption.NewKeychain(cipherSuite, keys)
+	kc, err := encryption.NewKeychain(keys)
 	if err != nil {
 		return nil, err
 	}

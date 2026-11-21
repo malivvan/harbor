@@ -357,11 +357,6 @@ func TestEncryptionConfigValidation(t *testing.T) {
 			cfg:  &Config{Key: testKey(9), EncryptValues: true, BlockDuration: -1},
 			want: ErrInvalidConfig,
 		},
-		{
-			name: "unsupported cipher",
-			cfg:  &Config{Key: testKey(9), Cipher: CipherSuite(99), EncryptValues: true},
-			want: ErrUnsupportedCipher,
-		},
 	}
 
 	for _, tt := range tests {

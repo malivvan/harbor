@@ -6,32 +6,13 @@ import (
 	"github.com/malivvan/storm/internal/encryption"
 )
 
-// CipherSuite selects the AEAD cipher used by an encrypted filesystem.
-type CipherSuite = encryption.CipherSuite
-
-// CipherEngine performs AEAD encryption and decryption.
-type CipherEngine = encryption.CipherEngine
-
-const (
-	// CipherAuto selects AES-256-GCM.
-	CipherAuto = encryption.CipherAuto
-	// CipherAES256GCM uses AES-256-GCM.
-	CipherAES256GCM = encryption.CipherAES256GCM
-	// CipherXChaCha20Poly1305 uses XChaCha20-Poly1305.
-	CipherXChaCha20Poly1305 = encryption.CipherXChaCha20Poly1305
-
-	// KeySize is the required key length in bytes (256 bits).
-	KeySize = encryption.KeySize
-)
+// KeySize is the required key length in bytes (256 bits).
+const KeySize = encryption.KeySize
 
 // Config enables optional encryption for a Store and its file systems. A nil
 // Config, or one with no encryption feature enabled, keeps the plaintext
 // on-disk format.
 type Config struct {
-	// Cipher selects the AEAD cipher. CipherAuto (the default) resolves to
-	// AES-256-GCM.
-	Cipher CipherSuite
-
 	// Key is a raw 32-byte master key. Exactly one of Key and KeyProvider must
 	// be set when encryption is enabled.
 	Key []byte
@@ -96,14 +77,6 @@ func (e *encState) enabled() bool {
 	return e != nil
 }
 
-// cipher returns the resolved cipher suite of an encrypted state.
-func (e *encState) cipher() CipherSuite {
-	if e == nil {
-		return CipherAuto
-	}
-	return e.kc.Cipher()
-}
-
 func (e *encState) seal(plain []byte) ([]byte, error) {
 	if e == nil {
 		return plain, nil
@@ -165,15 +138,13 @@ var markerSpec = encryption.MarkerSpec{Magic: markerMagic, ExtraFieldSize: 8}
 
 // marker describes the encryption mode recorded in a filesystem.
 type marker struct {
-	cipher      CipherSuite
 	encContent  bool
 	encMetadata bool
 	chunkSize   int
 }
 
 func (m marker) matches(e *encState) bool {
-	return m.cipher == e.cipher() &&
-		m.encContent == e.encContent &&
+	return m.encContent == e.encContent &&
 		m.encMetadata == e.encMetadata &&
 		m.chunkSize == e.chunkSize
 }
@@ -198,7 +169,6 @@ func (e *encState) encodeMarker() ([]byte, error) {
 	}
 
 	return encryption.EncodeMarker(markerSpec, encryption.Marker{
-		Cipher: e.cipher(),
 		Flags:  flags,
 		Extra:  uint64(e.chunkSize),
 		Canary: canary,
@@ -213,7 +183,6 @@ func decodeMarker(raw []byte) (marker, []byte, error) {
 	}
 
 	return marker{
-		cipher:      decoded.Cipher,
 		encContent:  decoded.Flags&markerFlagContent != 0,
 		encMetadata: decoded.Flags&markerFlagMetadata != 0,
 		chunkSize:   int(decoded.Extra),
@@ -233,17 +202,12 @@ func resolveConfig(cfg *Config) (*encState, error) {
 		return nil, fmt.Errorf("%w: chunk size cannot be negative", ErrInvalidConfig)
 	}
 
-	cipherSuite, err := encryption.Resolve(cfg.Cipher)
-	if err != nil {
-		return nil, ErrUnsupportedCipher
-	}
-
 	keys, err := encryption.ResolveKeys(cfg.Key, cfg.KeyProvider)
 	if err != nil {
 		return nil, err
 	}
 
-	kc, err := encryption.NewKeychain(cipherSuite, keys)
+	kc, err := encryption.NewKeychain(keys)
 	if err != nil {
 		return nil, err
 	}

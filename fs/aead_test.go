@@ -425,7 +425,6 @@ func TestEncryptionConfigValidation(t *testing.T) {
 			want: ErrInvalidConfig,
 		},
 		{"negative chunk", &Config{Key: testEncKey(11), ChunkSize: -1}, ErrInvalidConfig},
-		{"unsupported cipher", &Config{Key: testEncKey(11), Cipher: CipherSuite(99), EncryptContent: true}, ErrUnsupportedCipher},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -467,11 +466,10 @@ func TestEncryptionKeyProviders(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidConfig)
 }
 
-func TestEncryptionMarkerCipherAndFlags(t *testing.T) {
+func TestEncryptionMarkerFlags(t *testing.T) {
 	root := []byte("ts")
 	store, db := openEncStore(t, root, &Config{
 		Key:             testEncKey(14),
-		Cipher:          CipherXChaCha20Poly1305,
 		EncryptMetadata: true,
 		EncryptContent:  true,
 	})
@@ -482,7 +480,6 @@ func TestEncryptionMarkerCipherAndFlags(t *testing.T) {
 	require.NotEmpty(t, raw)
 	m, canary, err := decodeMarker(raw)
 	require.NoError(t, err)
-	require.Equal(t, CipherXChaCha20Poly1305, m.cipher)
 	require.True(t, m.encContent)
 	require.True(t, m.encMetadata)
 	require.Zero(t, m.chunkSize)

@@ -11,6 +11,11 @@ const markerVersion = byte(1)
 // markerHeaderSize is magic(4) | version(1) | cipher(1) | flags(1).
 const markerHeaderSize = 4 + 1 + 1 + 1
 
+// markerCipherAES256GCM is the cipher identifier stored in every marker. The
+// byte stays part of the layout so a future cipher could be added without
+// changing the framing; it must be 1 today.
+const markerCipherAES256GCM = byte(1)
+
 // MarkerSpec describes the framing of one store's encryption marker.
 //
 // Every store uses the same layout — magic | version | cipher | flags |
@@ -27,9 +32,6 @@ type MarkerSpec struct {
 
 // Marker is a decoded marker.
 type Marker struct {
-	// Cipher is the resolved cipher suite stored in the marker.
-	Cipher CipherSuite
-
 	// Flags holds the store-specific feature bits.
 	Flags uint8
 
@@ -59,7 +61,7 @@ func EncodeMarker(spec MarkerSpec, m Marker) ([]byte, error) {
 
 	raw := make([]byte, 0, markerHeaderSize+spec.ExtraFieldSize+len(m.Canary))
 	raw = append(raw, spec.Magic...)
-	raw = append(raw, markerVersion, byte(m.Cipher), m.Flags)
+	raw = append(raw, markerVersion, markerCipherAES256GCM, m.Flags)
 	if spec.ExtraFieldSize == 8 {
 		var extra [8]byte
 		binary.LittleEndian.PutUint64(extra[:], m.Extra)
@@ -86,10 +88,12 @@ func DecodeMarker(spec MarkerSpec, raw []byte) (Marker, error) {
 	if raw[4] != markerVersion {
 		return Marker{}, fmt.Errorf("%w: unsupported encryption marker version", ErrWrongMode)
 	}
+	if raw[5] != markerCipherAES256GCM {
+		return Marker{}, fmt.Errorf("%w: unsupported cipher in encryption marker", ErrWrongMode)
+	}
 
 	m := Marker{
-		Cipher: CipherSuite(raw[5]),
-		Flags:  raw[6],
+		Flags: raw[6],
 		// Copy: the caller's buffer may belong to a bbolt transaction that is
 		// about to end.
 		Canary: append([]byte(nil), raw[fixedSize:]...),

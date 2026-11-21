@@ -10,10 +10,8 @@ import (
 func TestNewKeychain(t *testing.T) {
 	key := testKey(10)
 
-	kc, err := NewKeychain(CipherAuto, [][]byte{key})
+	kc, err := NewKeychain([][]byte{key})
 	require.NoError(t, err)
-	require.Equal(t, CipherAES256GCM, kc.Cipher(), "CipherAuto resolves to AES-256-GCM")
-	require.NotNil(t, kc.PrimaryEngine())
 	require.Equal(t, [][]byte{key}, kc.Keys())
 
 	// Keys must be copies.
@@ -21,26 +19,17 @@ func TestNewKeychain(t *testing.T) {
 	keys[0][0] ^= 0xff
 	require.Equal(t, byte(10), kc.Keys()[0][0])
 
-	_, err = NewKeychain(CipherAuto, nil)
+	_, err = NewKeychain(nil)
 	require.ErrorIs(t, err, ErrInvalidConfig)
 
-	_, err = NewKeychain(CipherAuto, [][]byte{key[:8]})
+	_, err = NewKeychain([][]byte{key[:8]})
 	require.ErrorIs(t, err, ErrInvalidKey)
-
-	_, err = NewKeychain(CipherSuite(99), [][]byte{key})
-	require.ErrorIs(t, err, ErrUnsupportedCipher)
-
-	xchacha, err := NewKeychain(CipherXChaCha20Poly1305, [][]byte{testKey(11)})
-	require.NoError(t, err)
-	require.Equal(t, CipherXChaCha20Poly1305, xchacha.Cipher())
 }
 
 func TestNilKeychainIsPlaintext(t *testing.T) {
 	var kc *Keychain
 
-	require.Equal(t, CipherAuto, kc.Cipher())
 	require.Nil(t, kc.Keys())
-	require.Nil(t, kc.PrimaryEngine())
 
 	sealed, err := kc.Seal([]byte("plain"))
 	require.NoError(t, err)
@@ -52,7 +41,7 @@ func TestNilKeychainIsPlaintext(t *testing.T) {
 }
 
 func TestKeychainSealOpen(t *testing.T) {
-	kc, err := NewKeychain(CipherAES256GCM, [][]byte{testKey(12)})
+	kc, err := NewKeychain([][]byte{testKey(12)})
 	require.NoError(t, err)
 
 	first, err := kc.Seal([]byte("secret"))
@@ -76,7 +65,7 @@ func TestKeychainSealOpen(t *testing.T) {
 }
 
 func TestKeychainEmptyPassthrough(t *testing.T) {
-	kc, err := NewKeychain(CipherAES256GCM, [][]byte{testKey(13)})
+	kc, err := NewKeychain([][]byte{testKey(13)})
 	require.NoError(t, err)
 
 	for _, empty := range [][]byte{nil, {}} {
@@ -94,12 +83,12 @@ func TestKeychainFallbackKeys(t *testing.T) {
 	oldKey := testKey(14)
 	newKey := testKey(15)
 
-	oldChain, err := NewKeychain(CipherAuto, [][]byte{oldKey})
+	oldChain, err := NewKeychain([][]byte{oldKey})
 	require.NoError(t, err)
 	oldSealed, err := oldChain.Seal([]byte("from the old key"))
 	require.NoError(t, err)
 
-	both, err := NewKeychain(CipherAuto, [][]byte{newKey, oldKey})
+	both, err := NewKeychain([][]byte{newKey, oldKey})
 	require.NoError(t, err)
 
 	plain, err := both.Open(oldSealed)
@@ -117,13 +106,12 @@ func TestKeychainWithKey(t *testing.T) {
 	oldKey := testKey(16)
 	newKey := testKey(17)
 
-	kc, err := NewKeychain(CipherAuto, [][]byte{oldKey})
+	kc, err := NewKeychain([][]byte{oldKey})
 	require.NoError(t, err)
 
 	next, err := kc.WithKey(newKey)
 	require.NoError(t, err)
 	require.Equal(t, [][]byte{newKey}, next.Keys(), "WithKey drops fallbacks")
-	require.Equal(t, kc.Cipher(), next.Cipher())
 
 	// Data sealed with the old key is no longer readable.
 	sealed, err := kc.Seal([]byte("old payload"))
@@ -142,7 +130,7 @@ func TestKeychainWithKeyKeepingFallbacks(t *testing.T) {
 	oldKey := testKey(18)
 	newKey := testKey(19)
 
-	kc, err := NewKeychain(CipherAuto, [][]byte{oldKey})
+	kc, err := NewKeychain([][]byte{oldKey})
 	require.NoError(t, err)
 
 	next, err := kc.WithKeyKeepingFallbacks(newKey)
@@ -159,7 +147,7 @@ func TestKeychainWithKeyKeepingFallbacks(t *testing.T) {
 	// with the new key alone.
 	newSealed, err := next.Seal([]byte("new payload"))
 	require.NoError(t, err)
-	onlyNew, err := NewKeychain(CipherAuto, [][]byte{newKey})
+	onlyNew, err := NewKeychain([][]byte{newKey})
 	require.NoError(t, err)
 	plain, err = onlyNew.Open(newSealed)
 	require.NoError(t, err)

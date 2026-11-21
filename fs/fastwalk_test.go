@@ -1,23 +1,43 @@
 package fs_test
 
 import (
+	"context"
 	gofs "io/fs"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/malivvan/storm/fs"
-	"github.com/malivvan/storm/fs/memfs"
+	bolt "go.etcd.io/bbolt"
 )
+
+// newFastWalkTestFS returns the in-repo filesystem used to exercise FastWalk.
+func newFastWalkTestFS(t *testing.T) *fs.FileSystem {
+	t.Helper()
+
+	db, err := bolt.Open(filepath.Join(t.TempDir(), "fastwalk.db"), 0600, &bolt.Options{Timeout: time.Second})
+	if err != nil {
+		t.Fatalf("open bbolt: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	store, err := fs.Open(context.Background(), db, nil)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	filesystem, err := store.Open("walk")
+	if err != nil {
+		t.Fatalf("open filesystem: %v", err)
+	}
+	return filesystem
+}
 
 func TestFastWalk(t *testing.T) {
 	// Create test filesystem
-	mfs, err := memfs.NewFS()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mfs := newFastWalkTestFS(t)
 
 	// Create test structure
 	dirs := []string{
@@ -52,7 +72,7 @@ func TestFastWalk(t *testing.T) {
 	// Walk and collect all paths
 	var walked []string
 	var mu sync.Mutex
-	err = fs.FastWalk(mfs, "/", func(path string, d gofs.DirEntry, err error) error {
+	err := fs.FastWalk(mfs, "/", func(path string, d gofs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -96,10 +116,7 @@ func TestFastWalk(t *testing.T) {
 }
 
 func TestFastWalkSkipDir(t *testing.T) {
-	mfs, err := memfs.NewFS()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mfs := newFastWalkTestFS(t)
 
 	// Create test structure
 	if err := mfs.MkdirAll("/skip/nested", 0755); err != nil {
@@ -120,7 +137,7 @@ func TestFastWalkSkipDir(t *testing.T) {
 	// Walk and skip "skip" directory
 	var walked []string
 	var mu sync.Mutex
-	err = fs.FastWalk(mfs, "/", func(path string, d gofs.DirEntry, err error) error {
+	err := fs.FastWalk(mfs, "/", func(path string, d gofs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -160,10 +177,7 @@ func TestFastWalkSkipDir(t *testing.T) {
 }
 
 func TestFastWalkConfig(t *testing.T) {
-	mfs, err := memfs.NewFS()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mfs := newFastWalkTestFS(t)
 
 	// Create a simple structure
 	if err := mfs.Mkdir("/dir", 0755); err != nil {
@@ -179,7 +193,7 @@ func TestFastWalkConfig(t *testing.T) {
 	}
 
 	count := 0
-	err = fs.FastWalkWithConfig(mfs, "/", config, func(path string, d gofs.DirEntry, err error) error {
+	err := fs.FastWalkWithConfig(mfs, "/", config, func(path string, d gofs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -197,10 +211,7 @@ func TestFastWalkConfig(t *testing.T) {
 }
 
 func TestFastWalkEmptyDir(t *testing.T) {
-	mfs, err := memfs.NewFS()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mfs := newFastWalkTestFS(t)
 
 	// Create empty directory
 	if err := mfs.Mkdir("/empty", 0755); err != nil {
@@ -208,7 +219,7 @@ func TestFastWalkEmptyDir(t *testing.T) {
 	}
 
 	count := 0
-	err = fs.FastWalk(mfs, "/empty", func(path string, d gofs.DirEntry, err error) error {
+	err := fs.FastWalk(mfs, "/empty", func(path string, d gofs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -227,10 +238,7 @@ func TestFastWalkEmptyDir(t *testing.T) {
 }
 
 func TestFastWalkSingleFile(t *testing.T) {
-	mfs, err := memfs.NewFS()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mfs := newFastWalkTestFS(t)
 
 	// Create single file
 	f, _ := mfs.Create("/single.txt")
@@ -238,7 +246,7 @@ func TestFastWalkSingleFile(t *testing.T) {
 	f.Close()
 
 	var walked []string
-	err = fs.FastWalk(mfs, "/single.txt", func(path string, d gofs.DirEntry, err error) error {
+	err := fs.FastWalk(mfs, "/single.txt", func(path string, d gofs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

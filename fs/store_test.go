@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/malivvan/storm/fs/absfs"
-	"github.com/malivvan/storm/fs/memfs"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -239,17 +238,13 @@ func TestStoreWithoutRoot(t *testing.T) {
 	}
 }
 
-// TestFileSystemWithMemFS tests using memfs for external content storage
-func TestFileSystemWithMemFS(t *testing.T) {
+// TestFileSystemWithExternalContentFS tests using an external filesystem for content storage
+func TestFileSystemWithExternalContentFS(t *testing.T) {
 	tmpfile := filepath.Join(t.TempDir(), "test.db")
 
-	// Create memfs for content storage
-	contentFS, err := memfs.NewFS()
-	if err != nil {
-		t.Fatalf("memfs.NewFS failed: %v", err)
-	}
+	contentFS := newContentStorageFS(t)
 
-	// Open filesystem with memfs content storage
+	// Open filesystem with external content storage
 	fs, err := openFSWithContentForTest(t, tmpfile, "", contentFS)
 	if err != nil {
 		t.Fatalf("OpenWithContentFS failed: %v", err)
@@ -263,7 +258,7 @@ func TestFileSystemWithMemFS(t *testing.T) {
 	}
 
 	// Write data
-	testData := []byte("hello memfs storage!")
+	testData := []byte("hello external storage!")
 	n, err := f.Write(testData)
 	if err != nil {
 		t.Fatalf("Write failed: %v", err)
@@ -292,7 +287,7 @@ func TestFileSystemWithMemFS(t *testing.T) {
 	}
 	f.Close()
 
-	// Verify content is stored in memfs, not BoltDB
+	// Verify content is stored in the external filesystem, not BoltDB
 	// Get the inode number
 	info, err := fs.Stat("/test.txt")
 	if err != nil {
@@ -303,11 +298,11 @@ func TestFileSystemWithMemFS(t *testing.T) {
 		t.Fatal("Failed to get inode")
 	}
 
-	// Check that content exists in memfs
+	// Check that content exists in the external filesystem
 	contentPath := inoToPath(node.Ino)
 	_, err = contentFS.Stat(contentPath)
 	if err != nil {
-		t.Fatalf("Content not found in memfs: %v", err)
+		t.Fatalf("Content not found in the external filesystem: %v", err)
 	}
 
 	// Test file deletion
@@ -322,10 +317,10 @@ func TestFileSystemWithMemFS(t *testing.T) {
 		t.Fatalf("File should not exist after remove, got error: %v", err)
 	}
 
-	// Verify content was deleted from memfs
+	// Verify content was deleted from the external filesystem
 	_, err = contentFS.Stat(contentPath)
 	if !os.IsNotExist(err) {
-		t.Fatalf("Content should not exist in memfs after remove, got error: %v", err)
+		t.Fatalf("Content should not exist in the external filesystem after remove, got error: %v", err)
 	}
 }
 
@@ -377,7 +372,7 @@ func TestFileSystemWithoutExternalStorage(t *testing.T) {
 	f.Close()
 }
 
-// TestRemoveAllWithExternalStorage tests RemoveAll with memfs
+// TestRemoveAllWithExternalStorage tests RemoveAll with an external content filesystem
 func TestRemoveAllWithExternalStorage(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Skipping on Windows - Walk has path separator issues (uses filepath.Join which produces \\ on Windows, but BoltFS internally uses / separators)")
@@ -385,13 +380,9 @@ func TestRemoveAllWithExternalStorage(t *testing.T) {
 
 	tmpfile := filepath.Join(t.TempDir(), "test.db")
 
-	// Create memfs for content storage
-	contentFS, err := memfs.NewFS()
-	if err != nil {
-		t.Fatalf("memfs.NewFS failed: %v", err)
-	}
+	contentFS := newContentStorageFS(t)
 
-	// Open filesystem with memfs content storage
+	// Open filesystem with external content storage
 	fs, err := openFSWithContentForTest(t, tmpfile, "", contentFS)
 	if err != nil {
 		t.Fatalf("OpenWithContentFS failed: %v", err)
@@ -438,12 +429,12 @@ func TestRemoveAllWithExternalStorage(t *testing.T) {
 		t.Fatalf("Expected NotExist error, got: %v", err)
 	}
 
-	// Verify all content files were deleted from memfs
+	// Verify all content files were deleted from the external filesystem
 	for _, ino := range inodes {
 		contentPath := inoToPath(ino)
 		_, err := contentFS.Stat(contentPath)
 		if !os.IsNotExist(err) {
-			t.Errorf("Content for inode %d should not exist in memfs, got error: %v", ino, err)
+			t.Errorf("Content for inode %d should not exist in the external filesystem, got error: %v", ino, err)
 		}
 	}
 }
@@ -459,11 +450,7 @@ func TestSetContentFS(t *testing.T) {
 	}
 	defer fs.Close()
 
-	// Create memfs for content storage
-	contentFS, err := memfs.NewFS()
-	if err != nil {
-		t.Fatalf("memfs.NewFS failed: %v", err)
-	}
+	contentFS := newContentStorageFS(t)
 
 	// Set content filesystem
 	fs.SetContentFS(contentFS)
@@ -488,11 +475,11 @@ func TestSetContentFS(t *testing.T) {
 		t.Fatal("Failed to get inode")
 	}
 
-	// Verify content exists in memfs
+	// Verify content exists in the external filesystem
 	contentPath := inoToPath(node.Ino)
 	_, err = contentFS.Stat(contentPath)
 	if err != nil {
-		t.Fatalf("Content not found in memfs: %v", err)
+		t.Fatalf("Content not found in the external filesystem: %v", err)
 	}
 }
 
@@ -507,11 +494,7 @@ func TestOpenWithContentFS(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Create memfs for content storage
-	contentFS, err := memfs.NewFS()
-	if err != nil {
-		t.Fatalf("memfs.NewFS failed: %v", err)
-	}
+	contentFS := newContentStorageFS(t)
 
 	// Create filesystem with content filesystem
 	fs, err := newFSWithContentForTest(db, "", contentFS)
@@ -539,16 +522,29 @@ func TestOpenWithContentFS(t *testing.T) {
 		t.Fatal("Failed to get inode")
 	}
 
-	// Verify content exists in memfs
+	// Verify content exists in the external filesystem
 	contentPath := inoToPath(node.Ino)
 	_, err = contentFS.Stat(contentPath)
 	if err != nil {
-		t.Fatalf("Content not found in memfs: %v", err)
+		t.Fatalf("Content not found in the external filesystem: %v", err)
 	}
 }
 
 // openFSForTest opens a path-backed file system through a Store. The helper
 // owns the bbolt database and closes it during test cleanup.
+// newContentStorageFS returns an in-repo filesystem to use as the external
+// content storage of another filesystem.
+func newContentStorageFS(t *testing.T) *FileSystem {
+	t.Helper()
+
+	filesystem, err := openFSForTest(t, filepath.Join(t.TempDir(), "content.db"), "")
+	if err != nil {
+		t.Fatalf("open content storage: %v", err)
+	}
+	t.Cleanup(func() { _ = filesystem.Close() })
+	return filesystem
+}
+
 func openFSForTest(tb testing.TB, path, bucketpath string) (*FileSystem, error) {
 	tb.Helper()
 

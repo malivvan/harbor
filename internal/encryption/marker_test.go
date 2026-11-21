@@ -15,13 +15,12 @@ func TestMarkerRoundTrip(t *testing.T) {
 		spec := testMarkerSpec(0)
 		canary := []byte("sealed-canary")
 
-		raw, err := EncodeMarker(spec, Marker{Cipher: CipherXChaCha20Poly1305, Flags: 0b101, Canary: canary})
+		raw, err := EncodeMarker(spec, Marker{Flags: 0b101, Canary: canary})
 		require.NoError(t, err)
 		require.Len(t, raw, markerHeaderSize+len(canary))
 
 		decoded, err := DecodeMarker(spec, raw)
 		require.NoError(t, err)
-		require.Equal(t, CipherXChaCha20Poly1305, decoded.Cipher)
 		require.Equal(t, uint8(0b101), decoded.Flags)
 		require.Zero(t, decoded.Extra)
 		require.Equal(t, canary, decoded.Canary)
@@ -32,7 +31,6 @@ func TestMarkerRoundTrip(t *testing.T) {
 		canary := []byte("sealed-canary")
 
 		raw, err := EncodeMarker(spec, Marker{
-			Cipher: CipherAES256GCM,
 			Flags:  0b011,
 			Extra:  1 << 20,
 			Canary: canary,
@@ -65,7 +63,7 @@ func TestMarkerRoundTrip(t *testing.T) {
 func TestMarkerDecodeErrors(t *testing.T) {
 	spec := testMarkerSpec(0)
 
-	valid, err := EncodeMarker(spec, Marker{Cipher: CipherAES256GCM, Canary: []byte("c")})
+	valid, err := EncodeMarker(spec, Marker{Canary: []byte("c")})
 	require.NoError(t, err)
 
 	t.Run("short", func(t *testing.T) {
@@ -82,6 +80,13 @@ func TestMarkerDecodeErrors(t *testing.T) {
 	t.Run("unsupported version", func(t *testing.T) {
 		bumped := append([]byte(nil), valid...)
 		bumped[4] = markerVersion + 1
+		_, err := DecodeMarker(spec, bumped)
+		require.ErrorIs(t, err, ErrWrongMode)
+	})
+
+	t.Run("unsupported cipher", func(t *testing.T) {
+		bumped := append([]byte(nil), valid...)
+		bumped[5] = markerCipherAES256GCM + 1
 		_, err := DecodeMarker(spec, bumped)
 		require.ErrorIs(t, err, ErrWrongMode)
 	})
@@ -105,7 +110,7 @@ func TestMarkerSpecValidation(t *testing.T) {
 }
 
 func TestVerifyCanary(t *testing.T) {
-	kc, err := NewKeychain(CipherAuto, [][]byte{testKey(30)})
+	kc, err := NewKeychain([][]byte{testKey(30)})
 	require.NoError(t, err)
 
 	sealed, err := kc.Seal([]byte("storm/test/aead/v1"))
@@ -116,7 +121,7 @@ func TestVerifyCanary(t *testing.T) {
 	require.ErrorIs(t, VerifyCanary(kc, sealed, "storm/test/aead/v2"), ErrAuthFailed)
 
 	// A different key cannot open the canary.
-	other, err := NewKeychain(CipherAuto, [][]byte{testKey(31)})
+	other, err := NewKeychain([][]byte{testKey(31)})
 	require.NoError(t, err)
 	require.ErrorIs(t, VerifyCanary(other, sealed, "storm/test/aead/v1"), ErrAuthFailed)
 

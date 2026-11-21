@@ -446,28 +446,21 @@ func TestAEADInvalidConfig(t *testing.T) {
 
 	_, err = OpenWithConfig(ctx, bdb, nil, false, nil, &Config{
 		Key:           aeadKey(10),
-		Cipher:        CipherSuite(99),
-		EncryptPoints: true,
-	})
-	require.ErrorIs(t, err, ErrUnsupportedCipher)
-
-	_, err = OpenWithConfig(ctx, bdb, nil, false, nil, &Config{
-		Key:           aeadKey(10),
 		KeyProvider:   aeadRawProvider(t, aeadKey(10)),
 		EncryptPoints: true,
 	})
 	require.ErrorIs(t, err, ErrInvalidConfig)
 
-	xchacha, err := OpenWithConfig(ctx, bdb, nil, false, nil, &Config{
+	// A valid config still works after the rejected ones above.
+	valid, err := OpenWithConfig(ctx, bdb, nil, false, nil, &Config{
 		Key:           aeadKey(10),
-		Cipher:        CipherXChaCha20Poly1305,
 		EncryptPoints: true,
 	})
 	require.NoError(t, err)
-	require.NotNil(t, xchacha.enc)
-	require.NoError(t, xchacha.EnsureCollection("docs"))
-	require.NoError(t, xchacha.UpsertPoints("docs", aeadTestPoints()))
-	loaded, err := xchacha.LoadCollection("docs")
+	require.NotNil(t, valid.enc)
+	require.NoError(t, valid.EnsureCollection("docs"))
+	require.NoError(t, valid.UpsertPoints("docs", aeadTestPoints()))
+	loaded, err := valid.LoadCollection("docs")
 	require.NoError(t, err)
 	require.Equal(t, []string{"p1", "p2", "p3"}, aeadPointIDs(loaded))
 }

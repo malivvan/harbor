@@ -491,9 +491,6 @@ func TestAEADInvalidConfig(t *testing.T) {
 	_, err := OpenWithConfig(ctx, bdb, nil, nil, &Config{Key: []byte("short"), EncryptValues: true})
 	require.ErrorIs(t, err, ErrInvalidKey)
 
-	_, err = OpenWithConfig(ctx, bdb, nil, nil, &Config{Key: aeadKey(8), Cipher: CipherSuite(99), EncryptValues: true})
-	require.ErrorIs(t, err, ErrUnsupportedCipher)
-
 	_, err = OpenWithConfig(ctx, bdb, nil, nil, &Config{
 		Key:           aeadKey(8),
 		KeyProvider:   aeadRawProvider(t, aeadKey(8)),

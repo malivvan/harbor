@@ -33,9 +33,6 @@ var (
 	// ErrInvalidKey is returned for a missing or malformed encryption key.
 	ErrInvalidKey = encryption.ErrInvalidKey
 
-	// ErrUnsupportedCipher is returned for an unknown cipher suite.
-	ErrUnsupportedCipher = encryption.ErrUnsupportedCipher
-
 	// ErrInvalidConfig is returned for an inconsistent encryption config.
 	ErrInvalidConfig = encryption.ErrInvalidConfig
 

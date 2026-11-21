@@ -9,9 +9,6 @@ var (
 	// ErrAuthFailed is returned when ciphertext fails authentication.
 	ErrAuthFailed = errors.New("authentication failed - data may be corrupted or tampered")
 
-	// ErrUnsupportedCipher is returned for an unknown cipher suite.
-	ErrUnsupportedCipher = errors.New("unsupported cipher suite")
-
 	// ErrInvalidKey is returned for a missing or malformed encryption key.
 	ErrInvalidKey = errors.New("invalid encryption key")
 

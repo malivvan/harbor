@@ -747,10 +747,9 @@ store, err := storm.OpenWithConfig(ctx, bDB, nil, nil, &storm.Config{
 })
 ```
 
-The default cipher is AES-256-GCM; set `Cipher` to
-`storm.CipherXChaCha20Poly1305` to use XChaCha20-Poly1305 instead. Encrypted
-stores carry a marker, so opening one without a config (or with the wrong
-settings) fails with `ErrWrongMode` and a wrong key fails with `ErrAuthFailed`.
+Stores are sealed with AES-256-GCM. Encrypted stores carry a marker, so opening
+one without a config (or with the wrong settings) fails with `ErrWrongMode` and
+a wrong key fails with `ErrAuthFailed`.
 `Store.ReEncrypt` rotates the key and `Store.VerifyAll` re-reads the store to
 confirm everything decrypts.
 
