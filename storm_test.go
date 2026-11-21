@@ -2,7 +2,11 @@ package storm
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"testing"
+
+	"github.com/malivvan/storm/vec"
 )
 
 func TestStorm(t *testing.T) {
@@ -29,4 +33,40 @@ func TestStorm(t *testing.T) {
 	}
 
 	t.Log("KV store operations successful")
+
+	// 2. Create a Collection (Automatic Persistence)
+	col, _ := s.Vec().NewCollection("documents", 3, vec.Cosine, true)
+
+	err = col.Upsert([]vec.PointStruct{
+		{
+			ID:      "user_101",
+			Vector:  []float32{0.5, 0.5, 0.5},
+			Payload: vec.Payload{"role": "admin", "age": 30},
+		},
+		{
+			ID:      "user_202",
+			Vector:  []float32{0.8, 0.2, 0.0},
+			Payload: vec.Payload{"role": "guest", "age": 22},
+		},
+	})
+	if err != nil {
+		log.Fatalf("Upsert error: %v", err)
+	}
+
+	// 4. Perform a rich query using Go structs directly
+	fmt.Println("\nSearching for an admin closest to [1.0, 0.0, 0.0]...")
+	query := []float32{1.0, 0.0, 0.0}
+
+	filter := &vec.Filter{
+		Must: []vec.Condition{
+			{Key: "role", Match: vec.MatchValue{Value: "admin"}},
+		},
+	}
+
+	results, err := col.Search(query, filter, 1) // Get Top 1
+	if err != nil {
+		log.Fatalf("Search error: %v", err)
+	}
+
+	fmt.Printf("Best Match: %s (Score: %f)\n", results[0].ID, results[0].Score)
 }

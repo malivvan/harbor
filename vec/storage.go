@@ -9,9 +9,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	pb "github.com/malivvan/storm/vec/proto"
+	"github.com/malivvan/binco"
 	"go.etcd.io/bbolt"
-	"google.golang.org/protobuf/proto"
 )
 
 const collectionsMetaBucket = "__collections_meta__"
@@ -30,77 +29,85 @@ type Store struct {
 	useQuant  bool
 }
 
-func toProtoPoint(p *PointStruct) *pb.PointStruct {
-	pbPoint := &pb.PointStruct{
-		Id:     p.ID,
+func toStoredPoint(p *PointStruct) *StoredPoint {
+	stored := &StoredPoint{
+		ID:     p.ID,
 		Vector: p.Vector,
 	}
 
 	if p.Payload != nil {
-		pbPoint.Payload = make(map[string]*pb.Value)
+		stored.Payload = make(map[string]*Value)
 		for k, v := range p.Payload {
-			pbVal := &pb.Value{}
+			value := &Value{}
 			switch val := v.(type) {
 			case string:
 				if !utf8.ValidString(val) {
 					val = string(bytes.ToValidUTF8([]byte(val), nil)) // sanitize: replace invalid UTF-8 sequences
 				}
-				pbVal.Value = &pb.Value_StringValue{StringValue: val}
+				value.Kind = KindString
+				value.StringValue = val
 			case int:
-				pbVal.Value = &pb.Value_IntValue{IntValue: int64(val)}
+				value.Kind = KindInt
+				value.IntValue = int64(val)
 			case int64:
-				pbVal.Value = &pb.Value_IntValue{IntValue: val}
+				value.Kind = KindInt
+				value.IntValue = val
 			case float32:
-				pbVal.Value = &pb.Value_DoubleValue{DoubleValue: float64(val)}
+				value.Kind = KindDouble
+				value.DoubleValue = float64(val)
 			case float64:
-				pbVal.Value = &pb.Value_DoubleValue{DoubleValue: val}
+				value.Kind = KindDouble
+				value.DoubleValue = val
 			case bool:
-				pbVal.Value = &pb.Value_BoolValue{BoolValue: val}
+				value.Kind = KindBool
+				value.BoolValue = val
 			case []byte:
-				pbVal.Value = &pb.Value_BytesValue{BytesValue: val}
+				value.Kind = KindBytes
+				value.BytesValue = val
 			default:
 				// For complex types (map, slice, etc.), JSON-serialize and store as bytes
 				if jsonBytes, err := json.Marshal(val); err == nil {
-					pbVal.Value = &pb.Value_BytesValue{BytesValue: jsonBytes}
+					value.Kind = KindBytes
+					value.BytesValue = jsonBytes
 				}
 				// If JSON marshal fails, skip the value
 			}
-			pbPoint.Payload[k] = pbVal
+			stored.Payload[k] = value
 		}
 	}
 
-	return pbPoint
+	return stored
 }
 
-func fromProtoPoint(pbPoint *pb.PointStruct) *PointStruct {
+func fromStoredPoint(stored *StoredPoint) *PointStruct {
 	p := &PointStruct{
-		ID:     pbPoint.Id,
-		Vector: pbPoint.Vector,
+		ID:     stored.ID,
+		Vector: stored.Vector,
 	}
 
-	if pbPoint.Payload != nil {
+	if stored.Payload != nil {
 		p.Payload = make(Payload)
-		for k, v := range pbPoint.Payload {
-			if v.Value == nil {
+		for k, v := range stored.Payload {
+			if v == nil {
 				continue
 			}
-			switch val := v.Value.(type) {
-			case *pb.Value_StringValue:
-				p.Payload[k] = val.StringValue
-			case *pb.Value_IntValue:
-				p.Payload[k] = val.IntValue
-			case *pb.Value_DoubleValue:
-				p.Payload[k] = val.DoubleValue
-			case *pb.Value_BoolValue:
-				p.Payload[k] = val.BoolValue
-			case *pb.Value_BytesValue:
+			switch v.Kind {
+			case KindString:
+				p.Payload[k] = v.StringValue
+			case KindInt:
+				p.Payload[k] = v.IntValue
+			case KindDouble:
+				p.Payload[k] = v.DoubleValue
+			case KindBool:
+				p.Payload[k] = v.BoolValue
+			case KindBytes:
 				// Try to deserialize as JSON for complex nested objects (map, slice, etc.)
 				// If it's not valid JSON, return raw bytes
 				var obj any
-				if err := json.Unmarshal(val.BytesValue, &obj); err == nil {
+				if err := json.Unmarshal(v.BytesValue, &obj); err == nil {
 					p.Payload[k] = obj
 				} else {
-					p.Payload[k] = val.BytesValue
+					p.Payload[k] = v.BytesValue
 				}
 			}
 		}
@@ -295,10 +302,7 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 				p = &quantizedPoint
 			}
 
-			data, err := proto.Marshal(toProtoPoint(p))
-			if err != nil {
-				return fmt.Errorf("failed to marshal point %s: %w", p.ID, err)
-			}
+			data := binco.Encode(StoredPointBinco, *toStoredPoint(p))
 			if err := b.Put([]byte(p.ID), data); err != nil {
 				return fmt.Errorf("failed to write point %s to bbolt: %w", p.ID, err)
 			}
@@ -326,12 +330,12 @@ func (s *Store) LoadCollection(colName string) (map[string]*PointStruct, error) 
 		}
 
 		return b.ForEach(func(k, v []byte) error {
-			var pbPoint pb.PointStruct
-			if err := proto.Unmarshal(v, &pbPoint); err != nil {
+			stored, err := binco.DecodeExact(StoredPointBinco, v)
+			if err != nil {
 				return err
 			}
 
-			p := fromProtoPoint(&pbPoint)
+			p := fromStoredPoint(&stored)
 
 			// Dequantize vector if enabled and quantized vector exists
 			if s.useQuant && s.quantizer != nil {

@@ -32,18 +32,18 @@ const DefaultFlushThreshold = 64
 
 // NewCollection initializes a new vector collection, optionally loading from storage.
 // If useHNSW is true, it uses the optimized HNSW graph search; otherwise uses flat memory search.
-// When storage is provided, existing points are automatically loaded into memory.
+// When the receiver is non-nil, existing points are automatically loaded into memory.
 // Returns an error if the collection cannot be created or if loaded points have invalid dimensions.
-func NewCollection(name string, vectorLen int, metric Distance, store *Store, useHNSW bool) (*Collection, error) {
-	return NewCollectionWithParams(name, vectorLen, metric, store, useHNSW, DefaultHNSWParams())
+func (store *Store) NewCollection(name string, vectorLen int, metric Distance, useHNSW bool) (*Collection, error) {
+	return store.NewCollectionWithParams(name, vectorLen, metric, useHNSW, DefaultHNSWParams())
 }
 
 // NewCollectionWithParams initializes a new vector collection with custom HNSW parameters.
 // If useHNSW is true, it uses the optimized HNSW graph search with the provided parameters;
 // otherwise uses flat memory search.
-// When storage is provided, existing points are automatically loaded into memory.
+// When the receiver is non-nil, existing points are automatically loaded into memory.
 // Returns an error if the collection cannot be created or if loaded points have invalid dimensions.
-func NewCollectionWithParams(name string, vectorLen int, metric Distance, store *Store, useHNSW bool, hnswParams HNSWParams) (*Collection, error) {
+func (store *Store) NewCollectionWithParams(name string, vectorLen int, metric Distance, useHNSW bool, hnswParams HNSWParams) (*Collection, error) {
 	var index VectorIndex
 	if useHNSW {
 		index = NewHNSWIndexWithParams(metric, hnswParams)

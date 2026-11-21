@@ -6,8 +6,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	gvpb "github.com/malivvan/storm/vec/proto"
-	"google.golang.org/protobuf/proto"
+	"github.com/malivvan/binco"
 )
 
 func TestStorage(t *testing.T) {
@@ -82,9 +81,9 @@ func TestStorage(t *testing.T) {
 	// Verify payload types and values
 	expectedPayload := map[string]interface{}{
 		"string": "test1",
-		"int":    int64(42),     // Protobuf unmarshals int as int64
-		"int64":  int64(100),    // Protobuf unmarshals int64 as int64
-		"float":  float64(3.14), // Protobuf unmarshals float32 as float64 (double_value)
+		"int":    int64(42),     // integer payloads decode as int64
+		"int64":  int64(100),    // integer payloads decode as int64
+		"float":  float64(3.14), // float payloads decode as float64
 		"double": float64(2.718),
 		"bool":   true,
 		"bytes":  []byte{0x01, 0x02, 0x03},
@@ -294,8 +293,8 @@ func TestStorageErrorCases(t *testing.T) {
 }
 
 // TestToProtoPointInvalidUTF8 verifies that invalid UTF-8 strings in payload
-// are sanitized (replaced with U+FFFD) instead of causing proto.Marshal to fail.
-// This covers the P1 fix: UTF-8 validation in toProtoPoint.
+// are sanitized (replaced with U+FFFD) before binco encoding.
+// This covers the P1 fix: UTF-8 validation in toStoredPoint.
 func TestToProtoPointInvalidUTF8(t *testing.T) {
 	t.Run("InvalidUTF8String_Sanitized", func(t *testing.T) {
 		// Create a string with embedded invalid UTF-8 bytes (e.g., from binary file content)
@@ -311,13 +310,13 @@ func TestToProtoPointInvalidUTF8(t *testing.T) {
 			},
 		}
 
-		pb := toProtoPoint(p)
-		if pb == nil {
-			t.Fatal("toProtoPoint returned nil")
+		converted := toStoredPoint(p)
+		if converted == nil {
+			t.Fatal("toStoredPoint returned nil")
 		}
 
 		// Verify all string values are valid UTF-8
-		for k, v := range pb.Payload {
+		for k, v := range converted.Payload {
 			if sv := v.GetStringValue(); sv != "" {
 				if !utf8.ValidString(sv) {
 					t.Errorf("payload key %q still contains invalid UTF-8 after sanitization", k)
@@ -336,18 +335,18 @@ func TestToProtoPointInvalidUTF8(t *testing.T) {
 			},
 		}
 
-		pb := toProtoPoint(p)
-		if pb == nil {
-			t.Fatal("toProtoPoint returned nil")
+		converted := toStoredPoint(p)
+		if converted == nil {
+			t.Fatal("toStoredPoint returned nil")
 		}
 
-		if got := pb.Payload["text"].GetStringValue(); got != "hello 世界 🌍" {
+		if got := converted.Payload["text"].GetStringValue(); got != "hello 世界 🌍" {
 			t.Errorf("valid UTF-8 should pass through unchanged, got %q", got)
 		}
 	})
 
-	t.Run("RoundTrip_InvalidUTF8_MarshalSucceeds", func(t *testing.T) {
-		// The real bug: proto.Marshal would fail on invalid UTF-8
+	t.Run("RoundTrip_InvalidUTF8_EncodeSucceeds", func(t *testing.T) {
+		// The real bug: encoding would fail on invalid UTF-8
 		invalidStr := "data\x80corrupted"
 		p := &PointStruct{
 			ID:     "marshal-test",
@@ -357,19 +356,16 @@ func TestToProtoPointInvalidUTF8(t *testing.T) {
 			},
 		}
 
-		pb := toProtoPoint(p)
-		data, err := proto.Marshal(pb)
-		if err != nil {
-			t.Fatalf("proto.Marshal failed even after sanitization: %v", err)
-		}
+		converted := toStoredPoint(p)
+		data := binco.Encode(StoredPointBinco, *converted)
 		if len(data) == 0 {
-			t.Fatal("marshaled data is empty")
+			t.Fatal("encoded data is empty")
 		}
 
-		// Round-trip: unmarshal and verify content is valid UTF-8
-		decoded := &gvpb.PointStruct{}
-		if err := proto.Unmarshal(data, decoded); err != nil {
-			t.Fatalf("proto.Unmarshal failed: %v", err)
+		// Round-trip: decode and verify content is valid UTF-8
+		decoded, err := binco.DecodeExact(StoredPointBinco, data)
+		if err != nil {
+			t.Fatalf("binco decode failed: %v", err)
 		}
 		content := decoded.Payload["raw"].GetStringValue()
 		if !utf8.ValidString(content) {

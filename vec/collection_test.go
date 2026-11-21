@@ -9,7 +9,8 @@ import (
 func TestCollection(t *testing.T) {
 	// Test 1: Collection without storage
 	t.Run("CollectionWithoutStorage", func(t *testing.T) {
-		col, err := NewCollection("test-collection", 3, Cosine, nil, false)
+		var store *Store
+		col, err := store.NewCollection("test-collection", 3, Cosine, false)
 		if err != nil {
 			t.Fatalf("Failed to create collection: %v", err)
 		}
@@ -112,7 +113,7 @@ func TestCollection(t *testing.T) {
 		defer storage.Close()
 
 		// Create collection with HNSW index
-		col, err := NewCollection("test-collection", 3, Euclid, storage, true)
+		col, err := storage.NewCollection("test-collection", 3, Euclid, true)
 		if err != nil {
 			t.Fatalf("Failed to create collection with storage: %v", err)
 		}
@@ -205,7 +206,7 @@ func TestCollectionHNSWParams(t *testing.T) {
 		EfConstruction: 200,
 	}
 
-	col, err := NewCollectionWithParams("hnsw-col", 3, Cosine, storage, true, params)
+	col, err := storage.NewCollectionWithParams("hnsw-col", 3, Cosine, true, params)
 	if err != nil {
 		t.Fatalf("Failed to create collection: %v", err)
 	}
@@ -222,7 +223,7 @@ func TestCollectionHNSWParams(t *testing.T) {
 	}
 
 	// Reload collection from storage
-	col2, err := NewCollectionWithParams("hnsw-col", 3, Cosine, storage, true, params)
+	col2, err := storage.NewCollectionWithParams("hnsw-col", 3, Cosine, true, params)
 	if err != nil {
 		t.Fatalf("Failed to reload collection: %v", err)
 	}
@@ -251,7 +252,7 @@ func TestCollectionLoadError(t *testing.T) {
 	storage.UpsertPoints(colName, points)
 
 	// Try to create a collection with dimension 3, it should fail during loading
-	_, err := NewCollection(colName, 3, Cosine, storage, false)
+	_, err := storage.NewCollection(colName, 3, Cosine, false)
 	if err == nil {
 		t.Error("Expected error when loading point with wrong dimension")
 	}

@@ -1,5 +1,5 @@
-// Package core provides the core functionality for GoVector, a vector database library.
-// It includes vector indexing, storage, and search capabilities compatible with Qdrant.
+// Package vec provides the core functionality for a vector database library.
+// It includes vector indexing, storage, and search capabilities.
 package vec
 
 // VectorIndex defines the standard interface for vector search engines.

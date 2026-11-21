@@ -22,6 +22,9 @@ Initial release of Storm v1.
 - **Bucket store (`kv`)**: a `Store` that manages cached, named `Bucket`
   structs with `Open(ctx, db, root, codec)`, key/value operations, raw
   iteration, and bucket deletion.
+- **File system store (`fs`)**: a `Store` over a caller-owned bbolt database
+  that manages named file systems under a root bucket, with `Open(ctx, db,
+  root)`, `Open`, `FileSystems`, and `DeleteFS`.
 - **Operation-wrapped errors** with `errors.Is`-compatible causes.
 - **Destination safety**: read operations decode before publishing to caller
   destinations.

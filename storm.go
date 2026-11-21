@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/malivvan/storm/codec/json"
 	"github.com/malivvan/storm/kv"
+	"github.com/malivvan/storm/vec"
 
 	"os"
 	"sync"
@@ -21,6 +22,7 @@ type Store struct {
 	id  uuid.UUID
 	db  *db.Store
 	kv  *kv.Store
+	vec *vec.Store
 	ctx context.Context
 }
 
@@ -77,6 +79,11 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Opti
 		return nil, err
 	}
 
+	s.vec, err = vec.Open(ctx, s.b, []byte{3}, false, nil)
+	if err != nil {
+		return nil, err
+	}
+
 	return s, nil
 }
 
@@ -90,6 +97,10 @@ func (s *Store) KV() *kv.Store {
 
 func (s *Store) DB() *db.Store {
 	return s.db
+}
+
+func (s *Store) Vec() *vec.Store {
+	return s.vec
 }
 
 func (s *Store) Get(key string) string {
