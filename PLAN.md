@@ -273,5 +273,8 @@ rotation); `fs/aeadfs` is removed.
 - [x] **Phase 2 — chunked content** — `fs/chunk.go` chunk bucket keyed by
   inode+index, range read/write/truncate touching only affected chunks,
   File/ReadFile/snapshot routing; tests in `fs/chunk_test.go`.
-- [ ] Phase 3 — rotation (`ReEncryptFS`, `RotateAll`, `VerifyAll`).
+- [x] **Phase 3 — key rotation** — `MultiKeyProvider` fallback keys,
+  `ReEncryptFS`, `RotateAll`, `VerifyAll`; re-seals inodes, content, chunks,
+  symlinks and the marker canary and updates every open FileSystem; tests in
+  `fs/rotate_test.go`.
 - [ ] Merge `fs/aeadfs`, documentation and final verification.

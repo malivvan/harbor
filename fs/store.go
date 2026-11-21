@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sync"
 
 	"github.com/malivvan/storm/fs/absfs"
 	bolt "go.etcd.io/bbolt"
@@ -25,6 +26,9 @@ type Store struct {
 	db   *bolt.DB
 	root []byte
 	enc  *encState // nil when encryption is disabled
+
+	mu          sync.Mutex
+	filesystems []*FileSystem
 }
 
 // Open creates a Store over an already-open bbolt database.
@@ -102,6 +106,7 @@ func (s *Store) Open(name string) (*FileSystem, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.track(filesystem)
 	return filesystem, nil
 }
 
@@ -121,6 +126,7 @@ func (s *Store) OpenWithContentFS(name string, contentFS absfs.FileSystem) (*Fil
 		return nil, err
 	}
 	filesystem.contentFS = contentFS
+	s.track(filesystem)
 	return filesystem, nil
 }
 
@@ -302,6 +308,24 @@ func (s *Store) hasUserData(path string) (bool, error) {
 		return nil
 	})
 	return found, err
+}
+
+// track remembers an opened file system so key rotation can update its
+// encryption state.
+func (s *Store) track(filesystem *FileSystem) {
+	s.mu.Lock()
+	s.filesystems = append(s.filesystems, filesystem)
+	s.mu.Unlock()
+}
+
+// adoptEnc switches the store and every file system it opened to next.
+func (s *Store) adoptEnc(next *encState) {
+	s.mu.Lock()
+	s.enc = next
+	for _, filesystem := range s.filesystems {
+		filesystem.enc = next
+	}
+	s.mu.Unlock()
 }
 
 func (s *Store) bucketPath(name string) string {
