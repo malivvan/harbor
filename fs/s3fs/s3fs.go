@@ -99,24 +99,30 @@ func NewWithClientAndContext(ctx context.Context, client S3Client, bucket string
 // It normalizes "." and ".." components and rejects paths that would
 // escape above the root (e.g., "../secret").
 func sanitizePath(p string) (string, error) {
-	// Normalize: add leading slash so path.Clean handles ".." correctly
-	clean := path.Clean("/" + p)
-	// Remove the leading slash we added
-	clean = strings.TrimPrefix(clean, "/")
+	// Detect traversal on the raw input before cleaning: path.Clean("/"+p)
+	// always begins with "/", so any escaping ".." is silently collapsed and
+	// can never be detected afterwards. Walk the components keeping a depth
+	// counter and reject any ".." that would move above the root.
+	depth := 0
+	for _, part := range strings.Split(p, "/") {
+		switch part {
+		case "", ".":
+			// no-op
+		case "..":
+			if depth == 0 {
+				return "", &os.PathError{Op: "sanitize", Path: p, Err: os.ErrInvalid}
+			}
+			depth--
+		default:
+			depth++
+		}
+	}
 
-	// path.Clean("/" + "../x") yields "/x" which is fine,
-	// but path.Clean("/" + "../../x") also yields "/x".
-	// The real danger is "..": path.Clean("/..") → "/"
-	// We detect traversal by checking if the cleaned path would have
-	// gone above root. After cleaning with a leading slash, if the result
-	// is "/" or starts with "..", it's traversal.
+	clean := path.Clean("/" + p)
+	clean = strings.TrimPrefix(clean, "/")
 	if clean == "." {
 		clean = ""
 	}
-	if strings.HasPrefix(clean, "..") {
-		return "", &os.PathError{Op: "sanitize", Path: p, Err: os.ErrInvalid}
-	}
-
 	return clean, nil
 }
 
@@ -517,9 +523,14 @@ type fileInfo struct {
 	isDir   bool
 }
 
-func (fi *fileInfo) Name() string       { return fi.name }
-func (fi *fileInfo) Size() int64        { return fi.size }
-func (fi *fileInfo) Mode() os.FileMode  { return 0644 }
+func (fi *fileInfo) Name() string { return fi.name }
+func (fi *fileInfo) Size() int64  { return fi.size }
+func (fi *fileInfo) Mode() os.FileMode {
+	if fi.isDir {
+		return os.ModeDir | 0755
+	}
+	return 0644
+}
 func (fi *fileInfo) ModTime() time.Time { return fi.modTime }
 func (fi *fileInfo) IsDir() bool        { return fi.isDir }
 func (fi *fileInfo) Sys() interface{}   { return nil }

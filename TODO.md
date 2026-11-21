@@ -251,6 +251,7 @@ the encryption state (sections 4 and 6).
   are destroyed. Reversed-argument bug (verified in source).
   Fix: `copy(d, data)` (copy old content into the front of the new zero buffer), then `data = d`.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **`OpenFile` follows symlinks with no cycle/depth limit**
   — `fs/fs.go:883-902` (recursive call at 902)
   Problem: a symlink that points to itself (or a cycle `a -> b`, `b -> a`) recurses without
@@ -259,6 +260,7 @@ the encryption state (sections 4 and 6).
   Fix: thread a depth counter through the recursive `OpenFile` call and return `syscall.ELOOP`
   past `maxSymlinkDepth`.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **`O_TRUNC` does not truncate chunked content**
   — `fs/fs.go:913-925`
   Problem: the truncate branch only writes `b.data.Put(i2b(child.Ino), []byte{})`. Chunked
@@ -268,6 +270,7 @@ the encryption state (sections 4 and 6).
   Fix: in the `O_TRUNC` branch, when `fs.chunked() && fs.contentFS == nil`, truncate the chunk
   range (delete all chunk keys) and set `child.Size = 0` before saving the inode.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **`FileSystem.Truncate` corrupts encrypted (non-chunked) files**
   — `fs/fs.go:1027-1035`
   Problem: `b.data.Get(key)` returns the **sealed ciphertext** when content encryption is on.
@@ -277,6 +280,7 @@ the encryption state (sections 4 and 6).
   Fix: read via `loadData` (decrypt), resize in plaintext, then write via `saveData`
   (re-encrypt), or decrypt/re-encrypt inside the transaction.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **`Copy` copies only the inode, not the file's data**
   — `fs/fs.go:726-751`
   Problem: `Copy` creates `copyInode(srcChild)` and links it, but never copies the data bucket,
@@ -288,6 +292,7 @@ the encryption state (sections 4 and 6).
   `srcChild.Ino` to the new ino; for directories, recursively copy and bump `Nlink` of the
   copied children.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **Deleting an inode leaks chunk and symlink data**
   — `fs/fs.go:1122-1136` (`deleteInode`) and `fs/fs.go:1334-1356` (`RemoveAll`)
   Problem: `deleteInode` deletes only the `inodes` key and (when `contentFS == nil`) the `data`
@@ -297,6 +302,7 @@ the encryption state (sections 4 and 6).
   Fix: in both paths, delete the inode's chunk keys (iterate the `chunkKey(ino,0)` prefix) and
   `symlinks.Delete(i2b(ino))`.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **Snapshots return empty files when an external contentFS is configured**
   — `fs/snapshot.go:178-196` (`ReadFile`) and `fs/snapshot.go:378-397` (`Open`)
   Problem: these always read `s.bucket.data.Get(i2b(node.Ino))` and ignore `fs.contentFS`. When
@@ -305,6 +311,7 @@ the encryption state (sections 4 and 6).
   Fix: route snapshot content reads through the same `loadData`-style logic that consults
   `fs.contentFS` (and chunked storage) before falling back to the data bucket.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **s3fs `Seek` has no effect on subsequent `Read`/`Write`**
   — `fs/s3fs/s3file.go:109-126` and `fs/s3fs/s3file.go:280-293`
   Problem: `Read` streams `f.body` from the beginning and never uses `f.offset`; `Write` always
@@ -315,6 +322,7 @@ the encryption state (sections 4 and 6).
   zero-fill extension; read from the cached buffer at `f.offset`); set offset from the end only
   when `append` is true.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 ### Medium
 
 - **`O_TRUNC` and `FileSystem.Truncate` ignore external contentFS storage**
@@ -326,12 +334,14 @@ the encryption state (sections 4 and 6).
   Fix: when `contentFS != nil`, perform the truncate against the contentFS object
   (rewrite/delete as appropriate).
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **`Chmod` replaces the whole mode, including type bits**
   — `fs/fs.go:1457` (`node.Mode = mode`)
   Problem: assigning the caller-provided mode verbatim can clear `os.ModeDir` (and other type
   bits); e.g. `Chmod("/", 0644)` turns the root directory into a regular file.
   Fix: `node.Mode = (node.Mode & os.ModeType) | (mode &^ os.ModeType)`.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **`Chown` resolves relative symlinks against the wrong base path**
   — `fs/fs.go:1442-1443` (`link = path.Join(name, link)`)
   Problem: for a relative symlink target the base should be the directory containing the
@@ -340,6 +350,7 @@ the encryption state (sections 4 and 6).
   with ENOENT.
   Fix: `link = path.Join(path.Dir(name), link)`.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **`Chown` masks save errors with a nil inner error**
   — `fs/fs.go:1421-1423`
   Problem: on `saveInode` failure the code sets `pathErr.Err = nil` and returns `pathErr`, so
@@ -347,6 +358,7 @@ the encryption state (sections 4 and 6).
   `errors.Is` impossible).
   Fix: `pathErr.Err = err`.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **`O_APPEND` is silently ignored by the bbolt filesystem**
   — `fs/file.go:117-163` and `fs/fs.go:846`
   Problem: `OpenFile` accepts the flag but neither initializes `f.offset` to the current size
@@ -354,12 +366,14 @@ the encryption state (sections 4 and 6).
   Fix: in `OpenFile`, when `O_APPEND` is set, set `File.offset = child.Size`; and/or honor the
   flag in `Write`.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **`RemoveAll` returns an error for a non-existent path**
   — `fs/fs.go:1251-1273`
   Problem: the documented contract (and `os.RemoveAll`) is to return `nil` when the path does
   not exist; here `RemoveAll("/nonexistent")` returns the ENOENT from `Lstat`.
   Fix: detect `os.IsNotExist` from `Lstat` and return `nil`.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **Data race on `fs.enc` during key rotation**
   — `fs/store.go:318-325` (`adoptEnc` writes `filesystem.enc = next`) vs reads in
   `fs/chunk.go:22-24`, `fs/fs.go:527`, etc.
@@ -369,6 +383,7 @@ the encryption state (sections 4 and 6).
   Fix: store `enc` in an `atomic.Pointer[encState]` (or protect it with the same mutex) and
   load it once per operation.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **Inode read-modify-write has no synchronization; concurrent operations lose updates**
   — `fs/fs.go:1042-1110` (`loadParentChild`+`saveParentChild`) and `fs/fs.go:850-936` (`OpenFile`)
   Problem: public operations load inodes in one transaction, mutate the in-memory copy, and save
@@ -378,18 +393,21 @@ the encryption state (sections 4 and 6).
   Fix: add per-filesystem (or per-inode) locking around load-modify-save, or use a
   transaction-level compare-and-swap.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **Negative `size` panics in `FileSystem.Truncate`**
   — `fs/fs.go:1030` (`make([]byte, int(size))`) and `fs/file.go:356-362`
   Problem: `make`/slice expressions panic on negative length; `Truncate` should reject
   `size < 0` with an error instead.
   Fix: return `os.ErrInvalid`/`syscall.EINVAL` for negative sizes before allocating.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **Negative offsets panic in `File.ReadAt`/`File.WriteAt`**
   — `fs/file.go:109-114` and `fs/file.go:168-171`
   Problem: both methods assign `f.offset = off` then call `Read`/`Write`, which slice
   `data[f.offset:]`. A negative `off` produces a negative slice index and a runtime panic.
   Fix: validate `off >= 0` and return `os.ErrInvalid` before touching the offset.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **`inode.Inode.Rename` links a potentially stale source node**
   — `fs/inode/inode.go:441-501`
   Problem: `Rename` resolves `srcNode` before acquiring the directory locks; another goroutine
@@ -399,6 +417,7 @@ the encryption state (sections 4 and 6).
   wrong link count.
   Fix: after locking, use `srcEntry.Inode` as the node to link (not the pre-lock `srcNode`).
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **`inode.Inode.UnlinkAll` leaks link counts for `..`**
   — `fs/inode/inode.go:359-381` (explicit `continue` at 371-372)
   Problem: `UnlinkAll` clears the directory but skips the `..` entry without ever calling
@@ -407,12 +426,14 @@ the encryption state (sections 4 and 6).
   Fix: decrement the `..` target's link count too (unless it is a self-reference already
   handled by `.`), or stop managing `.`/`..` as counted entries.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **s3fs `WriteAt`/`Truncate` panic on negative offsets/sizes**
   — `fs/s3fs/s3file.go:201-210` (`WriteAt`) and `fs/s3fs/s3file.go:320-327` (`Truncate`)
   Problem: negative `off`/`size` reach negative slice indices / negative `make` length and
   panic.
   Fix: validate `off >= 0` and `size >= 0` at the top of each method.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 ### Low
 
 - **`inode.Walk` visits `.` and `..` entries and has no cycle guard**
@@ -422,12 +443,14 @@ the encryption state (sections 4 and 6).
   without bound.
   Fix: skip `.`/`..` before calling `fn`, and add a depth or visited-set guard.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **s3fs `fileInfo.Mode` reports `0644` even for directories**
   — `fs/s3fs/s3fs.go:522`
   Problem: directory entries from `Stat`/`ReadDir` have `IsDir() == true` but `Mode()` returns
   `0644` (no `os.ModeDir`), so `info.Mode()&os.ModeDir` misclassifies them.
   Fix: return `os.ModeDir | 0755` when `fi.isDir`.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **s3fs `sanitizePath` traversal rejection is ineffective**
   — `fs/s3fs/s3fs.go:101-121`
   Problem: because `path.Clean("/" + p)` always begins with `/`, the
@@ -436,6 +459,7 @@ the encryption state (sections 4 and 6).
   Fix: validate the original input for `..` components before cleaning, or compare the cleaned
   result against the intended root using `path.Rel`.
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 - **`FastWalkConfig.FollowSymlinks` is ignored**
   — `fs/fastwalk.go:29-33` and `fs/fastwalk.go:221-224`
   Problem: the exported `FollowSymlinks` option is never read; only the `TraverseLink` sentinel
@@ -445,6 +469,7 @@ the encryption state (sections 4 and 6).
 
 ---
 
+  **Status: FIXED** — fixed in `fs` with the regression tests named in commit `fix(fs): address review findings`
 ## 5. Package `ts`
 
 ### Medium

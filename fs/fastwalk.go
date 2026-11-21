@@ -66,12 +66,13 @@ func genericFastWalk(filer absfs.Filer, root string, config *FastWalkConfig, fn 
 	defer wg.Wait()
 
 	w := &genericWalker{
-		filer:    filer,
-		fn:       fn,
-		enqueuec: make(chan fastWalkItem, numWorkers),
-		workc:    make(chan fastWalkItem, numWorkers),
-		donec:    make(chan struct{}),
-		resc:     make(chan error, numWorkers),
+		filer:          filer,
+		fn:             fn,
+		followSymlinks: config != nil && config.FollowSymlinks,
+		enqueuec:       make(chan fastWalkItem, numWorkers),
+		workc:          make(chan fastWalkItem, numWorkers),
+		donec:          make(chan struct{}),
+		resc:           make(chan error, numWorkers),
 	}
 	defer close(w.donec)
 
@@ -117,12 +118,13 @@ func genericFastWalk(filer absfs.Filer, root string, config *FastWalkConfig, fn 
 }
 
 type genericWalker struct {
-	filer    absfs.Filer
-	fn       FastWalkFunc
-	donec    chan struct{}
-	workc    chan fastWalkItem
-	enqueuec chan fastWalkItem
-	resc     chan error
+	filer          absfs.Filer
+	fn             FastWalkFunc
+	followSymlinks bool
+	donec          chan struct{}
+	workc          chan fastWalkItem
+	enqueuec       chan fastWalkItem
+	resc           chan error
 }
 
 type fastWalkItem struct {
@@ -219,11 +221,11 @@ func (w *genericWalker) readDir(dirName string) error {
 
 		err := w.fn(joined, entry, nil)
 		if entry.Type()&fs.ModeSymlink != 0 {
-			if err == TraverseLink {
-				w.enqueue(fastWalkItem{dir: joined, callbackDone: true})
+			if err == filepath.SkipDir {
 				continue
 			}
-			if err == filepath.SkipDir {
+			if err == TraverseLink || w.followSymlinks {
+				w.enqueue(fastWalkItem{dir: joined, callbackDone: true})
 				continue
 			}
 		}

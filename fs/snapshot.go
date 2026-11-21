@@ -175,6 +175,24 @@ func (s *Snapshot) ReadFile(name string) ([]byte, error) {
 		return nil, &os.PathError{Op: "read", Path: name, Err: syscall.EISDIR}
 	}
 
+	data, err := s.readContent(node)
+	if err != nil {
+		return nil, &os.PathError{Op: "read", Path: name, Err: err}
+	}
+
+	// Return a copy to prevent modifications
+	result := make([]byte, len(data))
+	copy(result, data)
+	return result, nil
+}
+
+// readContent returns the content of node, consulting the external content
+// filesystem and chunked storage before falling back to the bbolt data bucket.
+func (s *Snapshot) readContent(node *iNode) ([]byte, error) {
+	if s.fs.contentFS != nil {
+		// Content lives outside bbolt in the external content filesystem.
+		return s.fs.loadData(node.Ino)
+	}
 	if s.fs.chunked() {
 		return s.bucket.readDataRange(node.Ino, 0, node.Size, s.fs.chunkSize())
 	}
@@ -184,16 +202,11 @@ func (s *Snapshot) ReadFile(name string) ([]byte, error) {
 		// File exists but has no data (empty file)
 		return []byte{}, nil
 	}
-
-	data, err = s.bucket.enc.openContent(data)
+	plain, err := s.bucket.enc.openContent(data)
 	if err != nil {
-		return nil, &os.PathError{Op: "read", Path: name, Err: err}
+		return nil, err
 	}
-
-	// Return a copy to prevent modifications
-	result := make([]byte, len(data))
-	copy(result, data)
-	return result, nil
+	return plain, nil
 }
 
 // Readlink reads the target of a symbolic link in the snapshot.
@@ -376,24 +389,10 @@ func (s *Snapshot) Open(name string) (absfs.File, error) {
 	}
 
 	// Load file data
-	var data []byte
-	if s.fs.chunked() {
-		data, err = s.bucket.readDataRange(node.Ino, 0, node.Size, s.fs.chunkSize())
-		if err != nil {
-			s.tx.Rollback()
-			return nil, err
-		}
-	} else {
-		data = s.bucket.data.Get(i2b(node.Ino))
-		if data == nil {
-			data = []byte{}
-		} else {
-			data, err = s.bucket.enc.openContent(data)
-			if err != nil {
-				s.tx.Rollback()
-				return nil, err
-			}
-		}
+	data, err := s.readContent(node)
+	if err != nil {
+		s.tx.Rollback()
+		return nil, err
 	}
 
 	// Make a copy to prevent external modifications

@@ -21,6 +21,7 @@ type File struct {
 	append  bool
 	buffer  []byte
 	offset  int64
+	flushed int64 // number of leading bytes already uploaded via multipart
 	body    io.ReadCloser
 
 	// Multipart upload state (issue #15)
@@ -37,8 +38,9 @@ func (f *File) Name() string {
 	return f.name
 }
 
-// Read reads from the S3 object.
-// On first call, the object is fetched from S3 and cached for subsequent reads.
+// Read reads from the S3 object at the current offset.
+// On first call, the object is fetched from S3 and cached so that subsequent
+// reads and seeks honour the file offset.
 func (f *File) Read(b []byte) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -47,19 +49,46 @@ func (f *File) Read(b []byte) (int, error) {
 		return 0, os.ErrInvalid
 	}
 
-	// Lazy load the object body
-	if f.body == nil {
-		output, err := f.fs.client.GetObject(f.fs.ctx, &GetObjectInput{
-			Bucket: f.fs.bucket,
-			Key:    f.key,
-		})
-		if err != nil {
-			return 0, wrapError("read", f.name, err)
-		}
-		f.body = output.Body
+	if err := f.loadReadCacheLocked(); err != nil {
+		return 0, err
 	}
 
-	return f.body.Read(b)
+	if f.offset < 0 {
+		f.offset = 0
+	}
+	if f.offset >= int64(len(f.readCache)) {
+		return 0, io.EOF
+	}
+
+	n := copy(b, f.readCache[f.offset:])
+	f.offset += int64(n)
+	if n < len(b) {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+// loadReadCacheLocked fetches the full object into readCache if not already
+// loaded. Must be called with f.mu held.
+func (f *File) loadReadCacheLocked() error {
+	if f.readCache != nil {
+		return nil
+	}
+	output, err := f.fs.client.GetObject(f.fs.ctx, &GetObjectInput{
+		Bucket: f.fs.bucket,
+		Key:    f.key,
+	})
+	if err != nil {
+		return wrapError("read", f.name, err)
+	}
+	defer output.Body.Close()
+
+	data, err := io.ReadAll(output.Body)
+	if err != nil {
+		return wrapError("read", f.name, err)
+	}
+	f.readCache = data
+	return nil
 }
 
 // ReadAt reads from the S3 object at a specific offset.
@@ -73,23 +102,12 @@ func (f *File) ReadAt(b []byte, off int64) (int, error) {
 	if f.writing {
 		return 0, os.ErrInvalid
 	}
+	if off < 0 {
+		return 0, os.ErrInvalid
+	}
 
-	// Cache full object on first ReadAt call
-	if f.readCache == nil {
-		output, err := f.fs.client.GetObject(f.fs.ctx, &GetObjectInput{
-			Bucket: f.fs.bucket,
-			Key:    f.key,
-		})
-		if err != nil {
-			return 0, wrapError("read", f.name, err)
-		}
-		defer output.Body.Close()
-
-		data, err := io.ReadAll(output.Body)
-		if err != nil {
-			return 0, wrapError("read", f.name, err)
-		}
-		f.readCache = data
+	if err := f.loadReadCacheLocked(); err != nil {
+		return 0, err
 	}
 
 	if off >= int64(len(f.readCache)) {
@@ -113,16 +131,32 @@ func (f *File) Write(b []byte) (int, error) {
 	if !f.writing {
 		return 0, os.ErrInvalid
 	}
+	if f.offset < 0 {
+		return 0, os.ErrInvalid
+	}
 
-	f.buffer = append(f.buffer, b...)
-	f.offset = int64(len(f.buffer))
+	// Map the logical offset into the current (not-yet-flushed) buffer. Bytes
+	// below flushed have already been uploaded and can no longer be rewritten.
+	rel := f.offset - f.flushed
+	if rel < 0 {
+		return 0, os.ErrInvalid
+	}
+	end := int(rel) + len(b)
+	if end > len(f.buffer) {
+		grown := make([]byte, end)
+		copy(grown, f.buffer)
+		f.buffer = grown
+	}
+
+	n := copy(f.buffer[rel:], b)
+	f.offset += int64(n)
 
 	// Flush parts if buffer exceeds part size
 	if err := f.flushPartsLocked(); err != nil {
 		return 0, wrapError("write", f.name, err)
 	}
 
-	return len(b), nil
+	return n, nil
 }
 
 // flushPartsLocked flushes complete parts from the buffer via multipart upload.
@@ -150,6 +184,7 @@ func (f *File) flushPartsLocked() error {
 		f.partNum++
 		part := f.buffer[:partSize]
 		f.buffer = f.buffer[partSize:]
+		f.flushed += partSize
 
 		output, err := f.fs.client.UploadPart(f.fs.ctx, &UploadPartInput{
 			Bucket:     f.fs.bucket,
@@ -197,15 +232,23 @@ func (f *File) WriteAt(b []byte, off int64) (int, error) {
 	if !f.writing {
 		return 0, os.ErrInvalid
 	}
+	if off < 0 {
+		return 0, os.ErrInvalid
+	}
+
+	rel := off - f.flushed
+	if rel < 0 {
+		return 0, os.ErrInvalid
+	}
 
 	// Extend buffer if necessary
-	if int(off)+len(b) > len(f.buffer) {
-		newBuf := make([]byte, int(off)+len(b))
+	if int(rel)+len(b) > len(f.buffer) {
+		newBuf := make([]byte, int(rel)+len(b))
 		copy(newBuf, f.buffer)
 		f.buffer = newBuf
 	}
 
-	copy(f.buffer[off:], b)
+	copy(f.buffer[rel:], b)
 	return len(b), nil
 }
 
@@ -313,9 +356,14 @@ func (f *File) Truncate(size int64) error {
 		return os.ErrInvalid
 	}
 
+	if size < 0 {
+		return os.ErrInvalid
+	}
+
 	// Abort any in-progress multipart upload since we can't truncate
-	// already-uploaded parts
+	// already-uploaded parts. Only the not-yet-flushed buffer survives.
 	f.abortMultipartLocked()
+	f.flushed = 0
 
 	if size < int64(len(f.buffer)) {
 		f.buffer = f.buffer[:size]

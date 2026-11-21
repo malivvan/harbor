@@ -36,6 +36,8 @@ func (f *File) Name() string {
 // Read reads up to len(b) bytes from the File. It returns the number of bytes
 // read and any error encountered. At end of file, Read returns 0, io.EOF.
 func (f *File) Read(p []byte) (int, error) {
+	f.fs.mu.Lock()
+	defer f.fs.mu.Unlock()
 
 	if f.flags == dirWriteFlags {
 		return 0, io.EOF
@@ -45,6 +47,9 @@ func (f *File) Read(p []byte) (int, error) {
 	}
 	if f.node.IsDir() && f.node.Size == 0 {
 		return 0, &os.PathError{Op: "read", Path: f.name, Err: syscall.EISDIR} //os.ErrPermission
+	}
+	if f.offset < 0 {
+		return 0, &os.PathError{Op: "read", Path: f.name, Err: os.ErrInvalid}
 	}
 	if f.fs.chunked() && f.fs.contentFS == nil {
 		return f.readChunked(p)
@@ -110,13 +115,22 @@ func (f *File) ReadAt(b []byte, off int64) (n int, err error) {
 	if f.flags&absfs.O_ACCESS == os.O_WRONLY {
 		return 0, os.ErrPermission
 	}
+	if off < 0 {
+		return 0, &os.PathError{Op: "readat", Path: f.name, Err: os.ErrInvalid}
+	}
 	f.offset = off
 	return f.Read(b)
 }
 
 func (f *File) Write(p []byte) (int, error) {
+	f.fs.mu.Lock()
+	defer f.fs.mu.Unlock()
+
 	if f.flags&absfs.O_ACCESS == os.O_RDONLY {
 		return 0, &os.PathError{Op: "write", Path: f.name, Err: syscall.EBADF}
+	}
+	if f.offset < 0 {
+		return 0, &os.PathError{Op: "write", Path: f.name, Err: os.ErrInvalid}
 	}
 
 	if f.fs.chunked() && f.fs.contentFS == nil {
@@ -166,6 +180,9 @@ func (f *File) Write(p []byte) (int, error) {
 // returns the number of bytes written and an error, if any. WriteAt returns
 // a non-nil error when n != len(b).
 func (f *File) WriteAt(b []byte, off int64) (n int, err error) {
+	if off < 0 {
+		return 0, &os.PathError{Op: "writeat", Path: f.name, Err: os.ErrInvalid}
+	}
 	f.offset = off
 	return f.Write(b)
 }
@@ -331,46 +348,17 @@ func (f *File) Readdirnames(n int) ([]string, error) {
 // it changes the size of the link's target. If there is an error, it will be of
 // type *PathError.
 func (f *File) Truncate(size int64) error {
+	f.fs.mu.Lock()
+	defer f.fs.mu.Unlock()
+
 	if f.flags&absfs.O_ACCESS == os.O_RDONLY {
 		return os.ErrPermission
 	}
-
-	if f.fs.chunked() && f.fs.contentFS == nil {
-		if err := f.fs.truncateRange(f.node.Ino, size); err != nil {
-			return err
-		}
-		if f.node.Size != size {
-			f.node.Size = size
-			if _, err := f.fs.saveInode(f.node); err != nil {
-				return err
-			}
-		}
-		return nil
+	if size < 0 {
+		return &os.PathError{Op: "truncate", Path: f.name, Err: syscall.EINVAL}
 	}
 
-	data, err := f.fs.loadData(f.node.Ino)
-	if err != nil {
-		return err
-	}
-
-	if int(size) <= len(data) {
-		data = data[:int(size)]
-	} else {
-		d := make([]byte, int(size))
-		copy(data, d)
-		data = d
-	}
-
-	ino := f.node.Ino
-	if f.node.Size != size {
-		f.node.Size = size
-		_, err = f.fs.saveInode(f.node)
-		if err != nil {
-			return err
-		}
-	}
-
-	return f.fs.saveData(ino, data)
+	return f.fs.resizeContent(f.node, size)
 }
 
 // WriteString is like Write, but writes the contents of string s rather than a

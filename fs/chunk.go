@@ -20,11 +20,19 @@ func chunkKey(ino uint64, idx int64) []byte {
 
 // chunked reports whether content is stored as encrypted chunks.
 func (fs *FileSystem) chunked() bool {
-	return fs != nil && fs.enc != nil && fs.enc.chunkSize > 0
+	if fs == nil {
+		return false
+	}
+	e := fs.enc.Load()
+	return e != nil && e.chunkSize > 0
 }
 
 func (fs *FileSystem) chunkSize() int64 {
-	return int64(fs.enc.chunkSize)
+	e := fs.enc.Load()
+	if e == nil {
+		return 0
+	}
+	return int64(e.chunkSize)
 }
 
 // openFsBucketForWrite opens the filesystem buckets and ensures the chunks
@@ -41,7 +49,7 @@ func (fs *FileSystem) openFsBucketForWrite(tx *bolt.Tx) (*fsBucket, error) {
 	if b == nil {
 		return nil, os.ErrNotExist
 	}
-	b.enc = fs.enc
+	b.enc = fs.enc.Load()
 	return b, nil
 }
 
@@ -188,6 +196,25 @@ func (b *fsBucket) truncateData(ino uint64, size, chunkSize int64) error {
 		chunk = chunk[:rem]
 	}
 	return b.writeChunk(ino, idx, chunk)
+}
+
+// deleteAllChunks removes every chunk belonging to an inode.
+func (b *fsBucket) deleteAllChunks(ino uint64) error {
+	if b == nil || b.chunks == nil {
+		return nil
+	}
+	prefix := chunkKey(ino, 0)[:8]
+	var keys [][]byte
+	cursor := b.chunks.Cursor()
+	for key, _ := cursor.Seek(prefix); key != nil && bytes.HasPrefix(key, prefix); key, _ = cursor.Next() {
+		keys = append(keys, append([]byte(nil), key...))
+	}
+	for _, key := range keys {
+		if err := b.chunks.Delete(key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // readAllChunks concatenates every chunk of an inode.

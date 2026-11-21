@@ -49,15 +49,15 @@ func TestRead_LazyLoading(t *testing.T) {
 	}
 
 	file := f.(*File)
-	if file.body != nil {
-		t.Error("Body should be nil before first read (lazy loading)")
+	if file.readCache != nil {
+		t.Error("readCache should be nil before first read (lazy loading)")
 	}
 
 	buf := make([]byte, 5)
 	f.Read(buf)
 
-	if file.body == nil {
-		t.Error("Body should be set after first read")
+	if file.readCache == nil {
+		t.Error("readCache should be set after first read")
 	}
 }
 

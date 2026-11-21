@@ -366,17 +366,25 @@ func (n *Inode) UnlinkAll() {
 	n.modified()
 	n.mu.Unlock()
 
-	// Process entries without holding the lock to avoid deadlock
+	// Process entries without holding the lock to avoid deadlock.
 	for _, e := range entries {
-		if e.Name() == ".." {
-			continue
-		}
-		if e.Inode.Ino == n.Ino {
+		switch e.Name() {
+		case "..":
+			// The ".." entry contributed a link count (to the parent, or to
+			// this directory itself when it is its own parent). Release it
+			// without recursing, otherwise clearing a directory leaks one
+			// link on its parent per directory.
 			e.Inode.countDown()
-			continue
+		case ".":
+			e.Inode.countDown()
+		default:
+			if e.Inode.Ino == n.Ino {
+				e.Inode.countDown()
+				continue
+			}
+			e.Inode.UnlinkAll()
+			e.Inode.countDown()
 		}
-		e.Inode.UnlinkAll()
-		e.Inode.countDown()
 	}
 }
 
@@ -437,9 +445,9 @@ func (n *Inode) Rename(oldpath, newpath string) error {
 	dstDir, dstName := path.Split(newpath)
 	dstDir = path.Clean(dstDir)
 
-	// Resolve source node
-	srcNode, err := n.Resolve(oldpath)
-	if err != nil {
+	// Verify the source path exists before acquiring locks. The actual node
+	// that gets linked is re-read from the source directory after locking.
+	if _, err := n.Resolve(oldpath); err != nil {
 		return err
 	}
 
@@ -490,15 +498,18 @@ func (n *Inode) Rename(oldpath, newpath string) error {
 		return syscall.EEXIST
 	}
 
-	// Add entry to destination
-	entry := NewDirEntry(dstName, srcNode)
+	// Add entry to destination. Use the inode that is currently linked in the
+	// source directory (srcEntry.Inode) rather than any node resolved before
+	// the locks were taken.
+	dstNode := srcEntry.Inode
+	entry := NewDirEntry(dstName, dstNode)
 	dstParent.Dir = append(dstParent.Dir, entry)
 	if dstParent.dirMap != nil {
 		dstParent.dirMap[dstName] = entry
 	} else if len(dstParent.Dir) > DirMapThreshold {
 		dstParent.promote()
 	}
-	srcNode.countUp()
+	dstNode.countUp()
 	dstParent.modified()
 
 	// Remove entry from source

@@ -319,7 +319,7 @@ func (s *Store) adoptEnc(next *encState) {
 	s.mu.Lock()
 	s.enc = next
 	for _, filesystem := range s.filesystems {
-		filesystem.enc = next
+		filesystem.enc.Store(next)
 	}
 	s.mu.Unlock()
 }

@@ -10,6 +10,8 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -29,9 +31,20 @@ type FileSystem struct {
 	cwd       string
 	cache     *inodeCache
 	contentFS absfs.FileSystem // Optional external filesystem for storing file content
-	enc       *encState        // nil when encryption is disabled
 
-	// symlinks map[uint64]string
+	// enc holds the encryption state. It is an atomic pointer so that key
+	// rotation (Store.adoptEnc) can swap it while other goroutines are doing
+	// file I/O without a data race. A nil value means encryption is disabled.
+	enc atomic.Pointer[encState]
+
+	// mu serializes inode load-modify-save cycles so concurrent operations on
+	// the same directory or inode do not lose updates.
+	mu sync.Mutex
+}
+
+// encState returns the current encryption state (nil when disabled).
+func (fs *FileSystem) encState() *encState {
+	return fs.enc.Load()
 }
 
 // newFS creates a new FileSystem in the convention of other `absfs`
@@ -55,8 +68,8 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FileSystem, error) {
 		cwd:       "/",
 		cache:     newInodeCache(1000), // Default cache size of 1000 inodes
 		contentFS: nil,                 // Use BoltDB by default (backward compatible)
-		enc:       enc,
 	}
+	fs.enc.Store(enc)
 	err = db.Update(func(tx *bolt.Tx) error {
 		bb, err := openBucket(tx, bucketpath)
 		if err != nil {
@@ -159,7 +172,7 @@ func (fs *FileSystem) openFsBucket(tx *bolt.Tx) (*fsBucket, error) {
 		return nil, err
 	}
 	b := newFsBucket(bb)
-	b.enc = fs.enc
+	b.enc = fs.enc.Load()
 	return b, nil
 }
 
@@ -171,7 +184,7 @@ func (fs *FileSystem) openFsBucketWithCache(tx *bolt.Tx) (*fsBucket, error) {
 		return nil, err
 	}
 	b := newFsBucketWithCache(bb, fs.cache)
-	b.enc = fs.enc
+	b.enc = fs.enc.Load()
 	return b, nil
 }
 
@@ -524,7 +537,7 @@ func (fs *FileSystem) saveData(ino uint64, data []byte) error {
 		return fs.saveChunkedData(ino, data)
 	}
 
-	sealed, err := fs.enc.sealContent(data)
+	sealed, err := fs.enc.Load().sealContent(data)
 	if err != nil {
 		return err
 	}
@@ -579,7 +592,7 @@ func (fs *FileSystem) loadData(ino uint64) ([]byte, error) {
 		if d == nil {
 			d = []byte{}
 		}
-		plain, err := fs.enc.openContent(d)
+		plain, err := fs.enc.Load().openContent(d)
 		if err != nil {
 			return err
 		}
@@ -592,6 +605,60 @@ func (fs *FileSystem) loadData(ino uint64) ([]byte, error) {
 	}
 
 	return data, err
+}
+
+// resizeBytes returns data resized to size, zero-padding when growing.
+func resizeBytes(data []byte, size int64) []byte {
+	if int64(len(data)) == size {
+		return data
+	}
+	if int64(len(data)) > size {
+		return data[:size]
+	}
+	out := make([]byte, size)
+	copy(out, data)
+	return out
+}
+
+// resizeContent resizes the content of node to size, handling external
+// contentFS storage, chunked storage and encrypted whole-blob storage. It
+// updates node.Size and persists the inode. size must be non-negative.
+func (fs *FileSystem) resizeContent(node *iNode, size int64) error {
+	if size < 0 {
+		return syscall.EINVAL
+	}
+	ino := node.Ino
+
+	switch {
+	case fs.contentFS != nil:
+		data, err := fs.loadData(ino)
+		if err != nil {
+			return err
+		}
+		if err := fs.saveData(ino, resizeBytes(data, size)); err != nil {
+			return err
+		}
+	case fs.chunked():
+		if err := fs.truncateRange(ino, size); err != nil {
+			return err
+		}
+	default:
+		data, err := fs.loadData(ino)
+		if err != nil {
+			return err
+		}
+		if err := fs.saveData(ino, resizeBytes(data, size)); err != nil {
+			return err
+		}
+	}
+
+	if node.Size != size {
+		node.Size = size
+		if _, err := fs.saveInode(node); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // cleanPath - takes the absolute or relative path provided by `name` and
@@ -611,6 +678,9 @@ func (fs *FileSystem) cleanPath(name string) (string, string) {
 // when oldpath and newpath are in different directories. If there is an
 // error, it will be of type *LinkError.
 func (fs *FileSystem) Rename(oldpath, newpath string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
 	linkErr := &os.LinkError{Op: "move", Old: oldpath, New: newpath}
 	if oldpath == "/" {
 		linkErr.Err = errors.New("the root folder may not be moved or renamed")
@@ -696,6 +766,9 @@ func (fs *FileSystem) Rename(oldpath, newpath string) error {
 // Copy is a convenience function that duplicates the `source` path to the
 // `newpath`
 func (fs *FileSystem) Copy(source, destination string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
 	pathErr := &os.PathError{Op: "copy", Path: source}
 	if source == "/" {
 		pathErr.Err = errors.New("the root folder may not be moved or renamed")
@@ -704,17 +777,17 @@ func (fs *FileSystem) Copy(source, destination string) error {
 
 	srcDir, srcFilename := fs.cleanPath(source)
 	dstDir, dstFilename := fs.cleanPath(destination)
-	srcParent, srcChild := fs.loadParentChild(srcDir, srcFilename)
+	_, srcChild := fs.loadParentChild(srcDir, srcFilename)
 	dstParent, dstChild := fs.loadParentChild(dstDir, dstFilename)
 
-	if srcParent == nil {
-		pathErr.Err = os.ErrNotExist
-		pathErr.Path = srcDir
-		return pathErr
-	}
 	if srcChild == nil {
 		pathErr.Err = os.ErrNotExist
 		pathErr.Path = path.Join(srcDir, srcFilename)
+		return pathErr
+	}
+	if dstParent == nil {
+		pathErr.Err = os.ErrNotExist
+		pathErr.Path = dstDir
 		return pathErr
 	}
 	if dstChild != nil {
@@ -723,10 +796,7 @@ func (fs *FileSystem) Copy(source, destination string) error {
 		return pathErr
 	}
 
-	node := copyInode(srcChild)
-	node.Ino = 0
-
-	ino, err := fs.saveInode(node)
+	ino, err := fs.copyNode(srcChild)
 	if err != nil {
 		pathErr.Err = err
 		return pathErr
@@ -744,13 +814,85 @@ func (fs *FileSystem) Copy(source, destination string) error {
 		return pathErr
 	}
 
-	_, err = fs.saveInode(srcParent)
-	if err != nil {
-		pathErr.Err = err
-		return pathErr
+	return nil
+}
+
+// copyNode deep-copies src into a newly allocated inode, returning the new
+// inode number. It copies the file content (data bucket, chunks, external
+// contentFS file) and symlink targets, and recursively copies directory
+// children into brand-new inodes so the copy is fully independent of the
+// source.
+func (fs *FileSystem) copyNode(src *iNode) (uint64, error) {
+	node := copyInode(src)
+	node.Ino = 0
+	node.Nlink = 1
+	if src.IsDir() {
+		node.Children = nil
 	}
 
-	return nil
+	newIno, err := fs.saveInode(node)
+	if err != nil {
+		return 0, err
+	}
+
+	switch {
+	case src.Mode&os.ModeSymlink != 0:
+		link, err := fs.readLink(src.Ino)
+		if err != nil {
+			return 0, err
+		}
+		err = fs.db.Update(func(tx *bolt.Tx) error {
+			b, err := fs.openFsBucket(tx)
+			if err != nil {
+				return err
+			}
+			return b.Symlink(newIno, link)
+		})
+		if err != nil {
+			return 0, err
+		}
+	case src.IsDir():
+		for _, child := range src.Children {
+			childNode, err := fs.loadInode(child.Ino)
+			if err != nil {
+				return 0, err
+			}
+			childIno, err := fs.copyNode(childNode)
+			if err != nil {
+				return 0, err
+			}
+			if _, err := node.Link(child.Name, childIno); err != nil {
+				return 0, err
+			}
+		}
+		if _, err := fs.saveInode(node); err != nil {
+			return 0, err
+		}
+	default:
+		data, err := fs.loadData(src.Ino)
+		if err != nil {
+			return 0, err
+		}
+		if err := fs.saveData(newIno, data); err != nil {
+			return 0, err
+		}
+	}
+
+	return newIno, nil
+}
+
+// readLink returns the symlink target stored for ino.
+func (fs *FileSystem) readLink(ino uint64) (string, error) {
+	var link string
+	err := fs.db.View(func(tx *bolt.Tx) error {
+		b, err := fs.openFsBucket(tx)
+		if err != nil {
+			return err
+		}
+		link = b.Readlink(ino)
+		return nil
+	})
+	return link, err
 }
 
 // Chdir - changes the current directory to the absolute or relative path
@@ -778,7 +920,9 @@ func (fs *FileSystem) Open(name string) (absfs.File, error) {
 // Create is a convenience function that opens a file for reading and writing.
 // If the file does not exist it is created, if it does then it is truncated.
 func (fs *FileSystem) Create(name string) (absfs.File, error) {
-	return fs.OpenFile(name, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0777)
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.openFile(name, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0777, 0)
 }
 
 // resolve resolves the path provided into a iNode, or an error
@@ -844,8 +988,21 @@ const (
 // File can be used for I/O. If there is an error, it will be of type
 // *os.PathError.
 func (fs *FileSystem) OpenFile(name string, flag int, perm os.FileMode) (absfs.File, error) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.openFile(name, flag, perm, 0)
+}
+
+// openFile is the implementation of OpenFile. depth tracks how many symlinks
+// have been followed so cyclic links cannot recurse without bound.
+func (fs *FileSystem) openFile(name string, flag int, perm os.FileMode, depth int) (absfs.File, error) {
 	file := &absfs.InvalidFile{Path: name}
 	pathErr := &os.PathError{Op: "open", Path: name}
+
+	if depth > maxSymlinkDepth {
+		pathErr.Err = syscall.ELOOP
+		return file, pathErr
+	}
 
 	dir, filename := fs.cleanPath(name)
 	parent, child := fs.loadParentChild(dir, filename)
@@ -882,15 +1039,7 @@ func (fs *FileSystem) OpenFile(name string, flag int, perm os.FileMode) (absfs.F
 
 		// Follow symlinks
 		if child.Mode&os.ModeSymlink != 0 {
-			var link string
-			err := fs.db.View(func(tx *bolt.Tx) error {
-				b, err := fs.openFsBucket(tx)
-				if err != nil {
-					return err
-				}
-				link = b.Readlink(child.Ino)
-				return nil
-			})
+			link, err := fs.readLink(child.Ino)
 			if err != nil {
 				pathErr.Err = err
 				return file, pathErr
@@ -899,7 +1048,7 @@ func (fs *FileSystem) OpenFile(name string, flag int, perm os.FileMode) (absfs.F
 				// Relative symlinks are relative to the directory containing the symlink
 				link = path.Join(dir, link)
 			}
-			return fs.OpenFile(link, flag, perm)
+			return fs.openFile(link, flag, perm, depth+1)
 		}
 
 		if child.Mode.IsDir() {
@@ -911,14 +1060,7 @@ func (fs *FileSystem) OpenFile(name string, flag int, perm os.FileMode) (absfs.F
 
 		// if we must truncate the file
 		if flag&os.O_TRUNC != 0 {
-			err := fs.db.Update(func(tx *bolt.Tx) error {
-				b, err := fs.openFsBucket(tx)
-				if err != nil {
-					return err
-				}
-				return b.data.Put(i2b(child.Ino), []byte{})
-			})
-			if err != nil {
+			if err := fs.resizeContent(child, 0); err != nil {
 				pathErr.Err = err
 				return file, pathErr
 			}
@@ -933,7 +1075,12 @@ func (fs *FileSystem) OpenFile(name string, flag int, perm os.FileMode) (absfs.F
 			return file, pathErr
 		}
 	}
-	return &File{fs: fs, name: name, flags: flag, node: child}, nil
+
+	f := &File{fs: fs, name: name, flags: flag, node: child}
+	if flag&os.O_APPEND != 0 {
+		f.offset = child.Size
+	}
+	return f, nil
 }
 
 // Stat returns the FileInfo structure describing file. If there is an error,
@@ -964,19 +1111,7 @@ func (fs *FileSystem) statWithDepth(name string, depth int) (os.FileInfo, error)
 		return inodeinfo{filename, node}, nil
 	}
 
-	// link, err := fs.loadSymlink(node.Ino)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	var link string
-	err = fs.db.View(func(tx *bolt.Tx) error {
-		b, err := fs.openFsBucket(tx)
-		if err != nil {
-			return err
-		}
-		link = b.Readlink(node.Ino)
-		return nil
-	})
+	link, err := fs.readLink(node.Ino)
 	if err != nil {
 		return nil, err
 	}
@@ -992,6 +1127,13 @@ func (fs *FileSystem) statWithDepth(name string, depth int) (os.FileInfo, error)
 // Truncate changes the size of the file. It does not change the I/O offset. If
 // there is an error, it will be of type *os.PathError.
 func (fs *FileSystem) Truncate(name string, size int64) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	if size < 0 {
+		return &os.PathError{Op: "truncate", Path: name, Err: syscall.EINVAL}
+	}
+
 	dir, filename := fs.cleanPath(name)
 	p := path.Join(dir, filename)
 	node, err := fs.resolve(p)
@@ -999,7 +1141,7 @@ func (fs *FileSystem) Truncate(name string, size int64) error {
 		if err != os.ErrNotExist {
 			return err
 		}
-		f, err := fs.Create(p)
+		f, err := fs.openFile(p, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0777, 0)
 		if err != nil {
 			return err
 		}
@@ -1010,31 +1152,7 @@ func (fs *FileSystem) Truncate(name string, size int64) error {
 		}
 	}
 
-	return fs.db.Update(func(tx *bolt.Tx) error {
-		b, err := fs.openFsBucketWithCache(tx)
-		if err != nil {
-			return err
-		}
-
-		// update the size of the inode
-		node.Size = size
-		err = b.PutInode(node.Ino, node)
-		if err != nil {
-			return err
-		}
-
-		// update the data
-		key := i2b(node.Ino)
-		data := b.data.Get(key)
-
-		d := make([]byte, int(size))
-		if data != nil {
-			copy(d, data)
-		}
-
-		return b.data.Put(key, d)
-	})
-
+	return fs.resizeContent(node, size)
 }
 
 // loadParentChild loads the node for `dir` and the child nodes with name
@@ -1133,6 +1251,11 @@ func (fs *FileSystem) deleteInode(ino uint64) error {
 		if fs.contentFS == nil {
 			b.data.Delete(key)
 		}
+		// Remove any chunked content and symlink target so they do not leak.
+		b.symlinks.Delete(key)
+		if err := b.deleteAllChunks(ino); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
@@ -1144,6 +1267,12 @@ func (fs *FileSystem) deleteInode(ino uint64) error {
 // Mkdir creates a new directory with the specified name and permission bits (before umask).
 // If there is an error, it will be of type *PathError.
 func (fs *FileSystem) Mkdir(name string, perm os.FileMode) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.mkdir(name, perm)
+}
+
+func (fs *FileSystem) mkdir(name string, perm os.FileMode) error {
 	pathErr := &os.PathError{Op: "mkdir", Path: name}
 	dir, filename := fs.cleanPath(name)
 	parent, child := fs.loadParentChild(dir, filename)
@@ -1171,6 +1300,12 @@ func (fs *FileSystem) Mkdir(name string, perm os.FileMode) error {
 // umask) are used for all directories that MkdirAll creates. If path is already
 // a directory, MkdirAll does nothing and returns nil.
 func (fs *FileSystem) MkdirAll(name string, perm os.FileMode) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.mkdirAll(name, perm)
+}
+
+func (fs *FileSystem) mkdirAll(name string, perm os.FileMode) error {
 	dir, filename := fs.cleanPath(name)
 	name = strings.TrimLeft(path.Join(dir, filename), "/")
 
@@ -1186,11 +1321,11 @@ func (fs *FileSystem) MkdirAll(name string, perm os.FileMode) error {
 			continue
 		}
 		p = path.Join(p, part)
-		err := fs.Mkdir(p, perm)
+		err := fs.mkdir(p, perm)
 
 		if err != nil {
-			patherr := err.(*os.PathError)
-			if patherr.Err != os.ErrExist {
+			patherr, ok := err.(*os.PathError)
+			if !ok || patherr.Err != os.ErrExist {
 				return err
 			}
 		}
@@ -1202,6 +1337,8 @@ func (fs *FileSystem) MkdirAll(name string, perm os.FileMode) error {
 // Remove removes the named file or (empty) directory. If there is an error, it
 // will be of type *PathError.
 func (fs *FileSystem) Remove(name string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
 
 	// cannot remove the root
 	if name == "/" {
@@ -1247,6 +1384,8 @@ func (fs *FileSystem) Remove(name string) error {
 // it can but returns the first error it encounters. If the path does not exist,
 // RemoveAll returns nil (no error).
 func (fs *FileSystem) RemoveAll(name string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
 
 	dir, filename := fs.cleanPath(name)
 	parent, child := fs.loadParentChild(dir, filename)
@@ -1254,7 +1393,7 @@ func (fs *FileSystem) RemoveAll(name string) error {
 	var inos []uint64
 
 	var rootid uint64
-	if dir == "/" {
+	if dir == "/" && parent != nil {
 		rootid = parent.Ino
 	}
 
@@ -1269,6 +1408,11 @@ func (fs *FileSystem) RemoveAll(name string) error {
 
 		info, err := fs.Lstat(p)
 		if err != nil {
+			if os.IsNotExist(err) {
+				// A missing path (or a child that vanished concurrently) is
+				// not an error for RemoveAll.
+				return nil
+			}
 			return err
 		}
 		node, ok := info.Sys().(*iNode)
@@ -1288,6 +1432,10 @@ func (fs *FileSystem) RemoveAll(name string) error {
 				stack = append(stack, childPath)
 			}
 		}
+	}
+
+	if len(inos) == 0 {
+		return nil
 	}
 
 	for i, j := 0, len(inos)-1; i < len(inos)/2; i, j = i+1, j-1 {
@@ -1353,6 +1501,11 @@ func (fs *FileSystem) RemoveAll(name string) error {
 					return err
 				}
 			}
+			// Remove chunked content and symlink targets to avoid leaks.
+			b.symlinks.Delete(key)
+			if err := b.deleteAllChunks(ino); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -1389,6 +1542,9 @@ func (fs *FileSystem) RemoveAll(name string) error {
 
 // Chtimes changes the access and modification times of the named file
 func (fs *FileSystem) Chtimes(name string, atime time.Time, mtime time.Time) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
 	dir, filename := fs.cleanPath(name)
 	_, node := fs.loadParentChild(dir, filename)
 	if node == nil {
@@ -1404,7 +1560,17 @@ func (fs *FileSystem) Chtimes(name string, atime time.Time, mtime time.Time) err
 
 // Chown changes the owner and group ids of the named file
 func (fs *FileSystem) Chown(name string, uid, gid int) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.chown(name, uid, gid, 0)
+}
+
+func (fs *FileSystem) chown(name string, uid, gid int, depth int) error {
 	pathErr := &os.PathError{Op: "chown", Path: name}
+	if depth > maxSymlinkDepth {
+		pathErr.Err = syscall.ELOOP
+		return pathErr
+	}
 
 	dir, filename := fs.cleanPath(name)
 	_, node := fs.loadParentChild(dir, filename)
@@ -1419,42 +1585,40 @@ func (fs *FileSystem) Chown(name string, uid, gid int) error {
 
 		_, err := fs.saveInode(node)
 		if err != nil {
-			pathErr.Err = nil
+			pathErr.Err = err
 			return pathErr
 		}
 		return nil
 	}
-	var link string
-	err := fs.db.View(func(tx *bolt.Tx) error {
-		b, err := fs.openFsBucket(tx)
-		if err != nil {
-			return err
-		}
-		link = b.Readlink(node.Ino)
-		if link == "" {
-			return os.ErrNotExist
-		}
-		return nil
-	})
+	link, err := fs.readLink(node.Ino)
 	if err != nil {
 		return err
 	}
+	if link == "" {
+		pathErr.Err = os.ErrNotExist
+		return pathErr
+	}
 	if !path.IsAbs(link) {
-		link = path.Join(name, link)
+		// Relative symlinks are relative to the directory containing the symlink
+		link = path.Join(path.Dir(name), link)
 	}
 
-	return fs.Chown(link, uid, gid)
+	return fs.chown(link, uid, gid, depth+1)
 }
 
 // Chmod changes the mode of the named file to mode.
 func (fs *FileSystem) Chmod(name string, mode os.FileMode) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
 	dir, filename := fs.cleanPath(name)
 	_, node := fs.loadParentChild(dir, filename)
 	if node == nil {
 		return os.ErrNotExist
 	}
 
-	node.Mode = mode
+	// Preserve type bits (e.g. os.ModeDir) and only change permission bits.
+	node.Mode = (node.Mode & os.ModeType) | (mode &^ os.ModeType)
 
 	_, err := fs.saveInode(node)
 	return err
@@ -1484,6 +1648,9 @@ func (fs *FileSystem) Lstat(name string) (os.FileInfo, error) {
 //
 // On Windows, it always returns the syscall.EWINDOWS error, wrapped in *PathError.
 func (fs *FileSystem) Lchown(name string, uid, gid int) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
 	pathErr := &os.PathError{Op: "lchown", Path: name}
 	dir, filename := fs.cleanPath(name)
 	_, node := fs.loadParentChild(dir, filename)
@@ -1510,25 +1677,22 @@ func (fs *FileSystem) Readlink(name string) (string, error) {
 		return "", err
 	}
 
-	var link string
-	err = fs.db.View(func(tx *bolt.Tx) error {
-		b, err := fs.openFsBucket(tx)
-		if err != nil {
-			return err
-		}
-		link = b.Readlink(node.Ino)
-		if link == "" {
-			return os.ErrNotExist
-		}
-		return nil
-	})
-
+	link, err := fs.readLink(node.Ino)
+	if err != nil {
+		return "", err
+	}
+	if link == "" {
+		return "", os.ErrNotExist
+	}
 	return link, nil
 }
 
 // Symlink creates newname as a symbolic link to oldname. If there is an error,
 // it will be of type *LinkError.
 func (fs *FileSystem) Symlink(source, destination string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
 	pathErr := &os.PathError{Op: "symlink", Path: destination}
 
 	dstDir, dstFilename := fs.cleanPath(destination)
@@ -1563,13 +1727,11 @@ func (fs *FileSystem) Symlink(source, destination string) error {
 		}
 		return b.Symlink(ino, source)
 	})
+	if err != nil {
+		pathErr.Err = err
+		return pathErr
+	}
 
-	// err = fs.saveSymlink(ino, source)
-	// if err != nil {
-	// 	pathErr.Err = err
-	// 	return pathErr
-	// }
-	// fmt.Printf("%d: %s -> %s\n", ino, destination, source)
 	_, err = dstParent.Link(dstFilename, ino)
 	if err != nil {
 		pathErr.Err = err

@@ -126,15 +126,9 @@ func TestInode(t *testing.T) {
 
 	// Walk the tree and collect path→ino mappings
 	expected := map[string]uint64{
-		"/":                   1,
-		"/.":                  1,
-		"/..":                 1,
-		"/dir0001":            202,
-		"/dir0001/.":          202,
-		"/dir0001/..":         1,
-		"/dir0001/dir0002":    203,
-		"/dir0001/dir0002/.":  203,
-		"/dir0001/dir0002/..": 202,
+		"/":                1,
+		"/dir0001":         202,
+		"/dir0001/dir0002": 203,
 	}
 	for i := 0; i < 100; i++ {
 		name := fmt.Sprintf("/dir0001/dir0002/file.%04d.txt", i+2)

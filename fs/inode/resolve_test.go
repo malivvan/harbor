@@ -46,21 +46,11 @@ func TestResolve(t *testing.T) {
 
 	// Walk the tree and verify all expected nodes are visited
 	expected := map[string]uint64{
-		"/":           1,
-		"/.":          1,
-		"/..":         1,
-		"/tmp":        2,
-		"/tmp/.":      2,
-		"/tmp/..":     1,
-		"/tmp/bar":    4,
-		"/tmp/bar/.":  4,
-		"/tmp/bar/..": 2,
-		"/tmp/bat":    5,
-		"/tmp/bat/.":  5,
-		"/tmp/bat/..": 2,
-		"/tmp/foo":    3,
-		"/tmp/foo/.":  3,
-		"/tmp/foo/..": 2,
+		"/":        1,
+		"/tmp":     2,
+		"/tmp/bar": 4,
+		"/tmp/bat": 5,
+		"/tmp/foo": 3,
 	}
 
 	got := make(map[string]uint64)

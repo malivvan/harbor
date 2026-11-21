@@ -74,7 +74,6 @@ func TestPath_DotPaths(t *testing.T) {
 		cleanKey string
 	}{
 		{"./current.txt", "current.txt"},
-		{"../parent.txt", "parent.txt"},
 		{"dir/./file.txt", "dir/file.txt"},
 		{"dir/../sibling.txt", "sibling.txt"},
 	}
@@ -91,6 +90,14 @@ func TestPath_DotPaths(t *testing.T) {
 			t.Errorf("OpenFile(%q): expected object at clean key %q", tc.input, tc.cleanKey)
 		}
 	}
+
+	// Escaping the root must be rejected, not silently collapsed.
+	if _, err := fs.OpenFile("../parent.txt", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); err == nil {
+		t.Error("OpenFile(\"../parent.txt\") should be rejected as traversal")
+	}
+	if mock.HasObject("parent.txt") {
+		t.Error("traversal path should not create an object")
+	}
 }
 
 func TestSanitizePath_Traversal(t *testing.T) {
@@ -104,7 +111,9 @@ func TestSanitizePath_Traversal(t *testing.T) {
 		{"./file.txt", "file.txt", true},
 		{"dir/../file.txt", "file.txt", true},
 		{"dir/./file.txt", "dir/file.txt", true},
-		{"../file.txt", "file.txt", true},
+		{"../file.txt", "", false},
+		{"../../secret", "", false},
+		{"a/../../b", "", false},
 		{"a/b/../c/d", "a/c/d", true},
 		{"a/b/c/../../d", "a/d", true},
 		{"dir with spaces/file.txt", "dir with spaces/file.txt", true},
@@ -539,8 +548,11 @@ func TestFileInfo_Directory(t *testing.T) {
 	if !fi.IsDir() {
 		t.Error("IsDir should return true")
 	}
-	if fi.Mode() != 0644 {
-		t.Errorf("Mode = %o, want 0644", fi.Mode())
+	if fi.Mode() != os.ModeDir|0755 {
+		t.Errorf("Mode = %o, want %o", fi.Mode(), os.ModeDir|0755)
+	}
+	if !fi.Mode().IsDir() {
+		t.Error("Mode should carry os.ModeDir")
 	}
 }
 
