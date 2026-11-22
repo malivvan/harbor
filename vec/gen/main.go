@@ -12,31 +12,36 @@ import (
 )
 
 func main() {
+	if err := run("binco.gen.go"); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run generates the serializers and writes them to path.
+func run(path string) error {
 	g, err := codegen.NewGenerator(
 		genopts.WithPath("github.com/malivvan/storm/vec"),
 	)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	if err := g.AddDefinedType(reflect.TypeFor[vec.ValueKind]()); err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if err := g.AddStruct(reflect.TypeFor[vec.Value]()); err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if err := g.AddStruct(reflect.TypeFor[vec.StoredPoint]()); err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	bs, err := g.Generate()
 	if err != nil {
 		if writeErr := os.WriteFile("failed.gen.go", bs, 0o644); writeErr != nil {
-			log.Fatal(writeErr)
+			return writeErr
 		}
-		log.Fatal(err)
+		return err
 	}
-	if err := os.WriteFile("binco.gen.go", bs, 0o644); err != nil {
-		log.Fatal(err)
-	}
+	return os.WriteFile(path, bs, 0o644)
 }
