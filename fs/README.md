@@ -3,7 +3,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/storm/fs.svg)](https://pkg.go.dev/github.com/malivvan/storm/fs)
 [![Go Report Card](https://goreportcard.com/badge/github.com/malivvan/storm/fs)](https://goreportcard.com/report/github.com/malivvan/storm/fs)
 [![CI](https://github.com/malivvan/storm/fs/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/storm/fs/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
 
 BoltFS provides a full featured filesystem on top of a boltdb database. This
 package implements most of the filesystem functions from the `os` standard
@@ -184,5 +184,5 @@ encryption applies to content stored in the bbolt data/chunk buckets.
 
 ## License
 
-MIT license. See LICENSE file for more information.
+MIT license. See [LICENSE](../LICENSE) for more information.
 

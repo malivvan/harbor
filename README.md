@@ -823,9 +823,13 @@ The same commands run in CI (`.github/workflows/ci.yml`) on every push to
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
+
+Storm is a fork of [asdine/storm](https://github.com/asdine/storm); the
+original MIT copyright notices are preserved in [LICENSE](LICENSE).
 
 ## Credits
 
 - [Asdine El Hrychy](https://github.com/asdine)
+- [Anderson Bargas](https://github.com/andersonbargas)
 - [Bjørn Erik Pedersen](https://github.com/bep)
