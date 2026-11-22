@@ -582,6 +582,7 @@ go build ./...
 # Tests
 go test -count=1 -timeout 180s ./...
 go test -race -count=1 -timeout 300s ./...
+CGO_ENABLED=0 go test -count=1 -timeout 180s ./...
 
 # Static analysis
 go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
@@ -595,9 +596,12 @@ go tool cover -func=coverage.out
 go test -run '^$' -bench . -benchmem -benchtime=100ms ./vec ./ts
 ```
 
-CI runs formatting, vet, build, tests, race tests, coverage, staticcheck and
-`govulncheck` on every push to `master` and every pull request. The benchmark
-job posts a `benchstat` comparison against the base commit for pull requests.
+CI runs formatting, vet, build, tests, race tests, coverage, staticcheck,
+`govulncheck` and `go mod tidy -diff` on every push to `master` and every pull
+request. A compatibility matrix builds with `CGO_ENABLED=0` for linux/amd64,
+linux/arm64, linux/loong64, darwin/arm64, windows/amd64 and windows/arm64, and
+runs the native CGO-free test suite. The benchmark job posts a pinned
+`benchstat` comparison against the base commit for pull requests.
 See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 ## Documentation conventions

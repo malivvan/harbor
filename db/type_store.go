@@ -118,7 +118,7 @@ func (n *node) ReIndex(ctx context.Context, data any) error {
 
 	ref := reflect.ValueOf(data)
 
-	if !ref.IsValid() || ref.Kind() != reflect.Ptr || ref.Elem().Kind() != reflect.Struct {
+	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
 		return wrapError("reindex", ErrStructPtrNeeded)
 	}
 
@@ -217,7 +217,7 @@ func (n *node) Save(ctx context.Context, data any) error {
 
 	ref := reflect.ValueOf(data)
 
-	if !ref.IsValid() || ref.Kind() != reflect.Ptr || ref.Elem().Kind() != reflect.Struct {
+	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
 		return wrapError("save", ErrStructPtrNeeded)
 	}
 
@@ -460,7 +460,7 @@ func mergeUpdateStruct(ctx context.Context, src, dst reflect.Value, cfg *structC
 // that struct; a nil destination pointer is allocated so the merge has
 // somewhere to write.
 func inlineValues(src, dst reflect.Value) (reflect.Value, reflect.Value, bool) {
-	if src.Kind() != reflect.Ptr {
+	if src.Kind() != reflect.Pointer {
 		if src.Kind() != reflect.Struct {
 			return reflect.Value{}, reflect.Value{}, false
 		}
@@ -473,7 +473,7 @@ func inlineValues(src, dst reflect.Value) (reflect.Value, reflect.Value, bool) {
 	if srcElem.Kind() != reflect.Struct {
 		return reflect.Value{}, reflect.Value{}, false
 	}
-	if dst.Kind() == reflect.Ptr {
+	if dst.Kind() == reflect.Pointer {
 		if dst.IsNil() {
 			if !dst.CanSet() {
 				return reflect.Value{}, reflect.Value{}, false
@@ -529,7 +529,7 @@ func (n *node) update(ctx context.Context, data interface{}, fn func(*reflect.Va
 	}
 
 	ref := reflect.ValueOf(data)
-	if !ref.IsValid() || ref.Kind() != reflect.Ptr || ref.Elem().Kind() != reflect.Struct {
+	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
 		return ErrStructPtrNeeded
 	}
 
@@ -632,7 +632,7 @@ func (n *node) DeleteStruct(ctx context.Context, data any) error {
 
 	ref := reflect.ValueOf(data)
 
-	if !ref.IsValid() || ref.Kind() != reflect.Ptr || ref.Elem().Kind() != reflect.Struct {
+	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
 		return wrapError("delete struct", ErrStructPtrNeeded)
 	}
 

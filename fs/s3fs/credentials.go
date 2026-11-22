@@ -124,7 +124,9 @@ func readINISection(path, section string) map[string]string {
 	if err != nil {
 		return values
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	inSection := false
 	scanner := bufio.NewScanner(f)

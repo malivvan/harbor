@@ -21,13 +21,29 @@ func graphWithNodes(n int) *Graph[string] {
 	return g
 }
 
+func TestSavedGraphSaveCleansTempOnRenameFailure(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "graph.bin")
+	// Renaming a regular file over an existing directory fails on all
+	// supported platforms; the temporary export must not be left behind.
+	require.NoError(t, os.Mkdir(target, 0o755))
+
+	saved := &SavedGraph[string]{Graph: NewGraph[string](), Path: target}
+	require.Error(t, saved.Save())
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, "graph.bin", entries[0].Name())
+}
+
 func TestSavedGraphRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "graph.bin")
 
 	saved, err := LoadSavedGraph[string](path)
 	require.NoError(t, err)
 	require.NotNil(t, saved.Graph)
-	require.Zero(t, saved.Graph.Len())
+	require.Zero(t, saved.Len())
 
 	g := saved.Graph
 	g.Add(
@@ -40,21 +56,21 @@ func TestSavedGraphRoundTrip(t *testing.T) {
 
 	loaded, err := LoadSavedGraph[string](path)
 	require.NoError(t, err)
-	require.Equal(t, 3, loaded.Graph.Len())
+	require.Equal(t, 3, loaded.Len())
 
-	vec, ok := loaded.Graph.Lookup("a")
+	vec, ok := loaded.Lookup("a")
 	require.True(t, ok)
 	require.Equal(t, []float32{1, 0, 0}, vec)
 
-	got := loaded.Graph.Search([]float32{1, 0, 0}, 2)
+	got := loaded.Search([]float32{1, 0, 0}, 2)
 	require.NotEmpty(t, got)
 
 	// Saving again replaces the file atomically.
-	loaded.Graph.Add(MakeNode("d", []float32{0, 0, 1}))
+	loaded.Add(MakeNode("d", []float32{0, 0, 1}))
 	require.NoError(t, loaded.Save())
 	again, err := LoadSavedGraph[string](path)
 	require.NoError(t, err)
-	require.Equal(t, 4, again.Graph.Len())
+	require.Equal(t, 4, again.Len())
 }
 
 func TestGraphLookupDeleteAndReplace(t *testing.T) {

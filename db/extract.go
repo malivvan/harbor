@@ -49,7 +49,7 @@ func bucketName(data interface{}) string {
 		if bn, ok := data.(BucketNamer); ok {
 			return bn.HarborBucketName()
 		}
-		if v.Kind() == reflect.Ptr && !v.IsNil() {
+		if v.Kind() == reflect.Pointer && !v.IsNil() {
 			return bucketNameFromValue(&v)
 		}
 	}
@@ -58,7 +58,7 @@ func bucketName(data interface{}) string {
 
 // bucketNameFromValue resolves the bucket name from a reflect.Value.
 func bucketNameFromValue(v *reflect.Value) string {
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		if !v.IsNil() && v.CanInterface() {
 			if bn, ok := v.Interface().(BucketNamer); ok {
 				return bn.HarborBucketName()
@@ -103,7 +103,7 @@ var structMetaCache sync.Map
 
 func extract(s *reflect.Value, mi ...*structConfig) (*structConfig, error) {
 	nameSrc := *s
-	if s.Kind() == reflect.Ptr {
+	if s.Kind() == reflect.Pointer {
 		e := s.Elem()
 		s = &e
 	}
@@ -235,7 +235,7 @@ func cacheableType(typ reflect.Type) bool {
 		if !strings.Contains(f.Tag.Get("db"), tagInline) {
 			continue
 		}
-		if f.Type.Kind() == reflect.Ptr {
+		if f.Type.Kind() == reflect.Pointer {
 			return false
 		}
 		if f.Type.Kind() == reflect.Struct && !cacheableType(f.Type) {
@@ -269,7 +269,7 @@ func extractField(value *reflect.Value, field *reflect.StructField, m *structCon
 			case tagUniqueIdx, tagIdx:
 				f.Index = tag
 			case tagInline:
-				if value.Kind() == reflect.Ptr {
+				if value.Kind() == reflect.Pointer {
 					e := value.Elem()
 					value = &e
 				}

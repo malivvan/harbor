@@ -63,16 +63,20 @@ func (o *SymlinkOverlay) Symlink(oldname, newname string) error {
 		return &os.PathError{Op: "symlink", Path: newname, Err: err}
 	}
 
-	_, err = f.Write([]byte(overlaySymlinkMagic + oldname))
-	f.Close()
-	if err != nil {
-		o.base.Remove(newname)
+	_, writeErr := f.Write([]byte(overlaySymlinkMagic + oldname))
+	closeErr := f.Close()
+	if writeErr != nil || closeErr != nil {
+		_ = o.base.Remove(newname)
+		err := writeErr
+		if err == nil {
+			err = closeErr
+		}
 		return &os.PathError{Op: "symlink", Path: newname, Err: err}
 	}
 
 	// Set symlink mode
 	if err := o.base.Chmod(newname, os.ModeSymlink|0777); err != nil {
-		o.base.Remove(newname)
+		_ = o.base.Remove(newname)
 		return &os.PathError{Op: "symlink", Path: newname, Err: err}
 	}
 

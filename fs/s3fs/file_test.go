@@ -54,7 +54,7 @@ func TestRead_LazyLoading(t *testing.T) {
 	}
 
 	buf := make([]byte, 5)
-	f.Read(buf)
+	_, _ = f.Read(buf)
 
 	if file.readCache == nil {
 		t.Error("readCache should be set after first read")
@@ -574,7 +574,7 @@ func TestWriteAt_Overwrite(t *testing.T) {
 	f, _ := fs.OpenFile("overwrite.txt", os.O_CREATE|os.O_WRONLY, 0644)
 	f.Write([]byte("abcdefghij"))
 
-	f.WriteAt([]byte("XYZ"), 0)
+	_, _ = f.WriteAt([]byte("XYZ"), 0)
 
 	file := f.(*File)
 	if string(file.buffer) != "XYZdefghij" {
@@ -657,7 +657,7 @@ func TestClose_ReadModeFile(t *testing.T) {
 
 	// Trigger lazy loading
 	buf := make([]byte, 10)
-	f.Read(buf)
+	_, _ = f.Read(buf)
 
 	err := f.Close()
 	if err != nil {
@@ -704,7 +704,7 @@ func TestClose_DoubleClose(t *testing.T) {
 	mock.PutTestObject("double.txt", []byte("data"))
 
 	f, _ := fs.OpenFile("double.txt", os.O_RDONLY, 0)
-	f.Read(make([]byte, 4))
+	_, _ = f.Read(make([]byte, 4))
 
 	err := f.Close()
 	if err != nil {
@@ -769,7 +769,7 @@ func TestSeek_SeekCurrent(t *testing.T) {
 	f, _ := fs.OpenFile("seek.txt", os.O_CREATE|os.O_WRONLY, 0644)
 
 	// Move to position 5
-	f.Seek(5, io.SeekStart)
+	_, _ = f.Seek(5, io.SeekStart)
 
 	// Move forward 3
 	pos, err := f.Seek(3, io.SeekCurrent)
@@ -787,7 +787,7 @@ func TestSeek_SeekCurrent_Negative(t *testing.T) {
 
 	f, _ := fs.OpenFile("seek.txt", os.O_CREATE|os.O_WRONLY, 0644)
 
-	f.Seek(10, io.SeekStart)
+	_, _ = f.Seek(10, io.SeekStart)
 	pos, err := f.Seek(-3, io.SeekCurrent)
 	if err != nil {
 		t.Fatalf("Seek failed: %v", err)
@@ -795,6 +795,20 @@ func TestSeek_SeekCurrent_Negative(t *testing.T) {
 
 	if pos != 7 {
 		t.Errorf("Seek position = %d, want 7", pos)
+	}
+}
+
+func TestSeek_SeekStart_Negative(t *testing.T) {
+	fs, _ := newTestFS()
+
+	f, _ := fs.OpenFile("seek.txt", os.O_CREATE|os.O_WRONLY, 0644)
+
+	pos, err := f.Seek(-1, io.SeekStart)
+	if !errors.Is(err, os.ErrInvalid) {
+		t.Fatalf("Seek(-1, SeekStart) error = %v, want os.ErrInvalid", err)
+	}
+	if pos != 0 {
+		t.Errorf("Position = %d, want 0 after invalid seek", pos)
 	}
 }
 
@@ -816,8 +830,8 @@ func TestSeek_InvalidWhence(t *testing.T) {
 
 	// Invalid whence value
 	pos, err := f.Seek(0, 99)
-	if err != nil {
-		// Expected - invalid whence falls through to default case
+	if !errors.Is(err, os.ErrInvalid) {
+		t.Fatalf("Seek(0, 99) error = %v, want os.ErrInvalid", err)
 	}
 	// Position should be unchanged
 	if pos != 0 {

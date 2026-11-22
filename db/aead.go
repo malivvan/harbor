@@ -449,7 +449,7 @@ func (n *node) unmarshal(raw []byte, v any) error {
 	if err != nil {
 		return err
 	}
-	if dest := reflect.ValueOf(v); dest.IsValid() && dest.Kind() == reflect.Ptr && !dest.IsNil() {
+	if dest := reflect.ValueOf(v); dest.IsValid() && dest.Kind() == reflect.Pointer && !dest.IsNil() {
 		dest.Elem().Set(reflect.Zero(dest.Elem().Type()))
 	}
 	return n.codec.Unmarshal(plain, v)

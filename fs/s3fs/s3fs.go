@@ -603,7 +603,9 @@ func (fs *FileSystem) Truncate(name string, size int64) error {
 	if err != nil {
 		return wrapError("truncate", name, err)
 	}
-	defer output.Body.Close()
+	defer func() {
+		_ = output.Body.Close()
+	}()
 
 	// Read the content
 	content, err := io.ReadAll(output.Body)
@@ -769,7 +771,9 @@ func (fs *FileSystem) ReadFile(name string) ([]byte, error) {
 	if err != nil {
 		return nil, wrapError("readfile", name, err)
 	}
-	defer output.Body.Close()
+	defer func() {
+		_ = output.Body.Close()
+	}()
 
 	return io.ReadAll(output.Body)
 }

@@ -19,7 +19,7 @@ _test
 *.cgo1.go
 *.cgo2.c
 _cgo_defun.c
-_cgo_gotypes.go
+_cgo_gotypes.c
 _cgo_export.*
 
 _testmain.go
@@ -31,8 +31,9 @@ _testmain.go
 # Golang vendor folder
 /vendor/
 
-# Test artifacts
+# Test and benchmark artifacts
 coverage.out
+coverage.txt
 *.db
+bench-*.txt
 .reasonix
-.idea

@@ -126,8 +126,7 @@ func (idx *ListIndex) Add(ctx context.Context, newValue []byte, targetID []byte)
 		}
 
 		// Never reuse the slice returned by bbolt: it may alias database
-		// memory. Build the new key in a fresh buffer.
-		key = nil
+		// memory. EncodeListKey below builds the replacement in a fresh buffer.
 	}
 
 	key = EncodeListKey(newValue, targetID)

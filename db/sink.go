@@ -429,14 +429,14 @@ type sliceSink interface {
 func newListSink(node Node, to interface{}) (*listSink, error) {
 	ref := reflect.ValueOf(to)
 
-	if ref.Kind() != reflect.Ptr || reflect.Indirect(ref).Kind() != reflect.Slice {
+	if ref.Kind() != reflect.Pointer || reflect.Indirect(ref).Kind() != reflect.Slice {
 		return nil, ErrSlicePtrNeeded
 	}
 
 	sliceType := reflect.Indirect(ref).Type()
 	elemType := sliceType.Elem()
 
-	if elemType.Kind() == reflect.Ptr {
+	if elemType.Kind() == reflect.Pointer {
 		elemType = elemType.Elem()
 	}
 
@@ -459,7 +459,7 @@ func newListSink(node Node, to interface{}) (*listSink, error) {
 	return &listSink{
 		node:     node,
 		ref:      ref,
-		isPtr:    sliceType.Elem().Kind() == reflect.Ptr,
+		isPtr:    sliceType.Elem().Kind() == reflect.Pointer,
 		elemType: elemType,
 		name:     name,
 		results:  reflect.MakeSlice(reflect.Indirect(ref).Type(), 0, 0),
@@ -573,7 +573,7 @@ func (l *listSink) needsValue() bool {
 func newFirstSink(node Node, to interface{}) (*firstSink, error) {
 	ref := reflect.ValueOf(to)
 
-	if !ref.IsValid() || ref.Kind() != reflect.Ptr || ref.Elem().Kind() != reflect.Struct {
+	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
 		return nil, ErrStructPtrNeeded
 	}
 
@@ -640,7 +640,7 @@ func (f *firstSink) needsValue() bool {
 func newDeleteSink(node Node, kind interface{}) (*deleteSink, error) {
 	ref := reflect.ValueOf(kind)
 
-	if !ref.IsValid() || ref.Kind() != reflect.Ptr || ref.Elem().Kind() != reflect.Struct {
+	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
 		return nil, ErrStructPtrNeeded
 	}
 
@@ -755,7 +755,7 @@ func (d *deleteSink) needsValue() bool {
 func newCountSink(node Node, kind interface{}) (*countSink, error) {
 	ref := reflect.ValueOf(kind)
 
-	if !ref.IsValid() || ref.Kind() != reflect.Ptr || ref.Elem().Kind() != reflect.Struct {
+	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
 		return nil, ErrStructPtrNeeded
 	}
 
@@ -817,7 +817,7 @@ func newRawSink(kind any) (*rawSink, sink, error) {
 		return r, r, nil
 	}
 	ref := reflect.ValueOf(kind)
-	if !ref.IsValid() || ref.Kind() != reflect.Ptr || ref.Elem().Kind() != reflect.Struct {
+	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
 		return nil, nil, ErrStructPtrNeeded
 	}
 	return r, &matchedRawSink{
@@ -913,7 +913,7 @@ func (r *rawSink) needsValue() bool {
 func newEachSink(to interface{}) (*eachSink, error) {
 	ref := reflect.ValueOf(to)
 
-	if !ref.IsValid() || ref.Kind() != reflect.Ptr || ref.Elem().Kind() != reflect.Struct {
+	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
 		return nil, ErrStructPtrNeeded
 	}
 

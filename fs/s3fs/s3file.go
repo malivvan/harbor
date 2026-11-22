@@ -86,7 +86,9 @@ func (f *File) loadReadCacheLocked() error {
 	if err != nil {
 		return wrapError("read", f.name, err)
 	}
-	defer output.Body.Close()
+	defer func() {
+		_ = output.Body.Close()
+	}()
 
 	data, err := io.ReadAll(output.Body)
 	if err != nil {
@@ -280,7 +282,7 @@ func (f *File) Close() error {
 	}
 
 	if f.body != nil {
-		f.body.Close()
+		_ = f.body.Close()
 	}
 
 	if !f.writing {
@@ -350,10 +352,19 @@ func (f *File) Seek(offset int64, whence int) (int64, error) {
 
 	switch whence {
 	case io.SeekStart:
+		if offset < 0 {
+			return 0, os.ErrInvalid
+		}
 		f.offset = offset
 	case io.SeekCurrent:
-		f.offset += offset
+		next := f.offset + offset
+		if next < 0 {
+			return 0, os.ErrInvalid
+		}
+		f.offset = next
 	case io.SeekEnd:
+		return 0, os.ErrInvalid
+	default:
 		return 0, os.ErrInvalid
 	}
 	return f.offset, nil

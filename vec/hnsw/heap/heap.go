@@ -130,9 +130,10 @@ func (h *Heap[T]) siftDown(i int) {
 }
 
 func (h *Heap[T]) swap(i, j int) {
-	if h.maxIdx == i {
+	switch h.maxIdx {
+	case i:
 		h.maxIdx = j
-	} else if h.maxIdx == j {
+	case j:
 		h.maxIdx = i
 	}
 	h.data[i], h.data[j] = h.data[j], h.data[i]

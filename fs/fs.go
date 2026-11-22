@@ -674,7 +674,9 @@ func (fs *FS) loadData(ino uint64) ([]byte, error) {
 			}
 			return nil, fmt.Errorf("failed to open file: %w", err)
 		}
-		defer f.Close()
+		defer func() {
+			_ = f.Close()
+		}()
 
 		data, err := io.ReadAll(f)
 		if err != nil {
@@ -952,9 +954,13 @@ func (fs *FS) Rename(oldpath, newpath string) error {
 				return err
 			}
 			if fs.contentFS == nil {
-				b.data.Delete(key)
+				if err := b.data.Delete(key); err != nil {
+					return err
+				}
 			}
-			b.symlinks.Delete(key)
+			if err := b.symlinks.Delete(key); err != nil {
+				return err
+			}
 			if err := b.deleteAllChunks(dstChild.Ino); err != nil {
 				return err
 			}
@@ -1479,9 +1485,13 @@ func (fs *FS) saveParentChild(parent *iNode, filename string, child *iNode) erro
 					return err
 				}
 				if fs.contentFS == nil {
-					b.data.Delete(key)
+					if err := b.data.Delete(key); err != nil {
+						return err
+					}
 				}
-				b.symlinks.Delete(key)
+				if err := b.symlinks.Delete(key); err != nil {
+					return err
+				}
 				if err := b.deleteAllChunks(oldChild.Ino); err != nil {
 					return err
 				}
@@ -1517,11 +1527,15 @@ func (fs *FS) deleteInode(ino uint64) error {
 		}
 		// Only delete from data bucket if no external content filesystem is configured
 		if fs.contentFS == nil {
-			b.data.Delete(key)
+			if err := b.data.Delete(key); err != nil {
+				return err
+			}
 		}
 		// Remove any chunked content, symlink target and directory entries so
 		// they do not leak.
-		b.symlinks.Delete(key)
+		if err := b.symlinks.Delete(key); err != nil {
+			return err
+		}
 		if err := b.deleteAllChunks(ino); err != nil {
 			return err
 		}
@@ -1666,7 +1680,6 @@ func (fs *FS) RemoveAll(name string) error {
 
 	dir, filename := fs.cleanPath(name)
 	parent, child := fs.loadParentChild(dir, filename)
-	_, _ = parent, child
 	var inos []uint64
 
 	var rootid uint64
@@ -1780,7 +1793,9 @@ func (fs *FS) RemoveAll(name string) error {
 			}
 			// Remove chunked content, symlink targets and directory entries
 			// to avoid leaks.
-			b.symlinks.Delete(key)
+			if err := b.symlinks.Delete(key); err != nil {
+				return err
+			}
 			if err := b.deleteAllChunks(ino); err != nil {
 				return err
 			}

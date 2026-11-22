@@ -87,12 +87,12 @@ func (n *NoSymlinks) Readlink(name string) (string, error) {
 
 // Lstat follows symlinks (same as Stat) - symlinks are invisible
 func (n *NoSymlinks) Lstat(name string) (os.FileInfo, error) {
-	return n.FileSystem.Stat(name)
+	return n.Stat(name)
 }
 
 // Lchown follows symlinks (same as Chown) - symlinks are invisible
 func (n *NoSymlinks) Lchown(name string, uid, gid int) error {
-	return n.FileSystem.Chown(name, uid, gid)
+	return n.Chown(name, uid, gid)
 }
 
 // BlockSymlinks wraps a FileSystem to block all symlink operations.

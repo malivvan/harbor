@@ -1,13 +1,25 @@
-.PHONY: build test test-race vet
+.PHONY: build build-cgo0 test test-cgo0 test-race vet lint coverage
 
 build:
 	go build ./...
 
+build-cgo0:
+	CGO_ENABLED=0 go build ./...
+
 test:
 	go test ./...
+
+test-cgo0:
+	CGO_ENABLED=0 go test ./...
 
 test-race:
 	go test -race ./...
 
 vet:
 	go vet ./...
+
+lint:
+	go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+
+coverage:
+	go test -covermode=atomic -coverprofile=coverage.out ./...

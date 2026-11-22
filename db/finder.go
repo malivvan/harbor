@@ -334,13 +334,13 @@ func (n *node) AllByIndex(ctx context.Context, fieldName string, to any, options
 
 	ref := reflect.ValueOf(to)
 
-	if ref.Kind() != reflect.Ptr || ref.Elem().Kind() != reflect.Slice {
+	if ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Slice {
 		return wrapError("all by index", ErrSlicePtrNeeded)
 	}
 
 	typ := reflect.Indirect(ref).Type().Elem()
 
-	if typ.Kind() == reflect.Ptr {
+	if typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
 	}
 

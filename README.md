@@ -54,12 +54,13 @@ and `Vec()`. Every store can also be used directly with its own `*bolt.DB`.
   Harbor operations with raw bbolt writes in one atomic transaction.
 - **Concurrency-tested.** The suite runs with `-race`, and CI also benchmarks
   the hot paths on every pull request.
-- **No C dependencies and no external database.** A single Go module and one
-  bbolt file.
+- **No C dependencies and no external database.** Harbor is pure Go, builds
+  with `CGO_ENABLED=0`, and needs only one bbolt file.
 
 ## Installation
 
 Harbor requires Go 1.27.4 or later and a writable path for the database file.
+It is pure Go and builds and tests with `CGO_ENABLED=0`.
 
 ```sh
 go get github.com/malivvan/harbor
@@ -779,7 +780,8 @@ The two entry points differ in who owns the bbolt handle:
 
 A `nil` context is rejected by context-aware operations with `ErrNilContext`
 (or the store's equivalent sentinel); `Close` is a lifecycle exception and
-takes no context.
+takes no context. `harbor.Open` is the one exception: it treats a nil context
+as `context.Background()`.
 
 ## Error handling
 
@@ -871,9 +873,10 @@ code where they are most useful (for the `db` package, see
 
 ## Status
 
-Harbor is at its first public release (`v0.1.x`). The on-disk formats are
-versioned and refuse data from an incompatible build instead of misreading it.
-Pin a module version, and treat pre-1.0 API changes as potentially breaking.
+Harbor is preparing its first public release (`v0.1.x`). The on-disk formats
+are versioned and refuse data from an incompatible build instead of misreading
+it. Pin a module version, and treat pre-1.0 API changes as potentially
+breaking.
 
 ## License
 

@@ -59,7 +59,9 @@ func (f *fileadapter) ReadAt(b []byte, off int64) (n int, err error) {
 		return 0, err
 	}
 	n, err = f.sf.Read(b)
-	_, _ = f.sf.Seek(cur, io.SeekStart)
+	if _, seekErr := f.sf.Seek(cur, io.SeekStart); err == nil {
+		err = seekErr
+	}
 	return n, err
 }
 
@@ -83,7 +85,9 @@ func (f *fileadapter) WriteAt(b []byte, off int64) (n int, err error) {
 		return 0, err
 	}
 	n, err = f.sf.Write(b)
-	_, _ = f.sf.Seek(cur, io.SeekStart)
+	if _, seekErr := f.sf.Seek(cur, io.SeekStart); err == nil {
+		err = seekErr
+	}
 	return n, err
 }
 

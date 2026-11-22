@@ -20,13 +20,13 @@ func TestKDFPresets(t *testing.T) {
 		t.Fatalf("strong preset = (%d, %d, %d)", StrongKDFTime, StrongKDFMemory, StrongKDFThreads)
 	}
 
-	if !(FastKDFTime < DefaultKDFTime && DefaultKDFTime < StrongKDFTime) {
+	if FastKDFTime >= DefaultKDFTime || DefaultKDFTime >= StrongKDFTime {
 		t.Fatal("preset time values are not ordered")
 	}
-	if !(FastKDFMemory <= DefaultKDFMemory && DefaultKDFMemory < StrongKDFMemory) {
+	if FastKDFMemory > DefaultKDFMemory || DefaultKDFMemory >= StrongKDFMemory {
 		t.Fatal("preset memory values are not ordered")
 	}
-	if !(FastKDFThreads < DefaultKDFThreads && DefaultKDFThreads < StrongKDFThreads) {
+	if FastKDFThreads >= DefaultKDFThreads || DefaultKDFThreads >= StrongKDFThreads {
 		t.Fatal("preset thread values are not ordered")
 	}
 }

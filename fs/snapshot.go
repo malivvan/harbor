@@ -47,7 +47,9 @@ func (fsys *FS) CreateSnapshot(name string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback() // read-only: Rollback is the close operation
+	defer func() {
+		_ = tx.Rollback() // read-only: Rollback is the close operation
+	}()
 
 	bucket, err := fsys.openFsBucket(tx) // Snapshots don't use the cache
 	if err != nil {

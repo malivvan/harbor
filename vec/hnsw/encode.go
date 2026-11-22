@@ -332,7 +332,9 @@ func LoadSavedGraph[K cmp.Ordered](path string) (*SavedGraph[K], error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 	info, err := f.Stat()
 	if err != nil {
 		return nil, err
@@ -357,12 +359,16 @@ func (g *SavedGraph[K]) Save() error {
 		return err
 	}
 	tmpName := tmp.Name()
+	renamed := false
 
 	defer func() {
-		if tmp != nil {
-			tmp.Close()
-			os.Remove(tmpName)
+		if renamed {
+			return
 		}
+		if tmp != nil {
+			_ = tmp.Close()
+		}
+		_ = os.Remove(tmpName)
 	}()
 
 	wr := bufio.NewWriter(tmp)
@@ -391,6 +397,7 @@ func (g *SavedGraph[K]) Save() error {
 	if err != nil {
 		return fmt.Errorf("renaming: %w", err)
 	}
+	renamed = true
 
 	return nil
 }

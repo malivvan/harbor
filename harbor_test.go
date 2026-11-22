@@ -663,7 +663,11 @@ func TestLoadOrCreateStateRejectsTampering(t *testing.T) {
 	tamper := func(mutate func(*Metadata)) error {
 		db, err := bolt.Open(path, 0600, nil)
 		require.NoError(t, err)
-		defer db.Close()
+		defer func() {
+			if err := db.Close(); err != nil {
+				t.Errorf("close bolt db: %v", err)
+			}
+		}()
 		require.NoError(t, db.Update(func(tx *bolt.Tx) error {
 			b := tx.Bucket(metadataBucket)
 			raw := b.Get(metadataRecordKey)
@@ -796,7 +800,11 @@ func TestLoadOrCreateStateReadOnly(t *testing.T) {
 
 	ro, err := bolt.Open(path, 0600, &bolt.Options{ReadOnly: true})
 	require.NoError(t, err)
-	defer ro.Close()
+	defer func() {
+		if err := ro.Close(); err != nil {
+			t.Errorf("close read-only bolt db: %v", err)
+		}
+	}()
 
 	// A new store needs to persist metadata, which a read-only handle cannot do.
 	_, _, err = loadOrCreateState(ro, testOptions("pw"))

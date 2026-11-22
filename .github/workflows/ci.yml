@@ -61,7 +61,7 @@ jobs:
           git worktree add /tmp/base "${{ github.event.pull_request.base.sha }}"
           (cd /tmp/base && go test -run '^$' -bench . -benchmem -benchtime=100ms -count=1 ./... > /tmp/bench-base.txt) || true
           if [ -s /tmp/bench-base.txt ]; then
-            go run golang.org/x/perf/cmd/benchstat@latest /tmp/bench-base.txt bench-head.txt
+            go run golang.org/x/perf/cmd/benchstat@v0.0.0-20261117185222-4febdb082b2c /tmp/bench-base.txt bench-head.txt
           fi
 
       - uses: actions/upload-artifact@v4
@@ -79,8 +79,50 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: go mod tidy
+        run: go mod tidy -diff
+
       - name: staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
 
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
+
+  compat:
+    name: compat ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            run_tests: true
+          - goos: linux
+            goarch: arm64
+          - goos: linux
+            goarch: loong64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
+    env:
+      CGO_ENABLED: "0"
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: build
+        run: go build ./...
+
+      - name: test (linux/amd64)
+        if: matrix.run_tests == true
+        run: go test -count=1 -timeout 180s ./...
