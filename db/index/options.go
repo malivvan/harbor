@@ -8,6 +8,9 @@ func NewOptions() *Options {
 }
 
 // Options controls index result pagination and ordering.
+//
+// Index methods decrement Skip/Limit in place; pass a fresh value for each
+// query if it will be reused.
 type Options struct {
 	// Limit is the maximum number of results; a negative value means unlimited.
 	Limit int

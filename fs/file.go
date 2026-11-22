@@ -246,6 +246,8 @@ func (f *File) Seek(offset int64, whence int) (ret int64, err error) {
 		f.offset += offset
 	case io.SeekEnd:
 		f.offset = int64(f.node.Size) + offset
+	default:
+		return 0, &os.PathError{Op: "seek", Path: f.name, Err: syscall.EINVAL}
 	}
 	if f.offset < 0 {
 		f.offset = 0

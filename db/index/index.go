@@ -1,4 +1,8 @@
-// Package index contains Index engines used to store values and their corresponding IDs
+// Package index contains Index engines used to store values and their corresponding IDs.
+//
+// The Get/All/AllRecords/Range/Prefix methods return byte slices that may alias
+// the underlying bbolt transaction. They are only valid until that transaction
+// ends; callers that retain them must copy them.
 package index
 
 import "context"

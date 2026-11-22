@@ -18,6 +18,7 @@ type File struct {
 	name    string
 	key     string
 	writing bool
+	closed  bool
 	append  bool
 	buffer  []byte
 	offset  int64
@@ -265,11 +266,16 @@ func (f *File) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	if f.closed {
+		return nil
+	}
+
 	if f.body != nil {
 		f.body.Close()
 	}
 
 	if !f.writing {
+		f.closed = true
 		return nil
 	}
 
@@ -306,6 +312,7 @@ func (f *File) Close() error {
 			f.abortMultipartLocked()
 			return wrapError("close", f.name, err)
 		}
+		f.closed = true
 		return nil
 	}
 

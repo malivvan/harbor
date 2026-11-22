@@ -234,6 +234,9 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	}); err != nil {
 		return nil, fmt.Errorf("storm: open vec store: %w", err)
 	}
+	// The vec store shares this handle with db, fs and ts; it must never close
+	// it on its own.
+	s.vec.SetOwnsDB(false)
 
 	opened = true
 	return s, nil

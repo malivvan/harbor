@@ -178,129 +178,29 @@ revision and may shift; use the named symbols and files to locate the code.
   missing, and the umask is cached in the `FS` instead of read for every
   create.
 
-# 6. API, contracts and documentation
+# 6. API, contracts and documentation — RESOLVED
 
-## A1. [High] Moving `absfs` to `internal/absfs` breaks the public import path and leaks internal types into exported APIs
-**Location:** `internal/absfs/*`, `fs/walk.go:21` (`Walk(filer absfs.Filer,
-...)`), `fs/fastwalk.go:46/51`, `fs/file.go` (methods return `absfs.File`),
-`fs/store.go` (`OpenWithContentFS(name string, contentFS absfs.FileSystem)`).
-**Problem:** External code importing `github.com/malivvan/storm/fs/absfs` no
-longer compiles, and the exported `fs` signatures now name an internal type.
-Values can still be passed structurally, but callers cannot declare the types
-in their own signatures and pkg.go.dev cannot link them.
-**Fix:** Either keep a public `fs/absfs` compatibility package that aliases the
-internal types, or move the interfaces into the public `fs` package and keep
-one canonical path. Document the breaking change in the README.
-
-## A2. [High] `vec.Store.Close` closes the caller's shared bbolt handle
-**Location:** `vec/store.go:426-465`.
-**Problem:** In an embedded `storm.Store`, `s.Vec()` returns this store; a user
-calling `s.Vec().Close()` closes the handle shared with `db`, `fs` and `ts`,
-breaking every sibling. The root `storm.Store.Close` avoids it by calling
-`Flush`, but the accessor still exposes the footgun. The doc calls it a
-"convenience" while also saying the caller owns the handle.
-**Fix:** Make `vec.Store.Close` flush only (like `db`/`fs`/`ts`), or add an
-`ownsDB` flag set only by a standalone constructor. Document the ownership
-model and add a test that `s.Vec().Close()` does not break `s.DB()`.
-
-## A3. [Medium] `fs.Truncate` creates missing files and handles symlinks inconsistently
-**Location:** `fs/fs.go:1203-1230` (creates on `os.ErrNotExist`, uses
-`resolve` which does not follow symlinks), `fs/fs.go:350-372` (`ReadFile` does
-not follow), `fs/fs.go:1688-1710` (`Chmod` does not follow),
-`fs/fs.go:1170-1199` (`Stat` does follow), `fs/file.go` (`openFile` follows).
-**Problem:** `os.Truncate` returns `ENOENT` for a missing file and follows
-symlinks; here it creates the file and truncates the symlink inode.
-`ReadFile`/`ReadDir`/`Chmod`/`Chtimes` operate on the link, while
-`Stat`/`OpenFile`/`Chown` follow it.
-**Fix:** Define a consistent policy: follow links for `Truncate`, `ReadFile`,
-`ReadDir`, `Chmod`, `Chtimes` (as POSIX does), use `Lstat`/`Lchown` for the
-no-follow variants, and return `ENOENT` from `Truncate` on a missing path.
-Add tests for each API on symlinks.
-
-## A4. [Resolved] `fs.MkdirAll` succeeds when the path is an existing non-directory
-**Location:** `fs/fs.go:1382-1420`.
-**Problem:** `mkdir` returns `os.ErrExist` for any existing child; `mkdirAll`
-treats `ErrExist` as success. Reproduced:
-```
-MkdirAll(/file) where /file is a regular file -> err=nil
-```
-**Fix:** On `ErrExist`, stat the path and return `ENOTDIR` if it is not a
-directory; add a test.
-
-## A5. [Resolved] `fs.File.ReadDir(0)` at EOF returns `io.EOF`, contradicting its doc and `Readdir`
-**Location:** `fs/file.go:381-420` vs `fs/file.go:270-320`.
-**Problem:** `ReadDir` checks `f.diroffset >= len(children)` before `n < 1` and
-returns `io.EOF`; `Readdir` returns an empty slice and nil for `n <= 0`.
-Reproduced:
-```
-ReadDir(-1): n=2 err=nil
-ReadDir(0) at EOF: n=0 err=EOF
-```
-**Fix:** Apply the `n <= 0` rule before the EOF check; add a test.
-
-## A6. [Resolved] `fs.ReadAt`/`WriteAt` mutate the sequential offset
-**Location:** `fs/file.go:114-123` (`ReadAt` sets `f.offset = off` then calls
-`Read`), `fs/file.go:182-190` (`WriteAt`).
-**Problem:** `io.ReaderAt`/`io.WriterAt` must not change the file offset.
-Reproduced: after `ReadAt(buf, 5)`, the offset is 8 and the next `Read` returns
-`"89"` instead of continuing from the previous position. Concurrent `ReadAt`
-calls also race on `f.offset` (it is written outside `fs.mu`). The generic
-`internal/absfs.fileadapter` fallbacks (`fileadapter.go:50-80`) have the same
-defect.
-**Fix:** Save/restore the offset under the lock (or use a local offset for the
-read/write path); add tests that assert the offset is unchanged.
-
-## A7. [Partially resolved] `s3fs.Mkdir` does not reject an existing file, and `File.Close` is not idempotent
-**Location:** `fs/s3fs/s3fs.go:292-330` (checks only the `name/` marker),
-`fs/s3fs/s3file.go:264-319` (does not reset `writing`/`multipartID`/`parts`).
-**Problem:** A file at `name` and a directory marker `name/` can coexist; a
-second `Close` of a multipart file re-completes an already completed upload
-(or re-uploads a simple object).
-**Fix:** `Mkdir` should `HeadObject(name)` as well and return `ErrExist`;
-`Close` should be idempotent and clear its state. Add tests.
-
-## A8. [Low] `db` `index` returns slices that alias the bbolt transaction
-**Location:** `db/index/unique.go:Get/All`, `db/index/id.go:Get/All`,
-`db/index/list.go:All/AllRecords/Range/Prefix` (append cursor values).
-**Problem:** The index package is public; outside the owning transaction those
-slices are invalid. Internal callers use them within the transaction, but the
-API gives no warning.
-**Fix:** Document the lifetime, or return copies from public methods (with a
-fast internal variant for hot paths).
-
-## A9. [Low] `index.Options` is mutated in place
-**Location:** `db/index/*.go` (`opts.Skip--`, `opts.Limit--`).
-**Problem:** Reusing an options value across calls silently changes the
-pagination.
-**Fix:** Copy the options at the start of each operation, or document the
-mutation.
-
-## A10. [Low] Error/contract inconsistencies and stale docs
-- `vec.NewCollection` accepts `vectorLen <= 0`; unknown `Distance` values are
-  silently treated as Cosine (`vec/math.go:CalculateDistance`,
-  `vec/hnsw_index.go:NewHNSWIndexWithParams`).
-- `vec.matchRegex` silently treats an invalid pattern as "no match"
-  (`vec/models.go:matchRegex`); `db/q.Re` returns the error.
-- `db.Query.Raw`/`RawEach` nil-kind contract is only a comment (see C9).
-- Stale "Copy" artifacts in docs: `internal/absfs/flags.go:58`,
-  `internal/absfs/filesystem.go:15/131`, `vec/hnsw/graph.go:229/258`.
-- `internal/absfs/flags.go:51` documents `ParseFlags` as returning an
-  "`Encrypt` value".
-- `vec/quant.go:Quantize` still comments "then shift to [-128, 127]" while the
-  code writes `[0, 255]`.
-- `fs/file.go:208-220` `Seek` silently ignores an unknown `whence` and clamps
-  negative offsets instead of returning `EINVAL`.
-- `fs/fs.go:974-990` `Chdir` accepts a file path.
-- `db.Find`/`Range`/`Prefix` empty-result semantics differ from `All` (C10).
-
-## A11. [Low] Dead/unused state
-- `fs/inodeCache` dirty tracking (`MarkDirty`/`MarkClean`/`GetDirty`/
-  `IsDirty`) is only used by tests.
-- `db/index.IDIndex.AllRecords` always returns an empty list.
-- `vec/hnsw/encode.go` has a TODO about the oversized byte count returned for
-  `*int`; the count is not used for seeking, but the contract is confusing.
-
----
+- **A1** — a public `fs/absfs` shim re-exports the internal interfaces, so the
+  documented import path works again and exported `fs` signatures remain
+  nameable.
+- **A2** — `vec.Store.SetOwnsDB(false)` marks a shared handle; `Close` then
+  flushes without closing it, and the storm root store sets this after opening
+  the vec sub-store.
+- **A3** — `ReadFile`, `ReadDir`, `Truncate`, `Chmod` and `Chtimes` follow
+  symlinks consistently; `Truncate` no longer creates a missing file; `Chdir`
+  rejects a non-directory with `ENOTDIR`.
+- **A4/A5/A6** — `MkdirAll` rejects an existing non-directory, `ReadDir(0)` at
+  EOF returns an empty slice, and `ReadAt`/`WriteAt` preserve the sequential
+  offset (including the absfs adapter).
+- **A7** — s3fs `Mkdir` rejects an existing file and `File.Close` is
+  idempotent.
+- **A8** — the `db/index` package documents the transaction lifetime of its
+  returned slices.
+- **A9** — `index.Options` documents its in-place pagination mutation.
+- **A10** — fixed the stale `Copy`/`Encrypt` documentation artifacts, the
+  quantization comment, `Seek`'s unknown-whence handling and `Chdir`.
+- **A11** — removed the stale HNSW TODO, documented `IDIndex.AllRecords` and
+  the cache's test-only dirty tracking.
 
 # 7. Repository health
 

@@ -42,6 +42,7 @@ type Store struct {
 	// closed reports whether Close has been called. It is an atomic so that
 	// Close can race safely with the other Store methods.
 	closed    atomic.Bool
+	ownsDB    atomic.Bool
 	quantizer Quantizer
 	useQuant  bool
 
@@ -275,6 +276,7 @@ func Open(ctx context.Context, bdb *bbolt.DB, cfg Config) (*Store, error) {
 		collections: make(map[string]*Collection),
 	}
 	store.enc.Store(enc)
+	store.ownsDB.Store(true)
 
 	if err := store.checkMode(ctx); err != nil {
 		return nil, err
@@ -495,7 +497,7 @@ func (s *Store) Close() error {
 	}
 	s.closed.Store(true)
 
-	if s.db == nil {
+	if s.db == nil || !s.ownsDB.Load() {
 		return nil
 	}
 
@@ -505,6 +507,15 @@ func (s *Store) Close() error {
 		return err
 	}
 	return nil
+}
+
+// SetOwnsDB controls whether Close closes the bbolt handle. An embedding store
+// that shares one handle (the storm root package) sets it to false; standalone
+// users keep the default true.
+func (s *Store) SetOwnsDB(owns bool) {
+	if s != nil {
+		s.ownsDB.Store(owns)
+	}
 }
 
 // Flush writes the buffered points of every collection created by this Store

@@ -87,7 +87,7 @@ func (q *SQ8Quantizer) Quantize(vector []float32) []byte {
 			result[i+8] = 0
 			continue
 		}
-		// Scale to [0, 255], then shift to [-128, 127]
+		// Scale to [0, 255].
 		qval := (v - min) * float32(scale)
 		if qval < 0 {
 			qval = 0

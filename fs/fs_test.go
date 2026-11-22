@@ -1731,6 +1731,17 @@ func TestFileSystem(t *testing.T) {
 			return
 		}
 
+		// Truncate follows os.Truncate: the file must already exist.
+		f, err := fs.Create(name)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if err := f.Close(); err != nil {
+			t.Error(err)
+			return
+		}
+
 		for _, size := range []int64{0, 10, 100, 23820, 0, 23589} {
 
 			err = fs.Truncate(name, size)

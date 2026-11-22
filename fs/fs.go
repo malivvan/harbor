@@ -319,9 +319,7 @@ func (filesystem *FS) ReadDir(name string) ([]fs.DirEntry, error) {
 
 // readDir is ReadDir without the lock; callers must hold fs.mu.
 func (filesystem *FS) readDir(name string) ([]fs.DirEntry, error) {
-	dir, filename := filesystem.cleanPath(name)
-	p := path.Join(dir, filename)
-	node, err := filesystem.resolve(p)
+	node, err := filesystem.resolveFollow(name, 0)
 	if err != nil {
 		return nil, &os.PathError{Op: "readdir", Path: name, Err: err}
 	}
@@ -349,9 +347,7 @@ func (filesystem *FS) readDir(name string) ([]fs.DirEntry, error) {
 func (fs *FS) ReadFile(name string) ([]byte, error) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
-	dir, filename := fs.cleanPath(name)
-	p := path.Join(dir, filename)
-	node, err := fs.resolve(p)
+	node, err := fs.resolveFollow(name, 0)
 	if err != nil {
 		return nil, &os.PathError{Op: "readfile", Path: name, Err: err}
 	}
@@ -990,9 +986,12 @@ func (fs *FS) Chdir(name string) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	dir, filename := fs.cleanPath(name)
-	_, err := fs.resolve(dir)
+	node, err := fs.resolveFollow(path.Join(dir, filename), 0)
 	if err != nil {
 		return err
+	}
+	if !node.IsDir() {
+		return &os.PathError{Op: "chdir", Path: name, Err: syscall.ENOTDIR}
 	}
 	fs.cwd = path.Join(dir, filename)
 	return nil
@@ -1016,6 +1015,30 @@ func (fs *FS) Create(name string) (absfs.File, error) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	return fs.openFile(name, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0777, 0)
+}
+
+// resolveFollow resolves name and follows a final symlink (with a depth bound),
+// which is what ReadFile/ReadDir/Truncate/Chmod/Chtimes need.
+func (fs *FS) resolveFollow(name string, depth int) (*iNode, error) {
+	if depth > maxSymlinkDepth {
+		return nil, syscall.ELOOP
+	}
+	dir, filename := fs.cleanPath(name)
+	node, err := fs.resolve(path.Join(dir, filename))
+	if err != nil {
+		return nil, err
+	}
+	if node.Mode&os.ModeSymlink == 0 {
+		return node, nil
+	}
+	link, err := fs.readLink(node.Ino)
+	if err != nil {
+		return nil, err
+	}
+	if !path.IsAbs(link) {
+		link = path.Join(path.Dir(name), link)
+	}
+	return fs.resolveFollow(link, depth+1)
 }
 
 // resolve resolves the path provided into a iNode, or an error
@@ -1230,21 +1253,9 @@ func (fs *FS) Truncate(name string, size int64) error {
 	}
 
 	dir, filename := fs.cleanPath(name)
-	p := path.Join(dir, filename)
-	node, err := fs.resolve(p)
+	node, err := fs.resolveFollow(path.Join(dir, filename), 0)
 	if err != nil {
-		if err != os.ErrNotExist {
-			return err
-		}
-		f, err := fs.openFile(p, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0777, 0)
-		if err != nil {
-			return err
-		}
-		f.Close()
-		node, err = fs.resolve(p)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 
 	return fs.resizeContent(node, size)
@@ -1668,15 +1679,15 @@ func (fs *FS) Chtimes(name string, atime time.Time, mtime time.Time) error {
 	defer fs.mu.Unlock()
 
 	dir, filename := fs.cleanPath(name)
-	_, node := fs.loadParentChild(dir, filename)
-	if node == nil {
-		return os.ErrNotExist
+	node, err := fs.resolveFollow(path.Join(dir, filename), 0)
+	if err != nil {
+		return err
 	}
 
 	node.SetAtime(atime)
 	node.SetMtime(mtime)
 
-	_, err := fs.saveInode(node)
+	_, err = fs.saveInode(node)
 	return err
 }
 
@@ -1734,15 +1745,15 @@ func (fs *FS) Chmod(name string, mode os.FileMode) error {
 	defer fs.mu.Unlock()
 
 	dir, filename := fs.cleanPath(name)
-	_, node := fs.loadParentChild(dir, filename)
-	if node == nil {
-		return os.ErrNotExist
+	node, err := fs.resolveFollow(path.Join(dir, filename), 0)
+	if err != nil {
+		return err
 	}
 
 	// Preserve type bits (e.g. os.ModeDir) and only change permission bits.
 	node.Mode = (node.Mode & os.ModeType) | (mode &^ os.ModeType)
 
-	_, err := fs.saveInode(node)
+	_, err = fs.saveInode(node)
 	return err
 }
 

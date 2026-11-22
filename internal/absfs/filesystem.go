@@ -12,7 +12,7 @@ import (
 )
 
 // Path separators for absfs virtual filesystems.
-// Copy absfs filesystems use Unix-style paths regardless of host OS.
+// All absfs filesystems use Unix-style paths regardless of host OS.
 const (
 	Separator     = '/'
 	ListSeparator = ':'
@@ -128,7 +128,7 @@ type SymlinkFileSystem interface {
 //
 // Path Semantics:
 //
-// Copy absfs filesystems use Unix-style forward slash paths ("/") on all platforms.
+// All absfs filesystems use Unix-style forward slash paths ("/") on all platforms.
 // This design enables virtual filesystems (mocks, in-memory, archives) to work
 // consistently across all platforms and compose seamlessly with each other.
 //

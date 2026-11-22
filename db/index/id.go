@@ -87,7 +87,8 @@ func (idx *IDIndex) All(ctx context.Context, value []byte, opts *Options) ([][]b
 	return nil, nil
 }
 
-// AllRecords returns all the IDs of this index
+// AllRecords returns no IDs: the primary bucket is the record store, not a
+// secondary index, so there is nothing to enumerate here.
 func (idx *IDIndex) AllRecords(ctx context.Context, opts *Options) ([][]byte, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, wrapError("index all records", err)

@@ -44,7 +44,6 @@ func binaryRead(r io.Reader, data interface{}) (int, error) {
 		}
 
 		*v = int(i)
-		// TODO: this will usually overshoot size.
 		return binary.MaxVarintLen64, nil
 
 	case *string:

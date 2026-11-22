@@ -95,6 +95,9 @@ func (c *inodeCache) Invalidate(ino uint64) {
 	c.mu.Unlock()
 }
 
+// The dirty-tracking helpers below are retained for cache tests; the store
+// persists inodes synchronously and does not rely on them.
+
 // MarkDirty marks a cached inode as dirty (modified but not persisted).
 func (c *inodeCache) MarkDirty(ino uint64) {
 	if !c.enabled {
