@@ -67,3 +67,36 @@ func TestCompareStringFastPath(t *testing.T) {
 		require.Equal(t, c.want, compare(c.a, c.b, c.tok), "%q %s %q", c.a, c.tok, c.b)
 	}
 }
+
+// TestCompareNumericFastPath covers same-kind numeric comparisons, which now
+// bypass go/constant boxing.
+func TestCompareNumericFastPath(t *testing.T) {
+	for _, tok := range []token.Token{token.LSS, token.LEQ, token.GTR, token.GEQ, token.EQL, token.NEQ} {
+		a, b := int64(-3), int64(7)
+		want := map[token.Token]bool{
+			token.LSS: true, token.LEQ: true, token.GTR: false,
+			token.GEQ: false, token.EQL: false, token.NEQ: true,
+		}[tok]
+		require.Equal(t, want, compare(a, b, tok), "int64 %s", tok)
+	}
+
+	require.True(t, compare(int8(5), int64(5), token.EQL))
+	require.True(t, compare(uint8(5), uint64(9), token.LSS))
+	require.True(t, compare(float32(1.5), float64(1.5), token.EQL))
+}
+
+// TestCompareFloatSpecialValues verifies the direct float path does not panic
+// on values that constant.MakeFloat64 rejects.
+func TestCompareFloatSpecialValues(t *testing.T) {
+	nan := math.NaN()
+	inf := math.Inf(1)
+
+	require.True(t, compare(nan, nan, token.NEQ))
+	require.False(t, compare(nan, nan, token.EQL))
+	require.False(t, compare(nan, 1.0, token.LSS))
+	require.False(t, compare(nan, 1.0, token.GTR))
+
+	require.True(t, compare(inf, inf, token.EQL))
+	require.True(t, compare(inf, 1.0, token.GTR))
+	require.True(t, compare(math.Inf(-1), 1.0, token.LSS))
+}

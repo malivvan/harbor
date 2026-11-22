@@ -21,7 +21,7 @@ func compare(a, b interface{}, tok token.Token) bool {
 		return tok == token.EQL || tok == token.NEQ
 	case ak >= reflect.Int && ak <= reflect.Int64:
 		if bk >= reflect.Int && bk <= reflect.Int64 {
-			return constant.Compare(constant.MakeInt64(vala.Int()), tok, constant.MakeInt64(valb.Int()))
+			return compareInt64(vala.Int(), valb.Int(), tok)
 		}
 
 		if bk >= reflect.Uint && bk <= reflect.Uint64 {
@@ -42,7 +42,7 @@ func compare(a, b interface{}, tok token.Token) bool {
 		}
 	case ak >= reflect.Uint && ak <= reflect.Uint64:
 		if bk >= reflect.Uint && bk <= reflect.Uint64 {
-			return constant.Compare(constant.MakeUint64(vala.Uint()), tok, constant.MakeUint64(valb.Uint()))
+			return compareUint64(vala.Uint(), valb.Uint(), tok)
 		}
 
 		if bk >= reflect.Int && bk <= reflect.Int64 {
@@ -63,7 +63,7 @@ func compare(a, b interface{}, tok token.Token) bool {
 		}
 	case ak == reflect.Float32 || ak == reflect.Float64:
 		if bk == reflect.Float32 || bk == reflect.Float64 {
-			return constant.Compare(constant.MakeFloat64(vala.Float()), tok, constant.MakeFloat64(valb.Float()))
+			return compareFloat64(vala.Float(), valb.Float(), tok)
 		}
 
 		if bk >= reflect.Int && bk <= reflect.Int64 {
@@ -139,4 +139,63 @@ func compare(a, b interface{}, tok token.Token) bool {
 	}
 
 	return false
+}
+
+// compareInt64 compares two signed integers without boxing them through
+// go/constant.
+func compareInt64(a, b int64, tok token.Token) bool {
+	switch tok {
+	case token.EQL:
+		return a == b
+	case token.NEQ:
+		return a != b
+	case token.LSS:
+		return a < b
+	case token.LEQ:
+		return a <= b
+	case token.GTR:
+		return a > b
+	case token.GEQ:
+		return a >= b
+	}
+	return constant.Compare(constant.MakeInt64(a), tok, constant.MakeInt64(b))
+}
+
+// compareUint64 compares two unsigned integers without boxing.
+func compareUint64(a, b uint64, tok token.Token) bool {
+	switch tok {
+	case token.EQL:
+		return a == b
+	case token.NEQ:
+		return a != b
+	case token.LSS:
+		return a < b
+	case token.LEQ:
+		return a <= b
+	case token.GTR:
+		return a > b
+	case token.GEQ:
+		return a >= b
+	}
+	return constant.Compare(constant.MakeUint64(a), tok, constant.MakeUint64(b))
+}
+
+// compareFloat64 compares two floats directly. Unlike constant.MakeFloat64 it
+// tolerates NaN and infinities.
+func compareFloat64(a, b float64, tok token.Token) bool {
+	switch tok {
+	case token.EQL:
+		return a == b
+	case token.NEQ:
+		return a != b
+	case token.LSS:
+		return a < b
+	case token.LEQ:
+		return a <= b
+	case token.GTR:
+		return a > b
+	case token.GEQ:
+		return a >= b
+	}
+	return constant.Compare(constant.MakeFloat64(a), tok, constant.MakeFloat64(b))
 }

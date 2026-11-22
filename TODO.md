@@ -127,6 +127,8 @@ so "defeating SIMD" is not a concern here.
   scan-semantics tests.
 
 ### 1.7 Numeric comparisons box through `go/constant` on every field eval — MEDIUM-HIGH
+
+> **Status:** ✅ FIXED — same-kind signed, unsigned and float comparisons now use direct Go operators; `go/constant` remains only for mixed-kind compares. The float path also tolerates NaN and infinities. Regression tests cover all operators and special float values.
 - **Location:** `db/q/compare.go:22-84`.
 - **Problem:** All numeric compares call `constant.MakeInt64/MakeUint64/MakeFloat64` + `Compare`,
   boxing on every record for `Gt`/`Lte`/`In`/… .
