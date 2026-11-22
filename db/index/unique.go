@@ -83,6 +83,14 @@ func (idx *UniqueIndex) Remove(ctx context.Context, value []byte) error {
 	return wrapError("index remove", checkContext(ctx))
 }
 
+// HasValueID reports whether id is the record indexed under value.
+func (idx *UniqueIndex) HasValueID(ctx context.Context, value, id []byte) (bool, error) {
+	if err := checkContext(ctx); err != nil {
+		return false, wrapError("index has value id", err)
+	}
+	return bytes.Equal(idx.IndexBucket.Get(value), id), nil
+}
+
 // RemoveID removes an ID from the unique index
 func (idx *UniqueIndex) RemoveID(ctx context.Context, id []byte) error {
 	if err := checkContext(ctx); err != nil {

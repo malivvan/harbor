@@ -165,6 +165,23 @@ func (idx *ListIndex) Remove(ctx context.Context, value []byte) error {
 	return wrapError("index remove", checkContext(ctx))
 }
 
+// HasValueID reports whether id is indexed under value. It is O(1): the ID
+// bucket maps an ID straight to its full index key.
+func (idx *ListIndex) HasValueID(ctx context.Context, value, id []byte) (bool, error) {
+	if err := checkContext(ctx); err != nil {
+		return false, wrapError("index has value id", err)
+	}
+	key, err := idx.IDs.Get(ctx, id)
+	if err != nil || key == nil {
+		return false, err
+	}
+	prefix := generatePrefix(value)
+	if prefix == nil {
+		return false, nil
+	}
+	return bytes.HasPrefix(key, prefix), nil
+}
+
 // RemoveID removes an ID from the list index
 func (idx *ListIndex) RemoveID(ctx context.Context, targetID []byte) error {
 	if err := checkContext(ctx); err != nil {

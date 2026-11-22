@@ -74,6 +74,9 @@ func (f *fsBucket) NextInode() (uint64, error) {
 // the `inodes` bucket to cause boltdb to increment the `NextSequence` counter
 // to 1.
 func (f *fsBucket) InodeInit() error {
+	if f.state.Get([]byte("inodes_initialized")) != nil {
+		return nil
+	}
 	node := newInode(os.ModeDir | 0755)
 	node.countUp() // iNode garbage collector should not remove nil, or root
 	for count := 2 - f.inodes.Stats().KeyN; count > 0; count-- {
@@ -83,7 +86,7 @@ func (f *fsBucket) InodeInit() error {
 			return err
 		}
 	}
-	return nil
+	return f.state.Put([]byte("inodes_initialized"), []byte{1})
 }
 
 // bucketInit initializes the necessary buckets for fs in the possibly nested

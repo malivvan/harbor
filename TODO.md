@@ -149,6 +149,21 @@ revision and may shift; use the named symbols and files to locate the code.
 
 # 5. Efficiency
 
+Resolved in this pass:
+
+- **E3** — `db.ReIndex` collects the record keys once and updates each record,
+  removing the repeated `Select(...).Skip(i)` scans (linear instead of O(n²)).
+- **E4 (partial)** — `save` uses a new O(1) `HasValueID` check on list and
+  unique indexes instead of scanning every ID for a value. `UniqueIndex.RemoveID`
+  still scans the index and remains open below.
+- **E9** — `InodeInit` records an initialized flag instead of calling
+  `Stats()` on every open, `newFS` writes the encryption marker only when it is
+  missing, and the umask is cached in the `FS` instead of read for every
+  create.
+
+Still open in this section:
+
+
 ## E1. [High] Non-chunked `fs.File.Write` rewrites the whole file on every write
 **Location:** `fs/file.go:125-180`; `loadData` (`fs/fs.go:555-600`) decrypts
 the entire file, then `Write` re-encrypts and rewrites it.

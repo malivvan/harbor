@@ -7,7 +7,6 @@ import (
 	"reflect"
 
 	"github.com/malivvan/storm/db/index"
-	"github.com/malivvan/storm/db/q"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -172,39 +171,34 @@ func (n *node) reIndex(ctx context.Context, tx *bolt.Tx, data interface{}, cfg *
 		return err
 	}
 
-	total, err := root.Count(ctx, data)
-	if err != nil {
+	// Collect the record keys first: updating a record mutates the bucket and
+	// a bbolt cursor must not be walked while it is being modified.
+	var keys [][]byte
+	if err := bucket.ForEach(func(k, v []byte) error {
+		if v == nil {
+			return nil // nested index/metadata bucket
+		}
+		keys = append(keys, append([]byte(nil), k...))
+		return nil
+	}); err != nil {
 		return err
 	}
 
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	for i := 0; i < total; i++ {
+	for _, key := range keys {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
-
-		err = root.Select(q.True()).Skip(i).First(ctx, data)
-		if err != nil {
+		raw := bucket.Get(key)
+		if raw == nil {
+			continue
+		}
+		if err := root.unmarshal(raw, data); err != nil {
 			return err
 		}
-
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-
-		err = root.Update(ctx, data)
-		if err != nil {
-			return err
-		}
-
-		if err := checkContext(ctx); err != nil {
+		if err := root.Update(ctx, data); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -331,21 +325,25 @@ func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data in
 		}
 
 		var found bool
-		idsSaved, err := idx.All(ctx, value, nil)
+		if checker, ok := idx.(interface {
+			HasValueID(context.Context, []byte, []byte) (bool, error)
+		}); ok {
+			found, err = checker.HasValueID(ctx, value, id)
+		} else {
+			var idsSaved [][]byte
+			idsSaved, err = idx.All(ctx, value, nil)
+			for _, idSaved := range idsSaved {
+				if bytes.Equal(idSaved, id) {
+					found = true
+					break
+				}
+			}
+		}
 		if err != nil {
 			return err
 		}
 		if err := checkContext(ctx); err != nil {
 			return err
-		}
-		for _, idSaved := range idsSaved {
-			if err := checkContext(ctx); err != nil {
-				return err
-			}
-			if bytes.Equal(idSaved, id) {
-				found = true
-				break
-			}
 		}
 
 		if found {

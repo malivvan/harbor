@@ -37,6 +37,9 @@ type FS struct {
 	// file I/O without a data race. A nil value means encryption is disabled.
 	enc atomic.Pointer[encState]
 
+	// umask caches the persisted creation mask.
+	umask atomic.Uint32
+
 	// mu serializes inode load-modify-save cycles so concurrent operations on
 	// the same directory or inode do not lose updates. Read paths take RLock so
 	// a multi-transaction read cannot observe a concurrent mutation.
@@ -78,8 +81,7 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FS, error) {
 		}
 		b := newFsBucket(bb)
 		b.enc = enc
-		if enc != nil {
-			hadMarker := b.state.Get([]byte(markerKey)) != nil
+		if enc != nil && b.state.Get([]byte(markerKey)) == nil {
 			raw, err := enc.encodeMarker()
 			if err != nil {
 				return err
@@ -87,7 +89,7 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FS, error) {
 			if err := b.state.Put([]byte(markerKey), raw); err != nil {
 				return err
 			}
-			if !hadMarker {
+			{
 				// An otherwise empty plaintext filesystem may contain the two
 				// system inodes; re-encode them with the new encryption state.
 				for ino := uint64(0); ino <= 1; ino++ {
@@ -115,10 +117,11 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FS, error) {
 		// load the
 		data := make([]byte, 4)
 		binary.BigEndian.PutUint32(data, uint32(0022))
-		_, err = b.LoadOrSet("umask", data)
+		umaskData, err := b.LoadOrSet("umask", data)
 		if err != nil {
 			return err
 		}
+		fs.umask.Store(binary.BigEndian.Uint32(umaskData))
 
 		// load the root Ino if one is available
 		data, err = b.LoadOrSet("rootIno", i2b(rootIno))
@@ -216,24 +219,13 @@ func (fs *FS) SetCacheSize(size int) {
 // permission bits requested for new files and directories. Returns 0022 if an
 // error occurs.
 func (fs *FS) Umask() os.FileMode {
-	var umask os.FileMode
-	err := fs.db.View(func(tx *bolt.Tx) error {
-		b, err := fs.openFsBucket(tx)
-		if err != nil {
-			return err
-		}
-		data, err := b.Get("umask")
-		if err != nil {
-			return err
-		}
-		umask = os.FileMode(binary.BigEndian.Uint32(data))
-		return nil
-	})
-	if err != nil {
-		// Return the default umask on error instead of panicking.
+	if fs == nil {
 		return 0022
 	}
-
+	umask := os.FileMode(fs.umask.Load())
+	if umask == 0 {
+		return 0022
+	}
 	return umask
 }
 
@@ -251,11 +243,10 @@ func (fs *FS) SetUmask(umask os.FileMode) {
 		return b.Put("umask", data[:])
 	})
 	if err != nil {
-		// Silently ignore errors to maintain backwards compatibility
-		// Callers who need error handling should use a wrapper or check state
+		// Silently ignore errors to maintain backwards compatibility.
 		return
 	}
-
+	fs.umask.Store(uint32(umask))
 }
 
 // TempDir returns the path to a temporary directory. Returns "/tmp" if an error occurs.
