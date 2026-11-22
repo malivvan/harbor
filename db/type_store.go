@@ -195,7 +195,10 @@ func (n *node) reIndex(ctx context.Context, tx *bolt.Tx, data interface{}, cfg *
 		if err := root.unmarshal(raw, data); err != nil {
 			return err
 		}
-		if err := root.Update(ctx, data); err != nil {
+		cfg.refresh()
+		// Re-index the record we already decoded instead of going through
+		// Update, which would fetch and decode it a second time.
+		if err := root.save(ctx, tx, cfg, data, true); err != nil {
 			return err
 		}
 	}

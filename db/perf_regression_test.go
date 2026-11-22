@@ -239,3 +239,25 @@ func TestIncrementTaggedIDUsesDirectKeyPath(t *testing.T) {
 	require.Len(t, byName, 1)
 	require.Equal(t, 42, byName[0].ID)
 }
+
+func TestReIndexDecodesEachRecordOnce(t *testing.T) {
+	ctx := context.Background()
+	cc := &countingCodec{}
+	db, cleanup := createDB(t, testCodec(cc))
+	defer cleanup()
+
+	for i := 0; i < 5; i++ {
+		u := User{Name: "John", Group: "Staff"}
+		require.NoError(t, db.Save(ctx, &u))
+	}
+
+	cc.unmarshals.Store(0)
+	require.NoError(t, db.ReIndex(ctx, &User{}))
+	require.EqualValues(t, 5, cc.unmarshals.Load(),
+		"ReIndex should decode every record exactly once")
+
+	// Indexes still work after the rebuild.
+	var found []User
+	require.NoError(t, db.Find(ctx, "Name", "John", &found))
+	require.Len(t, found, 5)
+}

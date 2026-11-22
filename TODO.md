@@ -174,6 +174,8 @@ so "defeating SIMD" is not a concern here.
   counter/random scheme.
 
 ### 1.11 `ReIndex` decodes and re-reads each record ~2-3× — MEDIUM
+
+> **Status:** ✅ FIXED — `ReIndex` unmarshals each record once and re-saves it directly with the reused config (after `cfg.refresh()`), instead of calling `Update`, which fetched and decoded the record again.
 - **Location:** `db/type_store.go:187-201` → `root.Update` → `update` (`db/type_store.go:479-505`)
   does a `One` (decode #2) + `extract` again before `save`.
 - **Problem:** A full reindex costs ~2-3 decodes and 2 `extract`s per record.

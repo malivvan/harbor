@@ -335,6 +335,16 @@ func extractField(value *reflect.Value, field *reflect.StructField, m *structCon
 	return nil
 }
 
+// refresh recomputes the dynamic (value-dependent) part of a config whose
+// Value pointers alias a record that was decoded in place.
+func (m *structConfig) refresh() {
+	for _, f := range m.Fields {
+		if f.Value != nil && f.Value.IsValid() {
+			f.IsZero = isZero(f.Value)
+		}
+	}
+}
+
 func extractSingleField(ref *reflect.Value, fieldName string) (*structConfig, error) {
 	var cfg structConfig
 	cfg.Fields = make(map[string]*fieldConfig)
