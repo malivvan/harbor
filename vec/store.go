@@ -17,6 +17,9 @@ import (
 
 const Name = "vec"
 
+// ErrClosed is returned when an operation targets a closed store.
+var ErrClosed = errors.New("vec: storage is closed")
+
 const collectionsMetaBucket = "__collections_meta__"
 
 // reservedTopLevelBuckets are the top-level buckets Storm itself creates in a
@@ -326,7 +329,7 @@ var ErrStorageNotOpen = errors.New("storage is not open")
 // database returns an error instead of panicking.
 func (s *Store) checkOpen() error {
 	if s.closed.Load() {
-		return fmt.Errorf("storage is closed")
+		return ErrClosed
 	}
 	if s.db == nil {
 		return ErrStorageNotOpen

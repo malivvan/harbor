@@ -26,6 +26,12 @@ type Collection struct {
 	writeBuf       []PointStruct // 缓冲写入的点，攒批后批量刷盘减少 fsync
 	flushThreshold int           // writeBuf 达到此大小时触发刷盘
 	lastVersion    uint64        // last store-managed Version handed out
+
+	// tombMu guards tombstones: IDs deleted while a flush batch was detached.
+	// A failed flush re-buffers the detached batch; filtering it against these
+	// tombstones prevents a later Flush from resurrecting deleted points.
+	tombMu     sync.Mutex
+	tombstones map[string]struct{}
 }
 
 // DefaultFlushThreshold 默认写入缓冲阈值（点数量）。
@@ -198,10 +204,11 @@ func (c *Collection) Upsert(points []PointStruct) error {
 	c.storage.flushMu.Unlock()
 	if err != nil {
 		c.mu.Lock()
-		c.writeBuf = append(flush, c.writeBuf...)
+		c.rebuffer(flush)
 		c.mu.Unlock()
 		return fmt.Errorf("failed to flush buffer to bbolt: %w", err)
 	}
+	c.clearTombstones()
 	return nil
 }
 
@@ -222,10 +229,11 @@ func (c *Collection) Flush() error {
 	c.storage.flushMu.Unlock()
 	if err != nil {
 		c.mu.Lock()
-		c.writeBuf = append(flush, c.writeBuf...)
+		c.rebuffer(flush)
 		c.mu.Unlock()
 		return fmt.Errorf("failed to flush buffer to bbolt: %w", err)
 	}
+	c.clearTombstones()
 	return nil
 }
 
@@ -311,6 +319,18 @@ func (c *Collection) Delete(points []string, filter *Filter) (int, error) {
 	if c.storage != nil {
 		c.storage.flushMu.Lock()
 		err := c.storage.DeletePoints(c.Name, targetIDs)
+		if err == nil {
+			// Record the IDs before releasing flushMu: a failed in-flight
+			// flush may re-buffer its batch afterwards, and must filter these.
+			c.tombMu.Lock()
+			if c.tombstones == nil {
+				c.tombstones = make(map[string]struct{}, len(targetIDs))
+			}
+			for _, id := range targetIDs {
+				c.tombstones[id] = struct{}{}
+			}
+			c.tombMu.Unlock()
+		}
 		c.storage.flushMu.Unlock()
 		if err != nil {
 			return 0, fmt.Errorf("failed to delete from storage: %w", err)
@@ -347,4 +367,30 @@ func (c *Collection) Delete(points []string, filter *Filter) (int, error) {
 	}
 
 	return successCount, nil
+}
+
+// rebuffer prepends a batch detached by a failed flush to writeBuf, dropping
+// points deleted while the batch was in flight. Must be called with c.mu held.
+func (c *Collection) rebuffer(flush []PointStruct) {
+	c.tombMu.Lock()
+	if len(c.tombstones) > 0 {
+		kept := flush[:0]
+		for _, p := range flush {
+			if _, dead := c.tombstones[p.ID]; !dead {
+				kept = append(kept, p)
+			}
+		}
+		flush = kept
+		c.tombstones = nil
+	}
+	c.tombMu.Unlock()
+	c.writeBuf = append(flush, c.writeBuf...)
+}
+
+// clearTombstones drops the delete tombstones after a successful commit. Any
+// batch they applied to has already been persisted or filtered.
+func (c *Collection) clearTombstones() {
+	c.tombMu.Lock()
+	c.tombstones = nil
+	c.tombMu.Unlock()
 }

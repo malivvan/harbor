@@ -698,19 +698,26 @@ func (s *Store) Close() error {
 		return nil
 	}
 	// The vec store buffers points in memory; drain them before closing the
-	// shared handle. A flush failure leaves the store open so the caller can
-	// retry instead of silently losing writes.
+	// shared handle. A flush failure must not keep the bbolt handle (and its
+	// file lock) open forever: close it anyway and return the flush error.
+	var flushErr error
 	if s.vec != nil {
-		if err := s.vec.Flush(); err != nil {
-			return fmt.Errorf("storm: flush vec store: %w", err)
+		if err := s.vec.Flush(); err != nil && !errors.Is(err, vec.ErrClosed) {
+			flushErr = fmt.Errorf("storm: flush vec store: %w", err)
 		}
 	}
-	err := s.bs.Close()
+	closeErr := s.bs.Close()
 	s.bs = nil
 	s.db = nil
 	s.fs = nil
 	s.ts = nil
 	s.vec = nil
 	s.kvc = nil
-	return err
+	if flushErr != nil && closeErr != nil {
+		return errors.Join(flushErr, closeErr)
+	}
+	if flushErr != nil {
+		return flushErr
+	}
+	return closeErr
 }

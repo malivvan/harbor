@@ -733,6 +733,18 @@ func (fs *FileSystem) ReadDir(name string) ([]iosfs.DirEntry, error) {
 		continuationToken = output.NextContinuationToken
 	}
 
+	// A missing path and a regular file must not look like an empty directory.
+	// Checked after listing so implicit directories (objects below a prefix but
+	// no marker) still work.
+	if len(entries) == 0 && name != "" {
+		if _, err := fs.client.HeadObject(fs.ctx, &HeadObjectInput{Bucket: fs.bucket, Key: name}); err == nil {
+			return nil, &os.PathError{Op: "readdir", Path: name, Err: syscall.ENOTDIR}
+		}
+		if _, err := fs.client.HeadObject(fs.ctx, &HeadObjectInput{Bucket: fs.bucket, Key: prefix}); err != nil {
+			return nil, &os.PathError{Op: "readdir", Path: name, Err: os.ErrNotExist}
+		}
+	}
+
 	// Display names are derived by trimming at "/", so listing order is not
 	// necessarily lexical (for example "a.txt" before "a"). Sort explicitly.
 	sort.Slice(entries, func(i, j int) bool {

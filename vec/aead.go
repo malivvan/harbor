@@ -36,7 +36,8 @@ type Config struct {
 
 	// EncryptPointIDs deterministically encrypts point IDs with AES-SIV, so
 	// exact lookups and deletes keep working while the stored keys no longer
-	// reveal them.
+	// reveal them. It also encrypts the stored point value: the ID is part of
+	// that value, and encrypting only the key would leave it in plaintext.
 	EncryptPointIDs bool
 
 	// EncryptCollectionNames deterministically encrypts collection bucket and
@@ -363,8 +364,10 @@ func resolveConfig(cfg Config) (*encState, error) {
 	}
 
 	state := &encState{
-		kc:        kc,
-		encPoints: cfg.EncryptPoints,
+		kc: kc,
+		// The ID is stored inside the point value, so encrypting only the key
+		// would leave it readable.
+		encPoints: cfg.EncryptPoints || cfg.EncryptPointIDs,
 		encIDs:    cfg.EncryptPointIDs,
 		encNames:  cfg.EncryptCollectionNames,
 	}
