@@ -7,11 +7,9 @@
 // Metadata detects a wrong password even for stores created with encryption
 // disabled.
 //
-// The key/value API (Get, Set, Delete, Has, Keys, Len) uses its own bucket, so
-// user keys never collide with store Metadata. When the store was created with
-// EncryptKVValues (included in EncryptAll, the default), values are sealed with
-// a dedicated AES-256-GCM key; keys stay in the clear so byte-ordered listing
-// keeps working. Use EncryptNone/Plaintext to opt out.
+// The sub-stores are reached through DB, FS, TS and Vec. Flags reports the
+// persisted encryption flags and Meta reports the KDF parameters. Use
+// EncryptNone/Plaintext to create an unencrypted store.
 package harbor
 
 import (
@@ -31,10 +29,6 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// The key/value API uses bucket 0. Store Metadata lives in its own
-// "harbor.Metadata" bucket (see meta.go), so user keys can never collide with it.
-var kvBucket = []byte{0}
-
 // namedRoot returns the default one-element bucket path for a sub-store.
 func namedRoot(name string) [][]byte {
 	return [][]byte{[]byte(name)}
@@ -46,17 +40,10 @@ const (
 	labelFS  = "harbor/fs/v1"
 	labelTS  = "harbor/ts/v1"
 	labelVec = "harbor/vec/v1"
-	labelKV  = "harbor/kv/v1"
 )
 
 // Errors returned by the package.
 var (
-	// ErrKeyNotFound is returned by Get for a missing key.
-	ErrKeyNotFound = errors.New("harbor: key not found")
-
-	// ErrInvalidKey is returned by Set, Delete and Has for an empty key.
-	ErrInvalidKey = errors.New("harbor: empty key")
-
 	// ErrClosed is returned by operations on a closed Store.
 	ErrClosed = errors.New("harbor: store is closed")
 
@@ -123,10 +110,6 @@ type Store struct {
 	fs  *fs.Store
 	ts  *ts.Store
 	vec *vec.Store
-
-	// kvc seals key/value payloads when EncryptKVValues is set. A nil keychain
-	// leaves the bucket in plaintext.
-	kvc *crypto.Keychain
 }
 
 // storeKeys holds the per-component keys derived for one Open call. They are
@@ -137,14 +120,13 @@ type storeKeys struct {
 	fs     []byte
 	ts     []byte
 	vec    []byte
-	kv     []byte
 }
 
 func (k *storeKeys) wipe() {
 	if k == nil {
 		return
 	}
-	for _, b := range [][]byte{k.canary, k.db, k.fs, k.ts, k.vec, k.kv} {
+	for _, b := range [][]byte{k.canary, k.db, k.fs, k.ts, k.vec} {
 		wipe(b)
 	}
 }
@@ -217,11 +199,6 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptSeriesNames: hasFlag(md.Flags, EncryptTSSeriesNames),
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open ts store: %w", err)
-	}
-	if hasFlag(md.Flags, EncryptKVValues) {
-		if s.kvc, err = crypto.NewKeychain([][]byte{keys.kv}); err != nil {
-			return nil, fmt.Errorf("harbor: open key/value store: %w", err)
-		}
 	}
 	if s.vec, err = vec.Open(ctx, bdb, vec.Config{
 		Root:                   namedRoot(vec.Name),
@@ -410,7 +387,6 @@ func deriveKeys(password string, salt []byte, time, memory uint32, threads uint8
 		{labelFS, &keys.fs},
 		{labelTS, &keys.ts},
 		{labelVec, &keys.vec},
-		{labelKV, &keys.kv},
 	}
 	for _, item := range labels {
 		*item.dst, err = derive(item.label)
@@ -465,10 +441,10 @@ func (s *Store) Vec() *vec.Store {
 	return storeComponent(s, func(s *Store) *vec.Store { return s.vec })
 }
 
-// EncryptFlags returns the encryption flags persisted by the store. A closed
-// store returns EncryptNone.
-func (s *Store) EncryptFlags() uint16 {
-	_, _, _, _, flags, err := s.Metadata()
+// Flags returns the encryption flags persisted by the store. A closed store
+// returns EncryptNone.
+func (s *Store) Flags() uint16 {
+	_, _, _, _, flags, err := s.Meta()
 	if err != nil {
 		return EncryptNone
 	}
@@ -488,199 +464,6 @@ func (s *Store) withDB(fn func(*bolt.DB) error) error {
 		return ErrClosed
 	}
 	return fn(s.bs)
-}
-
-// sealValue encrypts a key/value payload when EncryptKVValues is enabled.
-func (s *Store) sealValue(plain []byte) ([]byte, error) {
-	if s.kvc == nil {
-		return plain, nil
-	}
-	sealed, err := s.kvc.Seal(plain)
-	if err != nil {
-		return nil, fmt.Errorf("harbor: seal value: %w", err)
-	}
-	return sealed, nil
-}
-
-// openValue reverses sealValue.
-func (s *Store) openValue(key string, raw []byte) ([]byte, error) {
-	if s.kvc == nil {
-		return raw, nil
-	}
-	plain, err := s.kvc.Open(raw)
-	if err != nil {
-		return nil, fmt.Errorf("harbor: open value %q: %w", key, err)
-	}
-	return plain, nil
-}
-
-// lookup returns the decoded value and presence of key. It takes the store
-// read lock once and checks the closed state before the caller validates the
-// key, preserving the ErrClosed-precedence contract.
-func (s *Store) lookup(key string) (value string, found bool, err error) {
-	if s == nil {
-		return "", false, ErrClosed
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.bs == nil {
-		return "", false, ErrClosed
-	}
-	return s.lookupLocked(key)
-}
-
-// lookupLocked is lookup for callers that already hold the read lock.
-func (s *Store) lookupLocked(key string) (value string, found bool, err error) {
-	err = s.bs.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(kvBucket)
-		if b == nil {
-			return nil
-		}
-		raw := b.Get([]byte(key))
-		if raw == nil {
-			return nil
-		}
-		decoded, err := s.openValue(key, raw)
-		if err != nil {
-			return err
-		}
-		value = string(decoded)
-		found = true
-		return nil
-	})
-	return value, found, err
-}
-
-// Get returns the value stored under key. An empty key returns ErrInvalidKey,
-// and a nil or closed store returns ErrClosed before the key is validated.
-func (s *Store) Get(key string) (string, error) {
-	value, found, err := s.lookup(key)
-	if err != nil {
-		return "", err
-	}
-	if key == "" {
-		return "", ErrInvalidKey
-	}
-	if !found {
-		return "", ErrKeyNotFound
-	}
-	return value, nil
-}
-
-// Set stores key/value in the key/value bucket. An empty value removes the key.
-func (s *Store) Set(key, val string) error {
-	if s == nil {
-		return ErrClosed
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.bs == nil {
-		return ErrClosed
-	}
-	if key == "" {
-		return ErrInvalidKey
-	}
-	return s.bs.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists(kvBucket)
-		if err != nil {
-			return err
-		}
-		if val == "" {
-			return b.Delete([]byte(key))
-		}
-		raw, err := s.sealValue([]byte(val))
-		if err != nil {
-			return err
-		}
-		return b.Put([]byte(key), raw)
-	})
-}
-
-// Delete removes key. Deleting a missing key is not an error.
-func (s *Store) Delete(key string) error {
-	if s == nil {
-		return ErrClosed
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.bs == nil {
-		return ErrClosed
-	}
-	if key == "" {
-		return ErrInvalidKey
-	}
-	return s.bs.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(kvBucket)
-		if b == nil {
-			return nil
-		}
-		return b.Delete([]byte(key))
-	})
-}
-
-// Has reports whether key exists.
-func (s *Store) Has(key string) (bool, error) {
-	_, found, err := s.lookup(key)
-	if err != nil {
-		return false, err
-	}
-	if key == "" {
-		return false, ErrInvalidKey
-	}
-	return found, nil
-}
-
-// Keys returns all keys in byte order. Nested buckets are skipped.
-func (s *Store) Keys() ([]string, error) {
-	if s == nil {
-		return nil, ErrClosed
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.bs == nil {
-		return nil, ErrClosed
-	}
-
-	var keys []string
-	err := s.bs.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(kvBucket)
-		if b == nil {
-			return nil
-		}
-		keys = make([]string, 0, b.Stats().KeyN)
-		c := b.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if v == nil {
-				continue
-			}
-			keys = append(keys, string(k))
-		}
-		return nil
-	})
-	return keys, err
-}
-
-// Len returns the number of keys in the key/value bucket.
-func (s *Store) Len() (int, error) {
-	if s == nil {
-		return 0, ErrClosed
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.bs == nil {
-		return 0, ErrClosed
-	}
-
-	// The key/value bucket never contains nested buckets, so KeyN is an exact
-	// O(1) count instead of a full cursor walk.
-	n := 0
-	err := s.bs.View(func(tx *bolt.Tx) error {
-		if b := tx.Bucket(kvBucket); b != nil {
-			n = b.Stats().KeyN
-		}
-		return nil
-	})
-	return n, err
 }
 
 // Close closes the underlying database. It is safe to call more than once, and
@@ -712,7 +495,6 @@ func (s *Store) Close() error {
 	s.fs = nil
 	s.ts = nil
 	s.vec = nil
-	s.kvc = nil
 	if flushErr != nil && closeErr != nil {
 		return errors.Join(flushErr, closeErr)
 	}

@@ -56,7 +56,7 @@ This module contains several packages:
 - `vec` — a vector store with Flat and HNSW indexes, filters, quantization and
   optional encryption.
 - `harbor` (the module root) — opens one bbolt file behind one password and
-  exposes the `DB`, `FS`, `TS` and `Vec` sub-stores plus a small key/value API.
+  exposes the `DB`, `FS`, `TS` and `Vec` sub-stores.
 
 The API reference below covers `db` and `ts`; the other packages are summarized
 in this section.
@@ -73,11 +73,6 @@ if err != nil {
     log.Fatal(err)
 }
 defer store.Close()
-
-// Key/value API. Values are sealed by default (EncryptKVValues); keys stay
-// readable so byte-ordered listing keeps working.
-_ = store.Set("feature:dark-mode", "on")
-value, _ := store.Get("feature:dark-mode")
 
 // Sub-stores share the same bbolt file and password.
 _ = store.DB().Save(ctx, &User{Name: "alice"})

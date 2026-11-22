@@ -27,13 +27,11 @@ const (
 	EncryptVecPointIDs
 	EncryptVecCollectionNames
 	EncryptVecPoints
-	EncryptKVValues
 	EncryptDB  = EncryptDBKeys | EncryptDBValues | EncryptDBMetadata
 	EncryptFS  = EncryptFSContent | EncryptFSMetadata
 	EncryptTS  = EncryptTSValues | EncryptTSSeriesNames
 	EncryptVec = EncryptVecPointIDs | EncryptVecCollectionNames | EncryptVecPoints
-	EncryptKV  = EncryptKVValues
-	EncryptAll = EncryptDB | EncryptFS | EncryptTS | EncryptVec | EncryptKV
+	EncryptAll = EncryptDB | EncryptFS | EncryptTS | EncryptVec
 )
 
 // hasFlag reports whether all bits in other are set in flags.
@@ -264,8 +262,7 @@ func validateMetadata(md Metadata) error {
 	return validateKDFParams(md.Time, md.Memory, md.Threads, md.Flags, ErrCorruptStore)
 }
 
-// writeMetadata persists the Metadata and creates the key/value bucket in one
-// transaction.
+// writeMetadata persists the Metadata in one transaction.
 func writeMetadata(bdb *bolt.DB, md Metadata) error {
 	if err := validateMetadata(md); err != nil {
 		return err
@@ -276,9 +273,6 @@ func writeMetadata(bdb *bolt.DB, md Metadata) error {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.CreateBucketIfNotExists(kvBucket); err != nil {
-			return err
-		}
 		return meta.Put(metadataRecordKey, raw)
 	})
 	if err != nil {
@@ -287,9 +281,9 @@ func writeMetadata(bdb *bolt.DB, md Metadata) error {
 	return nil
 }
 
-// Metadata returns the persisted salt, Argon2id cost parameters and encryption
+// Meta returns the persisted salt, Argon2id cost parameters and encryption
 // flags. A closed store returns ErrClosed.
-func (s *Store) Metadata() (salt []byte, time, memory uint32, threads uint8, flags uint16, err error) {
+func (s *Store) Meta() (salt []byte, time, memory uint32, threads uint8, flags uint16, err error) {
 	err = s.withDB(func(bdb *bolt.DB) error {
 		meta, init, err := readMetadata(bdb)
 		if err != nil {
