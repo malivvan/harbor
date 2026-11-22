@@ -352,18 +352,43 @@ func getIndex(bucket *bolt.Bucket, idxKind string, fieldName string) (index.Inde
 	var idx index.Index
 	var err error
 
+	name := []byte(indexPrefix + fieldName)
+
 	switch idxKind {
 	case tagID:
-		idx, err = index.NewIDIndex(bucket, []byte(indexPrefix+fieldName))
+		idx, err = index.NewIDIndex(bucket, name)
 	case tagUniqueIdx:
-		idx, err = index.NewUniqueIndex(bucket, []byte(indexPrefix+fieldName))
+		idx, err = index.NewUniqueIndex(bucket, name)
 	case tagIdx:
-		idx, err = index.NewListIndex(bucket, []byte(indexPrefix+fieldName))
+		if bucket.Writable() {
+			idx, err = index.NewListIndex(bucket, name)
+		} else {
+			// Read paths only need the value bucket; defer the IDs bucket.
+			idx, err = index.NewListIndexRead(bucket, name)
+		}
 	default:
 		err = ErrIdxNotFound
 	}
 
 	return idx, err
+}
+
+// resolveIndexes opens every index handle a config needs, once, so callers
+// that touch several indexed fields (or several records) do not re-open the
+// same buckets per field and per record.
+func resolveIndexes(bucket *bolt.Bucket, cfg *structConfig) (map[string]index.Index, error) {
+	indexes := make(map[string]index.Index, len(cfg.Fields))
+	for fieldName, fieldCfg := range cfg.Fields {
+		if fieldCfg.Index == "" {
+			continue
+		}
+		idx, err := getIndex(bucket, fieldCfg.Index, fieldName)
+		if err != nil {
+			return nil, err
+		}
+		indexes[fieldName] = idx
+	}
+	return indexes, nil
 }
 
 func isZero(v *reflect.Value) bool {

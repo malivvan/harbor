@@ -26,16 +26,48 @@ func NewListIndex(parent *bolt.Bucket, indexName []byte) (*ListIndex, error) {
 		}
 	}
 
-	ids, err := NewUniqueIndex(b, []byte("storm__ids"))
-	if err != nil {
-		return nil, wrapError("index new list", err)
-	}
-
-	return &ListIndex{
+	idx := &ListIndex{
 		IndexBucket: b,
 		Parent:      parent,
-		IDs:         ids,
-	}, nil
+	}
+
+	// The ID bucket is only needed to mutate the index. In a read-only
+	// transaction skip the extra bucket open and resolve it lazily.
+	if parent.Writable() {
+		ids, err := NewUniqueIndex(b, []byte("storm__ids"))
+		if err != nil {
+			return nil, wrapError("index new list", err)
+		}
+		idx.IDs = ids
+	}
+
+	return idx, nil
+}
+
+// NewListIndexRead opens a ListIndex for reading without opening its IDs
+// bucket. It is the read-only counterpart of NewListIndex.
+func NewListIndexRead(parent *bolt.Bucket, indexName []byte) (*ListIndex, error) {
+	if parent == nil || len(indexName) == 0 {
+		return nil, wrapError("index new list", ErrNilParam)
+	}
+	b := parent.Bucket(indexName)
+	if b == nil {
+		return nil, wrapError("index new list", ErrNotFound)
+	}
+	return &ListIndex{IndexBucket: b, Parent: parent}, nil
+}
+
+// ids returns the ID bucket, opening it on first use.
+func (idx *ListIndex) ids() (*UniqueIndex, error) {
+	if idx.IDs != nil {
+		return idx.IDs, nil
+	}
+	ids, err := NewUniqueIndex(idx.IndexBucket, []byte("storm__ids"))
+	if err != nil {
+		return nil, err
+	}
+	idx.IDs = ids
+	return ids, nil
 }
 
 // ListIndex is an index that references values and the corresponding IDs.
@@ -60,7 +92,12 @@ func (idx *ListIndex) Add(ctx context.Context, newValue []byte, targetID []byte)
 		return wrapError("index add", ErrNilParam)
 	}
 
-	key, err := idx.IDs.Get(ctx, targetID)
+	ids, err := idx.ids()
+	if err != nil {
+		return wrapError("index add", err)
+	}
+
+	key, err := ids.Get(ctx, targetID)
 	if err != nil {
 		return wrapError("index add", err)
 	}
@@ -79,7 +116,7 @@ func (idx *ListIndex) Add(ctx context.Context, newValue []byte, targetID []byte)
 			return wrapError("index add", err)
 		}
 
-		err = idx.IDs.Remove(ctx, targetID)
+		err = ids.Remove(ctx, targetID)
 		if err != nil {
 			return wrapError("index add", err)
 		}
@@ -95,7 +132,7 @@ func (idx *ListIndex) Add(ctx context.Context, newValue []byte, targetID []byte)
 
 	key = EncodeListKey(newValue, targetID)
 
-	err = idx.IDs.Add(ctx, targetID, key)
+	err = ids.Add(ctx, targetID, key)
 	if err != nil {
 		return wrapError("index add", err)
 	}
@@ -119,6 +156,11 @@ func (idx *ListIndex) Remove(ctx context.Context, value []byte) error {
 
 	var err error
 	var keys [][]byte
+
+	ids, err := idx.ids()
+	if err != nil {
+		return wrapError("index remove", err)
+	}
 
 	c := idx.IndexBucket.Cursor()
 	prefix := generatePrefix(value)
@@ -156,7 +198,7 @@ func (idx *ListIndex) Remove(ctx context.Context, value []byte) error {
 		// The IDs bucket is keyed by the target ID, which sits between the
 		// "<value>__" prefix and the trailing value-length word.
 		id := k[len(prefix) : len(k)-listValueLenSize]
-		err = idx.IDs.RemoveID(ctx, id)
+		err = ids.RemoveID(ctx, id)
 		if err != nil {
 			return wrapError("index remove", err)
 		}
@@ -171,15 +213,19 @@ func (idx *ListIndex) HasValueID(ctx context.Context, value, id []byte) (bool, e
 	if err := checkContext(ctx); err != nil {
 		return false, wrapError("index has value id", err)
 	}
-	key, err := idx.IDs.Get(ctx, id)
-	if err != nil || key == nil {
+	ids, err := idx.ids()
+	if err != nil {
+		return false, wrapError("index has value id", err)
+	}
+	entry, err := ids.Get(ctx, id)
+	if err != nil || entry == nil {
 		return false, err
 	}
 	prefix := generatePrefix(value)
 	if prefix == nil {
 		return false, nil
 	}
-	return bytes.HasPrefix(key, prefix), nil
+	return bytes.HasPrefix(entry, prefix), nil
 }
 
 // RemoveID removes an ID from the list index
@@ -188,7 +234,12 @@ func (idx *ListIndex) RemoveID(ctx context.Context, targetID []byte) error {
 		return wrapError("index remove id", err)
 	}
 
-	value, err := idx.IDs.Get(ctx, targetID)
+	ids, err := idx.ids()
+	if err != nil {
+		return wrapError("index remove id", err)
+	}
+
+	value, err := ids.Get(ctx, targetID)
 	if err != nil {
 		return wrapError("index remove id", err)
 	}

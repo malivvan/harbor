@@ -659,10 +659,22 @@ func (d *deleteSink) flush(ctx context.Context) error {
 	}
 
 	// The scan is over at this point, so deleting keys no longer mutates a
-	// live cursor.
+	// live cursor. Index handles are resolved once per bucket instead of once
+	// per record and field.
+	indexes := make(map[*bolt.Bucket]map[string]index.Index)
 	for _, i := range d.pending {
 		if err := checkContext(ctx); err != nil {
 			return err
+		}
+
+		byField, ok := indexes[i.bucket]
+		if !ok {
+			var err error
+			byField, err = resolveIndexes(i.bucket, info)
+			if err != nil {
+				return err
+			}
+			indexes[i.bucket] = byField
 		}
 
 		for fieldName, fieldCfg := range info.Fields {
@@ -673,10 +685,7 @@ func (d *deleteSink) flush(ctx context.Context) error {
 			if fieldCfg.Index == "" {
 				continue
 			}
-			idx, err := getIndex(i.bucket, fieldCfg.Index, fieldName)
-			if err != nil {
-				return err
-			}
+			idx := byField[fieldName]
 
 			err = idx.RemoveID(ctx, i.k)
 			if err != nil {

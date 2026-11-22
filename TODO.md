@@ -81,6 +81,8 @@ so "defeating SIMD" is not a concern here.
   static cache.
 
 ### 1.4 `getIndex` rebuilds index wrappers (and re-opens buckets) per field per operation — HIGH
+
+> **Status:** ✅ FIXED — index handles are resolved once per operation (`resolveIndexes`) and reused across all fields and all matched records in save, delete-struct and query-delete; read-only list indexes use `NewListIndexRead` and open `storm__ids` lazily only when mutating. Regression test in `db/index/list_read_test.go`.
 - **Location:** `db/extract.go:238-254` (`getIndex`), `db/index/list.go:13-38`
   (`NewListIndex` opens two buckets), called per indexed field in `db/type_store.go:295` and at
   `db/finder.go:271,399,575,708`.

@@ -273,6 +273,15 @@ func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data in
 		return err
 	}
 
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	indexes, err := resolveIndexes(bucket, cfg)
+	if err != nil {
+		return err
+	}
+
 	for fieldName, fieldCfg := range cfg.Fields {
 		if err := checkContext(ctx); err != nil {
 			return err
@@ -292,10 +301,7 @@ func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data in
 			continue
 		}
 
-		idx, err := getIndex(bucket, fieldCfg.Index, fieldName)
-		if err != nil {
-			return err
-		}
+		idx := indexes[fieldName]
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -592,6 +598,11 @@ func (n *node) deleteStruct(ctx context.Context, tx *bolt.Tx, cfg *structConfig,
 		return ErrNotFound
 	}
 
+	indexes, err := resolveIndexes(bucket, cfg)
+	if err != nil {
+		return err
+	}
+
 	for fieldName, fieldCfg := range cfg.Fields {
 		if err := checkContext(ctx); err != nil {
 			return err
@@ -601,10 +612,7 @@ func (n *node) deleteStruct(ctx context.Context, tx *bolt.Tx, cfg *structConfig,
 			continue
 		}
 
-		idx, err := getIndex(bucket, fieldCfg.Index, fieldName)
-		if err != nil {
-			return err
-		}
+		idx := indexes[fieldName]
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
