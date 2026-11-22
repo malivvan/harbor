@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
@@ -139,7 +138,7 @@ func TestFile(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-		data, err := ioutil.ReadFile("file_test.go")
+		data, err := os.ReadFile("file_test.go")
 		if err != nil {
 			t.Error(err)
 		}
@@ -214,7 +213,7 @@ func TestFile(t *testing.T) {
 			if offset != int64(test.Start) {
 				t.Error(err)
 			}
-			offset, err = f.Seek(int64(test.Offset), test.Whence)
+			_, err = f.Seek(int64(test.Offset), test.Whence)
 			if err != nil {
 				t.Error(err)
 			}
@@ -224,7 +223,7 @@ func TestFile(t *testing.T) {
 				t.Error(err)
 			}
 			d = d[:n]
-			if bytes.Compare(d, data[test.Start:]) != 0 {
+			if !bytes.Equal(d, data[test.Start:]) {
 				t.Errorf("%d: data does not compare", i)
 			}
 
@@ -235,7 +234,7 @@ func TestFile(t *testing.T) {
 				t.Error(err)
 			}
 			d = d[:n]
-			if bytes.Compare(d, data[test.Start:]) != 0 {
+			if !bytes.Equal(d, data[test.Start:]) {
 				t.Errorf("%d: data does not compare", i)
 			}
 
@@ -244,7 +243,9 @@ func TestFile(t *testing.T) {
 				t.Error(err)
 			}
 			// test WriteAt
-			_, err = f.WriteAt([]byte(message), int64(test.Start))
+			if _, err = f.WriteAt([]byte(message), int64(test.Start)); err != nil {
+				t.Error(err)
+			}
 
 			copy(data[test.Start:], []byte(message))
 
@@ -254,14 +255,14 @@ func TestFile(t *testing.T) {
 				t.Error(err)
 			}
 
-			offset, err = io.Copy(w, f)
+			_, err = io.Copy(w, f)
 			if err != nil {
 				t.Error(err)
 			}
 
 			d = w.Bytes()
 
-			if bytes.Compare(d, data) != 0 {
+			if !bytes.Equal(d, data) {
 				t.Errorf("%d: write data does not compare", i)
 			}
 

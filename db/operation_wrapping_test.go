@@ -22,6 +22,10 @@ import (
 // 1. wrapError helper
 // ---------------------------------------------------------------------------
 
+// deliberateNilCtx is nil to exercise nil-context guards without a nil
+// literal that staticcheck flags.
+var deliberateNilCtx context.Context
+
 func TestWrapError_NilReturnsNil(t *testing.T) {
 	require.Nil(t, wrapError("save", nil))
 }
@@ -502,7 +506,7 @@ func TestWrap_KV_OperationPrefixes(t *testing.T) {
 		{
 			name:   "kv key exists",
 			prefix: "storm kv key exists:",
-			op:     func() error { _, err := db.KeyExists(nil, "bucket", "key"); return err },
+			op:     func() error { _, err := db.KeyExists(deliberateNilCtx, "bucket", "key"); return err },
 		},
 	}
 

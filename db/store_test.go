@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"math"
-	"math/bits"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,8 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
-
-const maxInt = 1<<(bits.UintSize-1) - 1
 
 func TestNewStorm(t *testing.T) {
 	db, err := Open(context.Background(), nil, Config{})

@@ -12,6 +12,7 @@ import (
 
 	"github.com/malivvan/binco"
 	"go.etcd.io/bbolt"
+	bolterrors "go.etcd.io/bbolt/errors"
 )
 
 const Name = "vec"
@@ -954,11 +955,11 @@ func (s *Store) DropCollection(name string) error {
 		// Delete collection bucket under the configured root.
 		if len(s.root) > 0 {
 			if root := s.rootBucket(tx); root != nil {
-				if err := root.DeleteBucket(key); err != nil && err != bbolt.ErrBucketNotFound {
+				if err := root.DeleteBucket(key); err != nil && err != bolterrors.ErrBucketNotFound {
 					return fmt.Errorf("failed to delete bucket: %w", err)
 				}
 			}
-		} else if err := tx.DeleteBucket(key); err != nil && err != bbolt.ErrBucketNotFound {
+		} else if err := tx.DeleteBucket(key); err != nil && err != bolterrors.ErrBucketNotFound {
 			return fmt.Errorf("failed to delete bucket: %w", err)
 		}
 

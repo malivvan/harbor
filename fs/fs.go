@@ -21,7 +21,6 @@ import (
 )
 
 var errNilIno = errors.New("ino is nil")
-var errNoData = errors.New("no data")
 
 // FS implements absfs.FileSystem for the boltdb packages `github.com/coreos/bbolt`.
 type FS struct {

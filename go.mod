@@ -1,6 +1,6 @@
 module github.com/malivvan/storm
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/malivvan/binco v0.9.0

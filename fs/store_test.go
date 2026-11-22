@@ -73,6 +73,7 @@ func assertFSBucket(t *testing.T, db *bolt.DB, parts ...string) {
 func TestStoreOpen(t *testing.T) {
 	ctx := context.Background()
 
+	//lint:ignore SA1012 deliberately nil to exercise the guard
 	store, err := Open(nil, nil, Config{})
 	if !errors.Is(err, ErrNilContext) {
 		t.Fatalf("expected ErrNilContext, got %v", err)

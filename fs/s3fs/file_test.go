@@ -712,7 +712,7 @@ func TestClose_DoubleClose(t *testing.T) {
 	}
 
 	// Second close should not panic
-	err = f.Close()
+	_ = f.Close()
 	// This may or may not error depending on implementation
 	// Just verify no panic
 }

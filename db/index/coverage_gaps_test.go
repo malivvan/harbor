@@ -222,7 +222,7 @@ func TestIndexConstructorErrors(t *testing.T) {
 }
 
 func TestIndexNilContextAndLazyIDErrors(t *testing.T) {
-	//nolint:staticcheck // deliberately nil to exercise the guard
+	//lint:ignore SA1012 deliberately nil to exercise the guard
 	require.ErrorIs(t, checkContext(nil), ErrNilContext)
 
 	ctx := context.Background()

@@ -67,7 +67,7 @@ func ParseFileMode(input string) (os.FileMode, error) {
 			continue
 		}
 		if int(c) != permissions[i][0] {
-			return 0, fmt.Errorf("unable to parse file mode string unrecognized character %q at %d.", string(input[i+1]), i+1)
+			return 0, fmt.Errorf("unable to parse file mode string: unrecognized character %q at %d", string(input[i+1]), i+1)
 		}
 		mode |= os.FileMode(permissions[i][1])
 	}

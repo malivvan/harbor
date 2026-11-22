@@ -34,7 +34,7 @@ func (e fsTestEntry) Name() string        { return e.name }
 func (e fsTestEntry) IsDir() bool         { return e.mode.IsDir() }
 func (e fsTestEntry) Type() iofs.FileMode { return e.mode.Type() }
 func (e fsTestEntry) Info() (iofs.FileInfo, error) {
-	return fsTestInfo{e.name, e.mode}, nil
+	return fsTestInfo(e), nil
 }
 
 // linkWalkFiler is an in-memory absfs.Filer where "/link" is a symlink whose

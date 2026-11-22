@@ -160,46 +160,6 @@ func (m *mockFiler) Sub(dir string) (fs.FS, error) {
 	return FilerToFS(m, dir)
 }
 
-// mockSubFiler wraps mockFiler with a path prefix
-type mockSubFiler struct {
-	parent *mockFiler
-	prefix string
-}
-
-func (s *mockSubFiler) OpenFile(name string, flag int, perm os.FileMode) (File, error) {
-	return s.parent.OpenFile(filepath.Join(s.prefix, name), flag, perm)
-}
-func (s *mockSubFiler) Mkdir(name string, perm os.FileMode) error {
-	return s.parent.Mkdir(filepath.Join(s.prefix, name), perm)
-}
-func (s *mockSubFiler) Remove(name string) error {
-	return s.parent.Remove(filepath.Join(s.prefix, name))
-}
-func (s *mockSubFiler) Rename(oldpath, newpath string) error {
-	return s.parent.Rename(filepath.Join(s.prefix, oldpath), filepath.Join(s.prefix, newpath))
-}
-func (s *mockSubFiler) Stat(name string) (os.FileInfo, error) {
-	return s.parent.Stat(filepath.Join(s.prefix, name))
-}
-func (s *mockSubFiler) Chmod(name string, mode os.FileMode) error {
-	return s.parent.Chmod(filepath.Join(s.prefix, name), mode)
-}
-func (s *mockSubFiler) Chtimes(name string, atime time.Time, mtime time.Time) error {
-	return s.parent.Chtimes(filepath.Join(s.prefix, name), atime, mtime)
-}
-func (s *mockSubFiler) Chown(name string, uid, gid int) error {
-	return s.parent.Chown(filepath.Join(s.prefix, name), uid, gid)
-}
-func (s *mockSubFiler) ReadDir(name string) ([]fs.DirEntry, error) {
-	return s.parent.ReadDir(filepath.Join(s.prefix, name))
-}
-func (s *mockSubFiler) ReadFile(name string) ([]byte, error) {
-	return s.parent.ReadFile(filepath.Join(s.prefix, name))
-}
-func (s *mockSubFiler) Sub(dir string) (fs.FS, error) {
-	return s.parent.Sub(filepath.Join(s.prefix, dir))
-}
-
 // mockFile represents a file in the mock filesystem
 type mockFile struct {
 	name    string

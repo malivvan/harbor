@@ -46,7 +46,7 @@ func Test_newFsBucket(t *testing.T) {
 		bucketpath := tt.args.bucketpath
 		var want *fsBucket
 
-		err = db.Update(func(tx *bolt.Tx) error {
+		if err = db.Update(func(tx *bolt.Tx) error {
 
 			// create buckets
 			err := bucketInit(tx, bucketpath)
@@ -85,7 +85,9 @@ func Test_newFsBucket(t *testing.T) {
 				t.Errorf("newFsBucket(, %q) = %v, want %v", bucketpath, got, want)
 			}
 			return nil
-		})
+		}); err != nil {
+			t.Error(err)
+		}
 	}
 }
 
@@ -268,7 +270,6 @@ func Test_fsBucket_LoadOrSet(t *testing.T) {
 				if !reflect.DeepEqual(got, test.want) {
 					t.Errorf("fsBucket.LoadOrSet() = %v, want %v", got, test.want)
 				}
-				return
 			})
 
 		}

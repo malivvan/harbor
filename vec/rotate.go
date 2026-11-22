@@ -7,6 +7,7 @@ import (
 
 	"github.com/malivvan/storm/internal/encryption"
 	"go.etcd.io/bbolt"
+	bolterrors "go.etcd.io/bbolt/errors"
 )
 
 // withRotationKey returns the state a single-collection rotation moves onto: the
@@ -536,7 +537,7 @@ func (r *rotation) deleteBucket(tx *bbolt.Tx, name []byte) error {
 	} else if root := r.store.rootBucket(tx); root != nil {
 		err = root.DeleteBucket(name)
 	}
-	if err != nil && err != bbolt.ErrBucketNotFound {
+	if err != nil && err != bolterrors.ErrBucketNotFound {
 		return err
 	}
 	return nil

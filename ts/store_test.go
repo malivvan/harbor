@@ -14,6 +14,9 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+// nilCtx is deliberately nil to exercise nil-context guards.
+var nilCtx context.Context
+
 func openTestStore(t *testing.T, root []byte) (*Store, *bolt.DB) {
 	t.Helper()
 
@@ -34,7 +37,7 @@ func openTestStore(t *testing.T, root []byte) (*Store, *bolt.DB) {
 func TestOpen(t *testing.T) {
 	ctx := context.Background()
 
-	store, err := Open(nil, nil, Config{})
+	store, err := Open(nilCtx, nil, Config{})
 	require.ErrorIs(t, err, ErrNilContext)
 	require.Nil(t, store)
 
@@ -420,35 +423,35 @@ func TestCoverageNilContext(t *testing.T) {
 	store, _ := openTestStore(t, nil)
 	se := store.Series("cpu")
 
-	_, err := se.Labels(nil)
+	_, err := se.Labels(nilCtx)
 	require.ErrorIs(t, err, ErrNilContext)
-	require.ErrorIs(t, se.SetLabels(nil, nil), ErrNilContext)
-	require.ErrorIs(t, se.Insert(nil, Point{Timestamp: 1}), ErrNilContext)
-	require.ErrorIs(t, se.InsertMany(nil, []Point{{Timestamp: 1}}), ErrNilContext)
-	_, err = se.Get(nil, 1)
+	require.ErrorIs(t, se.SetLabels(nilCtx, nil), ErrNilContext)
+	require.ErrorIs(t, se.Insert(nilCtx, Point{Timestamp: 1}), ErrNilContext)
+	require.ErrorIs(t, se.InsertMany(nilCtx, []Point{{Timestamp: 1}}), ErrNilContext)
+	_, err = se.Get(nilCtx, 1)
 	require.ErrorIs(t, err, ErrNilContext)
-	_, err = se.First(nil)
+	_, err = se.First(nilCtx)
 	require.ErrorIs(t, err, ErrNilContext)
-	_, err = se.Last(nil)
+	_, err = se.Last(nilCtx)
 	require.ErrorIs(t, err, ErrNilContext)
-	_, err = se.Range(nil, 0, 1)
+	_, err = se.Range(nilCtx, 0, 1)
 	require.ErrorIs(t, err, ErrNilContext)
-	require.ErrorIs(t, se.RangeEach(nil, 0, 1, func(Point) error { return nil }), ErrNilContext)
-	_, err = se.Count(nil)
+	require.ErrorIs(t, se.RangeEach(nilCtx, 0, 1, func(Point) error { return nil }), ErrNilContext)
+	_, err = se.Count(nilCtx)
 	require.ErrorIs(t, err, ErrNilContext)
-	_, err = se.DeleteRange(nil, 0, 1)
+	_, err = se.DeleteRange(nilCtx, 0, 1)
 	require.ErrorIs(t, err, ErrNilContext)
-	_, err = se.Aggregate(nil, 0, 1, 1, AggSum)
+	_, err = se.Aggregate(nilCtx, 0, 1, 1, AggSum)
 	require.ErrorIs(t, err, ErrNilContext)
-	require.ErrorIs(t, se.SetRetention(nil, Retention{MaxPoints: 1}), ErrNilContext)
-	_, err = se.Retention(nil)
+	require.ErrorIs(t, se.SetRetention(nilCtx, Retention{MaxPoints: 1}), ErrNilContext)
+	_, err = se.Retention(nilCtx)
 	require.ErrorIs(t, err, ErrNilContext)
-	_, err = se.EnforceRetention(nil, 0)
+	_, err = se.EnforceRetention(nilCtx, 0)
 	require.ErrorIs(t, err, ErrNilContext)
-	require.ErrorIs(t, se.Drop(nil), ErrNilContext)
+	require.ErrorIs(t, se.Drop(nilCtx), ErrNilContext)
 
-	require.ErrorIs(t, store.DeleteSeries(nil, "cpu"), ErrNilContext)
-	_, err = store.EnforceRetention(nil, 0)
+	require.ErrorIs(t, store.DeleteSeries(nilCtx, "cpu"), ErrNilContext)
+	_, err = store.EnforceRetention(nilCtx, 0)
 	require.ErrorIs(t, err, ErrNilContext)
 }
 

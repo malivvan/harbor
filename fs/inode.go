@@ -279,7 +279,7 @@ func (f *fsBucket) decodeNode(ino uint64, node *iNode) error {
 		return errNilNode
 	}
 	data := f.inodes.Get(i2b(ino))
-	if data == nil || len(data) == 0 {
+	if len(data) == 0 {
 		return os.ErrNotExist
 	}
 	plain, err := f.enc.openMetadata(data)
@@ -305,7 +305,7 @@ func (f *fsBucket) decodeRawNode(ino uint64, node *iNode) error {
 		return errNilNode
 	}
 	data := f.inodes.Get(i2b(ino))
-	if data == nil || len(data) == 0 {
+	if len(data) == 0 {
 		return os.ErrNotExist
 	}
 	return gob.NewDecoder(bytes.NewReader(data)).Decode(node)

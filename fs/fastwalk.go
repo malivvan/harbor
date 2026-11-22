@@ -15,10 +15,10 @@ import (
 // (avoids stat calls when only type information is needed).
 type FastWalkFunc func(path string, d fs.DirEntry, err error) error
 
-// TraverseLink is a sentinel error that can be returned from FastWalkFunc
+// ErrTraverseLink is a sentinel error that can be returned from FastWalkFunc
 // to indicate that a symlink should be traversed as a directory.
 // The caller is responsible for cycle detection.
-var TraverseLink = errors.New("traverse symlink, assuming target is a directory")
+var ErrTraverseLink = errors.New("traverse symlink, assuming target is a directory")
 
 // FastWalkConfig holds configuration options for FastWalk.
 type FastWalkConfig struct {
@@ -42,7 +42,7 @@ type FastWalkConfig struct {
 //
 // The fn must be safe for concurrent use as it may be called from multiple goroutines.
 // If fn returns filepath.SkipDir, the directory is skipped.
-// If fn returns TraverseLink for a symlink, it will be traversed as a directory.
+// If fn returns ErrTraverseLink for a symlink, it will be traversed as a directory.
 func FastWalk(filer absfs.Filer, root string, fn FastWalkFunc) error {
 	return FastWalkWithConfig(filer, root, nil, fn)
 }
@@ -224,7 +224,7 @@ func (w *genericWalker) readDir(dirName string) error {
 			if err == filepath.SkipDir {
 				continue
 			}
-			if err == TraverseLink || w.followSymlinks {
+			if err == ErrTraverseLink || w.followSymlinks {
 				w.enqueue(fastWalkItem{dir: joined, callbackDone: true})
 				continue
 			}
