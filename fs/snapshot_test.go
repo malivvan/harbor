@@ -375,7 +375,7 @@ func TestSnapshot_WriteOperationsFail(t *testing.T) {
 	}
 	defer snap.Release()
 
-	// All write operations should fail
+	// Copy write operations should fail
 	if err := snap.Mkdir("/test", 0755); err != os.ErrPermission {
 		t.Errorf("Mkdir should return ErrPermission, got %v", err)
 	}
@@ -566,7 +566,7 @@ func TestSnapshotManager_ReleaseAll(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// All snapshots should be released
+	// Copy snapshots should be released
 	for _, snap := range snaps {
 		_, err := snap.Stat("/")
 		if err != os.ErrClosed {
@@ -625,7 +625,7 @@ func TestSnapshot_CopyToFS(t *testing.T) {
 }
 
 // Helper function to read file contents
-func readFileContents(fs *FileSystem, path string) ([]byte, error) {
+func readFileContents(fs *FS, path string) ([]byte, error) {
 	file, err := fs.Open(path)
 	if err != nil {
 		return nil, err

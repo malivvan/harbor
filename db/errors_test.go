@@ -99,7 +99,7 @@ func TestNilContext_RootOperations(t *testing.T) {
 	require.NoError(t, db.Save(ctx, &User{ID: 1, Name: "test", Slug: "t1"}))
 
 	t.Run("Open", func(t *testing.T) {
-		db2, err := Open(nilCtx, nil, nil, Config{})
+		db2, err := Open(nilCtx, nil, Config{})
 		require.ErrorIs(t, err, ErrNilContext)
 		require.NotErrorIs(t, err, ErrNilParam)
 		require.Nil(t, db2)
@@ -355,7 +355,7 @@ func TestClassification_MissingIndex(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, db.Save(ctx, &User{ID: 1, Name: "test", Slug: "idx"}))
 
-	err := db.NativeDB().View(func(tx *bolt.Tx) error {
+	err := db.bolt.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte("User"))
 		if bucket == nil {
 			return ErrNotFound
@@ -422,15 +422,15 @@ func TestClassification_ExpiredContextNotErrNilContext(t *testing.T) {
 	require.NotErrorIs(t, err, ErrNilContext)
 }
 
-func TestClassification_ClosedNativeDB(t *testing.T) {
+func TestClassification_ClosedBoltDB(t *testing.T) {
 	bDB, err := bolt.Open(filepath.Join(t.TempDir(), "closed.db"), 0600, nil)
 	require.NoError(t, err)
 
-	db, err := Open(context.Background(), bDB, nil, Config{})
+	db, err := Open(context.Background(), bDB, Config{})
 	require.NoError(t, err)
 
-	// Close the underlying bolt.Store.
-	require.NoError(t, db.NativeDB().Close())
+	// Close the underlying bbolt database.
+	require.NoError(t, db.bolt.Close())
 
 	ctx := context.Background()
 	err = db.Save(ctx, &User{ID: 1, Name: "x", Slug: "x"})

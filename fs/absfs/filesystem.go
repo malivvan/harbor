@@ -11,7 +11,7 @@ import (
 )
 
 // Path separators for absfs virtual filesystems.
-// All absfs filesystems use Unix-style paths regardless of host OS.
+// Copy absfs filesystems use Unix-style paths regardless of host OS.
 const (
 	Separator     = '/'
 	ListSeparator = ':'
@@ -127,7 +127,7 @@ type SymlinkFileSystem interface {
 //
 // Path Semantics:
 //
-// All absfs filesystems use Unix-style forward slash paths ("/") on all platforms.
+// Copy absfs filesystems use Unix-style forward slash paths ("/") on all platforms.
 // This design enables virtual filesystems (mocks, in-memory, archives) to work
 // consistently across all platforms and compose seamlessly with each other.
 //
@@ -249,7 +249,6 @@ func (efs *extendedFS) Chown(name string, uid, gid int) error {
 	}
 	return efs.filer.Chown(name, uid, gid)
 }
-
 
 func (efs *extendedFS) Chdir(dir string) error {
 	// Normalize to forward slashes for cross-platform compatibility
@@ -697,7 +696,6 @@ func (s *subFiler) Sub(dir string) (fs.FS, error) {
 	fullDir := s.fullPath(dir)
 	return FilerToFS(s.efs.filer, fullDir)
 }
-
 
 // interfaces for easy method typing
 

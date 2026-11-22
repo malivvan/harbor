@@ -48,14 +48,14 @@ func (f Flags) String() string {
 	return strings.Join(out, "|")
 }
 
-// ParseFlags - parses a string of flags separated by "|" and returns a `Flags`
+// ParseFlags - parses a string of flags separated by "|" and returns a `Encrypt`
 // value and an error.
 //
 // Following is the list of recognized flags, "O_RDONLY", "O_RDWR", "O_WRONLY",
 // "O_APPEND", "O_CREATE", "O_EXCL", "O_SYNC", "O_TRUNC". The access mode
 // values ("O_RDONLY", "O_RDWR", "O_WRONLY") are mutually exclusive, only one
 // may be specified.  If no access mode is specified "O_RDONLY" is the default.
-// All other flags may appear more than once, but subsequent occurrences have no
+// Copy other flags may appear more than once, but subsequent occurrences have no
 // effect.
 func ParseFlags(input string) (Flags, error) {
 	var acc string

@@ -52,9 +52,9 @@ func (m *mockFiler) Mkdir(name string, perm os.FileMode) error {
 		return &os.PathError{Op: "mkdir", Path: name, Err: os.ErrExist}
 	}
 	m.files[name] = &mockFile{
-		name:  name,
-		mode:  os.ModeDir | perm,
-		isDir: true,
+		name:    name,
+		mode:    os.ModeDir | perm,
+		isDir:   true,
 		modTime: time.Now(),
 	}
 	return nil

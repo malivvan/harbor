@@ -23,7 +23,7 @@ func openTestStore(t *testing.T, root []byte) (*Store, *bolt.DB) {
 		_ = db.Close()
 	})
 
-	store, err := Open(context.Background(), db, root, Config{})
+	store, err := openStore(context.Background(), db, root, Config{})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = store.Close()
@@ -34,35 +34,34 @@ func openTestStore(t *testing.T, root []byte) (*Store, *bolt.DB) {
 func TestOpen(t *testing.T) {
 	ctx := context.Background()
 
-	store, err := Open(nil, nil, nil, Config{})
+	store, err := Open(nil, nil, Config{})
 	require.ErrorIs(t, err, ErrNilContext)
 	require.Nil(t, store)
 
-	store, err = Open(ctx, nil, nil, Config{})
+	store, err = Open(ctx, nil, Config{})
 	require.ErrorIs(t, err, ErrNilParam)
 	require.Nil(t, store)
 
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	store, err = Open(canceled, nil, nil, Config{})
+	store, err = Open(canceled, nil, Config{})
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, store)
 
 	store, db := openTestStore(t, nil)
-	require.Same(t, db, store.NativeDB())
+	require.Same(t, db, store.b)
 	require.Nil(t, store.Root())
 
 	root := []byte("tenant")
 	store, _ = openTestStore(t, root)
-	require.Equal(t, root, store.Root())
+	require.Equal(t, [][]byte{root}, store.Root())
 	root[0] = 'X'
-	require.Equal(t, []byte("tenant"), store.Root(), "Root must return a copy")
+	require.Equal(t, [][]byte{[]byte("tenant")}, store.Root(), "Root must return a copy")
 
 	require.NoError(t, store.Close())
 	require.NoError(t, db.View(func(tx *bolt.Tx) error { return nil }))
 
 	var nilStore *Store
-	require.Nil(t, nilStore.NativeDB())
 	require.Nil(t, nilStore.Root())
 	require.Nil(t, nilStore.Series("x"))
 	require.Nil(t, nilStore.SeriesNames())
@@ -251,7 +250,7 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 
 	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
-	store, err := Open(ctx, db, nil, Config{})
+	store, err := Open(ctx, db, Config{})
 	require.NoError(t, err)
 	cpu := store.Series("cpu")
 	require.NoError(t, cpu.InsertMany(ctx, []Point{{Timestamp: 10, Value: 1}, {Timestamp: 20, Value: 2}}))
@@ -262,7 +261,7 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	db, err = bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	defer db.Close()
-	store, err = Open(ctx, db, nil, Config{})
+	store, err = Open(ctx, db, Config{})
 	require.NoError(t, err)
 	cpu = store.Series("cpu")
 
@@ -988,7 +987,7 @@ func openBenchSeries(b *testing.B) *Series {
 		_ = db.Close()
 	})
 
-	store, err := Open(context.Background(), db, nil, Config{})
+	store, err := Open(context.Background(), db, Config{})
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -1085,4 +1084,28 @@ func BenchmarkEnforceRetention(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func TestNestedRoot(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "nested.db")
+	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	root := [][]byte{[]byte("tenant"), []byte("app")}
+	store, err := Open(ctx, db, Config{Root: root})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	require.NoError(t, store.Series("cpu").Insert(ctx, Point{Timestamp: 1, Value: 1}))
+
+	require.NoError(t, db.View(func(tx *bolt.Tx) error {
+		tenant := tx.Bucket([]byte("tenant"))
+		require.NotNil(t, tenant)
+		app := tenant.Bucket([]byte("app"))
+		require.NotNil(t, app)
+		require.NotNil(t, app.Bucket([]byte("cpu")))
+		return nil
+	}))
 }

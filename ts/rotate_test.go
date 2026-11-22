@@ -15,7 +15,10 @@ func tryOpenStoreAtPath(t *testing.T, path string, root []byte, cfg Config) (*St
 	t.Helper()
 	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
-	store, err := Open(context.Background(), db, root, cfg)
+	if len(root) > 0 {
+		cfg.Root = [][]byte{root}
+	}
+	store, err := Open(context.Background(), db, cfg)
 	if err != nil {
 		_ = db.Close()
 		return nil, nil, err

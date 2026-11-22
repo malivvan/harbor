@@ -1,204 +1,594 @@
+// Package storm exposes a single bbolt-backed store that combines the db, fs,
+// ts and vec sub-stores behind one password.
+//
+// The password is stretched with Argon2id using the salt and cost parameters
+// kept in an unencrypted "storm.metadata" record, then one key is derived per
+// sub-store. The password itself is never stored. A sealed canary in the
+// metadata detects a wrong password even for stores created with encryption
+// disabled.
+//
+// The key/value API (Get, Set, Delete, Has, Keys, Len) uses its own bucket, so
+// user keys never collide with store metadata.
 package storm
 
 import (
 	"context"
 	"errors"
 	"fmt"
-
 	"os"
-
-	"github.com/google/uuid"
-	"github.com/malivvan/storm/fs"
-	"github.com/malivvan/storm/ts"
-	"github.com/malivvan/storm/vec"
+	"runtime"
+	"sync"
 
 	"github.com/malivvan/storm/db"
+	"github.com/malivvan/storm/fs"
+	"github.com/malivvan/storm/internal/encryption"
+	"github.com/malivvan/storm/internal/slip21"
+	"github.com/malivvan/storm/ts"
+	"github.com/malivvan/storm/vec"
 	bolt "go.etcd.io/bbolt"
 )
 
-// Config configures a Store.
-type Config struct {
-	// Secret is the raw 32-byte master key shared by the db, fs, ts and vec
-	// sub-stores. It is required: every sub-store is opened encrypted.
-	Secret []byte
+// The key/value API uses bucket 0. Store metadata lives in its own
+// "storm.metadata" bucket (see meta.go), so user keys can never collide with it.
+var kvBucket = []byte{0}
+
+// namedRoot returns the default one-element bucket path for a sub-store.
+func namedRoot(name string) [][]byte {
+	return [][]byte{[]byte(name)}
 }
 
+// Domain-separated labels used to derive one key per component.
+const (
+	labelDB  = "storm/db/v1"
+	labelFS  = "storm/fs/v1"
+	labelTS  = "storm/ts/v1"
+	labelVec = "storm/vec/v1"
+)
+
+// Errors returned by the package.
+var (
+	// ErrKeyNotFound is returned by Get for a missing key.
+	ErrKeyNotFound = errors.New("storm: key not found")
+
+	// ErrInvalidKey is returned by Set, Delete and Has for an empty key.
+	ErrInvalidKey = errors.New("storm: empty key")
+
+	// ErrClosed is returned by operations on a closed Store.
+	ErrClosed = errors.New("storm: store is closed")
+
+	// ErrInvalidOptions reports a nil Options value or an unusable
+	// configuration.
+	ErrInvalidOptions = errors.New("storm: invalid options")
+
+	// ErrInvalidPassword reports an empty password or a password that does not
+	// decrypt the store canary.
+	ErrInvalidPassword = errors.New("storm: invalid password")
+)
+
+// Options configures Open.
+//
+// Password is required and is never stored: it is stretched with Argon2id and
+// the result is used to derive one key per sub-store. The embedded
+// bolt.Options configure the underlying database handle.
+type Options struct {
+	bolt.Options
+
+	// Codec encodes entities for the db sub-store. A nil Codec selects the
+	// default JSON codec.
+	Codec db.Codec
+
+	// Password protects the store. It is required.
+	Password string
+
+	// KDFTime, KDFMemory (KiB) and KDFThreads select the Argon2id cost
+	// parameters for a new store. All zero selects the DefaultKDF* values; a
+	// partial set is rejected. They are ignored when opening an existing
+	// store, whose stored parameters always win.
+	KDFTime    uint32
+	KDFMemory  uint32
+	KDFThreads uint8
+
+	// Encrypt selects which components a new store encrypts. The zero value
+	// enables EncryptAll. Use Plaintext to create an unencrypted store. It is
+	// ignored when opening an existing store.
+	Encrypt uint16
+
+	// Plaintext creates a new store without encryption. It conflicts with a
+	// non-zero Encrypt. It is ignored when opening an existing store.
+	Plaintext bool
+
+	// UseQuant enables vector quantization in the vec sub-store.
+	UseQuant bool
+
+	// Quantizer compresses vectors when UseQuant is enabled. A nil Quantizer
+	// selects the default SQ8 quantizer.
+	Quantizer vec.Quantizer
+}
+
+// Store is a single bbolt database that hosts the db, fs, ts and vec stores.
+// Each sub-store uses its own domain-separated key derived from Password.
 type Store struct {
-	b   *bolt.DB
-	id  uuid.UUID
+	mu  sync.RWMutex
+	bs  *bolt.DB
 	db  *db.Store
 	fs  *fs.Store
 	ts  *ts.Store
 	vec *vec.Store
 }
 
-// Top-level bucket layout. Each sub-store owns one bucket; the first also holds
-// the store ID and the package's small key/value API.
-var (
-	kvBucket  = []byte{0}
-	dbBucket  = []byte{1}
-	fsBucket  = []byte{2}
-	tsBucket  = []byte{3}
-	vecBucket = []byte{4}
-)
+// storeKeys holds the per-component keys derived for one Open call. They are
+// wiped as soon as the sub-stores have copied them.
+type storeKeys struct {
+	canary []byte
+	db     []byte
+	fs     []byte
+	ts     []byte
+	vec    []byte
+}
 
-func Open(ctx context.Context, path string, mode os.FileMode, options *bolt.Options, cfg Config) (s *Store, err error) {
+func (k *storeKeys) wipe() {
+	if k == nil {
+		return
+	}
+	for _, b := range [][]byte{k.canary, k.db, k.fs, k.ts, k.vec} {
+		wipe(b)
+	}
+}
+
+// Open opens (or creates) a Store at path.
+//
+// The first Open creates unencrypted metadata (salt, Argon2id parameters,
+// encryption flags and a sealed canary) and initializes the key/value bucket.
+// Later Opens use the stored settings; the KDF and encryption fields in options
+// only apply to a new store. A wrong or empty password fails with
+// ErrInvalidPassword and leaves the database closed.
+func Open(ctx context.Context, path string, mode os.FileMode, options *Options) (*Store, error) {
+	if options == nil {
+		return nil, fmt.Errorf("%w: options are required", ErrInvalidOptions)
+	}
+	if options.Password == "" {
+		return nil, fmt.Errorf("%w: password is required", ErrInvalidPassword)
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if len(cfg.Secret) != db.KeySize {
-		return nil, fmt.Errorf("storm: master key must be %d bytes, got %d", db.KeySize, len(cfg.Secret))
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	s = &Store{}
-	s.b, err = bolt.Open(path, mode, options)
+
+	bdb, err := bolt.Open(path, mode, &options.Options)
 	if err != nil {
 		return nil, err
 	}
-	bdb := s.b
 	opened := false
 	defer func() {
 		if !opened {
 			_ = bdb.Close()
 		}
 	}()
-	err = s.b.Update(func(tx *bolt.Tx) (err error) {
-		b := tx.Bucket(kvBucket)
-		if b == nil {
-			b, err = tx.CreateBucket(kvBucket)
-			if err != nil {
-				return err
-			}
-			s.id = uuid.New()
-			idb, err := s.id.MarshalBinary()
-			if err != nil {
-				return err
-			}
-			err = b.Put([]byte{0}, idb)
-			if err != nil {
-				return err
-			}
-			return nil
-		}
-		idb := b.Get([]byte{0})
-		if idb == nil {
-			return nil
-		}
-		err = s.id.UnmarshalBinary(idb)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
+
+	md, keys, err := loadOrCreateState(bdb, options)
 	if err != nil {
 		return nil, err
 	}
+	defer keys.wipe()
 
-	secret := append([]byte(nil), cfg.Secret...)
+	s := &Store{bs: bdb}
 
-	if s.db, err = db.Open(ctx, s.b, dbBucket, db.Config{
-		Secret:          secret,
-		Codec:           db.JSONCodec,
-		EncryptKeys:     true,
-		EncryptValues:   true,
-		EncryptMetadata: true,
+	// Bind each sub-store to its own derived key and explicit bucket root.
+	// The persisted flags decide which features are encrypted, so the on-disk
+	// mode cannot drift between runs.
+	if s.db, err = db.Open(ctx, bdb, db.Config{
+		Root:            namedRoot(db.Name),
+		Codec:           options.Codec,
+		Secret:          keys.db,
+		EncryptKeys:     hasFlag(md.Flags, EncryptDBKeys),
+		EncryptValues:   hasFlag(md.Flags, EncryptDBValues),
+		EncryptMetadata: hasFlag(md.Flags, EncryptDBMetadata),
 	}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("storm: open db store: %w", err)
 	}
-	if s.fs, err = fs.Open(ctx, s.b, fsBucket, fs.Config{
-		Secret:          secret,
-		EncryptMetadata: true,
-		EncryptContent:  true,
+	if s.fs, err = fs.Open(ctx, bdb, fs.Config{
+		Root:            namedRoot(fs.Name),
+		Secret:          keys.fs,
+		EncryptMetadata: hasFlag(md.Flags, EncryptFSMetadata),
+		EncryptContent:  hasFlag(md.Flags, EncryptFSContent),
 	}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("storm: open fs store: %w", err)
 	}
-	if s.ts, err = ts.Open(ctx, s.b, tsBucket, ts.Config{
-		Secret:             secret,
-		EncryptValues:      true,
-		EncryptSeriesNames: true,
+	if s.ts, err = ts.Open(ctx, bdb, ts.Config{
+		Root:               namedRoot(ts.Name),
+		Secret:             keys.ts,
+		EncryptValues:      hasFlag(md.Flags, EncryptTSValues),
+		EncryptSeriesNames: hasFlag(md.Flags, EncryptTSSeriesNames),
 	}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("storm: open ts store: %w", err)
 	}
-	if s.vec, err = vec.Open(ctx, s.b, vecBucket, vec.Config{
-		Secret:                 secret,
-		UseQuant:               false,
-		Quantizer:              nil,
-		EncryptPoints:          true,
-		EncryptPointIDs:        true,
-		EncryptCollectionNames: true,
+	if s.vec, err = vec.Open(ctx, bdb, vec.Config{
+		Root:                   namedRoot(vec.Name),
+		Secret:                 keys.vec,
+		UseQuant:               options.UseQuant,
+		Quantizer:              options.Quantizer,
+		EncryptPoints:          hasFlag(md.Flags, EncryptVecPoints),
+		EncryptPointIDs:        hasFlag(md.Flags, EncryptVecPointIDs),
+		EncryptCollectionNames: hasFlag(md.Flags, EncryptVecCollectionNames),
 	}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("storm: open vec store: %w", err)
 	}
 
 	opened = true
 	return s, nil
 }
 
-func (s *Store) ID() uuid.UUID {
-	return s.id
+// loadOrCreateState reads the metadata and derives the component keys. A new
+// store resolves options into metadata, seals the canary and persists it; an
+// existing store derives keys from the stored parameters and verifies the
+// canary. The returned keys must be wiped by the caller.
+func loadOrCreateState(bdb *bolt.DB, options *Options) (Metadata, *storeKeys, error) {
+	md, creating, err := readMetadata(bdb)
+	if err != nil {
+		return Metadata{}, nil, err
+	}
+	if !creating {
+		keys, err := deriveKeys(options.Password, md.Salt, md.Time, md.Memory, md.Threads)
+		if err != nil {
+			return Metadata{}, nil, err
+		}
+		if err := verifyCanary(keys.canary, md.Canary); err != nil {
+			keys.wipe()
+			return Metadata{}, nil, fmt.Errorf("%w: %w", ErrInvalidPassword, err)
+		}
+		return md, keys, nil
+	}
+
+	salt, kdfTime, kdfMemory, kdfThreads, flags, err := newKDFParams(options)
+	if err != nil {
+		return Metadata{}, nil, err
+	}
+	keys, err := deriveKeys(options.Password, salt, kdfTime, kdfMemory, kdfThreads)
+	if err != nil {
+		return Metadata{}, nil, err
+	}
+	canary, err := sealCanary(keys.canary)
+	if err != nil {
+		keys.wipe()
+		return Metadata{}, nil, err
+	}
+	md = Metadata{
+		Salt:    salt,
+		Time:    kdfTime,
+		Flags:   flags,
+		Memory:  kdfMemory,
+		Threads: kdfThreads,
+		Canary:  canary,
+	}
+	if err := writeMetadata(bdb, md); err != nil {
+		keys.wipe()
+		return Metadata{}, nil, err
+	}
+	return md, keys, nil
 }
 
+// newKDFParams resolves the Argon2id parameters and flags for a new store.
+func newKDFParams(options *Options) (salt []byte, time, memory uint32, threads uint8, flags uint16, err error) {
+	time, memory, threads = options.KDFTime, options.KDFMemory, options.KDFThreads
+	switch {
+	case time == 0 && memory == 0 && threads == 0:
+		time, memory, threads = DefaultKDFTime, DefaultKDFMemory, DefaultKDFThreads
+	case time == 0 || memory == 0 || threads == 0:
+		return nil, 0, 0, 0, 0, fmt.Errorf("%w: incomplete KDF parameters", ErrInvalidOptions)
+	}
+
+	flags, err = encryptionFlags(options)
+	if err != nil {
+		return nil, 0, 0, 0, 0, err
+	}
+	if err := validateKDFParams(time, memory, threads, flags, ErrInvalidOptions); err != nil {
+		return nil, 0, 0, 0, 0, err
+	}
+	salt, err = newSalt()
+	if err != nil {
+		return nil, 0, 0, 0, 0, err
+	}
+	return salt, time, memory, threads, flags, nil
+}
+
+// encryptionFlags resolves the encryption selection for a new store.
+func encryptionFlags(options *Options) (uint16, error) {
+	if options.Plaintext {
+		if options.Encrypt != 0 {
+			return 0, fmt.Errorf("%w: Plaintext conflicts with encryption flags", ErrInvalidOptions)
+		}
+		return EncryptNone, nil
+	}
+
+	flags := options.Encrypt
+	if flags == 0 {
+		flags = EncryptAll
+	}
+	return flags, nil
+}
+
+// canaryKeychain builds the one-key keychain used for the canary checks.
+func canaryKeychain(key []byte) (*encryption.Keychain, error) {
+	return encryption.NewKeychain([][]byte{key})
+}
+
+// sealCanary seals the fixed canary plaintext with the canary key.
+func sealCanary(key []byte) ([]byte, error) {
+	keychain, err := canaryKeychain(key)
+	if err != nil {
+		return nil, fmt.Errorf("storm: initialize canary key: %w", err)
+	}
+	sealed, err := keychain.Seal([]byte(canaryPlaintext))
+	if err != nil {
+		return nil, fmt.Errorf("storm: seal canary: %w", err)
+	}
+	return sealed, nil
+}
+
+// verifyCanary proves that key decrypts the stored canary.
+func verifyCanary(key, sealed []byte) error {
+	keychain, err := canaryKeychain(key)
+	if err != nil {
+		return err
+	}
+	return encryption.VerifyCanary(keychain, sealed, canaryPlaintext)
+}
+
+// deriveKeys stretches the password and derives one key per component.
+//
+// The pipeline is: Argon2id(password) -> 32-byte seed -> SLIP-0021 master ->
+// one labelled child per component. SLIP-0021 gives each child an independent
+// HMAC-SHA512 key, so compromise of one sub-store key does not expose the
+// others. The returned keys are fresh slices owned by the caller.
+func deriveKeys(password string, salt []byte, time, memory uint32, threads uint8) (*storeKeys, error) {
+	passwordBytes := []byte(password)
+	defer wipe(passwordBytes)
+
+	seed := deriveSeed(passwordBytes, salt, time, memory, threads)
+	defer wipe(seed)
+
+	master, err := slip21.New(seed)
+	if err != nil {
+		return nil, fmt.Errorf("storm: derive master key: %w", err)
+	}
+	defer master.Destroy()
+
+	derive := func(label string) ([]byte, error) {
+		node, err := master.Derive([]byte(label))
+		if err != nil {
+			return nil, fmt.Errorf("storm: derive %s key: %w", label, err)
+		}
+		defer node.Destroy()
+		key := node.Key()
+		if len(key) != KeySize {
+			return nil, fmt.Errorf("storm: derived %s key has %d bytes", label, len(key))
+		}
+		return key, nil
+	}
+
+	keys := &storeKeys{}
+	labels := []struct {
+		label string
+		dst   *[]byte
+	}{
+		{canaryPlaintext, &keys.canary},
+		{labelDB, &keys.db},
+		{labelFS, &keys.fs},
+		{labelTS, &keys.ts},
+		{labelVec, &keys.vec},
+	}
+	for _, item := range labels {
+		*item.dst, err = derive(item.label)
+		if err != nil {
+			keys.wipe()
+			return nil, err
+		}
+	}
+	return keys, nil
+}
+
+// wipe overwrites secret bytes. KeepAlive keeps the compiler from treating the
+// loop as dead once b is no longer otherwise referenced.
+func wipe(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+	runtime.KeepAlive(b)
+}
+
+// storeComponent returns one sub-store while holding the read lock, or nil
+// when the store is nil or closed.
+func storeComponent[T any](s *Store, component func(*Store) *T) *T {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil {
+		return nil
+	}
+	return component(s)
+}
+
+// DB returns the db sub-store.
 func (s *Store) DB() *db.Store {
-	return s.db
+	return storeComponent(s, func(s *Store) *db.Store { return s.db })
 }
 
-func (s *Store) Vec() *vec.Store {
-	return s.vec
-}
-
+// FS returns the fs sub-store.
 func (s *Store) FS() *fs.Store {
-	return s.fs
+	return storeComponent(s, func(s *Store) *fs.Store { return s.fs })
 }
 
+// TS returns the ts sub-store.
 func (s *Store) TS() *ts.Store {
-	return s.ts
+	return storeComponent(s, func(s *Store) *ts.Store { return s.ts })
 }
 
-// ErrKeyNotFound is returned by Get when the key does not exist.
-var ErrKeyNotFound = errors.New("storm: key not found")
+// Vec returns the vec sub-store.
+func (s *Store) Vec() *vec.Store {
+	return storeComponent(s, func(s *Store) *vec.Store { return s.vec })
+}
+
+// EncryptFlags returns the encryption flags persisted by the store. A closed
+// store returns EncryptNone.
+func (s *Store) EncryptFlags() uint16 {
+	_, _, _, _, flags, err := s.KDFParams()
+	if err != nil {
+		return EncryptNone
+	}
+	return flags
+}
+
+// withDB runs fn with the open database while holding the read lock. The lock
+// makes Close wait for in-flight operations and turns calls after Close into
+// ErrClosed.
+func (s *Store) withDB(fn func(*bolt.DB) error) error {
+	if s == nil {
+		return ErrClosed
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil {
+		return ErrClosed
+	}
+	return fn(s.bs)
+}
+
+// lookup returns the raw value and presence of key.
+func (s *Store) lookup(key string) (value string, found bool, err error) {
+	err = s.withDB(func(bdb *bolt.DB) error {
+		return bdb.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket(kvBucket)
+			if b == nil {
+				return nil
+			}
+			raw := b.Get([]byte(key))
+			if raw == nil {
+				return nil
+			}
+			value = string(raw)
+			found = true
+			return nil
+		})
+	})
+	return value, found, err
+}
+
+// scanKeys calls fn once per user key in byte order.
+func (s *Store) scanKeys(fn func(string)) error {
+	return s.withDB(func(bdb *bolt.DB) error {
+		return bdb.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket(kvBucket)
+			if b == nil {
+				return nil
+			}
+			c := b.Cursor()
+			for k, v := c.First(); k != nil; k, v = c.Next() {
+				if v == nil {
+					continue
+				}
+				fn(string(k))
+			}
+			return nil
+		})
+	})
+}
 
 // Get returns the value stored under key.
 func (s *Store) Get(key string) (string, error) {
-	if len(key) == 0 {
+	if key == "" {
 		return "", ErrKeyNotFound
 	}
-	var val string
-	err := s.b.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(kvBucket)
-		if b == nil {
-			return errors.New("kv bucket not found")
-		}
-		v := b.Get([]byte(key))
-		if v == nil {
-			return ErrKeyNotFound
-		}
-		val = string(v)
-		return nil
-	})
+	value, found, err := s.lookup(key)
 	if err != nil {
 		return "", err
 	}
-	return val, nil
+	if !found {
+		return "", ErrKeyNotFound
+	}
+	return value, nil
 }
 
+// Set stores key/value in the key/value bucket. An empty value removes the key.
 func (s *Store) Set(key, val string) error {
-	if len(key) == 0 {
-		return errors.New("key is empty")
+	if key == "" {
+		return ErrInvalidKey
 	}
-	return s.b.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(kvBucket)
-		if b == nil {
-			return errors.New("kv bucket not found")
-		}
-		if val == "" {
-			return b.Delete([]byte(key))
-		}
-		return b.Put([]byte(key), []byte(val))
+	return s.withDB(func(bdb *bolt.DB) error {
+		return bdb.Update(func(tx *bolt.Tx) error {
+			b, err := tx.CreateBucketIfNotExists(kvBucket)
+			if err != nil {
+				return err
+			}
+			if val == "" {
+				return b.Delete([]byte(key))
+			}
+			return b.Put([]byte(key), []byte(val))
+		})
 	})
 }
 
+// Delete removes key. Deleting a missing key is not an error.
+func (s *Store) Delete(key string) error {
+	if key == "" {
+		return ErrInvalidKey
+	}
+	return s.withDB(func(bdb *bolt.DB) error {
+		return bdb.Update(func(tx *bolt.Tx) error {
+			b := tx.Bucket(kvBucket)
+			if b == nil {
+				return nil
+			}
+			return b.Delete([]byte(key))
+		})
+	})
+}
+
+// Has reports whether key exists.
+func (s *Store) Has(key string) (bool, error) {
+	if key == "" {
+		return false, ErrInvalidKey
+	}
+	_, found, err := s.lookup(key)
+	return found, err
+}
+
+// Keys returns all keys in byte order. Nested buckets are skipped.
+func (s *Store) Keys() ([]string, error) {
+	var keys []string
+	err := s.scanKeys(func(key string) { keys = append(keys, key) })
+	return keys, err
+}
+
+// Len returns the number of keys in the key/value bucket.
+func (s *Store) Len() (int, error) {
+	n := 0
+	err := s.scanKeys(func(string) { n++ })
+	return n, err
+}
+
+// Close closes the underlying database. It is safe to call more than once, and
+// the sub-store accessors return nil afterwards.
+//
+// The sub-stores borrow this single bbolt handle, so closing it is enough; the
+// references are cleared to make accidental use after Close fail predictably.
 func (s *Store) Close() error {
-	if s == nil || s.b == nil {
+	if s == nil {
 		return nil
 	}
-	return s.b.Close()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.bs == nil {
+		return nil
+	}
+	err := s.bs.Close()
+	s.bs = nil
+	s.db = nil
+	s.fs = nil
+	s.ts = nil
+	s.vec = nil
+	return err
 }

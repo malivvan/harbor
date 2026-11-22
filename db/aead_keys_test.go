@@ -270,7 +270,7 @@ func TestAEADEncryptedKeysSurviveReopen(t *testing.T) {
 	otherPath := filepath.Join(t.TempDir(), "other.db")
 	otherDB := aeadOpenBolt(t, otherPath)
 	defer otherDB.Close()
-	_, err := Open(ctx, otherDB, nil, Config{
+	_, err := Open(ctx, otherDB, Config{
 		Secret:          aeadKey(12),
 		EncryptValues:   true,
 		EncryptMetadata: true,

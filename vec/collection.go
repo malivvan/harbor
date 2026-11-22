@@ -34,8 +34,8 @@ const DefaultFlushThreshold = 64
 // If useHNSW is true, it uses the optimized HNSW graph search; otherwise uses flat memory search.
 // When the receiver is non-nil, existing points are automatically loaded into memory.
 // Returns an error if the collection cannot be created or if loaded points have invalid dimensions.
-func (store *Store) NewCollection(name string, vectorLen int, metric Distance, useHNSW bool) (*Collection, error) {
-	return store.NewCollectionWithParams(name, vectorLen, metric, useHNSW, DefaultHNSWParams())
+func (s *Store) NewCollection(name string, vectorLen int, metric Distance, useHNSW bool) (*Collection, error) {
+	return s.NewCollectionWithParams(name, vectorLen, metric, useHNSW, DefaultHNSWParams())
 }
 
 // NewCollectionWithParams initializes a new vector collection with custom HNSW parameters.
@@ -43,7 +43,7 @@ func (store *Store) NewCollection(name string, vectorLen int, metric Distance, u
 // otherwise uses flat memory search.
 // When the receiver is non-nil, existing points are automatically loaded into memory.
 // Returns an error if the collection cannot be created or if loaded points have invalid dimensions.
-func (store *Store) NewCollectionWithParams(name string, vectorLen int, metric Distance, useHNSW bool, hnswParams HNSWParams) (*Collection, error) {
+func (s *Store) NewCollectionWithParams(name string, vectorLen int, metric Distance, useHNSW bool, hnswParams HNSWParams) (*Collection, error) {
 	var index VectorIndex
 	if useHNSW {
 		index = NewHNSWIndexWithParams(metric, hnswParams)
@@ -56,21 +56,21 @@ func (store *Store) NewCollectionWithParams(name string, vectorLen int, metric D
 		VectorLen: vectorLen,
 		Metric:    metric,
 		index:     index,
-		storage:   store,
+		storage:   s,
 
 		writeBuf:       make([]PointStruct, 0),
 		flushThreshold: DefaultFlushThreshold,
 	}
 
-	if store != nil {
-		if err := store.EnsureCollection(name); err != nil {
+	if s != nil {
+		if err := s.EnsureCollection(name); err != nil {
 			return nil, fmt.Errorf("failed to ensure storage collection %s: %w", name, err)
 		}
 
 		// Load and validate existing points before persisting the metadata:
 		// opening an existing collection with the wrong configuration must not
 		// overwrite the configuration already stored on disk.
-		loadedPoints, err := store.LoadCollection(name)
+		loadedPoints, err := s.LoadCollection(name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load points for %s: %w", name, err)
 		}
@@ -99,7 +99,7 @@ func (store *Store) NewCollectionWithParams(name string, vectorLen int, metric D
 			UseHNSW:    useHNSW,
 			HNSWParams: hnswParams,
 		}
-		if err := store.SaveCollectionMeta(name, meta); err != nil {
+		if err := s.SaveCollectionMeta(name, meta); err != nil {
 			return nil, fmt.Errorf("failed to save metadata for %s: %w", name, err)
 		}
 	}

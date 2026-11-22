@@ -155,7 +155,7 @@ func TestVerifyAllTamper(t *testing.T) {
 	ctx := context.Background()
 	root := []byte("ts")
 
-	newStore := func(t *testing.T, cfg Config) (*Store, *bolt.DB, *FileSystem) {
+	newStore := func(t *testing.T, cfg Config) (*Store, *bolt.DB, *FS) {
 		t.Helper()
 		store, db := openEncStore(t, root, cfg)
 		fsys, err := store.Open("fs")

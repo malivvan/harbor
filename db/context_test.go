@@ -38,7 +38,7 @@ func TestOpen_CancelledContextDoesNotInitializeDatabase(t *testing.T) {
 	require.NoError(t, err)
 	defer bDB.Close()
 
-	db, err := Open(canceledCtx(), bDB, nil, Config{})
+	db, err := Open(canceledCtx(), bDB, Config{})
 	require.Error(t, err)
 	require.Nil(t, db)
 	require.True(t, errors.Is(err, context.Canceled))
@@ -81,7 +81,7 @@ func TestOpen_InitializationErrorDoesNotCloseBorrowedDatabase(t *testing.T) {
 	// checkVersion will call Set on __database, which builds the data
 	// bucket via setBytes -> newMeta, and newMeta will compare codec names and
 	// return ErrDifferentCodec. That is our deterministic initialization error.
-	db, err := Open(context.Background(), bDB, nil, Config{})
+	db, err := Open(context.Background(), bDB, Config{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrDifferentCodec), "expected ErrDifferentCodec, got %v", err)
 	require.Nil(t, db)
@@ -120,7 +120,7 @@ func TestStructOps_CancelledContextPreventsWork(t *testing.T) {
 				return db.Init(ctx, &IndexedNameUser{})
 			},
 			verifyNoPersist: func(t *testing.T) {
-				err := db.NativeDB().View(func(tx *bolt.Tx) error {
+				err := db.bolt.View(func(tx *bolt.Tx) error {
 					require.Nil(t, tx.Bucket([]byte("IndexedNameUser")))
 					return nil
 				})
@@ -232,7 +232,7 @@ func TestFinder_CancelledContextPreventsReads(t *testing.T) {
 		require.True(t, errors.Is(err, context.Canceled))
 	})
 
-	t.Run("All", func(t *testing.T) {
+	t.Run("Copy", func(t *testing.T) {
 		var us []IndexedNameUser
 		err := db.All(canceledCtx(), &us)
 		require.Error(t, err)
@@ -397,7 +397,7 @@ func TestScanner_CancelledContextReturnsErrorAndNoResults(t *testing.T) {
 // ============================================================================
 
 // Manual transactions (Begin/Commit/Rollback) are not part of the API.
-// All transactional behavior is exercised via managed transactions
+// Copy transactional behavior is exercised via managed transactions
 // (ReadTransaction / WriteTransaction). See managed_transaction_test.go
 // and managed_transaction_lifecycle_test.go.
 
@@ -749,7 +749,7 @@ func TestWriteOperation_RollbackOnPreCommitCancellation(t *testing.T) {
 	})
 	require.ErrorIs(t, err, context.Canceled)
 
-	err = db.NativeDB().View(func(tx *bolt.Tx) error {
+	err = db.bolt.View(func(tx *bolt.Tx) error {
 		require.Nil(t, tx.Bucket([]byte("precommit")), "canceled transaction must roll back bucket creation")
 		return nil
 	})

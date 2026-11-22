@@ -186,7 +186,7 @@ func TestStoreWideEnforceRetention(t *testing.T) {
 
 	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
-	store, err := Open(ctx, db, nil, Config{})
+	store, err := Open(ctx, db, Config{})
 	require.NoError(t, err)
 
 	age := store.Series("age")
@@ -218,7 +218,7 @@ func TestStoreWideEnforceRetention(t *testing.T) {
 	db, err = bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	defer db.Close()
-	store, err = Open(ctx, db, nil, Config{})
+	store, err = Open(ctx, db, Config{})
 	require.NoError(t, err)
 
 	// Do not call Series before enforcement: metadata iteration must cover series
@@ -246,7 +246,7 @@ func TestRetentionPersistence(t *testing.T) {
 
 	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
-	store, err := Open(ctx, db, nil, Config{})
+	store, err := Open(ctx, db, Config{})
 	require.NoError(t, err)
 	cpu := store.Series("cpu")
 	require.NoError(t, cpu.SetRetention(ctx, Retention{MaxAge: time.Minute, MaxPoints: 7}))
@@ -256,7 +256,7 @@ func TestRetentionPersistence(t *testing.T) {
 	db, err = bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	defer db.Close()
-	store, err = Open(ctx, db, nil, Config{})
+	store, err = Open(ctx, db, Config{})
 	require.NoError(t, err)
 	cpu = store.Series("cpu")
 

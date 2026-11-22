@@ -166,7 +166,7 @@ func (n *node) rangeScan(ctx context.Context, tx *bolt.Tx, min, max string) ([]N
 func (n *node) cursor(tx *bolt.Tx) *bolt.Cursor {
 	var c *bolt.Cursor
 
-	if len(n.rootBucket) > 0 {
+	if len(n.root) > 0 {
 		b := n.getBucket(tx)
 		if b == nil {
 			return nil

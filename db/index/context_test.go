@@ -67,7 +67,7 @@ func openTestDB(t *testing.T) *testDB {
 	require.NoError(t, err)
 	bdb, err := bolt.Open(filepath.Join(dir, "storm.db"), 0600, nil)
 	require.NoError(t, err)
-	db, err := storm.Open(context.Background(), bdb, nil, storm.Config{})
+	db, err := storm.Open(context.Background(), bdb, storm.Config{})
 	require.NoError(t, err)
 	return &testDB{db: db, bdb: bdb, dir: dir}
 }
@@ -117,7 +117,7 @@ func TestIndexes_CancelledContextRejected(t *testing.T) {
 
 	cancelled := newStepContext(0)
 
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 
 		for _, tc := range []struct {
@@ -151,7 +151,7 @@ func TestIndexes_CancelledContextRejected(t *testing.T) {
 					require.ErrorIs(t, e, context.Canceled)
 					require.Nil(t, r)
 				})
-				t.Run("All", func(t *testing.T) {
+				t.Run("Copy", func(t *testing.T) {
 					r, e := idx.All(cancelled, []byte("v"), nil)
 					require.ErrorIs(t, e, context.Canceled)
 					require.Nil(t, r)
@@ -190,7 +190,7 @@ func TestIDIndex_RangeCancellationDiscardsPartialResults(t *testing.T) {
 	defer td.cleanup(t)
 
 	ctx := context.Background()
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 		// IDIndex.Add is a no-op; write keys directly to the bucket.
 		for i := 0; i < 20; i++ {
@@ -204,7 +204,7 @@ func TestIDIndex_RangeCancellationDiscardsPartialResults(t *testing.T) {
 	// cancelAt=5: entry (1) + 4 iterations (2-5) → cancelled at 5th call.
 	{
 		sc := newStepContext(5)
-		result, err := callView(td.db, "test", "pk", func(idx index.Index) ([][]byte, error) {
+		result, err := callView(td.bdb, "test", "pk", func(idx index.Index) ([][]byte, error) {
 			return idx.Range(sc, []byte("a00"), []byte("a99"), nil)
 		})
 		require.ErrorIs(t, err, context.Canceled)
@@ -212,7 +212,7 @@ func TestIDIndex_RangeCancellationDiscardsPartialResults(t *testing.T) {
 		require.GreaterOrEqual(t, sc.Calls(), 3)
 	}
 
-	result, err := callView(td.db, "test", "pk", func(idx index.Index) ([][]byte, error) {
+	result, err := callView(td.bdb, "test", "pk", func(idx index.Index) ([][]byte, error) {
 		return idx.Range(ctx, []byte("a00"), []byte("a99"), nil)
 	})
 	require.NoError(t, err)
@@ -224,7 +224,7 @@ func TestIDIndex_PrefixCancellationDiscardsPartialResults(t *testing.T) {
 	defer td.cleanup(t)
 
 	ctx := context.Background()
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 		for i := 0; i < 20; i++ {
 			val := []byte(fmt.Sprintf("a%d", i))
@@ -236,7 +236,7 @@ func TestIDIndex_PrefixCancellationDiscardsPartialResults(t *testing.T) {
 
 	{
 		sc := newStepContext(6)
-		result, err := callView(td.db, "test", "pk", func(idx index.Index) ([][]byte, error) {
+		result, err := callView(td.bdb, "test", "pk", func(idx index.Index) ([][]byte, error) {
 			return idx.Prefix(sc, []byte("a"), nil)
 		})
 		require.ErrorIs(t, err, context.Canceled)
@@ -244,7 +244,7 @@ func TestIDIndex_PrefixCancellationDiscardsPartialResults(t *testing.T) {
 		require.GreaterOrEqual(t, sc.Calls(), 2)
 	}
 
-	result, err := callView(td.db, "test", "pk", func(idx index.Index) ([][]byte, error) {
+	result, err := callView(td.bdb, "test", "pk", func(idx index.Index) ([][]byte, error) {
 		return idx.Prefix(ctx, []byte("a"), nil)
 	})
 	require.NoError(t, err)
@@ -252,7 +252,7 @@ func TestIDIndex_PrefixCancellationDiscardsPartialResults(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ListIndex: All / Remove / Range / Prefix cancellation
+// ListIndex: Copy / Remove / Range / Prefix cancellation
 // ---------------------------------------------------------------------------
 
 func TestListIndex_AllCancellationDiscardsPartialResults(t *testing.T) {
@@ -260,7 +260,7 @@ func TestListIndex_AllCancellationDiscardsPartialResults(t *testing.T) {
 	defer td.cleanup(t)
 
 	ctx := context.Background()
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 		idx := newListIndex(t, b, "li")
 		for i := 0; i < 10; i++ {
@@ -272,7 +272,7 @@ func TestListIndex_AllCancellationDiscardsPartialResults(t *testing.T) {
 
 	{
 		sc := newStepContext(5)
-		result, err := callView(td.db, "test", "li", func(idx index.Index) ([][]byte, error) {
+		result, err := callView(td.bdb, "test", "li", func(idx index.Index) ([][]byte, error) {
 			return idx.All(sc, []byte("hello"), nil)
 		})
 		require.ErrorIs(t, err, context.Canceled)
@@ -280,7 +280,7 @@ func TestListIndex_AllCancellationDiscardsPartialResults(t *testing.T) {
 		require.GreaterOrEqual(t, sc.Calls(), 3)
 	}
 
-	result, err := callView(td.db, "test", "li", func(idx index.Index) ([][]byte, error) {
+	result, err := callView(td.bdb, "test", "li", func(idx index.Index) ([][]byte, error) {
 		return idx.All(ctx, []byte("hello"), nil)
 	})
 	require.NoError(t, err)
@@ -292,7 +292,7 @@ func TestListIndex_RemoveCancellationReturnsError(t *testing.T) {
 	defer td.cleanup(t)
 
 	ctx := context.Background()
-	require.NoError(t, td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	require.NoError(t, td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 		idx := newListIndex(t, b, "li")
 		for i := 0; i < 5; i++ {
@@ -303,7 +303,7 @@ func TestListIndex_RemoveCancellationReturnsError(t *testing.T) {
 
 	// cancelAt=4: entry (1), 2 cursor keys (2,3), first delete check (4) → cancel.
 	sc := newStepContext(4)
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("test"))
 		idx := newListIndex(t, b, "li")
 		return idx.Remove(sc, []byte("hello"))
@@ -311,7 +311,7 @@ func TestListIndex_RemoveCancellationReturnsError(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 
 	// Bolt.Update already rolled back. Verify original state.
-	require.NoError(t, td.db.NativeDB().View(func(tx *bolt.Tx) error {
+	require.NoError(t, td.bdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("test"))
 		idx := newListIndex(t, b, "li")
 		result, err := idx.All(ctx, []byte("hello"), nil)
@@ -326,7 +326,7 @@ func TestListIndex_RangeCancellationDiscardsPartialResults(t *testing.T) {
 	defer td.cleanup(t)
 
 	ctx := context.Background()
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 		idx := newListIndex(t, b, "li")
 		for i := 0; i < 10; i++ {
@@ -338,7 +338,7 @@ func TestListIndex_RangeCancellationDiscardsPartialResults(t *testing.T) {
 
 	{
 		sc := newStepContext(5)
-		result, err := callView(td.db, "test", "li", func(idx index.Index) ([][]byte, error) {
+		result, err := callView(td.bdb, "test", "li", func(idx index.Index) ([][]byte, error) {
 			return idx.Range(sc, []byte("key00"), []byte("key99"), nil)
 		})
 		require.ErrorIs(t, err, context.Canceled)
@@ -346,7 +346,7 @@ func TestListIndex_RangeCancellationDiscardsPartialResults(t *testing.T) {
 		require.GreaterOrEqual(t, sc.Calls(), 3)
 	}
 
-	result, err := callView(td.db, "test", "li", func(idx index.Index) ([][]byte, error) {
+	result, err := callView(td.bdb, "test", "li", func(idx index.Index) ([][]byte, error) {
 		return idx.Range(ctx, []byte("key00"), []byte("key99"), nil)
 	})
 	require.NoError(t, err)
@@ -358,7 +358,7 @@ func TestListIndex_PrefixCancellationDiscardsPartialResults(t *testing.T) {
 	defer td.cleanup(t)
 
 	ctx := context.Background()
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 		idx := newListIndex(t, b, "li")
 		for i := 0; i < 10; i++ {
@@ -370,14 +370,14 @@ func TestListIndex_PrefixCancellationDiscardsPartialResults(t *testing.T) {
 
 	{
 		sc := newStepContext(5)
-		result, err := callView(td.db, "test", "li", func(idx index.Index) ([][]byte, error) {
+		result, err := callView(td.bdb, "test", "li", func(idx index.Index) ([][]byte, error) {
 			return idx.Prefix(sc, []byte("pref"), nil)
 		})
 		require.ErrorIs(t, err, context.Canceled)
 		require.Nil(t, result)
 	}
 
-	result, err := callView(td.db, "test", "li", func(idx index.Index) ([][]byte, error) {
+	result, err := callView(td.bdb, "test", "li", func(idx index.Index) ([][]byte, error) {
 		return idx.Prefix(ctx, []byte("pref"), nil)
 	})
 	require.NoError(t, err)
@@ -393,7 +393,7 @@ func TestUniqueIndex_AllRecordsCancellationDiscardsPartialResults(t *testing.T) 
 	defer td.cleanup(t)
 
 	ctx := context.Background()
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 		idx := newUniqueIndex(t, b, "ui")
 		for i := 0; i < 10; i++ {
@@ -405,7 +405,7 @@ func TestUniqueIndex_AllRecordsCancellationDiscardsPartialResults(t *testing.T) 
 
 	{
 		sc := newStepContext(5)
-		result, err := callView(td.db, "test", "ui", func(idx index.Index) ([][]byte, error) {
+		result, err := callView(td.bdb, "test", "ui", func(idx index.Index) ([][]byte, error) {
 			return idx.AllRecords(sc, nil)
 		})
 		require.ErrorIs(t, err, context.Canceled)
@@ -413,7 +413,7 @@ func TestUniqueIndex_AllRecordsCancellationDiscardsPartialResults(t *testing.T) 
 		require.GreaterOrEqual(t, sc.Calls(), 3)
 	}
 
-	result, err := callView(td.db, "test", "ui", func(idx index.Index) ([][]byte, error) {
+	result, err := callView(td.bdb, "test", "ui", func(idx index.Index) ([][]byte, error) {
 		return idx.AllRecords(ctx, nil)
 	})
 	require.NoError(t, err)
@@ -425,7 +425,7 @@ func TestUniqueIndex_RangeCancellationDiscardsPartialResults(t *testing.T) {
 	defer td.cleanup(t)
 
 	ctx := context.Background()
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 		idx := newUniqueIndex(t, b, "ui")
 		for i := 0; i < 10; i++ {
@@ -437,14 +437,14 @@ func TestUniqueIndex_RangeCancellationDiscardsPartialResults(t *testing.T) {
 
 	{
 		sc := newStepContext(5)
-		result, err := callView(td.db, "test", "ui", func(idx index.Index) ([][]byte, error) {
+		result, err := callView(td.bdb, "test", "ui", func(idx index.Index) ([][]byte, error) {
 			return idx.Range(sc, []byte("u0"), []byte("u9"), nil)
 		})
 		require.ErrorIs(t, err, context.Canceled)
 		require.Nil(t, result)
 	}
 
-	result, err := callView(td.db, "test", "ui", func(idx index.Index) ([][]byte, error) {
+	result, err := callView(td.bdb, "test", "ui", func(idx index.Index) ([][]byte, error) {
 		return idx.Range(ctx, []byte("u0"), []byte("u9"), nil)
 	})
 	require.NoError(t, err)
@@ -456,7 +456,7 @@ func TestUniqueIndex_PrefixCancellationDiscardsPartialResults(t *testing.T) {
 	defer td.cleanup(t)
 
 	ctx := context.Background()
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 		idx := newUniqueIndex(t, b, "ui")
 		for i := 0; i < 10; i++ {
@@ -468,14 +468,14 @@ func TestUniqueIndex_PrefixCancellationDiscardsPartialResults(t *testing.T) {
 
 	{
 		sc := newStepContext(5)
-		result, err := callView(td.db, "test", "ui", func(idx index.Index) ([][]byte, error) {
+		result, err := callView(td.bdb, "test", "ui", func(idx index.Index) ([][]byte, error) {
 			return idx.Prefix(sc, []byte("p"), nil)
 		})
 		require.ErrorIs(t, err, context.Canceled)
 		require.Nil(t, result)
 	}
 
-	result, err := callView(td.db, "test", "ui", func(idx index.Index) ([][]byte, error) {
+	result, err := callView(td.bdb, "test", "ui", func(idx index.Index) ([][]byte, error) {
 		return idx.Prefix(ctx, []byte("p"), nil)
 	})
 	require.NoError(t, err)
@@ -494,7 +494,7 @@ func TestMutation_UniqueAddCancellationRollsBack(t *testing.T) {
 
 	// UniqueIndex.Add checks: entry (1), pre-Put (2), Put, post-Put (3).
 	sc := newStepContext(3)
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 		idx := newUniqueIndex(t, b, "ui")
 		return idx.Add(sc, []byte("val"), []byte("id1"))
@@ -502,7 +502,7 @@ func TestMutation_UniqueAddCancellationRollsBack(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 
 	// Confirm nothing persisted (Bolt.Update rolled back).
-	require.NoError(t, td.db.NativeDB().View(func(tx *bolt.Tx) error {
+	require.NoError(t, td.bdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("test"))
 		if b == nil {
 			return nil
@@ -520,7 +520,7 @@ func TestMutation_UniqueRemoveCancellationRollsBack(t *testing.T) {
 	defer td.cleanup(t)
 
 	ctx := context.Background()
-	require.NoError(t, td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	require.NoError(t, td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 		idx := newUniqueIndex(t, b, "ui")
 		return idx.Add(ctx, []byte("val"), []byte("id1"))
@@ -528,14 +528,14 @@ func TestMutation_UniqueRemoveCancellationRollsBack(t *testing.T) {
 
 	// UniqueIndex.Remove checks: entry (1), Delete, post-Delete (2).
 	sc := newStepContext(2)
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("test"))
 		idx := newUniqueIndex(t, b, "ui")
 		return idx.Remove(sc, []byte("val"))
 	})
 	require.ErrorIs(t, err, context.Canceled)
 
-	require.NoError(t, td.db.NativeDB().View(func(tx *bolt.Tx) error {
+	require.NoError(t, td.bdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("test"))
 		idx := newUniqueIndex(t, b, "ui")
 		id, err := idx.Get(ctx, []byte("val"))
@@ -550,7 +550,7 @@ func TestMutation_UniqueRemoveIDCancellationRollsBack(t *testing.T) {
 	defer td.cleanup(t)
 
 	ctx := context.Background()
-	require.NoError(t, td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	require.NoError(t, td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 		idx := newUniqueIndex(t, b, "ui")
 		return idx.Add(ctx, []byte("val"), []byte("id1"))
@@ -560,14 +560,14 @@ func TestMutation_UniqueRemoveIDCancellationRollsBack(t *testing.T) {
 	// Seed has 1 entry. Entry check (1), first iteration check (2).
 	// cancelAt=2 cancels during first iteration before comparison.
 	sc := newStepContext(2)
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("test"))
 		idx := newUniqueIndex(t, b, "ui")
 		return idx.RemoveID(sc, []byte("id1"))
 	})
 	require.ErrorIs(t, err, context.Canceled)
 
-	require.NoError(t, td.db.NativeDB().View(func(tx *bolt.Tx) error {
+	require.NoError(t, td.bdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("test"))
 		idx := newUniqueIndex(t, b, "ui")
 		id, err := idx.Get(ctx, []byte("val"))
@@ -586,14 +586,14 @@ func TestMutation_ListAddCancellationRollsBack(t *testing.T) {
 	// ListIndex.Add with no existing key: entry (1), post-IDs.Get (2), skip delete,
 	// post-IDs.Add (3), post-Put (4).  cancelAt=4 cancels after Put succeeds.
 	sc := newStepContext(4)
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 		idx := newListIndex(t, b, "li")
 		return idx.Add(sc, []byte("val"), []byte("id1"))
 	})
 	require.ErrorIs(t, err, context.Canceled)
 
-	require.NoError(t, td.db.NativeDB().View(func(tx *bolt.Tx) error {
+	require.NoError(t, td.bdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("test"))
 		if b == nil {
 			return nil
@@ -611,7 +611,7 @@ func TestMutation_ListRemoveCancellationRollsBack(t *testing.T) {
 	defer td.cleanup(t)
 
 	ctx := context.Background()
-	require.NoError(t, td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	require.NoError(t, td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 		idx := newListIndex(t, b, "li")
 		for i := 0; i < 3; i++ {
@@ -623,14 +623,14 @@ func TestMutation_ListRemoveCancellationRollsBack(t *testing.T) {
 	// cancelAt=6: entry (1), 3 cursor iterations (2-4), pre-Delete (5),
 	// first Delete, post-Delete (6) → cancel after one mutation.
 	sc := newStepContext(6)
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("test"))
 		idx := newListIndex(t, b, "li")
 		return idx.Remove(sc, []byte("hello"))
 	})
 	require.ErrorIs(t, err, context.Canceled)
 
-	require.NoError(t, td.db.NativeDB().View(func(tx *bolt.Tx) error {
+	require.NoError(t, td.bdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("test"))
 		idx := newListIndex(t, b, "li")
 		result, err := idx.All(ctx, []byte("hello"), nil)
@@ -645,7 +645,7 @@ func TestMutation_ListRemoveIDCancellationRollsBack(t *testing.T) {
 	defer td.cleanup(t)
 
 	ctx := context.Background()
-	require.NoError(t, td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	require.NoError(t, td.bdb.Update(func(tx *bolt.Tx) error {
 		b := createBucket(t, tx, "test")
 		idx := newListIndex(t, b, "li")
 		return idx.Add(ctx, []byte("hello"), []byte("id1"))
@@ -654,14 +654,14 @@ func TestMutation_ListRemoveIDCancellationRollsBack(t *testing.T) {
 	// ListIndex.RemoveID checks: entry (1), IDs.Get entry/post-Get (2,3),
 	// pre-Delete (4), Delete, post-Delete (5) → cancel after the mutation.
 	sc := newStepContext(5)
-	err := td.db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := td.bdb.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("test"))
 		idx := newListIndex(t, b, "li")
 		return idx.RemoveID(sc, []byte("id1"))
 	})
 	require.ErrorIs(t, err, context.Canceled)
 
-	require.NoError(t, td.db.NativeDB().View(func(tx *bolt.Tx) error {
+	require.NoError(t, td.bdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("test"))
 		idx := newListIndex(t, b, "li")
 		result, err := idx.All(ctx, []byte("hello"), nil)
@@ -676,13 +676,13 @@ func TestMutation_ListRemoveIDCancellationRollsBack(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func callView(
-	db *storm.Store,
+	db *bolt.DB,
 	bucketName, indexName string,
 	fn func(index.Index) ([][]byte, error),
 ) ([][]byte, error) {
 	var result [][]byte
 	var resultErr error
-	err := db.NativeDB().View(func(tx *bolt.Tx) error {
+	err := db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucketName))
 		idx, err := buildIndex(b, indexName)
 		if err != nil {

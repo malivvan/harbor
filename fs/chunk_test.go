@@ -236,7 +236,7 @@ func TestChunkedTamper(t *testing.T) {
 		return b.chunks.Put(first, raw)
 	}))
 
-	store2, err := Open(context.Background(), db, root, cfg)
+	store2, err := openStore(context.Background(), db, root, cfg)
 	require.NoError(t, err)
 	fsys2, err := store2.Open("fs")
 	require.NoError(t, err)

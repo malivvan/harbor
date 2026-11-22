@@ -185,7 +185,7 @@ func TestOpenFileOTruncChunked(t *testing.T) {
 	}
 }
 
-// --- High: FileSystem.Truncate must not corrupt encrypted files ---
+// --- High: FS.Truncate must not corrupt encrypted files ---
 
 func TestTruncateEncryptedFile(t *testing.T) {
 	store, _ := openEncStore(t, nil, Config{Secret: testEncKey(71), EncryptContent: true})

@@ -84,7 +84,7 @@ type CollectionMeta struct {
 // MatchFilter evaluates whether a given payload matches the filter criteria.
 // It returns true if:
 //   - The filter is nil (no filtering)
-//   - All Must conditions are satisfied
+//   - Copy Must conditions are satisfied
 //   - No MustNot conditions are satisfied
 func MatchFilter(payload Payload, filter *Filter) bool {
 	if filter == nil {

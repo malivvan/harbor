@@ -8,6 +8,8 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+const Name = "ts"
+
 const metaBucketName = "__ts_meta__"
 
 // nowProvider wraps the pluggable clock so it can be stored in an atomic
@@ -19,7 +21,7 @@ type nowProvider struct {
 // Store manages named time series backed by a bbolt database.
 type Store struct {
 	b      *bolt.DB
-	root   []byte
+	root   [][]byte
 	now    atomic.Pointer[nowProvider]
 	mu     sync.RWMutex
 	series map[string]*Series
@@ -43,20 +45,12 @@ func (s *Store) blockDuration() int64 {
 	return s.enc.blockDur
 }
 
-// NativeDB returns the underlying bbolt database.
-func (s *Store) NativeDB() *bolt.DB {
+// Root returns a copy of the store's root bucket path.
+func (s *Store) Root() [][]byte {
 	if s == nil {
 		return nil
 	}
-	return s.b
-}
-
-// Root returns a copy of the store's root bucket key.
-func (s *Store) Root() []byte {
-	if s == nil {
-		return nil
-	}
-	return append([]byte(nil), s.root...)
+	return cloneRoot(s.root)
 }
 
 // Close releases the Store wrapper. The underlying bbolt database remains open
@@ -122,7 +116,7 @@ func (s *Store) DeleteSeries(ctx context.Context, name string) error {
 		found := false
 		var parent *bolt.Bucket
 		if len(s.root) > 0 {
-			parent = tx.Bucket(s.root)
+			parent = s.rootBucket(tx)
 		}
 
 		key, err := s.bucketKey(name)
@@ -201,11 +195,57 @@ func (s *Store) logicalName(physical []byte) (string, error) {
 	return string(name), nil
 }
 
+// rootBucket traverses the configured root path, or returns nil when the path
+// is empty or any element is missing.
 func (s *Store) rootBucket(tx *bolt.Tx) *bolt.Bucket {
-	if len(s.root) == 0 {
+	var b *bolt.Bucket
+	for _, name := range s.root {
+		if len(name) == 0 {
+			continue
+		}
+		if b == nil {
+			b = tx.Bucket(name)
+		} else {
+			b = b.Bucket(name)
+		}
+		if b == nil {
+			return nil
+		}
+	}
+	return b
+}
+
+// createRootBucket creates the configured root path and returns its innermost
+// bucket. An empty path returns nil.
+func (s *Store) createRootBucket(tx *bolt.Tx) (*bolt.Bucket, error) {
+	var b *bolt.Bucket
+	for _, name := range s.root {
+		if len(name) == 0 {
+			continue
+		}
+		var err error
+		if b == nil {
+			b, err = tx.CreateBucketIfNotExists(name)
+		} else {
+			b, err = b.CreateBucketIfNotExists(name)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return b, nil
+}
+
+// cloneRoot returns a deep copy of a bucket path.
+func cloneRoot(root [][]byte) [][]byte {
+	if root == nil {
 		return nil
 	}
-	return tx.Bucket(s.root)
+	out := make([][]byte, len(root))
+	for i, part := range root {
+		out[i] = append([]byte(nil), part...)
+	}
+	return out
 }
 
 func (s *Store) seriesBucket(tx *bolt.Tx, name string) (*bolt.Bucket, error) {
@@ -233,7 +273,7 @@ func (s *Store) createSeriesBucket(tx *bolt.Tx, name string) (*bolt.Bucket, erro
 		return tx.CreateBucketIfNotExists(key)
 	}
 
-	root, err := tx.CreateBucketIfNotExists(s.root)
+	root, err := s.createRootBucket(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -246,9 +286,9 @@ func (s *Store) metaBucket(tx *bolt.Tx, create bool) (*bolt.Bucket, error) {
 
 	if len(s.root) > 0 {
 		if create {
-			parent, err = tx.CreateBucketIfNotExists(s.root)
+			parent, err = s.createRootBucket(tx)
 		} else {
-			parent = tx.Bucket(s.root)
+			parent = s.rootBucket(tx)
 		}
 		if err != nil {
 			return nil, err

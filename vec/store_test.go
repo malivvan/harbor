@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/malivvan/binco"
+	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -23,11 +24,7 @@ func TestStorage(t *testing.T) {
 	tempFile.Close()
 	defer os.Remove(tempPath)
 
-	// Test NewStorage
-	storage, err := NewStorage(tempPath)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
+	storage := openTestStorage(t, tempPath)
 	defer storage.Close()
 
 	// Test EnsureCollection
@@ -174,7 +171,7 @@ func TestStorageWithQuantization(t *testing.T) {
 	tempFile.Close()
 	defer os.Remove(tempPath)
 
-	storage, _ := NewStorageWithQuantization(tempPath, true, nil, false)
+	storage := openTestStorageOptions(t, tempPath, nil, Config{UseQuant: true})
 	defer storage.Close()
 
 	colName := "quantized-col"
@@ -217,7 +214,7 @@ func TestCollectionMetaStorage(t *testing.T) {
 	tempFile.Close()
 	defer os.Remove(tempPath)
 
-	storage, _ := NewStorage(tempPath)
+	storage := openTestStorage(t, tempPath)
 	defer storage.Close()
 
 	meta := CollectionMeta{
@@ -276,7 +273,7 @@ func TestStorageErrorCases(t *testing.T) {
 	tempFile.Close()
 	defer os.Remove(tempPath)
 
-	storage, _ := NewStorage(tempPath)
+	storage := openTestStorage(t, tempPath)
 
 	// Test LoadCollectionMeta when bucket doesn't exist
 	_, err := storage.LoadCollectionMeta("any")
@@ -389,7 +386,7 @@ func openRootTestStore(t *testing.T, root []byte) (*Store, *bolt.DB) {
 		_ = bdb.Close()
 	})
 
-	store, err := Open(context.Background(), bdb, root, Config{})
+	store, err := openStore(context.Background(), bdb, root, Config{})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -501,11 +498,11 @@ func TestStoreRootsAreIsolated(t *testing.T) {
 	}
 	defer bdb.Close()
 
-	storeA, err := Open(context.Background(), bdb, []byte("a"), Config{})
+	storeA, err := openStore(context.Background(), bdb, []byte("a"), Config{})
 	if err != nil {
 		t.Fatalf("open store a: %v", err)
 	}
-	storeB, err := Open(context.Background(), bdb, []byte("b"), Config{})
+	storeB, err := openStore(context.Background(), bdb, []byte("b"), Config{})
 	if err != nil {
 		t.Fatalf("open store b: %v", err)
 	}
@@ -591,4 +588,20 @@ func TestStoreRootMissing(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("inspect root: %v", err)
 	}
+}
+
+func TestNestedRoot(t *testing.T) {
+	root := [][]byte{[]byte("tenant"), []byte("app")}
+	store, bdb := aeadOpenStore(t, filepath.Join(t.TempDir(), "nested.db"), false, Config{Root: root})
+	require.NoError(t, store.EnsureCollection("docs"))
+	require.NoError(t, store.UpsertPoints("docs", aeadTestPoints()))
+
+	require.NoError(t, bdb.View(func(tx *bolt.Tx) error {
+		tenant := tx.Bucket([]byte("tenant"))
+		require.NotNil(t, tenant)
+		app := tenant.Bucket([]byte("app"))
+		require.NotNil(t, app)
+		require.NotNil(t, app.Bucket([]byte("docs")))
+		return nil
+	}))
 }

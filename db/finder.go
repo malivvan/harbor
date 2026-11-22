@@ -40,12 +40,12 @@ type Finder interface {
 }
 
 // resolveBucketName returns the bucket name, falling back to the
-// innermost rootBucket if the sink has no name (anonymous type).
+// innermost root if the sink has no name (anonymous type).
 func (n *node) resolveBucketName(sink sink) string {
 	name := sink.bucketName()
-	if name == "" && len(n.rootBucket) > 0 {
+	if name == "" && len(n.root) > 0 {
 		// Return empty to signal that the root bucket itself is the data bucket.
-		// GetBucket/CreateBucketIfNotExists will use only the rootBucket path.
+		// GetBucket/CreateBucketIfNotExists will use only the root path.
 		return ""
 	}
 	return name
@@ -56,7 +56,7 @@ func (n *node) hasBucketName(sink sink) bool {
 	if sink.bucketName() != "" {
 		return true
 	}
-	return len(n.rootBucket) > 0
+	return len(n.root) > 0
 }
 
 // One returns one record by the specified index

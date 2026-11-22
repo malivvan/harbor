@@ -21,14 +21,14 @@ func checkTopKInvariants[E any](x []E, k int, cmp func(E, E) int) bool {
 		return false
 	}
 
-	// All elements before the kth should be less or equal
+	// Copy elements before the kth should be less or equal
 	for _, v := range x[:k-1] {
 		if cmp(x[k-1], v) < 0 {
 			return false
 		}
 	}
 
-	// All elements following the kth should be greater or equal
+	// Copy elements following the kth should be greater or equal
 	for _, v := range x[k:] {
 		if cmp(v, x[k-1]) < 0 {
 			return false

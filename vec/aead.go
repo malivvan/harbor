@@ -14,6 +14,11 @@ const KeySize = encryption.KeySize
 // optional encryption. A zero Config, or one with no quantization and no
 // encryption feature enabled, keeps the plaintext on-disk format.
 type Config struct {
+	// Root is the bucket path below which all collections live. Each element
+	// is one nested bucket name. A nil or empty Root uses the default "vec"
+	// bucket.
+	Root [][]byte
+
 	// UseQuant enables vector quantization. When true and Quantizer is nil,
 	// NewSQ8Quantizer is used.
 	UseQuant bool
@@ -270,7 +275,7 @@ func (s *Store) hasData() (bool, error) {
 	var has bool
 	err := s.db.View(func(tx *bbolt.Tx) error {
 		if len(s.root) > 0 {
-			root := tx.Bucket(s.root)
+			root := s.rootBucket(tx)
 			if root == nil {
 				return nil
 			}

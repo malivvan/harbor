@@ -10,7 +10,7 @@ package math32
 // version of the original C.
 //
 // ====================================================
-// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+// Copyright (C) 1993 by Sun Microsystems, Inc. Copy rights reserved.
 //
 // Developed at SunPro, a Sun Microsystems, Inc. business.
 // Permission to use, copy, modify, and distribute this

@@ -15,6 +15,10 @@ const KeySize = encryption.KeySize
 // or one with no encryption feature enabled, leaves the store in its plaintext
 // format.
 type Config struct {
+	// Root is the bucket path below which all series live. Each element is one
+	// nested bucket name. A nil or empty Root uses the default "ts" bucket.
+	Root [][]byte
+
 	// Secret is a raw 32-byte master key. It must be set when encryption is
 	// enabled.
 	Secret []byte
@@ -237,7 +241,7 @@ func (s *Store) hasData(db *bolt.DB) (bool, error) {
 		if found || len(s.root) == 0 {
 			return nil
 		}
-		if root := tx.Bucket(s.root); root != nil {
+		if root := s.rootBucket(tx); root != nil {
 			if err := root.ForEach(func(key, value []byte) error {
 				if value == nil && string(key) != metaBucketName {
 					found = true
@@ -255,10 +259,10 @@ func (s *Store) hasData(db *bolt.DB) (bool, error) {
 // Open wraps an already-open bbolt database in a time series Store.
 //
 // The caller owns db and must keep it open for the lifetime of the Store. The
-// Store never closes db. root is an optional root bucket key; nil or an empty
-// slice means the database root. cfg enables optional encryption; a zero
+// Store never closes db. cfg enables optional encryption; cfg.Root is an
+// optional bucket path (an empty path means the database root), and a zero
 // Config, or one with no encryption enabled, creates a plaintext store.
-func Open(ctx context.Context, bdb *bolt.DB, key []byte, cfg Config) (*Store, error) {
+func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
@@ -273,7 +277,7 @@ func Open(ctx context.Context, bdb *bolt.DB, key []byte, cfg Config) (*Store, er
 
 	s := &Store{
 		b:      bdb,
-		root:   append([]byte(nil), key...),
+		root:   cloneRoot(cfg.Root),
 		series: make(map[string]*Series),
 	}
 	s.now.Store(&nowProvider{fn: defaultNow})

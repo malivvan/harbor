@@ -18,7 +18,7 @@ func TestParseFlags_AllCombinations(t *testing.T) {
 		{"O_RDONLY", Flags(O_RDONLY), false},
 		{"O_WRONLY|O_CREATE", Flags(O_WRONLY | O_CREATE), false},
 		{"O_RDWR|O_APPEND|O_SYNC", Flags(O_RDWR | O_APPEND | O_SYNC), false},
-		{"O_RDONLY|O_RDWR", 0, true}, // Multiple access modes - error
+		{"O_RDONLY|O_RDWR", 0, true},   // Multiple access modes - error
 		{"O_WRONLY|O_RDONLY", 0, true}, // Multiple access modes - error
 		{"O_INVALID", 0, true},
 		{"O_CREATE|O_EXCL|O_TRUNC", Flags(O_CREATE | O_EXCL | O_TRUNC), false},

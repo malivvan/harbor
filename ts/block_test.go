@@ -290,20 +290,20 @@ func TestBlockModeConfigMismatch(t *testing.T) {
 	})
 	require.NoError(t, store.Series("cpu").Insert(ctx, Point{Timestamp: 1, Value: 1}))
 
-	_, err := Open(ctx, db, root, Config{
+	_, err := openStore(ctx, db, root, Config{
 		Secret:        testKey(26),
 		EncryptValues: true,
 		BlockDuration: 20,
 	})
 	require.ErrorIs(t, err, ErrWrongMode)
 
-	_, err = Open(ctx, db, root, Config{
+	_, err = openStore(ctx, db, root, Config{
 		Secret:        testKey(26),
 		BlockDuration: 10,
 	})
 	require.ErrorIs(t, err, ErrWrongMode)
 
-	_, err = Open(ctx, db, root, Config{
+	_, err = openStore(ctx, db, root, Config{
 		EncryptValues: true,
 		BlockDuration: 10,
 	})

@@ -19,16 +19,16 @@ func chunkKey(ino uint64, idx int64) []byte {
 }
 
 // chunked reports whether content is stored as encrypted chunks.
-func (fs *FileSystem) chunked() bool {
-	if fs == nil {
+func (fsys *FS) chunked() bool {
+	if fsys == nil {
 		return false
 	}
-	e := fs.enc.Load()
+	e := fsys.enc.Load()
 	return e != nil && e.chunkSize > 0
 }
 
-func (fs *FileSystem) chunkSize() int64 {
-	e := fs.enc.Load()
+func (fsys *FS) chunkSize() int64 {
+	e := fsys.enc.Load()
 	if e == nil {
 		return 0
 	}
@@ -37,8 +37,8 @@ func (fs *FileSystem) chunkSize() int64 {
 
 // openFsBucketForWrite opens the filesystem buckets and ensures the chunks
 // bucket exists.
-func (fs *FileSystem) openFsBucketForWrite(tx *bolt.Tx) (*fsBucket, error) {
-	bb, err := openBucket(tx, fs.bucket)
+func (fsys *FS) openFsBucketForWrite(tx *bolt.Tx) (*fsBucket, error) {
+	bb, err := openBucket(tx, fsys.bucket)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +49,7 @@ func (fs *FileSystem) openFsBucketForWrite(tx *bolt.Tx) (*fsBucket, error) {
 	if b == nil {
 		return nil, os.ErrNotExist
 	}
-	b.enc = fs.enc.Load()
+	b.enc = fsys.enc.Load()
 	return b, nil
 }
 
@@ -266,43 +266,43 @@ func (b *fsBucket) writeAllChunks(ino uint64, data []byte, chunkSize int64) erro
 	return nil
 }
 
-func (fs *FileSystem) readRange(ino uint64, off, n int64) ([]byte, error) {
+func (fsys *FS) readRange(ino uint64, off, n int64) ([]byte, error) {
 	var out []byte
-	err := fs.db.View(func(tx *bolt.Tx) error {
-		b, err := fs.openFsBucket(tx)
+	err := fsys.db.View(func(tx *bolt.Tx) error {
+		b, err := fsys.openFsBucket(tx)
 		if err != nil {
 			return err
 		}
-		out, err = b.readDataRange(ino, off, n, fs.chunkSize())
+		out, err = b.readDataRange(ino, off, n, fsys.chunkSize())
 		return err
 	})
 	return out, err
 }
 
-func (fs *FileSystem) writeRange(ino uint64, off int64, data []byte) error {
-	return fs.db.Update(func(tx *bolt.Tx) error {
-		b, err := fs.openFsBucketForWrite(tx)
+func (fsys *FS) writeRange(ino uint64, off int64, data []byte) error {
+	return fsys.db.Update(func(tx *bolt.Tx) error {
+		b, err := fsys.openFsBucketForWrite(tx)
 		if err != nil {
 			return err
 		}
-		return b.writeDataRange(ino, off, data, fs.chunkSize())
+		return b.writeDataRange(ino, off, data, fsys.chunkSize())
 	})
 }
 
-func (fs *FileSystem) truncateRange(ino uint64, size int64) error {
-	return fs.db.Update(func(tx *bolt.Tx) error {
-		b, err := fs.openFsBucketForWrite(tx)
+func (fsys *FS) truncateRange(ino uint64, size int64) error {
+	return fsys.db.Update(func(tx *bolt.Tx) error {
+		b, err := fsys.openFsBucketForWrite(tx)
 		if err != nil {
 			return err
 		}
-		return b.truncateData(ino, size, fs.chunkSize())
+		return b.truncateData(ino, size, fsys.chunkSize())
 	})
 }
 
-func (fs *FileSystem) loadChunkedData(ino uint64) ([]byte, error) {
+func (fsys *FS) loadChunkedData(ino uint64) ([]byte, error) {
 	var out []byte
-	err := fs.db.View(func(tx *bolt.Tx) error {
-		b, err := fs.openFsBucket(tx)
+	err := fsys.db.View(func(tx *bolt.Tx) error {
+		b, err := fsys.openFsBucket(tx)
 		if err != nil {
 			return err
 		}
@@ -312,12 +312,12 @@ func (fs *FileSystem) loadChunkedData(ino uint64) ([]byte, error) {
 	return out, err
 }
 
-func (fs *FileSystem) saveChunkedData(ino uint64, data []byte) error {
-	return fs.db.Update(func(tx *bolt.Tx) error {
-		b, err := fs.openFsBucketForWrite(tx)
+func (fsys *FS) saveChunkedData(ino uint64, data []byte) error {
+	return fsys.db.Update(func(tx *bolt.Tx) error {
+		b, err := fsys.openFsBucketForWrite(tx)
 		if err != nil {
 			return err
 		}
-		return b.writeAllChunks(ino, data, fs.chunkSize())
+		return b.writeAllChunks(ino, data, fsys.chunkSize())
 	})
 }

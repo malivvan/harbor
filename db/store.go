@@ -1,643 +1,237 @@
+// Package db is a toolkit for BoltDB that provides indexes, a wide range
+// of methods to store and fetch data, an advanced query system, and managed
+// transactions with context support.
 package db
 
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
-	"reflect"
+	"fmt"
 
-	"github.com/malivvan/storm/db/index"
-	"github.com/malivvan/storm/db/q"
 	bolt "go.etcd.io/bbolt"
 )
 
-// TypeStore stores user defined types in BoltDB.
-type TypeStore interface {
-	Finder
-	// Init creates the indexes and buckets for a given structure
-	Init(ctx context.Context, data any) error
+const (
+	databaseInfo   = "__database"
+	metadataBucket = "__metadata"
+	versionKey     = "version"
+)
 
-	// ReIndex rebuilds all the indexes of a bucket
-	ReIndex(ctx context.Context, data any) error
-
-	// Save a structure
-	Save(ctx context.Context, data any) error
-
-	// Update a structure
-	Update(ctx context.Context, data any) error
-
-	// UpdateField updates a single field
-	UpdateField(ctx context.Context, data any, fieldName string, value any) error
-
-	// Drop a bucket
-	Drop(ctx context.Context, data any) error
-
-	// DeleteStruct deletes a structure from the associated bucket
-	DeleteStruct(ctx context.Context, data any) error
+// BucketNamer is an interface that can be implemented by structs to provide
+// a custom bucket name. This is essential for runtime-generated types
+// (via reflect.StructOf) that have no static type name.
+type BucketNamer interface {
+	StormBucketName() string
 }
 
-// Init creates the indexes and buckets for a given structure
-func (n *node) Init(ctx context.Context, data any) error {
+// defaultCodec is the codec used when none is supplied.
+var defaultCodec = JSONCodec
+
+// Open initializes Storm on an already-open bbolt database.
+//
+// The caller owns db and must keep it open for the lifetime of the returned
+// Store. Storm never closes db.
+//
+// cfg configures the store. cfg.Root is an optional bucket path; an empty path
+// means the database root. A zero cfg selects the default JSON codec and
+// creates a plaintext store. cfg.Codec is the codec used to encode and decode
+// entities; a nil Codec selects the default JSON codec.
+//
+// When cfg enables encryption the store writes an unencrypted marker into the
+// __database bucket and verifies it with a sealed canary, so:
+//
+//   - opening an encrypted store without a Config (or with the wrong settings)
+//     fails with ErrWrongMode,
+//   - opening an encrypted store with the wrong key fails with ErrAuthFailed,
+//   - opening a store that already holds plaintext data with encryption
+//     requested fails with ErrWrongMode.
+//
+// Migrating an existing plaintext store to an encrypted one is not supported
+// yet; export and re-import instead.
+func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 	if err := checkContext(ctx); err != nil {
-		return wrapError("init", err)
+		return nil, wrapError("open", err)
+	}
+	if bdb == nil {
+		return nil, wrapError("open", ErrNilParam)
 	}
 
-	v := reflect.ValueOf(data)
-	cfg, err := extract(&v)
+	c := defaultCodec
+	if cfg.Codec != nil {
+		c = cfg.Codec
+	}
+
+	enc, err := resolveConfig(cfg)
 	if err != nil {
-		return wrapError("init", err)
+		return nil, wrapError("open", err)
 	}
 
-	if err := checkContext(ctx); err != nil {
-		return wrapError("init", err)
+	s := Store{
+		bolt: bdb,
+		enc:  enc,
 	}
 
-	return wrapError("init", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
-		return n.init(ctx, tx, cfg)
-	}))
+	root := cloneBucketPath(cfg.Root)
+	n := node{
+		s:     &s,
+		codec: c,
+		root:  cloneBucketPath(root),
+	}
+
+	s.Node = &n
+
+	if err := s.checkMode(ctx); err != nil {
+		return nil, wrapError("open", err)
+	}
+
+	if err := s.checkVersion(ctx); err != nil {
+		return nil, wrapError("open", err)
+	}
+
+	return &s, nil
 }
 
-func (n *node) init(ctx context.Context, tx *bolt.Tx, cfg *structConfig) error {
-	if err := checkContext(ctx); err != nil {
-		return err
+// Store is the wrapper around BoltDB. It contains an instance of BoltDB and uses it to perform all the
+// needed operations
+type Store struct {
+	// The root node that points to the root bucket.
+	Node
+
+	// bolt is the underlying bbolt database. It is owned by the caller.
+	bolt *bolt.DB
+
+	// enc is the optional encryption state. nil means a plaintext store.
+	enc *encState
+}
+
+// Close releases the Storm wrapper. The underlying bbolt database is owned by
+// the caller and is not closed.
+//
+// If the receiver is nil or the underlying bbolt database is nil, Close returns
+// ErrNilParam without panicking.
+func (s *Store) Close() error {
+	if s == nil {
+		return wrapError("close", ErrNilParam)
+	}
+	if s.bolt == nil {
+		return wrapError("close", ErrNilParam)
+	}
+	return nil
+}
+
+func (s *Store) checkVersion(ctx context.Context) error {
+	// Read the encoded value separately so a decode failure can be classified
+	// as an incompatible codec while preserving the underlying codec error.
+	root, ok := s.Node.(*node)
+	if !ok {
+		return ErrBadType
 	}
 
-	bucket, err := n.createBucketIfNotExists(tx, cfg.Name)
+	raw, err := root.getBytesRaw(ctx, databaseInfo, versionKey)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return s.Set(ctx, databaseInfo, versionKey, Version)
+		}
 		return err
 	}
 
-	// save node configuration in the bucket
-	_, err = newMeta(bucket, n)
+	var v string
+	err = root.unmarshal(raw, &v)
 	if err != nil {
-		return err
+		if errors.Is(err, ErrAuthFailed) {
+			return err
+		}
+		return errors.Join(ErrDifferentCodec, err)
 	}
-
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	for fieldName, fieldCfg := range cfg.Fields {
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-		if fieldCfg.Index == "" {
-			continue
-		}
-		switch fieldCfg.Index {
-		case tagID:
-			_, err = index.NewIDIndex(bucket, []byte(indexPrefix+fieldName))
-		case tagUniqueIdx:
-			_, err = index.NewUniqueIndex(bucket, []byte(indexPrefix+fieldName))
-		case tagIdx:
-			_, err = index.NewListIndex(bucket, []byte(indexPrefix+fieldName))
-		default:
-			err = ErrIdxNotFound
-		}
-
-		if err != nil {
-			return err
-		}
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
+	if v == "" {
+		return s.Set(ctx, databaseInfo, versionKey, Version)
 	}
 
 	return nil
 }
 
-func (n *node) ReIndex(ctx context.Context, data any) error {
-	if err := checkContext(ctx); err != nil {
-		return wrapError("reindex", err)
-	}
-
-	ref := reflect.ValueOf(data)
-
-	if !ref.IsValid() || ref.Kind() != reflect.Ptr || ref.Elem().Kind() != reflect.Struct {
-		return wrapError("reindex", ErrStructPtrNeeded)
-	}
-
-	cfg, err := extract(&ref)
-	if err != nil {
-		return wrapError("reindex", err)
-	}
-	if err := checkContext(ctx); err != nil {
-		return wrapError("reindex", err)
-	}
-
-	return wrapError("reindex", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
-		return n.reIndex(ctx, tx, data, cfg)
-	}))
-}
-
-func (n *node) reIndex(ctx context.Context, tx *bolt.Tx, data interface{}, cfg *structConfig) error {
+// checkMode reconciles the encryption settings of the Store with the marker
+// stored on disk. A plaintext store has no marker; an encrypted store always
+// has one, which also proves the configured key can decrypt the store.
+func (s *Store) checkMode(ctx context.Context) error {
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
 
-	root := n.withTransaction(tx)
-	nodes, err := root.From(cfg.Name).PrefixScan(ctx, indexPrefix)
+	root, ok := s.Node.(*node)
+	if !ok {
+		return ErrBadType
+	}
+
+	m, canary, found, err := root.loadMarker(ctx)
 	if err != nil {
 		return err
 	}
 
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	bucket := root.getBucket(tx, cfg.Name)
-	if bucket == nil {
-		return ErrNotFound
-	}
-
-	// Delete existing index buckets.
-	for _, idxNode := range nodes {
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-		buckets := idxNode.Bucket()
-		name := buckets[len(buckets)-1]
-		err := bucket.DeleteBucket([]byte(name))
-		if err != nil {
-			return err
-		}
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	total, err := root.Count(ctx, data)
-	if err != nil {
-		return err
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	for i := 0; i < total; i++ {
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-
-		err = root.Select(q.True()).Skip(i).First(ctx, data)
-		if err != nil {
-			return err
-		}
-
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-
-		err = root.Update(ctx, data)
-		if err != nil {
-			return err
-		}
-
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// Save a structure
-func (n *node) Save(ctx context.Context, data any) error {
-	if err := checkContext(ctx); err != nil {
-		return wrapError("save", err)
-	}
-
-	ref := reflect.ValueOf(data)
-
-	if !ref.IsValid() || ref.Kind() != reflect.Ptr || ref.Elem().Kind() != reflect.Struct {
-		return wrapError("save", ErrStructPtrNeeded)
-	}
-
-	cfg, err := extract(&ref)
-	if err != nil {
-		return wrapError("save", err)
-	}
-
-	if cfg.ID.IsZero {
-		if !cfg.ID.IsInteger || !cfg.ID.Increment {
-			return wrapError("save", ErrZeroID)
-		}
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return wrapError("save", err)
-	}
-
-	return wrapError("save", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
-		return n.save(ctx, tx, cfg, data, false)
-	}))
-}
-
-func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data interface{}, update bool) error {
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	bucket, err := n.createBucketIfNotExists(tx, cfg.Name)
-	if err != nil {
-		return err
-	}
-
-	// save node configuration in the bucket
-	meta, err := newMeta(bucket, n)
-	if err != nil {
-		return err
-	}
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	if cfg.ID.IsZero {
-		err = meta.increment(cfg.ID)
-		if err != nil {
-			return err
-		}
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	id, err := n.keyBytes(cfg.ID.Value.Interface(), keyDomainID)
-	if err != nil {
-		return err
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	for fieldName, fieldCfg := range cfg.Fields {
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-
-		if !update && !fieldCfg.IsID && fieldCfg.Increment && fieldCfg.IsInteger && fieldCfg.IsZero {
-			err = meta.increment(fieldCfg)
-			if err != nil {
-				return err
-			}
-			if err := checkContext(ctx); err != nil {
-				return err
-			}
-		}
-
-		if fieldCfg.Index == "" {
-			continue
-		}
-
-		idx, err := getIndex(bucket, fieldCfg.Index, fieldName)
-		if err != nil {
-			return err
-		}
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-
-		if update && fieldCfg.IsZero && !fieldCfg.ForceUpdate {
-			continue
-		}
-
-		if fieldCfg.IsZero {
-			err = idx.RemoveID(ctx, id)
-			if err != nil {
-				return err
-			}
-			if err := checkContext(ctx); err != nil {
-				return err
-			}
-			continue
-		}
-
-		value, err := n.keyBytes(fieldCfg.Value.Interface(), keyDomainIndex)
-		if err != nil {
-			return err
-		}
-
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-
-		var found bool
-		idsSaved, err := idx.All(ctx, value, nil)
-		if err != nil {
-			return err
-		}
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-		for _, idSaved := range idsSaved {
-			if err := checkContext(ctx); err != nil {
-				return err
-			}
-			if bytes.Equal(idSaved, id) {
-				found = true
-				break
-			}
-		}
-
+	if s.enc == nil {
 		if found {
-			continue
-		}
-
-		err = idx.RemoveID(ctx, id)
-		if err != nil {
-			return err
-		}
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-
-		err = idx.Add(ctx, value, id)
-		if err != nil {
-			if errors.Is(err, index.ErrAlreadyExists) {
-				return ErrAlreadyExists
-			}
-			return err
-		}
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	raw, err := n.marshal(data)
-	if err != nil {
-		return err
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	if err := bucket.Put(id, raw); err != nil {
-		return err
-	}
-	return checkContext(ctx)
-}
-
-// Update a structure
-func (n *node) Update(ctx context.Context, data any) error {
-	return wrapError("update", n.update(ctx, data, func(ref *reflect.Value, current *reflect.Value, cfg *structConfig) error {
-		numfield := ref.NumField()
-		for i := 0; i < numfield; i++ {
-			if err := checkContext(ctx); err != nil {
-				return err
-			}
-			f := ref.Field(i)
-			if ref.Type().Field(i).PkgPath != "" {
-				continue
-			}
-			zero := reflect.Zero(f.Type()).Interface()
-			actual := f.Interface()
-			if !reflect.DeepEqual(actual, zero) {
-				cf := current.Field(i)
-				cf.Set(f)
-				idxInfo, ok := cfg.Fields[ref.Type().Field(i).Name]
-				if ok {
-					idxInfo.Value = &cf
-				}
-			}
+			return fmt.Errorf("%w: store is encrypted", ErrWrongMode)
 		}
 		return nil
-	}))
-}
-
-// UpdateField updates a single field
-func (n *node) UpdateField(ctx context.Context, data any, fieldName string, value any) error {
-	return wrapError("update field", n.update(ctx, data, func(ref *reflect.Value, current *reflect.Value, cfg *structConfig) error {
-		f := current.FieldByName(fieldName)
-		if !f.IsValid() {
-			return ErrNotFound
-		}
-		tf, _ := current.Type().FieldByName(fieldName)
-		if tf.PkgPath != "" {
-			return ErrNotFound
-		}
-		v := reflect.ValueOf(value)
-		if v.Kind() != f.Kind() {
-			return ErrIncompatibleValue
-		}
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-		f.Set(v)
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-		idxInfo, ok := cfg.Fields[fieldName]
-		if ok {
-			idxInfo.Value = &f
-			idxInfo.IsZero = isZero(idxInfo.Value)
-			idxInfo.ForceUpdate = true
-		}
-		return nil
-	}))
-}
-
-func (n *node) update(ctx context.Context, data interface{}, fn func(*reflect.Value, *reflect.Value, *structConfig) error) error {
-	if err := checkContext(ctx); err != nil {
-		return err
 	}
 
-	ref := reflect.ValueOf(data)
-	if !ref.IsValid() || ref.Kind() != reflect.Ptr || ref.Elem().Kind() != reflect.Struct {
-		return ErrStructPtrNeeded
+	if found {
+		if !m.matches(s.enc) {
+			return fmt.Errorf("%w: encryption settings do not match the store", ErrWrongMode)
+		}
+		return s.enc.verifyCanary(canary)
 	}
 
-	cfg, err := extract(&ref)
+	// No marker: only a brand-new store may be initialized as encrypted.
+	hasData, err := root.hasUserData(ctx)
 	if err != nil {
 		return err
 	}
-
-	if cfg.ID.IsZero {
-		return ErrNoID
+	if hasData {
+		return fmt.Errorf("%w: store already contains plaintext data", ErrWrongMode)
 	}
 
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	current := reflect.New(reflect.Indirect(ref).Type())
-
-	return n.readWriteTx(ctx, func(tx *bolt.Tx) error {
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-
-		err = n.withTransaction(tx).One(ctx, cfg.ID.Name, cfg.ID.Value.Interface(), current.Interface())
-		if err != nil {
-			return err
-		}
-
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-
-		ref := reflect.ValueOf(data).Elem()
-		cref := current.Elem()
-		err = fn(&ref, &cref, cfg)
-		if err != nil {
-			return err
-		}
-
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-
-		return n.save(ctx, tx, cfg, current.Interface(), true)
-	})
+	return root.storeMarker(ctx, s.enc)
 }
 
-// Drop a bucket
-func (n *node) Drop(ctx context.Context, data any) error {
-	if err := checkContext(ctx); err != nil {
-		return wrapError("drop", err)
+// toBytes turns an interface into a slice of bytes
+func toBytes(key interface{}, c Codec) ([]byte, error) {
+	if key == nil {
+		return nil, nil
 	}
-
-	var bucketName string
-
-	v := reflect.ValueOf(data)
-	if v.Kind() != reflect.String {
-		info, err := extract(&v)
-		if err != nil {
-			return wrapError("drop", err)
-		}
-
-		bucketName = info.Name
-	} else {
-		bucketName = v.Interface().(string)
+	switch t := key.(type) {
+	case []byte:
+		return t, nil
+	case string:
+		return []byte(t), nil
+	case int:
+		return numbertob(int64(t))
+	case uint:
+		return numbertob(uint64(t))
+	case int8, int16, int32, int64, uint8, uint16, uint32, uint64:
+		return numbertob(t)
+	default:
+		return c.Marshal(key)
 	}
-
-	if err := checkContext(ctx); err != nil {
-		return wrapError("drop", err)
-	}
-
-	return wrapError("drop", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
-		return n.drop(ctx, tx, bucketName)
-	}))
 }
 
-func (n *node) drop(ctx context.Context, tx *bolt.Tx, bucketName string) error {
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	bucket := n.getBucket(tx)
-	var err error
-	if bucket == nil {
-		err = tx.DeleteBucket([]byte(bucketName))
-	} else {
-		err = bucket.DeleteBucket([]byte(bucketName))
-	}
+func numbertob(v interface{}) ([]byte, error) {
+	var buf bytes.Buffer
+	err := binary.Write(&buf, binary.BigEndian, v)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return checkContext(ctx)
+	return buf.Bytes(), nil
 }
 
-// DeleteStruct deletes a structure from the associated bucket
-func (n *node) DeleteStruct(ctx context.Context, data any) error {
-	if err := checkContext(ctx); err != nil {
-		return wrapError("delete struct", err)
-	}
-
-	ref := reflect.ValueOf(data)
-
-	if !ref.IsValid() || ref.Kind() != reflect.Ptr || ref.Elem().Kind() != reflect.Struct {
-		return wrapError("delete struct", ErrStructPtrNeeded)
-	}
-
-	cfg, err := extract(&ref)
+func numberfromb(raw []byte) (int64, error) {
+	r := bytes.NewReader(raw)
+	var to int64
+	err := binary.Read(r, binary.BigEndian, &to)
 	if err != nil {
-		return wrapError("delete struct", err)
+		return 0, err
 	}
-
-	if err := checkContext(ctx); err != nil {
-		return wrapError("delete struct", err)
-	}
-
-	id, err := n.keyBytes(cfg.ID.Value.Interface(), keyDomainID)
-	if err != nil {
-		return wrapError("delete struct", err)
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return wrapError("delete struct", err)
-	}
-
-	return wrapError("delete struct", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
-		return n.deleteStruct(ctx, tx, cfg, id)
-	}))
-}
-
-func (n *node) deleteStruct(ctx context.Context, tx *bolt.Tx, cfg *structConfig, id []byte) error {
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	bucket := n.getBucket(tx, cfg.Name)
-	if bucket == nil {
-		return ErrNotFound
-	}
-
-	for fieldName, fieldCfg := range cfg.Fields {
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-
-		if fieldCfg.Index == "" {
-			continue
-		}
-
-		idx, err := getIndex(bucket, fieldCfg.Index, fieldName)
-		if err != nil {
-			return err
-		}
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-
-		err = idx.RemoveID(ctx, id)
-		if err != nil {
-			if errors.Is(err, index.ErrNotFound) {
-				return ErrNotFound
-			}
-			return err
-		}
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	raw := bucket.Get(id)
-	if raw == nil {
-		return ErrNotFound
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return err
-	}
-
-	if err := bucket.Delete(id); err != nil {
-		return err
-	}
-	return checkContext(ctx)
+	return to, nil
 }

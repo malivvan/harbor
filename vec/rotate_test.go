@@ -110,7 +110,7 @@ func TestAEADRotateAllReEncryptsEverything(t *testing.T) {
 	// The old key must no longer open the store; the new key must.
 	bdb, err = bbolt.Open(path, 0600, &bbolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
-	_, err = Open(ctx, bdb, nil, aeadNamesConfig(keyA))
+	_, err = Open(ctx, bdb, aeadNamesConfig(keyA))
 	require.ErrorIs(t, err, ErrAuthFailed)
 	require.NoError(t, bdb.Close())
 
@@ -118,7 +118,7 @@ func TestAEADRotateAllReEncryptsEverything(t *testing.T) {
 	require.NoError(t, err)
 	defer reopened.Close()
 
-	store, err = Open(ctx, reopened, nil, aeadNamesConfig(keyB))
+	store, err = Open(ctx, reopened, aeadNamesConfig(keyB))
 	require.NoError(t, err)
 	require.NoError(t, store.VerifyAll(ctx))
 
@@ -204,7 +204,7 @@ func TestAEADReEncryptCollectionKeepsOthersReadable(t *testing.T) {
 	require.NoError(t, err)
 	defer bdb.Close()
 
-	store, err = Open(ctx, bdb, nil, Config{Secret: keyB, EncryptPoints: true})
+	store, err = Open(ctx, bdb, Config{Secret: keyB, EncryptPoints: true})
 	require.NoError(t, err)
 	require.NoError(t, store.VerifyAll(ctx))
 

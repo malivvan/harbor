@@ -19,7 +19,7 @@ func TestListIndex(t *testing.T) {
 	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
-	err := db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := db.bdb.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
 
@@ -168,7 +168,7 @@ func TestListIndexReverse(t *testing.T) {
 	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
-	err := db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := db.bdb.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
 
@@ -213,7 +213,7 @@ func TestListIndexAddRemoveID(t *testing.T) {
 	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
-	db.NativeDB().Update(func(tx *bolt.Tx) error {
+	db.bdb.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
 
@@ -257,7 +257,7 @@ func TestListIndexAllRecords(t *testing.T) {
 	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
-	db.NativeDB().Update(func(tx *bolt.Tx) error {
+	db.bdb.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
 
@@ -336,7 +336,7 @@ func TestListIndexRange(t *testing.T) {
 	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
-	db.NativeDB().Update(func(tx *bolt.Tx) error {
+	db.bdb.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
 
@@ -432,7 +432,7 @@ func TestListIndexPrefix(t *testing.T) {
 	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
-	db.NativeDB().Update(func(tx *bolt.Tx) error {
+	db.bdb.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
 

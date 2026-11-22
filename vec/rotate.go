@@ -247,7 +247,7 @@ func (r *rotation) collectionNames(tx *bbolt.Tx) ([]string, error) {
 	}
 
 	if len(r.store.root) > 0 {
-		root := tx.Bucket(r.store.root)
+		root := r.store.rootBucket(tx)
 		if root == nil {
 			return nil, nil
 		}
@@ -489,7 +489,7 @@ func (r *rotation) bucket(tx *bbolt.Tx, name []byte) *bbolt.Bucket {
 	if len(r.store.root) == 0 {
 		return tx.Bucket(name)
 	}
-	root := tx.Bucket(r.store.root)
+	root := r.store.rootBucket(tx)
 	if root == nil {
 		return nil
 	}
@@ -506,7 +506,7 @@ func (r *rotation) createBucket(tx *bbolt.Tx, name []byte) (*bbolt.Bucket, error
 	if len(r.store.root) == 0 {
 		return tx.CreateBucketIfNotExists(name)
 	}
-	root, err := tx.CreateBucketIfNotExists(r.store.root)
+	root, err := r.store.createRootBucket(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -518,7 +518,7 @@ func (r *rotation) deleteBucket(tx *bbolt.Tx, name []byte) error {
 	var err error
 	if len(r.store.root) == 0 {
 		err = tx.DeleteBucket(name)
-	} else if root := tx.Bucket(r.store.root); root != nil {
+	} else if root := r.store.rootBucket(tx); root != nil {
 		err = root.DeleteBucket(name)
 	}
 	if err != nil && err != bbolt.ErrBucketNotFound {

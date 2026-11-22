@@ -26,7 +26,10 @@ func openEncStore(t *testing.T, root []byte, cfg Config) (*Store, *bolt.DB) {
 	db, err := bolt.Open(filepath.Join(t.TempDir(), "fs-enc.db"), 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	store, err := Open(context.Background(), db, root, cfg)
+	if len(root) > 0 {
+		cfg.Root = [][]byte{root}
+	}
+	store, err := Open(context.Background(), db, cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return store, db
@@ -36,7 +39,10 @@ func openEncStoreAt(t *testing.T, dbPath string, root []byte, cfg Config) (*Stor
 	t.Helper()
 	db, err := bolt.Open(dbPath, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
-	store, err := Open(context.Background(), db, root, cfg)
+	if len(root) > 0 {
+		cfg.Root = [][]byte{root}
+	}
+	store, err := Open(context.Background(), db, cfg)
 	if err != nil {
 		_ = db.Close()
 		return nil, nil, err
@@ -125,7 +131,7 @@ func rawDecodeInode(t *testing.T, db *bolt.DB, root []byte, name string, ino uin
 	return decodeErr
 }
 
-func writeTestFile(t *testing.T, fsys *FileSystem, path, content string) {
+func writeTestFile(t *testing.T, fsys *FS, path, content string) {
 	t.Helper()
 	f, err := fsys.Create(path)
 	require.NoError(t, err)
@@ -152,7 +158,7 @@ func TestEncryptionOptionalPlaintextFormat(t *testing.T) {
 	data := fsValue(t, db, root, "fs", func(b *fsBucket) *bolt.Bucket { return b.data }, ino)
 	require.Equal(t, []byte("plain hello"), data, "plaintext content is stored raw")
 
-	store2, err := Open(ctx, db, root, Config{})
+	store2, err := openStore(ctx, db, root, Config{})
 	require.NoError(t, err)
 	fsys2, err := store2.Open("fs")
 	require.NoError(t, err)
@@ -301,7 +307,7 @@ func TestEncryptionTamper(t *testing.T) {
 		raw[len(raw)-1] ^= 0xFF
 		return b.inodes.Put(i2b(ino), raw)
 	}))
-	store2, err := Open(ctx, db, root, cfg)
+	store2, err := openStore(ctx, db, root, cfg)
 	require.NoError(t, err)
 	fsys2, err := store2.Open("fs")
 	require.NoError(t, err)
@@ -310,7 +316,7 @@ func TestEncryptionTamper(t *testing.T) {
 	require.NoError(t, store2.Close())
 
 	// Tamper with the sealed content.
-	store3, err := Open(ctx, db, root, cfg)
+	store3, err := openStore(ctx, db, root, cfg)
 	require.NoError(t, err)
 	fsys3, err := store3.Open("fs")
 	require.NoError(t, err)
@@ -365,7 +371,7 @@ func TestEncryptionModeDetection(t *testing.T) {
 	require.NoError(t, err)
 	writeTestFile(t, fsys, "/file.txt", "plain")
 
-	encStore, err := Open(ctx, db, root, Config{Secret: testEncKey(8), EncryptContent: true})
+	encStore, err := openStore(ctx, db, root, Config{Secret: testEncKey(8), EncryptContent: true})
 	require.NoError(t, err)
 	_, err = encStore.Open("fs")
 	require.ErrorIs(t, err, ErrWrongMode, "plaintext data must not be silently encrypted")
@@ -376,13 +382,13 @@ func TestEncryptionModeDetection(t *testing.T) {
 	fsys, err = enc.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, fsys, "/file.txt", "secret")
-	plainStore, err := Open(ctx, db2, root2, Config{})
+	plainStore, err := openStore(ctx, db2, root2, Config{})
 	require.NoError(t, err)
 	_, err = plainStore.Open("fs")
 	require.ErrorIs(t, err, ErrWrongMode)
 
 	// Different encryption settings are rejected.
-	other, err := Open(ctx, db2, root2, Config{Secret: testEncKey(9), EncryptMetadata: true})
+	other, err := openStore(ctx, db2, root2, Config{Secret: testEncKey(9), EncryptMetadata: true})
 	require.NoError(t, err)
 	_, err = other.Open("fs")
 	require.ErrorIs(t, err, ErrWrongMode)
@@ -397,7 +403,7 @@ func TestEncryptionEmptyPlaintextFSMigration(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, fsys.Close())
 
-	enc, err := Open(ctx, db, root, Config{Secret: testEncKey(10), EncryptMetadata: true, EncryptContent: true})
+	enc, err := openStore(ctx, db, root, Config{Secret: testEncKey(10), EncryptMetadata: true, EncryptContent: true})
 	require.NoError(t, err)
 	encFS, err := enc.Open("fs")
 	require.NoError(t, err)
@@ -423,7 +429,7 @@ func TestEncryptionConfigValidation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Open(ctx, db, root, tt.cfg)
+			_, err := openStore(ctx, db, root, tt.cfg)
 			require.ErrorIs(t, err, tt.want)
 		})
 	}

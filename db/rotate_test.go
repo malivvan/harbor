@@ -101,7 +101,7 @@ func TestAEADRotateReEncryptsEverything(t *testing.T) {
 
 	// The old key must no longer open the store; the new key must.
 	bdb = aeadOpenBolt(t, path)
-	_, err = Open(ctx, bdb, nil, aeadRotateConfig(keyA))
+	_, err = Open(ctx, bdb, aeadRotateConfig(keyA))
 	require.ErrorIs(t, err, ErrAuthFailed)
 	require.NoError(t, bdb.Close())
 

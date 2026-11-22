@@ -168,7 +168,7 @@ func TestIDIndexParams(t *testing.T) {
 	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
-	err := db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := db.bdb.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
 
@@ -206,10 +206,10 @@ func TestIDIndexParams(t *testing.T) {
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
 	bDB, _ := bolt.Open(filepath.Join(dir, "storm.db"), 0600, nil)
-	db, _ := storm.Open(ctx, bDB, nil, storm.Config{})
+	db, _ := storm.Open(ctx, bDB, storm.Config{})
 	defer db.Close()
 
-	err := db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := db.bdb.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
 
@@ -293,7 +293,7 @@ func TestIDIndexParams(t *testing.T) {
 		require.Nil(t, id)
 		id = idx.Get(ctx, []byte("yo"))
 		require.Equal(t, []byte("id3"), id)
-		ids, err := idx.All(ctx, []byte("yo"), nil)
+		ids, err := idx.Copy(ctx, []byte("yo"), nil)
 		require.NoError(t, err)
 		require.Len(t, ids, 1)
 		require.Equal(t, []byte("id3"), ids[0])
@@ -315,7 +315,7 @@ func TestIDIndexRange(t *testing.T) {
 	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
-	db.NativeDB().Update(func(tx *bolt.Tx) error {
+	db.bdb.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
 
@@ -388,7 +388,7 @@ func TestIDIndexPrefix(t *testing.T) {
 	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
-	db.NativeDB().Update(func(tx *bolt.Tx) error {
+	db.bdb.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
 

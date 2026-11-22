@@ -17,7 +17,7 @@ const dirWriteFlags = 3712
 
 // File implements the absfs.File interface, providing a file interface for boltdb
 type File struct {
-	fs *FileSystem
+	fs *FS
 	// db *bolt.DB
 
 	name  string

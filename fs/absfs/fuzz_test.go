@@ -278,7 +278,7 @@ func FuzzFlags(f *testing.F) {
 			t.Logf("unusual access mode: flags=0x%x, accessMode=0x%x", flags, accessMode)
 		}
 
-		// Property 2: Test Flags type conversion and String method
+		// Property 2: Test Encrypt type conversion and String method
 		f := Flags(flags)
 		s := f.String()
 

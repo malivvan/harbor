@@ -15,6 +15,11 @@ const KeySize = encryption.KeySize
 // encryption. A zero Config, or one with no encryption feature enabled, keeps
 // the plaintext on-disk format and uses the default JSON codec.
 type Config struct {
+	// Root is the bucket path below which all Storm data lives. Each element
+	// is one nested bucket name. A nil or empty Root uses the default "db"
+	// bucket.
+	Root [][]byte
+
 	// Codec encodes and decodes entities. A nil Codec selects the default JSON
 	// codec.
 	Codec Codec

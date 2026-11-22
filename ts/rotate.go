@@ -23,7 +23,7 @@ func (s *Store) withRotationKey(newKey []byte) (*Store, error) {
 	}
 	next := &Store{
 		b:    s.b,
-		root: s.root,
+		root: cloneRoot(s.root),
 		enc: &encState{
 			kc:        kc,
 			encValues: s.enc.encValues,
@@ -52,7 +52,7 @@ func (s *Store) withKey(newKey []byte) (*Store, error) {
 
 	next := &Store{
 		b:    s.b,
-		root: s.root,
+		root: cloneRoot(s.root),
 		enc: &encState{
 			kc:        kc,
 			encValues: s.enc.encValues,
@@ -119,7 +119,7 @@ func (s *Store) deleteBucket(tx *bolt.Tx, key []byte) error {
 		}
 		return nil
 	}
-	root := tx.Bucket(s.root)
+	root := s.rootBucket(tx)
 	if root != nil && root.Bucket(key) != nil {
 		return root.DeleteBucket(key)
 	}
@@ -365,7 +365,7 @@ func (s *Store) allSeriesNames(tx *bolt.Tx) ([]string, error) {
 	}
 
 	if len(s.root) > 0 {
-		if root := tx.Bucket(s.root); root != nil {
+		if root := s.rootBucket(tx); root != nil {
 			if err := root.ForEach(func(key, value []byte) error {
 				if value != nil || string(key) == metaBucketName {
 					return nil

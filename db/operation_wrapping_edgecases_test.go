@@ -69,7 +69,7 @@ func TestWrap_Finder_LabelsAndClassification(t *testing.T) {
 			cause:  index.ErrNotFound,
 		},
 		{
-			name:   "All",
+			name:   "Copy",
 			prefix: "storm all:",
 			op:     func() error { return db.All(nilCtx, &[]User{}) },
 			cause:  ErrNilContext,
@@ -477,7 +477,7 @@ func TestWrap_QueryDelete_Rollback(t *testing.T) {
 
 	require.GreaterOrEqual(t, qsc.count(), 2, "query must advance past the first mutated record")
 
-	// All records and indexes must be restored.
+	// Copy records and indexes must be restored.
 	count, err = db.Count(ctx, &User{})
 	require.NoError(t, err)
 	require.Equal(t, 3, count, "all records must be restored after rollback")
@@ -658,7 +658,7 @@ func TestWrap_IndexMethods(t *testing.T) {
 		prefix string
 	}
 
-	// All test cases for all index methods.
+	// Copy test cases for all index methods.
 	// We cover:
 	// - index add (IDIndex, ListIndex, UniqueIndex)
 	// - index remove (IDIndex, ListIndex, UniqueIndex)
@@ -856,26 +856,26 @@ func TestWrap_IndexMethods(t *testing.T) {
 	t.Run("index all", func(t *testing.T) {
 		tests := []idxTest{
 			{
-				label:  "IDIndex.All nil context",
+				label:  "IDIndex.Copy nil context",
 				prefix: "storm index all:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := idIdx.All(nilCtx, []byte("x"), nil); return err },
 			},
 			{
-				label:  "ListIndex.All nil context",
+				label:  "ListIndex.Copy nil context",
 				prefix: "storm index all:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := listIdx.All(nilCtx, []byte("x"), nil); return err },
 			},
 			{
-				label:  "UniqueIndex.All nil context",
+				label:  "UniqueIndex.Copy nil context",
 				prefix: "storm index all:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := uniqueIdx.All(nilCtx, []byte("x"), nil); return err },
 			},
-			// All returns nil on error
+			// Copy returns nil on error
 			{
-				label:  "IDIndex.All returns nil on error",
+				label:  "IDIndex.Copy returns nil on error",
 				prefix: "storm index all:",
 				cause:  index.ErrNilContext,
 				op: func() error {
@@ -1197,18 +1197,18 @@ func TestWrap_NestedWrapping(t *testing.T) {
 	// Seed data with indexed fields
 	require.NoError(t, db.Save(ctx, &User{ID: 1, Name: "John", Slug: "john"}))
 
-	// All calls query.Find which generates nested wrapping
+	// Copy calls query.Find which generates nested wrapping
 	t.Run("AllNestedWithQueryFind", func(t *testing.T) {
 		err := db.All(ctx, &[]User{})
 		require.NoError(t, err)
 	})
 
-	// Cancelled All -> expects wrapping on the All boundary
+	// Cancelled Copy -> expects wrapping on the Copy boundary
 	t.Run("CancelledAllShowsNestedWrapping", func(t *testing.T) {
 		err := db.All(canceledCtx(), &[]User{})
 		require.Error(t, err)
 		require.True(t, strings.HasPrefix(err.Error(), "storm all:"),
-			"outermost prefix for All must be 'storm all:', got %q", err.Error())
+			"outermost prefix for Copy must be 'storm all:', got %q", err.Error())
 		require.ErrorIs(t, err, context.Canceled)
 	})
 
@@ -1337,7 +1337,7 @@ func TestWrap_SensitiveDataExclusion(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// All operation labels covered (extended from C2A)
+// Copy operation labels covered (extended from C2A)
 // ---------------------------------------------------------------------------
 
 func TestWrap_AllLabels_C2B(t *testing.T) {

@@ -27,7 +27,7 @@ func aeadOpenStore(t *testing.T, path string, useQuant bool, cfg Config) (*Store
 
 	cfg.UseQuant = useQuant
 
-	store, err := Open(context.Background(), bdb, nil, cfg)
+	store, err := Open(context.Background(), bdb, cfg)
 	require.NoError(t, err)
 	return store, bdb
 }
@@ -253,7 +253,7 @@ func TestAEADWrongKeyFails(t *testing.T) {
 
 	bdb, err := bbolt.Open(path, 0600, &bbolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
-	_, err = Open(context.Background(), bdb, nil, Config{Secret: aeadKey(4), EncryptPoints: true})
+	_, err = Open(context.Background(), bdb, Config{Secret: aeadKey(4), EncryptPoints: true})
 	require.ErrorIs(t, err, ErrAuthFailed)
 	require.NoError(t, bdb.Close())
 
@@ -361,7 +361,7 @@ func TestAEADModeMismatch(t *testing.T) {
 		require.NoError(t, err)
 		defer bdb.Close()
 
-		_, err = Open(ctx, bdb, nil, Config{})
+		_, err = Open(ctx, bdb, Config{})
 		require.ErrorIs(t, err, ErrWrongMode)
 	})
 
@@ -376,7 +376,7 @@ func TestAEADModeMismatch(t *testing.T) {
 		require.NoError(t, err)
 		defer bdb.Close()
 
-		_, err = Open(ctx, bdb, nil, Config{Secret: aeadKey(8), EncryptPoints: true})
+		_, err = Open(ctx, bdb, Config{Secret: aeadKey(8), EncryptPoints: true})
 		require.ErrorIs(t, err, ErrWrongMode)
 	})
 
@@ -390,7 +390,7 @@ func TestAEADModeMismatch(t *testing.T) {
 		require.NoError(t, err)
 		defer bdb.Close()
 
-		_, err = Open(ctx, bdb, nil, Config{
+		_, err = Open(ctx, bdb, Config{
 			Secret:                 aeadKey(8),
 			EncryptPoints:          true,
 			EncryptCollectionNames: true,
@@ -422,7 +422,7 @@ func TestAEADEmptyStoreAdoptsEncryption(t *testing.T) {
 	require.NoError(t, err)
 	defer bdb.Close()
 
-	_, err = Open(context.Background(), bdb, nil, Config{})
+	_, err = Open(context.Background(), bdb, Config{})
 	require.ErrorIs(t, err, ErrWrongMode)
 }
 
@@ -435,11 +435,11 @@ func TestAEADInvalidConfig(t *testing.T) {
 
 	ctx := context.Background()
 
-	_, err = Open(ctx, bdb, nil, Config{Secret: []byte("short"), EncryptPoints: true})
+	_, err = Open(ctx, bdb, Config{Secret: []byte("short"), EncryptPoints: true})
 	require.ErrorIs(t, err, ErrInvalidKey)
 
 	// A valid config still works after the rejected ones above.
-	valid, err := Open(ctx, bdb, nil, Config{
+	valid, err := Open(ctx, bdb, Config{
 		Secret:        aeadKey(10),
 		EncryptPoints: true,
 	})

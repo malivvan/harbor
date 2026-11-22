@@ -788,7 +788,7 @@ func TestQueryFirst_CodecErrorPreservesDestination(t *testing.T) {
 	// so that the codec error is encountered on the first key.
 	// The valid record has ID=1 encoded as big-endian int64,
 	// so a single 0x00 byte sorts before it.
-	require.NoError(t, db.NativeDB().Update(func(tx *bolt.Tx) error {
+	require.NoError(t, db.bolt.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("Score"))
 		require.NotNil(t, b)
 		return b.Put([]byte{0x00}, []byte("{this is not valid json"))
@@ -1085,7 +1085,7 @@ func TestQueryDelete_CancellationRollsBackRecordsAndIndexes(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.Canceled))
 
-	// All records must still exist.
+	// Copy records must still exist.
 	var after []IndexedScore
 	require.NoError(t, db.All(ctx, &after))
 	require.Len(t, after, 5)

@@ -104,8 +104,8 @@ func ExampleParseFlags() {
 		panic(err)
 	}
 
-	fmt.Printf("Flags: %s\n", flags)
-	// Output: Flags: O_RDWR|O_CREATE|O_TRUNC
+	fmt.Printf("Encrypt: %s\n", flags)
+	// Output: Encrypt: O_RDWR|O_CREATE|O_TRUNC
 }
 
 // ExampleFlags_String demonstrates converting flags to string

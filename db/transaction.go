@@ -67,7 +67,7 @@ func (s *Store) ReadTransaction(ctx context.Context, fn func(Node) error) error 
 // WriteTransaction uses bbolt.Update, which executes the callback exactly once.
 //
 // Panic behavior: if fn panics, bbolt rolls back the transaction and
-// the panic propagates to the caller. All writes performed before the
+// the panic propagates to the caller. Copy writes performed before the
 // panic are discarded. Storm does not recover panics.
 func (s *Store) WriteTransaction(ctx context.Context, fn func(Node) error) error {
 	if err := checkContext(ctx); err != nil {

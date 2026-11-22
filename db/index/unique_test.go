@@ -18,7 +18,7 @@ func TestUniqueIndex(t *testing.T) {
 	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
-	err := db.NativeDB().Update(func(tx *bolt.Tx) error {
+	err := db.bdb.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
 
@@ -123,7 +123,7 @@ func TestUniqueIndexRange(t *testing.T) {
 	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
-	db.NativeDB().Update(func(tx *bolt.Tx) error {
+	db.bdb.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
 
@@ -195,7 +195,7 @@ func TestUniqueIndexPrefix(t *testing.T) {
 	db := openStormDB(t, filepath.Join(dir, "storm.db"))
 	defer db.Close()
 
-	db.NativeDB().Update(func(tx *bolt.Tx) error {
+	db.bdb.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte("test"))
 		require.NoError(t, err)
 

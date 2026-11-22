@@ -13,6 +13,11 @@ const KeySize = encryption.KeySize
 // Config, or one with no encryption feature enabled, keeps the plaintext
 // on-disk format.
 type Config struct {
+	// Root is the bucket path below which all file systems live. Each element
+	// is one nested bucket name. A nil or empty Root uses the default "fs"
+	// bucket.
+	Root [][]byte
+
 	// Secret is a raw 32-byte master key. It must be set when encryption is
 	// enabled.
 	Secret []byte

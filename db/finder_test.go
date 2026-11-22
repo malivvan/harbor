@@ -521,7 +521,7 @@ func TestOneNotWritable(t *testing.T) {
 
 	bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
-	db, err := Open(ctx, bDB, nil, Config{})
+	db, err := Open(ctx, bDB, Config{})
 	require.NoError(t, err)
 
 	err = db.Save(ctx, &User{ID: 10, Name: "John"})
@@ -533,7 +533,7 @@ func TestOneNotWritable(t *testing.T) {
 	roBDB, err := bolt.Open(path, 0660, &bolt.Options{ReadOnly: true})
 	require.NoError(t, err)
 	defer roBDB.Close()
-	db, err = Open(ctx, roBDB, nil, Config{})
+	db, err = Open(ctx, roBDB, Config{})
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -918,7 +918,7 @@ func TestFind_IndexedIndexCancellationPreservesDestination(t *testing.T) {
 
 	// Public Find and readTx consume five checks before entering the helper.
 	// The helper then checks entry, bucket and getIndex (calls 6-8), so call 9
-	// is the first check inside idx.All.
+	// is the first check inside idx.Copy.
 	fsc := &finderStepContext{cancelAt: 9}
 	n := db.Node.(*node)
 
@@ -929,7 +929,7 @@ func TestFind_IndexedIndexCancellationPreservesDestination(t *testing.T) {
 	require.Equal(t, []IndexedNameUser{sentinel}, dest,
 		"destination must be preserved on index cancellation")
 	require.GreaterOrEqual(t, fsc.Calls(), 9,
-		"cancellation must occur inside idx.All")
+		"cancellation must occur inside idx.Copy")
 }
 
 func TestFind_IndexedSuccessReplacesDestination(t *testing.T) {
@@ -1313,7 +1313,7 @@ func TestFinders_CancellationDuringOptionStopsBeforeIO(t *testing.T) {
 			"destination must be preserved after option cancellation")
 	})
 
-	t.Run("All", func(t *testing.T) {
+	t.Run("Copy", func(t *testing.T) {
 		db, cleanup := createDB(t)
 		defer cleanup()
 

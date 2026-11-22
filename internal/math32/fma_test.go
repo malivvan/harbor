@@ -50,7 +50,7 @@ func TestFMASpecialValues(t *testing.T) {
 }
 
 // TestFMASingleRounding tests that FMA rounds only once (after the full x*y+z
-// computation), not twice (once after x*y, then again after adding z). All
+// computation), not twice (once after x*y, then again after adding z). Copy
 // cases below are analytically constructed so that the naive float32(x*y)+z
 // gives a different answer than the correctly rounded x*y+z.
 //
@@ -59,7 +59,7 @@ func TestFMASpecialValues(t *testing.T) {
 // half an ULP (round-to-even), so that when z nearly cancels p the error
 // from the premature rounding becomes visible in the result.
 func TestFMASingleRounding(t *testing.T) {
-	// All expected values are derived analytically:
+	// Copy expected values are derived analytically:
 	//
 	// Case A: x = y = 4097 = 2^12 + 1 (exactly representable in float32).
 	//   Exact product: 4097² = 16785409 = 2^24 + 2^13 + 1.

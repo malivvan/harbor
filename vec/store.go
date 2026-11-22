@@ -8,12 +8,13 @@ import (
 	"fmt"
 	"log"
 	"sync/atomic"
-	"time"
 	"unicode/utf8"
 
 	"github.com/malivvan/binco"
 	"go.etcd.io/bbolt"
 )
+
+const Name = "vec"
 
 const collectionsMetaBucket = "__collections_meta__"
 
@@ -22,9 +23,9 @@ const collectionsMetaBucket = "__collections_meta__"
 type Store struct {
 	db *bbolt.DB
 
-	// root is the optional parent bucket for collections and collection
-	// metadata. An empty root means the database root.
-	root []byte
+	// root is the parent bucket path for collections and collection metadata.
+	// The default is the "vec" bucket.
+	root [][]byte
 
 	// closed reports whether Close has been called. It is an atomic so that
 	// Close can race safely with the other Store methods.
@@ -167,39 +168,13 @@ func normalizeJSONValue(v any) any {
 	}
 }
 
-// NewStorage opens a bbolt database at path and returns a Store with default
-// storage options.
-func NewStorage(path string) (*Store, error) {
-	return NewStorageWithQuantization(path, false, nil, false)
-}
-
-// NewStorageWithQuantization opens a bbolt database at path with optional
-// vector quantization. When readOnly is true, the database is opened in
-// read-only mode.
-func NewStorageWithQuantization(path string, useQuant bool, quantizer Quantizer, readOnly bool) (*Store, error) {
-	bdb, err := bbolt.Open(path, 0600, &bbolt.Options{
-		Timeout:  time.Second,
-		ReadOnly: readOnly,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	store, err := Open(context.Background(), bdb, nil, Config{UseQuant: useQuant, Quantizer: quantizer})
-	if err != nil {
-		_ = bdb.Close()
-		return nil, err
-	}
-	return store, nil
-}
-
 // Open initializes a new BoltDB storage engine with optional vector quantization
 // and native AEAD encryption.
 //
 // A nil database is rejected with ErrInvalidConfig: the returned Store would
 // have no way to persist anything and every method would otherwise panic.
-// The root key, when non-empty, is used as the parent bucket for all collections
-// and collection metadata.
+// cfg.Root is an optional bucket path used as the parent for all collections
+// and collection metadata; an empty path means the database root.
 // Returns an error if the context is invalid.
 //
 // A zero cfg creates a plaintext store with no quantization and its on-disk
@@ -218,7 +193,7 @@ func NewStorageWithQuantization(path string, useQuant bool, quantizer Quantizer,
 //
 // Migrating an existing plaintext store to an encrypted one is not supported;
 // re-import the data instead.
-func Open(ctx context.Context, bdb *bbolt.DB, key []byte, cfg Config) (*Store, error) {
+func Open(ctx context.Context, bdb *bbolt.DB, cfg Config) (*Store, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
@@ -248,7 +223,7 @@ func Open(ctx context.Context, bdb *bbolt.DB, key []byte, cfg Config) (*Store, e
 		db:        bdb,
 		quantizer: quantizer,
 		useQuant:  useQuant,
-		root:      append([]byte(nil), key...),
+		root:      cloneRoot(cfg.Root),
 		enc:       enc,
 	}
 
@@ -324,13 +299,57 @@ func checkContext(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// rootBucket returns the configured root bucket, or nil when the store operates
-// at the database root. The bucket must already exist.
+// rootBucket traverses the configured root path, or returns nil when the path
+// is empty or any element is missing.
 func (s *Store) rootBucket(tx *bbolt.Tx) *bbolt.Bucket {
-	if len(s.root) == 0 {
+	var b *bbolt.Bucket
+	for _, name := range s.root {
+		if len(name) == 0 {
+			continue
+		}
+		if b == nil {
+			b = tx.Bucket(name)
+		} else {
+			b = b.Bucket(name)
+		}
+		if b == nil {
+			return nil
+		}
+	}
+	return b
+}
+
+// createRootBucket creates the configured root path and returns its innermost
+// bucket. An empty path returns nil.
+func (s *Store) createRootBucket(tx *bbolt.Tx) (*bbolt.Bucket, error) {
+	var b *bbolt.Bucket
+	for _, name := range s.root {
+		if len(name) == 0 {
+			continue
+		}
+		var err error
+		if b == nil {
+			b, err = tx.CreateBucketIfNotExists(name)
+		} else {
+			b, err = b.CreateBucketIfNotExists(name)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return b, nil
+}
+
+// cloneRoot returns a deep copy of a bucket path.
+func cloneRoot(root [][]byte) [][]byte {
+	if root == nil {
 		return nil
 	}
-	return tx.Bucket(s.root)
+	out := make([][]byte, len(root))
+	for i, part := range root {
+		out[i] = append([]byte(nil), part...)
+	}
+	return out
 }
 
 // collectionBucket returns the bucket for a collection under the configured
@@ -364,7 +383,7 @@ func (s *Store) createCollectionBucket(tx *bbolt.Tx, name string) (*bbolt.Bucket
 		return tx.CreateBucketIfNotExists(key)
 	}
 
-	root, err := tx.CreateBucketIfNotExists(s.root)
+	root, err := s.createRootBucket(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -379,9 +398,9 @@ func (s *Store) metaBucket(tx *bbolt.Tx, create bool) (*bbolt.Bucket, error) {
 
 	if len(s.root) > 0 {
 		if create {
-			parent, err = tx.CreateBucketIfNotExists(s.root)
+			parent, err = s.createRootBucket(tx)
 		} else {
-			parent = tx.Bucket(s.root)
+			parent = s.rootBucket(tx)
 		}
 		if err != nil {
 			return nil, err
@@ -569,7 +588,7 @@ func (s *Store) ListCollections() ([]string, error) {
 
 	err := s.db.View(func(tx *bbolt.Tx) error {
 		if len(s.root) > 0 {
-			root := tx.Bucket(s.root)
+			root := s.rootBucket(tx)
 			if root == nil {
 				return nil
 			}
@@ -747,7 +766,7 @@ func (s *Store) DropCollection(name string) error {
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		// Delete collection bucket under the configured root.
 		if len(s.root) > 0 {
-			if root := tx.Bucket(s.root); root != nil {
+			if root := s.rootBucket(tx); root != nil {
 				if err := root.DeleteBucket(key); err != nil && err != bbolt.ErrBucketNotFound {
 					return fmt.Errorf("failed to delete bucket: %w", err)
 				}

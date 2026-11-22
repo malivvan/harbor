@@ -18,7 +18,7 @@ import (
 // Snapshots are implemented using BoltDB's read-only transactions (MVCC),
 // which provide consistent views without blocking writes to the main filesystem.
 type Snapshot struct {
-	fs       *FileSystem
+	fs       *FS
 	tx       *bolt.Tx
 	bucket   *fsBucket
 	created  time.Time
@@ -28,20 +28,20 @@ type Snapshot struct {
 
 // CreateSnapshot creates a new read-only snapshot of the filesystem.
 // The snapshot must be released by calling Release() when done to free resources.
-func (fs *FileSystem) CreateSnapshot(name string) (*Snapshot, error) {
-	tx, err := fs.db.Begin(false) // false = read-only transaction
+func (fsys *FS) CreateSnapshot(name string) (*Snapshot, error) {
+	tx, err := fsys.db.Begin(false) // false = read-only transaction
 	if err != nil {
 		return nil, err
 	}
 
-	bucket, err := fs.openFsBucket(tx) // Snapshots don't use the cache
+	bucket, err := fsys.openFsBucket(tx) // Snapshots don't use the cache
 	if err != nil {
 		tx.Rollback()
 		return nil, err
 	}
 
 	return &Snapshot{
-		fs:       fs,
+		fs:       fsys,
 		tx:       tx,
 		bucket:   bucket,
 		created:  time.Now(),
@@ -290,14 +290,14 @@ func (s *Snapshot) CopyToFS(srcPath, dstPath string) error {
 
 // SnapshotManager manages named snapshots for a filesystem.
 type SnapshotManager struct {
-	fs        *FileSystem
+	fs        *FS
 	snapshots map[string]*Snapshot
 }
 
 // NewSnapshotManager creates a new snapshot manager for the given filesystem.
-func (fs *FileSystem) NewSnapshotManager() *SnapshotManager {
+func (fsys *FS) NewSnapshotManager() *SnapshotManager {
 	return &SnapshotManager{
-		fs:        fs,
+		fs:        fsys,
 		snapshots: make(map[string]*Snapshot),
 	}
 }
@@ -359,7 +359,7 @@ func (sm *SnapshotManager) ReleaseAll() error {
 // Ensure Snapshot implements relevant absfs interfaces where applicable.
 var _ absfs.FileSystem = (*Snapshot)(nil)
 
-// The following methods make Snapshot compatible with absfs.FileSystem
+// The following methods make Snapshot compatible with absfs.FS
 // for read-only operations. Write operations return errors.
 
 func (s *Snapshot) Chdir(dir string) error { return os.ErrPermission }

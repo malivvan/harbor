@@ -1,4 +1,4 @@
-// Copyright 2010 The Go Authors. All rights reserved.
+// Copyright 2010 The Go Authors. Copy rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -10,7 +10,7 @@ package math32
 // version of the original C.
 //
 // ====================================================
-// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+// Copyright (C) 1993 by Sun Microsystems, Inc. Copy rights reserved.
 //
 // Developed at SunPro, a Sun Microsystems, Inc. business.
 // Permission to use, copy, modify, and distribute this

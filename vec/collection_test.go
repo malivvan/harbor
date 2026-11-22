@@ -106,10 +106,7 @@ func TestCollection(t *testing.T) {
 		defer os.Remove(tempPath)
 
 		// Create storage
-		storage, err := NewStorage(tempPath)
-		if err != nil {
-			t.Fatalf("Failed to create storage: %v", err)
-		}
+		storage := openTestStorage(t, tempPath)
 		defer storage.Close()
 
 		// Create collection with HNSW index
@@ -198,7 +195,7 @@ func TestCollectionHNSWParams(t *testing.T) {
 	tempFile.Close()
 	defer os.Remove(tempPath)
 
-	storage, _ := NewStorage(tempPath)
+	storage := openTestStorage(t, tempPath)
 	defer storage.Close()
 
 	params := HNSWParams{
@@ -239,7 +236,7 @@ func TestCollectionLoadError(t *testing.T) {
 	tempFile.Close()
 	defer os.Remove(tempPath)
 
-	storage, _ := NewStorage(tempPath)
+	storage := openTestStorage(t, tempPath)
 	defer storage.Close()
 
 	colName := "error-col"
@@ -264,7 +261,7 @@ func TestCollectionUpsertFailure(t *testing.T) {
 	tempFile.Close()
 	defer os.Remove(tempPath)
 
-	storage, _ := NewStorage(tempPath)
+	storage := openTestStorage(t, tempPath)
 	defer storage.Close()
 
 	col := &Collection{

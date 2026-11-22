@@ -59,7 +59,7 @@ func prepareDB() (string, *storm.Store, *bolt.DB) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	db, err := storm.Open(ctx, bdb, nil, storm.Config{})
+	db, err := storm.Open(ctx, bdb, storm.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}

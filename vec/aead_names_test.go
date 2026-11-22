@@ -169,7 +169,7 @@ func TestAEADEncryptedNamesRootScope(t *testing.T) {
 	require.NoError(t, err)
 	defer bdb.Close()
 
-	store, err := Open(context.Background(), bdb, []byte("tenant"), aeadNamesConfig(aeadKey(24)))
+	store, err := openStore(context.Background(), bdb, []byte("tenant"), aeadNamesConfig(aeadKey(24)))
 	require.NoError(t, err)
 
 	require.NoError(t, store.EnsureCollection("invoices"))

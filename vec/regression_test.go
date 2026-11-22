@@ -18,7 +18,7 @@ func newTempStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("open bbolt: %v", err)
 	}
-	store, err := Open(context.Background(), bdb, nil, Config{})
+	store, err := Open(context.Background(), bdb, Config{})
 	if err != nil {
 		_ = bdb.Close()
 		t.Fatalf("open store: %v", err)
@@ -393,7 +393,7 @@ func TestCollectionDeleteKeepsBufferOnStorageFailure(t *testing.T) {
 // TestOpenRejectsNilDatabase is a regression test for Open handing out a store
 // whose methods panic on a nil database.
 func TestOpenRejectsNilDatabase(t *testing.T) {
-	store, err := Open(context.Background(), nil, nil, Config{})
+	store, err := Open(context.Background(), nil, Config{})
 	if err == nil {
 		t.Fatalf("Open with a nil database returned %v, want an error", store)
 	}

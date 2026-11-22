@@ -9,12 +9,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func bpath(parts ...string) [][]byte {
+	root := make([][]byte, len(parts))
+	for i, part := range parts {
+		root[i] = []byte(part)
+	}
+	return root
+}
+
 func TestBucket(t *testing.T) {
 	db, cleanup := createDB(t)
 	defer cleanup()
 
 	// Read tx
-	readTx, err := db.NativeDB().Begin(false)
+	readTx, err := db.bolt.Begin(false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +41,7 @@ func TestBucket(t *testing.T) {
 	// End read tx
 
 	// Write tx
-	writeTx, err := db.NativeDB().Begin(true)
+	writeTx, err := db.bolt.Begin(true)
 
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +65,7 @@ func TestBucket(t *testing.T) {
 	// End write tx
 
 	// Read tx
-	readTx, err = db.NativeDB().Begin(false)
+	readTx, err = db.bolt.Begin(false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,34 +194,34 @@ func TestBucketHelpers_DoNotMutateNodePath(t *testing.T) {
 	defer cleanup()
 
 	node := db.From("tenant").(*node)
-	original := []string{"root", "tenant"}
-	require.Equal(t, original, node.rootBucket)
+	original := bpath("root", "tenant")
+	require.Equal(t, original, node.root)
 
 	// Use a real bbolt write transaction.
-	writeTx, err := db.NativeDB().Begin(true)
+	writeTx, err := db.bolt.Begin(true)
 	require.NoError(t, err)
 
 	// createBucketIfNotExists
 	b, err := node.createBucketIfNotExists(writeTx, "users")
 	require.NoError(t, err)
 	require.NotNil(t, b)
-	require.Equal(t, original, node.rootBucket, "CreateBucketIfNotExists must not mutate rootBucket")
+	require.Equal(t, original, node.root, "CreateBucketIfNotExists must not mutate root")
 
 	// createBucketIfNotExists with empty bucket
 	b2, err := node.createBucketIfNotExists(writeTx, "")
 	require.NoError(t, err)
 	require.NotNil(t, b2)
-	require.Equal(t, original, node.rootBucket, "CreateBucketIfNotExists with empty must not mutate rootBucket")
+	require.Equal(t, original, node.root, "CreateBucketIfNotExists with empty must not mutate root")
 
 	// getBucket
 	b3 := node.getBucket(writeTx, "users")
 	require.NotNil(t, b3)
-	require.Equal(t, original, node.rootBucket, "GetBucket must not mutate rootBucket")
+	require.Equal(t, original, node.root, "GetBucket must not mutate root")
 
 	// getBucket with empty children
 	b4 := node.getBucket(writeTx)
 	require.NotNil(t, b4)
-	require.Equal(t, original, node.rootBucket, "GetBucket without children must not mutate rootBucket")
+	require.Equal(t, original, node.root, "GetBucket without children must not mutate root")
 
 	require.NoError(t, writeTx.Commit())
 }
@@ -223,40 +231,40 @@ func TestBucketHelpers_DoNotMutateNodePath(t *testing.T) {
 // slice has excess capacity.
 func TestNodePath_ExcessCapacity_From(t *testing.T) {
 	// Construct a node with a slice that has excess capacity.
-	root := make([]string, 1, 8)
-	root[0] = "tenant"
+	root := make([][]byte, 1, 8)
+	root[0] = []byte("tenant")
 
-	parent := &node{rootBucket: root}
+	parent := &node{root: root}
 
 	// Derive a child.
 	child := parent.From("users")
 	childNode := child.(*node)
 
 	// The child should have the correct path.
-	require.Equal(t, []string{"tenant", "users"}, childNode.rootBucket)
+	require.Equal(t, bpath("tenant", "users"), childNode.root)
 
 	// The parent's backing array beyond len(root) must remain empty.
 	full := root[:cap(root)]
 	for i := len(root); i < len(full); i++ {
-		require.Equal(t, "", full[i], "position %d in parent backing array was written", i)
+		require.Nil(t, full[i], "position %d in parent backing array was written", i)
 	}
 
 	// The parent path must be unchanged.
-	require.Equal(t, []string{"tenant"}, parent.rootBucket)
+	require.Equal(t, bpath("tenant"), parent.root)
 }
 
 // TestNodePath_ExcessCapacity_CreateBucketIfNotExists verifies that
 // CreateBucketIfNotExists does not write into the parent's backing array.
 func TestNodePath_ExcessCapacity_CreateBucketIfNotExists(t *testing.T) {
-	root := make([]string, 1, 8)
-	root[0] = "tenant"
+	root := make([][]byte, 1, 8)
+	root[0] = []byte("tenant")
 
-	n := &node{rootBucket: root}
+	n := &node{root: root}
 
 	db, cleanup := createDB(t)
 	defer cleanup()
 
-	writeTx, err := db.NativeDB().Begin(true)
+	writeTx, err := db.bolt.Begin(true)
 	require.NoError(t, err)
 
 	_, err = n.createBucketIfNotExists(writeTx, "users")
@@ -267,24 +275,24 @@ func TestNodePath_ExcessCapacity_CreateBucketIfNotExists(t *testing.T) {
 	// Parent backing array beyond len(root) must remain empty.
 	full := root[:cap(root)]
 	for i := len(root); i < len(full); i++ {
-		require.Equal(t, "", full[i], "position %d in parent backing array was written", i)
+		require.Nil(t, full[i], "position %d in parent backing array was written", i)
 	}
 
-	require.Equal(t, []string{"tenant"}, n.rootBucket)
+	require.Equal(t, bpath("tenant"), n.root)
 }
 
 // TestNodePath_ExcessCapacity_GetBucket verifies that
 // getBucket does not write into the parent's backing array.
 func TestNodePath_ExcessCapacity_GetBucket(t *testing.T) {
-	root := make([]string, 1, 8)
-	root[0] = "tenant"
+	root := make([][]byte, 1, 8)
+	root[0] = []byte("tenant")
 
-	n := &node{rootBucket: root}
+	n := &node{root: root}
 
 	db, cleanup := createDB(t)
 	defer cleanup()
 
-	writeTx, err := db.NativeDB().Begin(true)
+	writeTx, err := db.bolt.Begin(true)
 	require.NoError(t, err)
 
 	// First create the bucket so that getBucket can find it.
@@ -300,10 +308,10 @@ func TestNodePath_ExcessCapacity_GetBucket(t *testing.T) {
 	// Parent backing array beyond len(root) must remain empty.
 	full := root[:cap(root)]
 	for i := len(root); i < len(full); i++ {
-		require.Equal(t, "", full[i], "position %d in parent backing array was written", i)
+		require.Nil(t, full[i], "position %d in parent backing array was written", i)
 	}
 
-	require.Equal(t, []string{"tenant"}, n.rootBucket)
+	require.Equal(t, bpath("tenant"), n.root)
 }
 
 // TestBucketScanner_ReturnsIndependentNodePaths verifies that scanner
@@ -362,7 +370,7 @@ func TestBucketScanner_NestedRoot(t *testing.T) {
 	db, cleanup := createDB(t, testRoot("tenant", "context"))
 	defer cleanup()
 
-	// db already has rootBucket ["tenant", "context"].
+	// db already has root ["tenant", "context"].
 	// Create child buckets under it.
 	for i := 1; i <= 3; i++ {
 		child := db.From(fmtBucketName(i))
@@ -376,7 +384,7 @@ func TestBucketScanner_NestedRoot(t *testing.T) {
 
 	for _, node := range nodes {
 		p := node.Bucket()
-		// rootBucket is ["tenant", "context", "child_N"]
+		// root is ["tenant", "context", "child_N"]
 		require.Len(t, p, 3)
 		require.Equal(t, "tenant", p[0])
 		require.Equal(t, "context", p[1])
@@ -393,7 +401,7 @@ func TestBucketScanner_NestedRoot(t *testing.T) {
 // concurrent From and Bucket calls on an immutable shared parent
 // are race-free.
 func TestNodePath_DerivationAndInspectionAreRaceSafe(t *testing.T) {
-	parent := &node{rootBucket: []string{"tenant"}}
+	parent := &node{root: bpath("tenant")}
 
 	const goroutines = 50
 	var wg sync.WaitGroup

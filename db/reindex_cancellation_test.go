@@ -248,7 +248,7 @@ func TestReIndex_CancellationAfterMutationRollsBackAll(t *testing.T) {
 	}
 
 	// Verify indexes exist pre-ReIndex via bbolt.
-	require.NoError(t, db.NativeDB().View(func(tx *bolt.Tx) error {
+	require.NoError(t, db.bolt.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("reindexUser"))
 		require.NotNil(t, b)
 		require.NotNil(t, b.Bucket([]byte(indexPrefix+"Name")))
@@ -268,8 +268,8 @@ func TestReIndex_CancellationAfterMutationRollsBackAll(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, 4, sctx.Hits())
 
-	// All index buckets must be back after rollback.
-	require.NoError(t, db.NativeDB().View(func(tx *bolt.Tx) error {
+	// Copy index buckets must be back after rollback.
+	require.NoError(t, db.bolt.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("reindexUser"))
 		require.NotNil(t, b)
 		require.NotNil(t, b.Bucket([]byte(indexPrefix+"Name")))
@@ -315,8 +315,8 @@ func TestReIndex_CancellationDuringMultiFieldRebuildRollsBack(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, 3, sctx.Hits())
 
-	// All index buckets must be back.
-	require.NoError(t, db.NativeDB().View(func(tx *bolt.Tx) error {
+	// Copy index buckets must be back.
+	require.NoError(t, db.bolt.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("reindexUser"))
 		require.NotNil(t, b)
 		require.NotNil(t, b.Bucket([]byte(indexPrefix+"Name")))
@@ -325,7 +325,7 @@ func TestReIndex_CancellationDuringMultiFieldRebuildRollsBack(t *testing.T) {
 		return nil
 	}))
 
-	// All three index types must work.
+	// Copy three index types must work.
 	var found []reindexUser
 	require.NoError(t, db.Find(ctx, "Name", "multi-a", &found))
 	require.Len(t, found, 1)
@@ -389,7 +389,7 @@ func TestReIndex_ListIndexPreservedAfterRollback(t *testing.T) {
 	ctx := context.Background()
 
 	// Seed with list-indexed scores where some share the same score.
-	// All scores must be non-zero to ensure they are indexed (zero values
+	// Copy scores must be non-zero to ensure they are indexed (zero values
 	// are treated as "not set" and are not added to list indexes).
 	for i := 1; i <= 6; i++ {
 		u := reindexUser{
@@ -505,7 +505,7 @@ func TestReIndex_SuccessfulRepairsStaleIndexes(t *testing.T) {
 
 	// Deliberately corrupt the index state via direct bbolt access.
 	// Delete the Score index bucket, simulating stale index state.
-	require.NoError(t, db.NativeDB().Update(func(tx *bolt.Tx) error {
+	require.NoError(t, db.bolt.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("reindexUser"))
 		if b == nil {
 			return ErrNotFound
@@ -514,7 +514,7 @@ func TestReIndex_SuccessfulRepairsStaleIndexes(t *testing.T) {
 	}))
 
 	// Verify Score index is now gone.
-	require.NoError(t, db.NativeDB().View(func(tx *bolt.Tx) error {
+	require.NoError(t, db.bolt.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("reindexUser"))
 		require.NotNil(t, b)
 		require.Nil(t, b.Bucket([]byte(indexPrefix+"Score")),
@@ -531,7 +531,7 @@ func TestReIndex_SuccessfulRepairsStaleIndexes(t *testing.T) {
 	require.NoError(t, db.ReIndex(ctx, &reindexUser{}))
 
 	// Score index must be recreated and functional.
-	require.NoError(t, db.NativeDB().View(func(tx *bolt.Tx) error {
+	require.NoError(t, db.bolt.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("reindexUser"))
 		require.NotNil(t, b)
 		require.NotNil(t, b.Bucket([]byte(indexPrefix+"Score")),

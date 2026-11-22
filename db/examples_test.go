@@ -50,7 +50,7 @@ func ExampleOpen() {
 		}
 	}()
 
-	db, err := storm.Open(ctx, bdb, nil, storm.Config{})
+	db, err := storm.Open(ctx, bdb, storm.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func ExampleStore_Save() {
 		}
 	}()
 
-	db, err := storm.Open(ctx, bdb, nil, storm.Config{Codec: storm.JSONCodec})
+	db, err := storm.Open(ctx, bdb, storm.Config{Codec: storm.JSONCodec})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func ExampleOpen_existingDB() {
 		log.Fatal(err)
 	}
 
-	db, err := storm.Open(ctx, bDB, nil, storm.Config{})
+	db, err := storm.Open(ctx, bDB, storm.Config{})
 	if err != nil {
 		if closeErr := bDB.Close(); closeErr != nil {
 			log.Println("native close after open failure:", closeErr)
@@ -706,7 +706,7 @@ func prepareDB() (string, *storm.Store) {
 	}
 	exampleBoltDBs = append(exampleBoltDBs, bdb)
 
-	db, err := storm.Open(ctx, bdb, nil, storm.Config{})
+	db, err := storm.Open(ctx, bdb, storm.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}

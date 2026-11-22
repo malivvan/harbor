@@ -1,724 +1,425 @@
 package db
 
 import (
+	"bytes"
 	"context"
-	"fmt"
-	"sync"
+	"encoding/binary"
+	"errors"
+	"math"
+	"math/bits"
+	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/q"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
 
-func TestInit(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
+const maxInt = 1<<(bits.UintSize-1) - 1
 
-	ctx := context.Background()
+func TestNewStorm(t *testing.T) {
+	db, err := Open(context.Background(), nil, Config{})
 
-	var u IndexedNameUser
-	err := db.One(ctx, "Name", "John", &u)
-	require.ErrorIs(t, err, ErrNotFound)
+	require.Error(t, err)
+	require.Nil(t, db)
 
-	err = db.Init(ctx, &u)
+	dir, err := os.MkdirTemp(os.TempDir(), "storm")
 	require.NoError(t, err)
+	defer os.RemoveAll(dir)
 
-	err = db.One(ctx, "Name", "John", &u)
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrNotFound)
+	file := filepath.Join(dir, "storm.db")
+	bdb, err := bolt.Open(file, 0600, &bolt.Options{Timeout: time.Second})
+	require.NoError(t, err)
+	defer bdb.Close()
 
-	err = db.Init(ctx, &ClassicBadTags{})
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrUnknownTag)
+	db, err = Open(context.Background(), bdb, Config{})
+	require.NoError(t, err)
+	defer db.Close()
 
-	err = db.Init(ctx, 10)
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrBadType)
+	require.Implements(t, (*Node)(nil), db)
+	require.NotNil(t, db.bolt)
+	require.Equal(t, defaultCodec, db.Codec())
 
-	err = db.Init(ctx, &ClassicNoTags{})
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrNoID)
-
-	err = db.Init(ctx, &struct{ ID string }{})
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrNoName)
+	var v string
+	err = db.Get(context.Background(), databaseInfo, "version", &v)
+	require.NoError(t, err)
+	require.Equal(t, Version, v)
 }
 
-func TestInitMetadata(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
+func TestNewStormWithRootAndCodec(t *testing.T) {
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
+	defer os.RemoveAll(dir)
 
+	dc := new(dummyCodec)
+
+	bdb1, err := bolt.Open(filepath.Join(dir, "storm1.db"), 0660, &bolt.Options{Timeout: 10 * time.Second})
+	require.NoError(t, err)
+	defer bdb1.Close()
+	db1, err := Open(context.Background(), bdb1, Config{Root: [][]byte{[]byte("a")}, Codec: dc})
+	require.NoError(t, err)
+	require.Equal(t, dc, db1.Codec())
+	require.Equal(t, bpath("a"), db1.Node.(*node).root)
+
+	err = db1.Save(context.Background(), &SimpleUser{ID: 1})
+	require.NoError(t, err)
+
+	bdb2, err := bolt.Open(filepath.Join(dir, "storm2.db"), 0600, &bolt.Options{Timeout: 10 * time.Second})
+	require.NoError(t, err)
+	defer bdb2.Close()
+	db2, err := Open(context.Background(), bdb2, Config{Codec: dc})
+	require.NoError(t, err)
+	require.Equal(t, dc, db2.Codec())
+}
+
+func TestBoltDB(t *testing.T) {
+	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
+	defer os.RemoveAll(dir)
+	bDB, err := bolt.Open(filepath.Join(dir, "bolt.db"), 0600, &bolt.Options{Timeout: 10 * time.Second})
+	require.NoError(t, err)
+	defer bDB.Close()
+
+	sDB, err := Open(context.Background(), bDB, Config{})
+	require.NoError(t, err)
+	defer sDB.Close()
+	err = sDB.Save(context.Background(), &SimpleUser{ID: 10})
+	require.NoError(t, err)
+}
+
+type dummyCodec int
+
+func (c dummyCodec) Marshal(v interface{}) ([]byte, error) {
+	return []byte("dummy"), nil
+}
+
+func (c dummyCodec) Unmarshal(b []byte, v interface{}) error {
+	return nil
+}
+
+func (c dummyCodec) Name() string {
+	return "dummy"
+}
+
+func TestCodec(t *testing.T) {
+	u1 := &SimpleUser{Name: "John"}
+	encoded, err := defaultCodec.Marshal(u1)
+	require.Nil(t, err)
+	u2 := &SimpleUser{}
+	err = defaultCodec.Unmarshal(encoded, u2)
+	require.Nil(t, err)
+	if !reflect.DeepEqual(u1, u2) {
+		t.Fatal("Codec mismatch")
+	}
+}
+
+func TestToBytes(t *testing.T) {
+	b, err := toBytes([]byte("a slice of bytes"), nil)
+	require.NoError(t, err)
+	require.Equal(t, []byte("a slice of bytes"), b)
+
+	b, err = toBytes("a string", nil)
+	require.NoError(t, err)
+	require.Equal(t, []byte("a string"), b)
+
+	b, err = toBytes(&SimpleUser{ID: 10, Name: "John", age: 100}, JSONCodec)
+	require.NoError(t, err)
+	require.Equal(t, `{"ID":10,"Name":"John"}`, string(b))
+
+	tests := map[interface{}]interface{}{
+		int(-maxInt):           int64(-maxInt),
+		int(maxInt):            int64(maxInt),
+		int8(-math.MaxInt8):    int8(-math.MaxInt8),
+		int8(math.MaxInt8):     int8(math.MaxInt8),
+		int16(-math.MaxInt16):  int16(-math.MaxInt16),
+		int16(math.MaxInt16):   int16(math.MaxInt16),
+		int32(-math.MaxInt32):  int32(-math.MaxInt32),
+		int32(math.MaxInt32):   int32(math.MaxInt32),
+		int64(-math.MaxInt64):  int64(-math.MaxInt64),
+		int64(math.MaxInt64):   int64(math.MaxInt64),
+		uint(maxInt):           uint64(maxInt),
+		uint64(math.MaxUint64): uint64(math.MaxUint64),
+	}
+
+	for v, expected := range tests {
+		b, err = toBytes(v, nil)
+		require.NoError(t, err)
+		require.NotNil(t, b)
+		buf := bytes.NewReader(b)
+		typ := reflect.TypeOf(expected)
+		actual := reflect.New(typ)
+		err = binary.Read(buf, binary.BigEndian, actual.Interface())
+		require.NoError(t, err)
+		require.Equal(t, expected, actual.Elem().Interface())
+	}
+}
+
+func createDB(t errorHandler, opts ...testOpenOption) (*Store, func()) {
+	cfg := defaultTestOpenOptions()
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	dir, err := os.MkdirTemp(os.TempDir(), "storm")
+	if err != nil {
+		t.Error(err)
+	}
+
+	bdb, err := bolt.Open(filepath.Join(dir, "storm.db"), cfg.mode, cfg.boltOptions)
+	if err != nil {
+		t.Error(err)
+	}
+
+	root := make([][]byte, len(cfg.root))
+	for i, part := range cfg.root {
+		root[i] = []byte(part)
+	}
+
+	db, err := Open(context.Background(), bdb, Config{Root: root, Codec: cfg.codec})
+	if err != nil {
+		t.Error(err)
+	}
+
+	return db, func() {
+		if db != nil {
+			_ = db.Close()
+		}
+		if bdb != nil {
+			_ = bdb.Close()
+		}
+		_ = os.RemoveAll(dir)
+	}
+}
+
+type errorHandler interface {
+	Error(args ...interface{})
+}
+
+// errTestDecode is a stable sentinel returned by the test codec's Unmarshal.
+var errTestDecode = errors.New("test-codec: deterministic decode error")
+
+// testDecodeCodec is a private codec used only to prove that checkVersion
+// preserves the underlying codec/decode error alongside ErrDifferentCodec.
+type testDecodeCodec struct{}
+
+func (testDecodeCodec) Name() string                          { return "test-decode-codec" }
+func (testDecodeCodec) Marshal(v interface{}) ([]byte, error) { return []byte("x"), nil }
+func (testDecodeCodec) Unmarshal(b []byte, v interface{}) error {
+	return errTestDecode
+}
+
+// TestCheckVersion_EmptyVersionIsInitialized verifies that an existing version
+// value that decodes as empty is replaced with the current version.
+func TestCheckVersion_EmptyVersionIsInitialized(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty-version.db")
 	ctx := context.Background()
 
-	err := db.Init(ctx, new(User))
+	bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
-	n := db.WithCodec(altCodec)
-	err = n.Init(ctx, new(User))
+	defer bDB.Close()
+
+	db, err := Open(ctx, bDB, Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Set(ctx, databaseInfo, "version", ""))
+	require.NoError(t, db.Close())
+
+	db, err = Open(ctx, bDB, Config{})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, db.Close()) }()
+
+	var version string
+	require.NoError(t, db.Get(ctx, databaseInfo, "version", &version))
+	require.Equal(t, Version, version)
+}
+
+// TestCheckVersion_ErrorChainPreservation proves that when Open encounters a
+// codec mismatch during checkVersion, the returned error matches both
+// ErrDifferentCodec and the underlying codec/decode error.
+func TestCheckVersion_ErrorChainPreservation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "seed.db")
+
+	bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 10 * time.Second})
+	require.NoError(t, err)
+	defer bDB.Close()
+
+	// Create a database with the default JSON codec. This writes
+	// __database/version using the JSON codec.
+	seedDB, err := Open(context.Background(), bDB, Config{})
+	require.NoError(t, err, "create seed Store")
+	require.NoError(t, seedDB.Close(), "close seed Store")
+
+	// Open with an incompatible codec that deliberately fails Unmarshal.
+	db, err := Open(context.Background(), bDB, Config{Codec: testDecodeCodec{}})
+	require.Error(t, err)
+
+	// Must match ErrDifferentCodec.
+	require.ErrorIs(t, err, ErrDifferentCodec,
+		"checkVersion must classify codec mismatch as ErrDifferentCodec")
+
+	// The underlying decode error must remain discoverable.
+	require.ErrorIs(t, err, errTestDecode,
+		"checkVersion must preserve the underlying decode error in the chain")
+
+	// No partial Store is returned.
+	assert.Nil(t, db, "returned Store must be nil on initialization failure")
+
+	// Reopening with the correct codec must succeed and data must be intact.
+	db2, err := Open(context.Background(), bDB, Config{})
+	require.NoError(t, err, "reopen with correct codec")
+	require.NoError(t, db2.Close())
+}
+
+// TestOpenNilDBRejected verifies Open rejects a nil bbolt database.
+func TestOpenNilDBRejected(t *testing.T) {
+	db, err := Open(context.Background(), nil, Config{})
+	require.ErrorIs(t, err, ErrNilParam)
+	require.Nil(t, db)
+}
+
+// TestCallerOwnsLifecycle verifies that Storm borrows the supplied bbolt Store.
+func TestCallerOwnsLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	bDBPath := filepath.Join(dir, "borrowed.db")
+
+	bDB, err := bolt.Open(bDBPath, 0600, &bolt.Options{Timeout: 10 * time.Second})
+	require.NoError(t, err)
+
+	db, err := Open(context.Background(), bDB, Config{})
+	require.NoError(t, err)
+
+	// The store keeps the exact pointer supplied to Open.
+	require.Same(t, bDB, db.bolt, "the store must keep the supplied bDB pointer")
+
+	// Close releases the Storm wrapper without closing the caller's Store.
+	require.NoError(t, db.Close(), "Close must return nil")
+
+	err = bDB.View(func(tx *bolt.Tx) error { return nil })
+	require.NoError(t, err, "bbolt Store must still be usable after Storm Close")
+
+	// The caller remains responsible for closing the database.
+	require.NoError(t, bDB.Close(), "caller must be able to close the Store after Storm Close")
+}
+
+// TestInitFailureDoesNotClose verifies a failed Open leaves the caller's Store open.
+func TestInitFailureDoesNotClose(t *testing.T) {
+	dir := t.TempDir()
+	bDBPath := filepath.Join(dir, "borrowed_no_close.db")
+
+	bDB, err := bolt.Open(bDBPath, 0600, &bolt.Options{Timeout: 10 * time.Second})
+	require.NoError(t, err)
+
+	// Pre-seed with a conflicting codec to trigger initialization failure.
+	err = bDB.Update(func(tx *bolt.Tx) error {
+		top, err := tx.CreateBucketIfNotExists([]byte(databaseInfo))
+		if err != nil {
+			return err
+		}
+		_, err = top.CreateBucket([]byte(metadataBucket))
+		if err != nil {
+			return err
+		}
+		mb := top.Bucket([]byte(metadataBucket))
+		return mb.Put([]byte(metaCodec), []byte("not-json"))
+	})
+	require.NoError(t, err)
+
+	db, err := Open(context.Background(), bDB, Config{})
 	require.ErrorIs(t, err, ErrDifferentCodec)
+	require.Nil(t, db)
+
+	// The supplied Store must still be open.
+	err = bDB.View(func(tx *bolt.Tx) error { return nil })
+	require.NoError(t, err, "bbolt must still be usable after init failure")
+
+	require.NoError(t, bDB.Close())
 }
 
-func TestReIndex(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
+// TestCancellationDoesNotClose verifies a cancelled Open leaves the caller's Store open.
+func TestCancellationDoesNotClose(t *testing.T) {
+	dir := t.TempDir()
+	bDBPath := filepath.Join(dir, "borrowed_cancel.db")
+
+	bDB, err := bolt.Open(bDBPath, 0600, &bolt.Options{Timeout: 10 * time.Second})
+	require.NoError(t, err)
+
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	db, err := Open(cancelCtx, bDB, Config{})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, db)
+
+	err = bDB.View(func(tx *bolt.Tx) error { return nil })
+	require.NoError(t, err, "bbolt must still be usable after cancelled Open")
+
+	require.NoError(t, bDB.Close())
+}
+
+// TestDBNilClose verifies nil receiver and nil bolt Close behavior.
+func TestDBNilClose(t *testing.T) {
+	// (*Store)(nil).Close() returns ErrNilParam.
+	var nilDB *Store
+	err := nilDB.Close()
+	require.ErrorIs(t, err, ErrNilParam)
+
+	// Store with nil private database returns ErrNilParam from Close.
+	db := &Store{} // bolt is nil
+	err = db.Close()
+	require.ErrorIs(t, err, ErrNilParam)
+}
+
+// TestNativeKVInteroperability verifies native writes are visible to Storm and vice versa.
+func TestNativeKVInteroperability(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "native_interop.db")
+
+	bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 10 * time.Second})
+	require.NoError(t, err)
+	defer bDB.Close()
+
+	db, err := Open(context.Background(), bDB, Config{})
+	require.NoError(t, err)
 
 	ctx := context.Background()
 
-	for i := 1; i < 10; i++ {
-		type User struct {
-			ID   int
-			Age  int    `db:"index"`
-			Name string `db:"unique"`
+	// Step 1: Storm write via KV API.
+	err = db.Set(ctx, "interop", "key1", "storm_value")
+	require.NoError(t, err)
+
+	// Step 2: Verify via native DB (read back the raw bytes).
+	var nativeVal []byte
+	err = db.bolt.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("interop"))
+		if b == nil {
+			return ErrNotFound
 		}
-
-		u := User{
-			ID:   i,
-			Age:  i % 2,
-			Name: fmt.Sprintf("John%d", i),
+		raw := b.Get([]byte("key1"))
+		if raw == nil {
+			return ErrNotFound
 		}
-		err := db.Save(ctx, &u)
-		require.NoError(t, err)
-	}
-
-	db.NativeDB().View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte("User"))
-		require.NotNil(t, bucket)
-
-		require.NotNil(t, bucket.Bucket([]byte(indexPrefix+"Name")))
-		require.NotNil(t, bucket.Bucket([]byte(indexPrefix+"Age")))
+		nativeVal = append([]byte(nil), raw...)
 		return nil
 	})
-
-	type User struct {
-		ID    int
-		Age   int
-		Name  string `db:"index"`
-		Group string `db:"unique"`
-	}
-
-	require.NoError(t, db.ReIndex(ctx, new(User)))
-
-	db.NativeDB().View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte("User"))
-		require.NotNil(t, bucket)
-
-		require.NotNil(t, bucket.Bucket([]byte(indexPrefix+"Name")))
-		require.Nil(t, bucket.Bucket([]byte(indexPrefix+"Age")))
-		require.NotNil(t, bucket.Bucket([]byte(indexPrefix+"Group")))
-		return nil
-	})
-}
-
-func TestSave(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	err := db.Save(ctx, &SimpleUser{ID: 10, Name: "John"})
 	require.NoError(t, err)
+	require.Equal(t, `"storm_value"`, string(nativeVal), "Storm value must be visible through native DB")
 
-	err = db.Save(ctx, &SimpleUser{Name: "John"})
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrZeroID)
-
-	err = db.Save(ctx, &ClassicBadTags{ID: "id", PublicField: 100})
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrUnknownTag)
-
-	err = db.Save(ctx, &UserWithNoID{Name: "John"})
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrNoID)
-
-	err = db.Save(ctx, &UserWithIDField{ID: 10, Name: "John"})
-	require.NoError(t, err)
-
-	u := UserWithEmbeddedIDField{}
-	u.ID = 150
-	u.Name = "Pete"
-	u.Age = 10
-	err = db.Save(ctx, &u)
-	require.NoError(t, err)
-
-	v := UserWithIDField{ID: 10, Name: "John"}
-	err = db.Save(ctx, &v)
-	require.NoError(t, err)
-
-	w := UserWithEmbeddedField{}
-	w.ID = 150
-	w.Name = "John"
-	err = db.Save(ctx, &w)
-	require.NoError(t, err)
-
-	db.NativeDB().View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte("UserWithIDField"))
-		require.NotNil(t, bucket)
-
-		i, err := toBytes(10, JSONCodec)
-		require.NoError(t, err)
-
-		val := bucket.Get(i)
-		require.NotNil(t, val)
-
-		content, err := db.Codec().Marshal(&v)
-		require.NoError(t, err)
-		require.Equal(t, content, val)
-		return nil
-	})
-}
-
-func TestSaveUnique(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	u1 := UniqueNameUser{ID: 10, Name: "John", Age: 10}
-	err := db.Save(ctx, &u1)
-	require.NoError(t, err)
-
-	u2 := UniqueNameUser{ID: 11, Name: "John", Age: 100}
-	err = db.Save(ctx, &u2)
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrAlreadyExists)
-
-	// same id
-	u3 := UniqueNameUser{ID: 10, Name: "Jake", Age: 100}
-	err = db.Save(ctx, &u3)
-	require.NoError(t, err)
-
-	db.NativeDB().View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte("UniqueNameUser"))
-
-		uniqueBucket := bucket.Bucket([]byte(indexPrefix + "Name"))
-		require.NotNil(t, uniqueBucket)
-
-		id := uniqueBucket.Get([]byte("Jake"))
-		i, err := toBytes(10, JSONCodec)
-		require.NoError(t, err)
-		require.Equal(t, i, id)
-
-		id = uniqueBucket.Get([]byte("John"))
-		require.Nil(t, id)
-		return nil
-	})
-}
-
-func TestSaveUniqueStruct(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	a := ClassicUnique{ID: "id1"}
-	a.InlineStruct.A = 10.0
-	a.InlineStruct.B = 12.0
-
-	err := db.Save(ctx, &a)
-	require.NoError(t, err)
-
-	b := ClassicUnique{ID: "id2"}
-	b.InlineStruct.A = 10.0
-	b.InlineStruct.B = 12.0
-
-	err = db.Save(ctx, &b)
-	require.ErrorIs(t, err, ErrAlreadyExists)
-
-	err = db.One(ctx, "InlineStruct", struct {
-		A float32
-		B float64
-	}{A: 10.0, B: 12.0}, &b)
-	require.NoError(t, err)
-	require.Equal(t, a.ID, b.ID)
-}
-
-func TestSaveIndex(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	u1 := IndexedNameUser{ID: 10, Name: "John", age: 10}
-	err := db.Save(ctx, &u1)
-	require.NoError(t, err)
-
-	u1 = IndexedNameUser{ID: 10, Name: "John", age: 10}
-	err = db.Save(ctx, &u1)
-	require.NoError(t, err)
-
-	u2 := IndexedNameUser{ID: 11, Name: "John", age: 100}
-	err = db.Save(ctx, &u2)
-	require.NoError(t, err)
-
-	name1 := "Jake"
-	name2 := "Jane"
-	name3 := "James"
-
-	for i := 0; i < 100; i++ {
-		u := IndexedNameUser{ID: i + 1}
-
-		if i%2 == 0 {
-			u.Name = name1
-		} else {
-			u.Name = name2
+	// Step 3: Native write via native DB (write raw JSON-encoded string).
+	err = db.bolt.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("interop"))
+		if b == nil {
+			return ErrNotFound
 		}
-
-		db.Save(ctx, &u)
-	}
-
-	var users []IndexedNameUser
-	err = db.Find(ctx, "Name", name1, &users)
-	require.NoError(t, err)
-	require.Len(t, users, 50)
-
-	err = db.Find(ctx, "Name", name2, &users)
-	require.NoError(t, err)
-	require.Len(t, users, 50)
-
-	err = db.Find(ctx, "Name", name3, &users)
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrNotFound)
-
-	err = db.Save(ctx, nil)
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrStructPtrNeeded)
-}
-
-func TestSaveEmptyValues(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	u := User{
-		ID: 10,
-	}
-	err := db.Save(ctx, &u)
-	require.NoError(t, err)
-
-	var v User
-	err = db.One(ctx, "ID", 10, &v)
-	require.NoError(t, err)
-	require.Equal(t, 10, v.ID)
-
-	u.Name = "John"
-	u.Slug = "john"
-	err = db.Save(ctx, &u)
-	require.NoError(t, err)
-
-	err = db.One(ctx, "Name", "John", &v)
-	require.NoError(t, err)
-	require.Equal(t, "John", v.Name)
-	require.Equal(t, "john", v.Slug)
-	err = db.One(ctx, "Slug", "john", &v)
-	require.NoError(t, err)
-	require.Equal(t, "John", v.Name)
-	require.Equal(t, "john", v.Slug)
-
-	u.Name = ""
-	u.Slug = ""
-	err = db.Save(ctx, &u)
-	require.NoError(t, err)
-
-	err = db.One(ctx, "Name", "John", &v)
-	require.Error(t, err)
-	err = db.One(ctx, "Slug", "john", &v)
-	require.Error(t, err)
-}
-
-func TestSaveIncrement(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	type User struct {
-		Identifier int    `db:"id,increment"`
-		Name       string `db:"index,increment"`
-		Age        int    `db:"unique,increment=18"`
-	}
-
-	for i := 1; i < 10; i++ {
-		s1 := User{Name: fmt.Sprintf("John%d", i)}
-		err := db.Save(ctx, &s1)
-		require.NoError(t, err)
-		require.Equal(t, i, s1.Identifier)
-		require.Equal(t, i-1+18, s1.Age)
-		require.Equal(t, fmt.Sprintf("John%d", i), s1.Name)
-
-		var s2 User
-		err = db.One(ctx, "Identifier", i, &s2)
-		require.NoError(t, err)
-		require.Equal(t, s1, s2)
-
-		var list []User
-		err = db.Find(ctx, "Age", i-1+18, &list)
-		require.NoError(t, err)
-		require.Len(t, list, 1)
-		require.Equal(t, s1, list[0])
-	}
-}
-
-func TestSaveDifferentBucketRoot(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	require.Len(t, db.Node.(*node).rootBucket, 0)
-
-	dbSub := db.From("sub").(*node)
-
-	require.NotEqual(t, dbSub, db)
-	require.Len(t, dbSub.rootBucket, 1)
-
-	err := db.Save(ctx, &User{ID: 10, Name: "John"})
-	require.NoError(t, err)
-	err = dbSub.Save(ctx, &User{ID: 11, Name: "Paul"})
-	require.NoError(t, err)
-
-	var (
-		john User
-		paul User
-	)
-
-	err = db.One(ctx, "Name", "John", &john)
-	require.NoError(t, err)
-	err = db.One(ctx, "Name", "Paul", &paul)
-	require.Error(t, err)
-
-	err = dbSub.One(ctx, "Name", "Paul", &paul)
-	require.NoError(t, err)
-	err = dbSub.One(ctx, "Name", "John", &john)
-	require.Error(t, err)
-}
-
-func TestSaveEmbedded(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	type Base struct {
-		ID int `db:"id,increment"`
-	}
-
-	type User struct {
-		Base      `db:"inline"`
-		Group     string `db:"index"`
-		Email     string `db:"unique"`
-		Name      string
-		Age       int
-		CreatedAt time.Time `db:"index"`
-	}
-
-	user := User{
-		Group:     "staff",
-		Email:     "john@provider.com",
-		Name:      "John",
-		Age:       21,
-		CreatedAt: time.Now(),
-	}
-
-	err := db.Save(ctx, &user)
-	require.NoError(t, err)
-	require.Equal(t, 1, user.ID)
-}
-
-func TestSaveByValue(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	w := User{Name: "John"}
-	err := db.Save(ctx, w)
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrStructPtrNeeded)
-}
-
-func TestConcurrentSave(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	var wg sync.WaitGroup
-	errs := make(chan error, 5)
-
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			errs <- db.Save(ctx, &User{ID: i + 1, Name: "John", Slug: fmt.Sprintf("cs%d", i)})
-		}(i)
-	}
-
-	wg.Wait()
-	close(errs)
-
-	for e := range errs {
-		require.NoError(t, e)
-	}
-
-	// Confirm all records persisted.
-	for i := 0; i < 5; i++ {
-		var u User
-		err := db.One(ctx, "ID", i+1, &u)
-		require.NoError(t, err)
-		require.Equal(t, "John", u.Name)
-	}
-}
-
-func TestSaveMetadata(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	w := User{ID: 10, Name: "John"}
-	err := db.Save(ctx, &w)
-	require.NoError(t, err)
-	n := db.WithCodec(altCodec)
-	err = n.Save(ctx, &w)
-	require.ErrorIs(t, err, ErrDifferentCodec)
-}
-
-func TestUpdate(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	type User struct {
-		ID          int       `db:"id,increment"`
-		Name        string    `db:"index"`
-		Age         uint64    `db:"index,increment"`
-		DateOfBirth time.Time `db:"index"`
-		Group       string
-		Slug        string `db:"unique"`
-	}
-
-	var u User
-
-	err := db.Save(ctx, &User{ID: 10, Name: "John", Age: 5, Group: "Staff", Slug: "john"})
-	require.NoError(t, err)
-
-	// nil
-	err = db.Update(ctx, nil)
-	require.ErrorIs(t, err, ErrStructPtrNeeded)
-
-	// no id
-	err = db.Update(ctx, &User{Name: "Jack"})
-	require.ErrorIs(t, err, ErrNoID)
-
-	// Unknown user
-	err = db.Update(ctx, &User{ID: 11, Name: "Jack"})
-	require.ErrorIs(t, err, ErrNotFound)
-
-	// actual user
-	err = db.Update(ctx, &User{ID: 10, Name: "Jack"})
-	require.NoError(t, err)
-
-	err = db.One(ctx, "Name", "John", &u)
-	require.ErrorIs(t, err, ErrNotFound)
-
-	err = db.One(ctx, "Name", "Jack", &u)
-	require.NoError(t, err)
-	require.Equal(t, "Jack", u.Name)
-	require.Equal(t, uint64(5), u.Age)
-
-	// indexed field with zero value #170
-	err = db.Update(ctx, &User{ID: 10, Group: "Staff"})
-	require.NoError(t, err)
-
-	err = db.One(ctx, "Name", "Jack", &u)
-	require.NoError(t, err)
-	require.Equal(t, "Jack", u.Name)
-	require.Equal(t, uint64(5), u.Age)
-	require.Equal(t, "Staff", u.Group)
-}
-
-func TestUpdateField(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	type User struct {
-		ID          int       `db:"id,increment"`
-		Name        string    `db:"index"`
-		Age         uint64    `db:"index,increment"`
-		DateOfBirth time.Time `db:"index"`
-		Group       string
-		Slug        string `db:"unique"`
-	}
-
-	var u User
-
-	err := db.Save(ctx, &User{ID: 10, Name: "John", Age: 5, Group: "Staff", Slug: "john"})
-	require.NoError(t, err)
-
-	// nil
-	err = db.UpdateField(ctx, nil, "", nil)
-	require.ErrorIs(t, err, ErrStructPtrNeeded)
-
-	// no id
-	err = db.UpdateField(ctx, &User{}, "Name", "Jack")
-	require.ErrorIs(t, err, ErrNoID)
-
-	// Unknown user
-	err = db.UpdateField(ctx, &User{ID: 11}, "Name", "Jack")
-	require.ErrorIs(t, err, ErrNotFound)
-
-	// Unknown field
-	err = db.UpdateField(ctx, &User{ID: 11}, "Address", "Jack")
-	require.ErrorIs(t, err, ErrNotFound)
-
-	// Incompatible value
-	err = db.UpdateField(ctx, &User{ID: 10}, "Name", 50)
-	require.ErrorIs(t, err, ErrIncompatibleValue)
-
-	// actual user
-	err = db.UpdateField(ctx, &User{ID: 10}, "Name", "Jack")
-	require.NoError(t, err)
-
-	err = db.One(ctx, "Name", "John", &u)
-	require.ErrorIs(t, err, ErrNotFound)
-
-	err = db.One(ctx, "Name", "Jack", &u)
-	require.NoError(t, err)
-	require.Equal(t, "Jack", u.Name)
-
-	// zero value
-	err = db.UpdateField(ctx, &User{ID: 10}, "Name", "")
-	require.NoError(t, err)
-
-	err = db.One(ctx, "Name", "Jack", &u)
-	require.ErrorIs(t, err, ErrNotFound)
-
-	err = db.One(ctx, "ID", 10, &u)
-	require.NoError(t, err)
-	require.Equal(t, "", u.Name)
-
-	// zero value with int and increment
-	err = db.UpdateField(ctx, &User{ID: 10}, "Age", uint64(0))
-	require.NoError(t, err)
-
-	err = db.Select(q.Eq("Age", uint64(5))).First(ctx, &u)
-	require.ErrorIs(t, err, ErrNotFound)
-
-	err = db.Select(q.Eq("Age", uint64(0))).First(ctx, &u)
-	require.NoError(t, err)
-}
-
-func TestDropByString(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	n := db.From("b1", "b2", "b3")
-	err := n.Save(ctx, &SimpleUser{ID: 10, Name: "John"})
-	require.NoError(t, err)
-
-	err = db.From("b1").Drop(ctx, "b2")
-	require.NoError(t, err)
-
-	err = db.From("b1").Drop(ctx, "b2")
-	require.Error(t, err)
-
-	n.From("b4").Drop(ctx, "b5")
-	require.Error(t, err)
-
-	err = db.Drop(ctx, "b1")
-	require.NoError(t, err)
-
-	db.NativeDB().Update(func(tx *bolt.Tx) error {
-		require.Nil(t, db.From().(*node).getBucket(tx, "b1"))
-		d := db.Node.(*node).withTransaction(tx)
-		n := d.From("a1")
-		err = n.Save(ctx, &SimpleUser{ID: 10, Name: "John"})
-		require.NoError(t, err)
-
-		err = d.Drop(ctx, "a1")
-		require.NoError(t, err)
-
-		return nil
+		return b.Put([]byte("key2"), []byte(`"native_value"`))
 	})
-}
-
-func TestDropByStruct(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	n := db.From("b1", "b2", "b3")
-	err := n.Save(ctx, &SimpleUser{ID: 10, Name: "John"})
 	require.NoError(t, err)
 
-	err = n.Drop(ctx, &SimpleUser{})
+	// Step 4: Verify via Storm.
+	var got string
+	err = db.Get(ctx, "interop", "key2", &got)
 	require.NoError(t, err)
+	require.Equal(t, "native_value", got, "native write must be visible through Storm")
 
-	db.NativeDB().Update(func(tx *bolt.Tx) error {
-		require.Nil(t, n.(*node).getBucket(tx, "SimpleUser"))
-		d := db.Node.(*node).withTransaction(tx)
-		n := d.From("a1")
-		err = n.Save(ctx, &SimpleUser{ID: 10, Name: "John"})
-		require.NoError(t, err)
-
-		err = n.Drop(ctx, &SimpleUser{})
-		require.NoError(t, err)
-
-		require.Nil(t, n.(*node).getBucket(tx, "SimpleUser"))
-		return nil
-	})
-}
-
-func TestDeleteStruct(t *testing.T) {
-	db, cleanup := createDB(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	u1 := IndexedNameUser{ID: 10, Name: "John", age: 10}
-	err := db.Save(ctx, &u1)
-	require.NoError(t, err)
-
-	err = db.DeleteStruct(ctx, u1)
-	require.ErrorIs(t, err, ErrStructPtrNeeded)
-
-	err = db.DeleteStruct(ctx, &u1)
-	require.NoError(t, err)
-
-	err = db.DeleteStruct(ctx, &u1)
-	require.ErrorIs(t, err, ErrNotFound)
-
-	u2 := IndexedNameUser{}
-	err = db.Get(ctx, "IndexedNameUser", 10, &u2)
-	require.ErrorIs(t, err, ErrNotFound)
-
-	err = db.DeleteStruct(ctx, nil)
-	require.ErrorIs(t, err, ErrStructPtrNeeded)
-
-	var users []User
-	for i := 0; i < 10; i++ {
-		user := User{Name: "John", ID: i + 1, Slug: fmt.Sprintf("John%d", i+1), DateOfBirth: time.Now().Add(-time.Duration(i*10) * time.Minute)}
-		err = db.Save(ctx, &user)
-		require.NoError(t, err)
-		users = append(users, user)
-	}
-
-	err = db.DeleteStruct(ctx, &users[0])
-	require.NoError(t, err)
-	err = db.DeleteStruct(ctx, &users[1])
-	require.NoError(t, err)
-
-	users = nil
-	err = db.All(ctx, &users)
-	require.NoError(t, err)
-	require.Len(t, users, 8)
-	require.Equal(t, 3, users[0].ID)
+	require.NoError(t, db.Close())
 }

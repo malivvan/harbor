@@ -31,7 +31,7 @@ func attachDB(t *testing.T) *Store {
 	t.Cleanup(func() {
 		require.NoError(t, bDB.Close())
 	})
-	db, err := Open(context.Background(), bDB, nil, Config{})
+	db, err := Open(context.Background(), bDB, Config{})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, db.Close())
@@ -45,7 +45,7 @@ func attachDB(t *testing.T) *Store {
 func attachBegin(t *testing.T, db *Store, writable bool) *bolt.Tx {
 	t.Helper()
 
-	tx, err := db.NativeDB().Begin(writable)
+	tx, err := db.bolt.Begin(writable)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		// No-op when the test already committed or rolled back.
@@ -85,7 +85,7 @@ func TestAttach_CommitIsAtomic(t *testing.T) {
 
 	// The raw bolt write committed atomically with the Storm write.
 	var raw []byte
-	require.NoError(t, db.NativeDB().View(func(vtx *bolt.Tx) error {
+	require.NoError(t, db.bolt.View(func(vtx *bolt.Tx) error {
 		b := vtx.Bucket([]byte("audit"))
 		if b == nil {
 			return ErrNotFound
@@ -137,7 +137,7 @@ func TestAttach_RollbackDiscardsEverything(t *testing.T) {
 	require.ErrorIs(t, db.Find(ctx, "Tag", "t1", &found), ErrNotFound)
 
 	// The raw bolt write is gone too.
-	require.NoError(t, db.NativeDB().View(func(vtx *bolt.Tx) error {
+	require.NoError(t, db.bolt.View(func(vtx *bolt.Tx) error {
 		require.Nil(t, vtx.Bucket([]byte("audit")))
 		return nil
 	}))
@@ -221,7 +221,7 @@ func TestAttach_IsolationFromOtherTransactions(t *testing.T) {
 	require.NoError(t, txn1.Save(ctx, &attachUser{ID: 1, Name: "alice", Tag: "t1"}))
 
 	// A raw bolt reader does not see the uncommitted write.
-	require.NoError(t, db.NativeDB().View(func(vtx *bolt.Tx) error {
+	require.NoError(t, db.bolt.View(func(vtx *bolt.Tx) error {
 		require.Nil(t, vtx.Bucket([]byte("attachUser")))
 		return nil
 	}))
@@ -268,7 +268,7 @@ func TestAttach_NeverCommitsOrRollsBackCallerTx(t *testing.T) {
 	require.NoError(t, audit.Put([]byte("event"), []byte("created")))
 
 	// Nothing was committed in between.
-	require.NoError(t, db.NativeDB().View(func(vtx *bolt.Tx) error {
+	require.NoError(t, db.bolt.View(func(vtx *bolt.Tx) error {
 		require.Nil(t, vtx.Bucket([]byte("attachUser")))
 		require.Nil(t, vtx.Bucket([]byte("audit")))
 		return nil

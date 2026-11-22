@@ -291,7 +291,7 @@ func TestDynamicStructAllViaFrom(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// All
+	// Copy
 	sliceType := reflect.SliceOf(reflect.PointerTo(dynType))
 	resultsVal := reflect.New(sliceType)
 
@@ -464,7 +464,7 @@ func TestDynamicStructSelectCombined(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 5, count)
 
-	// All
+	// Copy
 	sliceType := reflect.SliceOf(reflect.PointerTo(dynType))
 	results := reflect.New(sliceType)
 	err = node.All(ctx, results.Interface())
@@ -548,7 +548,7 @@ func TestDynamicStructInit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify bucket exists
-	err = db.NativeDB().View(func(tx *bolt.Tx) error {
+	err = db.bolt.View(func(tx *bolt.Tx) error {
 		b := db.Node.(*node).getBucket(tx, bucketName)
 		require.NotNil(t, b)
 
@@ -572,7 +572,7 @@ func TestExplicitBucketFromSave(t *testing.T) {
 	bDB, err := bolt.Open(file, 0600, nil)
 	require.NoError(t, err)
 	defer bDB.Close()
-	db, err := Open(ctx, bDB, nil, Config{})
+	db, err := Open(ctx, bDB, Config{})
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -611,7 +611,7 @@ func TestBucketNamerInterface(t *testing.T) {
 	bDB, err := bolt.Open(file, 0600, nil)
 	require.NoError(t, err)
 	defer bDB.Close()
-	db, err := Open(ctx, bDB, nil, Config{})
+	db, err := Open(ctx, bDB, Config{})
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -642,7 +642,7 @@ func TestBucketNamerUpdate(t *testing.T) {
 	bDB, err := bolt.Open(file, 0600, nil)
 	require.NoError(t, err)
 	defer bDB.Close()
-	db, err := Open(ctx, bDB, nil, Config{})
+	db, err := Open(ctx, bDB, Config{})
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -677,7 +677,7 @@ func TestBucketNamerDrop(t *testing.T) {
 	bDB, err := bolt.Open(file, 0600, nil)
 	require.NoError(t, err)
 	defer bDB.Close()
-	db, err := Open(ctx, bDB, nil, Config{})
+	db, err := Open(ctx, bDB, Config{})
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -690,7 +690,7 @@ func TestBucketNamerDrop(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify bucket is gone
-	err = db.NativeDB().View(func(tx *bolt.Tx) error {
+	err = db.bolt.View(func(tx *bolt.Tx) error {
 		b := db.Node.(*node).getBucket(tx, "drop_me")
 		require.Nil(t, b)
 		return nil
@@ -700,7 +700,7 @@ func TestBucketNamerDrop(t *testing.T) {
 
 // ============================================================================
 // Regression: newListSink must resolve BucketNamer before static type name.
-// This proves All/Find on named value-receiver BucketNamer types work.
+// This proves Copy/Find on named value-receiver BucketNamer types work.
 // ============================================================================
 
 func TestBucketNamerListSinkResolution(t *testing.T) {
@@ -709,7 +709,7 @@ func TestBucketNamerListSinkResolution(t *testing.T) {
 	bDB, err := bolt.Open(file, 0600, nil)
 	require.NoError(t, err)
 	defer bDB.Close()
-	db, err := Open(ctx, bDB, nil, Config{})
+	db, err := Open(ctx, bDB, Config{})
 	require.NoError(t, err)
 	defer func() {
 		err := db.Close()
@@ -726,7 +726,7 @@ func TestBucketNamerListSinkResolution(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// All: must read both records from the custom bucket.
+	// Copy: must read both records from the custom bucket.
 	var all []NamerUser
 	err = db.All(ctx, &all)
 	require.NoError(t, err)
@@ -749,8 +749,8 @@ func TestBucketNamerListSinkResolution(t *testing.T) {
 	require.Equal(t, "Alice", aliceResults[0].Name)
 
 	// Prove the Go type-name bucket is not being used.
-	// With the fix: db.All should read from "namer_users" (via BucketNamer).
-	// Without the fix: db.All would read from "NamerUser" and return empty.
+	// With the fix: db.Copy should read from "namer_users" (via BucketNamer).
+	// Without the fix: db.Copy would read from "NamerUser" and return empty.
 	// So db.From("NamerUser") reading should be empty regardless (data is not stored there).
 	goTypeNode := db.From("NamerUser")
 	var goTypeAll []NamerUser

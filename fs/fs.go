@@ -23,8 +23,8 @@ import (
 var errNilIno = errors.New("ino is nil")
 var errNoData = errors.New("no data")
 
-// FileSystem implements absfs.FileSystem for the boltdb packages `github.com/coreos/bbolt`.
-type FileSystem struct {
+// FS implements absfs.FileSystem for the boltdb packages `github.com/coreos/bbolt`.
+type FS struct {
 	db        *bolt.DB
 	bucket    string
 	rootIno   uint64
@@ -43,13 +43,13 @@ type FileSystem struct {
 }
 
 // encState returns the current encryption state (nil when disabled).
-func (fs *FileSystem) encState() *encState {
+func (fs *FS) encState() *encState {
 	return fs.enc.Load()
 }
 
-// newFS creates a new FileSystem in the convention of other `absfs`
+// newFS creates a new FS in the convention of other `absfs`
 // implementations. It takes a bolt.DB pointer and a bucket path.
-func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FileSystem, error) {
+func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FS, error) {
 
 	// create buckets
 	err := db.Update(func(tx *bolt.Tx) error {
@@ -61,7 +61,7 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FileSystem, error) {
 
 	// load or initialize
 	rootIno := uint64(1)
-	fs := &FileSystem{
+	fs := &FS{
 		db:        db,
 		bucket:    bucketpath,
 		rootIno:   rootIno,
@@ -152,7 +152,7 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FileSystem, error) {
 
 // Close releases the file system wrapper. The underlying bbolt database is
 // owned by the Store and is not closed.
-func (fs *FileSystem) Close() error {
+func (fs *FS) Close() error {
 	return nil
 }
 
@@ -160,13 +160,13 @@ func (fs *FileSystem) Close() error {
 // This allows file content to be stored in any absfs.FileSystem implementation
 // (memfs, osfs, s3fs, etc.) instead of in BoltDB. This should be called before
 // any file operations.
-func (fs *FileSystem) SetContentFS(contentFS absfs.FileSystem) {
+func (fs *FS) SetContentFS(contentFS absfs.FileSystem) {
 	fs.contentFS = contentFS
 }
 
 // openFsBucket opens the filesystem buckets at the configured bucket path.
 // This ensures proper bucket isolation when a non-empty bucket path is configured.
-func (fs *FileSystem) openFsBucket(tx *bolt.Tx) (*fsBucket, error) {
+func (fs *FS) openFsBucket(tx *bolt.Tx) (*fsBucket, error) {
 	bb, err := openBucket(tx, fs.bucket)
 	if err != nil {
 		return nil, err
@@ -178,7 +178,7 @@ func (fs *FileSystem) openFsBucket(tx *bolt.Tx) (*fsBucket, error) {
 
 // openFsBucketWithCache opens the filesystem buckets with cache support.
 // This ensures proper bucket isolation when a non-empty bucket path is configured.
-func (fs *FileSystem) openFsBucketWithCache(tx *bolt.Tx) (*fsBucket, error) {
+func (fs *FS) openFsBucketWithCache(tx *bolt.Tx) (*fsBucket, error) {
 	bb, err := openBucket(tx, fs.bucket)
 	if err != nil {
 		return nil, err
@@ -189,7 +189,7 @@ func (fs *FileSystem) openFsBucketWithCache(tx *bolt.Tx) (*fsBucket, error) {
 }
 
 // CacheStats returns statistics about the inode cache.
-func (fs *FileSystem) CacheStats() CacheStats {
+func (fs *FS) CacheStats() CacheStats {
 	if fs.cache == nil {
 		return CacheStats{}
 	}
@@ -197,7 +197,7 @@ func (fs *FileSystem) CacheStats() CacheStats {
 }
 
 // FlushCache removes all entries from the inode cache.
-func (fs *FileSystem) FlushCache() {
+func (fs *FS) FlushCache() {
 	if fs.cache != nil {
 		fs.cache.Flush()
 	}
@@ -205,7 +205,7 @@ func (fs *FileSystem) FlushCache() {
 
 // SetCacheSize changes the maximum size of the inode cache.
 // Setting size to 0 or negative disables the cache.
-func (fs *FileSystem) SetCacheSize(size int) {
+func (fs *FS) SetCacheSize(size int) {
 	if fs.cache != nil {
 		fs.cache.Enable(size)
 	}
@@ -213,7 +213,7 @@ func (fs *FileSystem) SetCacheSize(size int) {
 
 // Umask returns the current `umask` value. A non zero `umask` will be masked
 // with file and directory creation permissions. Returns 0755 if an error occurs.
-func (fs *FileSystem) Umask() os.FileMode {
+func (fs *FS) Umask() os.FileMode {
 	var umask os.FileMode
 	err := fs.db.View(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucket(tx)
@@ -236,7 +236,7 @@ func (fs *FileSystem) Umask() os.FileMode {
 }
 
 // SetUmask sets the current `umask` value. Silently ignores errors.
-func (fs *FileSystem) SetUmask(umask os.FileMode) {
+func (fs *FS) SetUmask(umask os.FileMode) {
 	var data [4]byte
 
 	err := fs.db.Update(func(tx *bolt.Tx) error {
@@ -257,7 +257,7 @@ func (fs *FileSystem) SetUmask(umask os.FileMode) {
 }
 
 // TempDir returns the path to a temporary directory. Returns "/tmp" if an error occurs.
-func (fs *FileSystem) TempDir() string {
+func (fs *FS) TempDir() string {
 	var tempdir string
 	tempdir = "/tmp"
 	err := fs.db.Update(func(tx *bolt.Tx) error {
@@ -282,7 +282,7 @@ func (fs *FileSystem) TempDir() string {
 
 // SetTempdir sets the path to a temporary directory, but does not create the
 // actual directories. Silently ignores errors.
-func (fs *FileSystem) SetTempdir(tempdir string) {
+func (fs *FS) SetTempdir(tempdir string) {
 	// Ignore the error to maintain backwards compatibility
 	_ = fs.db.Update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucket(tx)
@@ -297,7 +297,7 @@ func (fs *FileSystem) SetTempdir(tempdir string) {
 // non-zero the node will be saved with the `ino` provided.
 // If `ino` is zero (the nil value) then a new `ino` is created. In both
 // cases the `ino` value is returned.
-func (fs *FileSystem) saveInode(node *iNode) (ino uint64, err error) {
+func (fs *FS) saveInode(node *iNode) (ino uint64, err error) {
 	ino = node.Ino
 	err = fs.db.Update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucketWithCache(tx)
@@ -318,7 +318,7 @@ func (fs *FileSystem) saveInode(node *iNode) (ino uint64, err error) {
 }
 
 // ReadDir reads the named directory and returns a list of directory entries sorted by filename.
-func (filesystem *FileSystem) ReadDir(name string) ([]fs.DirEntry, error) {
+func (filesystem *FS) ReadDir(name string) ([]fs.DirEntry, error) {
 	dir, filename := filesystem.cleanPath(name)
 	p := path.Join(dir, filename)
 	node, err := filesystem.resolve(p)
@@ -346,7 +346,7 @@ func (filesystem *FileSystem) ReadDir(name string) ([]fs.DirEntry, error) {
 }
 
 // ReadFile reads the named file and returns its contents.
-func (fs *FileSystem) ReadFile(name string) ([]byte, error) {
+func (fs *FS) ReadFile(name string) ([]byte, error) {
 	dir, filename := fs.cleanPath(name)
 	p := path.Join(dir, filename)
 	node, err := fs.resolve(p)
@@ -372,7 +372,7 @@ func (fs *FileSystem) ReadFile(name string) ([]byte, error) {
 }
 
 // Sub returns an fs.FS corresponding to the subtree rooted at dir.
-func (fs *FileSystem) Sub(dir string) (fs.FS, error) {
+func (fs *FS) Sub(dir string) (fs.FS, error) {
 	cleanDir, filename := fs.cleanPath(dir)
 	p := path.Join(cleanDir, filename)
 	node, err := fs.resolve(p)
@@ -410,9 +410,9 @@ func (d *dirEntry) Info() (fs.FileInfo, error) {
 	return &inodeinfo{d.name, d.node}, nil
 }
 
-// subFS wraps a FileSystem and prefixes all paths with a directory
+// subFS wraps a FS and prefixes all paths with a directory
 type subFS struct {
-	fs  *FileSystem
+	fs  *FS
 	dir string
 }
 
@@ -486,7 +486,7 @@ func inoToPath(ino uint64) string {
 }
 
 // loadInode - loads the iNode defined by `ino` or returns an error
-func (fs *FileSystem) loadInode(ino uint64) (*iNode, error) {
+func (fs *FS) loadInode(ino uint64) (*iNode, error) {
 	if ino == 0 {
 		return nil, errNilIno
 	}
@@ -504,7 +504,7 @@ func (fs *FileSystem) loadInode(ino uint64) (*iNode, error) {
 }
 
 // saveData - saves file data for a given `ino` or returns an error
-func (fs *FileSystem) saveData(ino uint64, data []byte) error {
+func (fs *FS) saveData(ino uint64, data []byte) error {
 	if ino == 0 {
 		return errNilIno
 	}
@@ -552,7 +552,7 @@ func (fs *FileSystem) saveData(ino uint64, data []byte) error {
 }
 
 // loadData - loads file data for a given `ino` or returns an error
-func (fs *FileSystem) loadData(ino uint64) ([]byte, error) {
+func (fs *FS) loadData(ino uint64) ([]byte, error) {
 	if ino == 0 {
 		return nil, errNilIno
 	}
@@ -623,7 +623,7 @@ func resizeBytes(data []byte, size int64) []byte {
 // resizeContent resizes the content of node to size, handling external
 // contentFS storage, chunked storage and encrypted whole-blob storage. It
 // updates node.Size and persists the inode. size must be non-negative.
-func (fs *FileSystem) resizeContent(node *iNode, size int64) error {
+func (fs *FS) resizeContent(node *iNode, size int64) error {
 	if size < 0 {
 		return syscall.EINVAL
 	}
@@ -663,7 +663,7 @@ func (fs *FileSystem) resizeContent(node *iNode, size int64) error {
 
 // cleanPath - takes the absolute or relative path provided by `name` and
 // returns the directory and filename of the cleand absolute path.
-func (fs *FileSystem) cleanPath(name string) (string, string) {
+func (fs *FS) cleanPath(name string) (string, string) {
 	p := name
 	if !path.IsAbs(p) {
 		p = path.Join(fs.cwd, p)
@@ -677,7 +677,7 @@ func (fs *FileSystem) cleanPath(name string) (string, string) {
 // is not a directory, Rename replaces it. OS-specific restrictions may apply
 // when oldpath and newpath are in different directories. If there is an
 // error, it will be of type *LinkError.
-func (fs *FileSystem) Rename(oldpath, newpath string) error {
+func (fs *FS) Rename(oldpath, newpath string) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -765,7 +765,7 @@ func (fs *FileSystem) Rename(oldpath, newpath string) error {
 
 // Copy is a convenience function that duplicates the `source` path to the
 // `newpath`
-func (fs *FileSystem) Copy(source, destination string) error {
+func (fs *FS) Copy(source, destination string) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -822,7 +822,7 @@ func (fs *FileSystem) Copy(source, destination string) error {
 // contentFS file) and symlink targets, and recursively copies directory
 // children into brand-new inodes so the copy is fully independent of the
 // source.
-func (fs *FileSystem) copyNode(src *iNode) (uint64, error) {
+func (fs *FS) copyNode(src *iNode) (uint64, error) {
 	node := copyInode(src)
 	node.Ino = 0
 	node.Nlink = 1
@@ -882,7 +882,7 @@ func (fs *FileSystem) copyNode(src *iNode) (uint64, error) {
 }
 
 // readLink returns the symlink target stored for ino.
-func (fs *FileSystem) readLink(ino uint64) (string, error) {
+func (fs *FS) readLink(ino uint64) (string, error) {
 	var link string
 	err := fs.db.View(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucket(tx)
@@ -897,7 +897,7 @@ func (fs *FileSystem) readLink(ino uint64) (string, error) {
 
 // Chdir - changes the current directory to the absolute or relative path
 // provided by `Chdir`
-func (fs *FileSystem) Chdir(name string) error {
+func (fs *FS) Chdir(name string) error {
 	dir, filename := fs.cleanPath(name)
 	_, err := fs.resolve(dir)
 	if err != nil {
@@ -908,25 +908,25 @@ func (fs *FileSystem) Chdir(name string) error {
 }
 
 // Getwd returns the current working directory, the error value is always `nil`.
-func (fs *FileSystem) Getwd() (dir string, err error) {
+func (fs *FS) Getwd() (dir string, err error) {
 	return fs.cwd, nil
 }
 
 // Open is a convenience function that opens a file in read only mode.
-func (fs *FileSystem) Open(name string) (absfs.File, error) {
+func (fs *FS) Open(name string) (absfs.File, error) {
 	return fs.OpenFile(name, os.O_RDONLY, 0)
 }
 
 // Create is a convenience function that opens a file for reading and writing.
 // If the file does not exist it is created, if it does then it is truncated.
-func (fs *FileSystem) Create(name string) (absfs.File, error) {
+func (fs *FS) Create(name string) (absfs.File, error) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	return fs.openFile(name, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0777, 0)
 }
 
 // resolve resolves the path provided into a iNode, or an error
-func (fs *FileSystem) resolve(path string) (*iNode, error) {
+func (fs *FS) resolve(path string) (*iNode, error) {
 	node := new(iNode)
 
 	err := fs.db.View(func(tx *bolt.Tx) error {
@@ -987,7 +987,7 @@ const (
 // perm (before umask), if applicable. If successful, methods on the returned
 // File can be used for I/O. If there is an error, it will be of type
 // *os.PathError.
-func (fs *FileSystem) OpenFile(name string, flag int, perm os.FileMode) (absfs.File, error) {
+func (fs *FS) OpenFile(name string, flag int, perm os.FileMode) (absfs.File, error) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	return fs.openFile(name, flag, perm, 0)
@@ -995,7 +995,7 @@ func (fs *FileSystem) OpenFile(name string, flag int, perm os.FileMode) (absfs.F
 
 // openFile is the implementation of OpenFile. depth tracks how many symlinks
 // have been followed so cyclic links cannot recurse without bound.
-func (fs *FileSystem) openFile(name string, flag int, perm os.FileMode, depth int) (absfs.File, error) {
+func (fs *FS) openFile(name string, flag int, perm os.FileMode, depth int) (absfs.File, error) {
 	file := &absfs.InvalidFile{Path: name}
 	pathErr := &os.PathError{Op: "open", Path: name}
 
@@ -1085,7 +1085,7 @@ func (fs *FileSystem) openFile(name string, flag int, perm os.FileMode, depth in
 
 // Stat returns the FileInfo structure describing file. If there is an error,
 // it will be of type *os.PathError.
-func (fs *FileSystem) Stat(name string) (os.FileInfo, error) {
+func (fs *FS) Stat(name string) (os.FileInfo, error) {
 	return fs.statWithDepth(name, 0)
 }
 
@@ -1093,7 +1093,7 @@ func (fs *FileSystem) Stat(name string) (os.FileInfo, error) {
 // maxSymlinkDepth limits the number of symlinks that can be followed.
 const maxSymlinkDepth = 40
 
-func (fs *FileSystem) statWithDepth(name string, depth int) (os.FileInfo, error) {
+func (fs *FS) statWithDepth(name string, depth int) (os.FileInfo, error) {
 	if depth > maxSymlinkDepth {
 		return nil, &os.PathError{Op: "stat", Path: name, Err: syscall.ELOOP}
 	}
@@ -1126,7 +1126,7 @@ func (fs *FileSystem) statWithDepth(name string, depth int) (os.FileInfo, error)
 
 // Truncate changes the size of the file. It does not change the I/O offset. If
 // there is an error, it will be of type *os.PathError.
-func (fs *FileSystem) Truncate(name string, size int64) error {
+func (fs *FS) Truncate(name string, size int64) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -1157,7 +1157,7 @@ func (fs *FileSystem) Truncate(name string, size int64) error {
 
 // loadParentChild loads the node for `dir` and the child nodes with name
 // `filename` or nil.
-func (fs *FileSystem) loadParentChild(dir, filename string) (*iNode, *iNode) {
+func (fs *FS) loadParentChild(dir, filename string) (*iNode, *iNode) {
 	if fs == nil {
 		panic("receiver may not be nil")
 	}
@@ -1196,7 +1196,7 @@ func (fs *FileSystem) loadParentChild(dir, filename string) (*iNode, *iNode) {
 	return parent, nil
 }
 
-func (fs *FileSystem) saveParentChild(parent *iNode, filename string, child *iNode) error {
+func (fs *FS) saveParentChild(parent *iNode, filename string, child *iNode) error {
 	filename = strings.Trim(filename, "/")
 	child.countUp()
 	ino, err := fs.saveInode(child)
@@ -1228,7 +1228,7 @@ func (fs *FileSystem) saveParentChild(parent *iNode, filename string, child *iNo
 	return nil
 }
 
-func (fs *FileSystem) deleteInode(ino uint64) error {
+func (fs *FS) deleteInode(ino uint64) error {
 	// Delete from external content filesystem first
 	if fs.contentFS != nil {
 		contentPath := inoToPath(ino)
@@ -1266,13 +1266,13 @@ func (fs *FileSystem) deleteInode(ino uint64) error {
 
 // Mkdir creates a new directory with the specified name and permission bits (before umask).
 // If there is an error, it will be of type *PathError.
-func (fs *FileSystem) Mkdir(name string, perm os.FileMode) error {
+func (fs *FS) Mkdir(name string, perm os.FileMode) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	return fs.mkdir(name, perm)
 }
 
-func (fs *FileSystem) mkdir(name string, perm os.FileMode) error {
+func (fs *FS) mkdir(name string, perm os.FileMode) error {
 	pathErr := &os.PathError{Op: "mkdir", Path: name}
 	dir, filename := fs.cleanPath(name)
 	parent, child := fs.loadParentChild(dir, filename)
@@ -1299,13 +1299,13 @@ func (fs *FileSystem) mkdir(name string, perm os.FileMode) error {
 // and returns nil, or else returns an error. The permission bits perm (before
 // umask) are used for all directories that MkdirAll creates. If path is already
 // a directory, MkdirAll does nothing and returns nil.
-func (fs *FileSystem) MkdirAll(name string, perm os.FileMode) error {
+func (fs *FS) MkdirAll(name string, perm os.FileMode) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	return fs.mkdirAll(name, perm)
 }
 
-func (fs *FileSystem) mkdirAll(name string, perm os.FileMode) error {
+func (fs *FS) mkdirAll(name string, perm os.FileMode) error {
 	dir, filename := fs.cleanPath(name)
 	name = strings.TrimLeft(path.Join(dir, filename), "/")
 
@@ -1336,7 +1336,7 @@ func (fs *FileSystem) mkdirAll(name string, perm os.FileMode) error {
 
 // Remove removes the named file or (empty) directory. If there is an error, it
 // will be of type *PathError.
-func (fs *FileSystem) Remove(name string) error {
+func (fs *FS) Remove(name string) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -1383,7 +1383,7 @@ func (fs *FileSystem) Remove(name string) error {
 // RemoveAll removes path and any children it contains. It removes everything
 // it can but returns the first error it encounters. If the path does not exist,
 // RemoveAll returns nil (no error).
-func (fs *FileSystem) RemoveAll(name string) error {
+func (fs *FS) RemoveAll(name string) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -1541,7 +1541,7 @@ func (fs *FileSystem) RemoveAll(name string) error {
 }
 
 // Chtimes changes the access and modification times of the named file
-func (fs *FileSystem) Chtimes(name string, atime time.Time, mtime time.Time) error {
+func (fs *FS) Chtimes(name string, atime time.Time, mtime time.Time) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -1559,13 +1559,13 @@ func (fs *FileSystem) Chtimes(name string, atime time.Time, mtime time.Time) err
 }
 
 // Chown changes the owner and group ids of the named file
-func (fs *FileSystem) Chown(name string, uid, gid int) error {
+func (fs *FS) Chown(name string, uid, gid int) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	return fs.chown(name, uid, gid, 0)
 }
 
-func (fs *FileSystem) chown(name string, uid, gid int, depth int) error {
+func (fs *FS) chown(name string, uid, gid int, depth int) error {
 	pathErr := &os.PathError{Op: "chown", Path: name}
 	if depth > maxSymlinkDepth {
 		pathErr.Err = syscall.ELOOP
@@ -1607,7 +1607,7 @@ func (fs *FileSystem) chown(name string, uid, gid int, depth int) error {
 }
 
 // Chmod changes the mode of the named file to mode.
-func (fs *FileSystem) Chmod(name string, mode os.FileMode) error {
+func (fs *FS) Chmod(name string, mode os.FileMode) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -1628,7 +1628,7 @@ func (fs *FileSystem) Chmod(name string, mode os.FileMode) error {
 // link, the returned FileInfo describes the symbolic link. Lstat makes no
 // attempt to follow the link. If there is an error, it will be of type
 // *PathError.
-func (fs *FileSystem) Lstat(name string) (os.FileInfo, error) {
+func (fs *FS) Lstat(name string) (os.FileInfo, error) {
 	pathErr := &os.PathError{Op: "lstat", Path: name}
 	dir, filename := fs.cleanPath(name)
 	node, err := fs.resolve(path.Join(dir, filename))
@@ -1647,7 +1647,7 @@ func (fs *FileSystem) Lstat(name string) (os.FileInfo, error) {
 // error, it will be of type *PathError.
 //
 // On Windows, it always returns the syscall.EWINDOWS error, wrapped in *PathError.
-func (fs *FileSystem) Lchown(name string, uid, gid int) error {
+func (fs *FS) Lchown(name string, uid, gid int) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -1671,7 +1671,7 @@ func (fs *FileSystem) Lchown(name string, uid, gid int) error {
 
 // Readlink returns the destination of the named symbolic link. If there is an
 // error, it will be of type *PathError.
-func (fs *FileSystem) Readlink(name string) (string, error) {
+func (fs *FS) Readlink(name string) (string, error) {
 	node, err := fs.resolve(name)
 	if err != nil {
 		return "", err
@@ -1689,7 +1689,7 @@ func (fs *FileSystem) Readlink(name string) (string, error) {
 
 // Symlink creates newname as a symbolic link to oldname. If there is an error,
 // it will be of type *LinkError.
-func (fs *FileSystem) Symlink(source, destination string) error {
+func (fs *FS) Symlink(source, destination string) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 

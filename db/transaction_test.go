@@ -415,7 +415,7 @@ func TestWriteTransaction_ConcurrentIndependent(t *testing.T) {
 		require.NoError(t, e)
 	}
 
-	// All records must be visible.
+	// Copy records must be visible.
 	for i := 0; i < goroutines; i++ {
 		var u User
 		err := db.One(ctx, "ID", i+1, &u)

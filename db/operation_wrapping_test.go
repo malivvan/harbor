@@ -60,7 +60,7 @@ func TestWrapError_NoFormattingArtifacts(t *testing.T) {
 
 func TestWrap_OpenNilContext(t *testing.T) {
 	var nilCtx context.Context
-	db, err := Open(nilCtx, nil, nil, Config{})
+	db, err := Open(nilCtx, nil, Config{})
 	require.ErrorIs(t, err, ErrNilContext)
 	require.True(t, strings.HasPrefix(err.Error(), "storm open:"),
 		"error must have open prefix")
@@ -69,7 +69,7 @@ func TestWrap_OpenNilContext(t *testing.T) {
 
 func TestWrap_OpenNilDB(t *testing.T) {
 	ctx := context.Background()
-	db, err := Open(ctx, nil, nil, Config{})
+	db, err := Open(ctx, nil, Config{})
 	require.ErrorIs(t, err, ErrNilParam)
 	require.True(t, strings.HasPrefix(err.Error(), "storm open:"))
 	require.Nil(t, db)
@@ -86,7 +86,7 @@ func TestWrap_OpenCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	db, err := Open(ctx, bDB, nil, Config{})
+	db, err := Open(ctx, bDB, Config{})
 	require.ErrorIs(t, err, context.Canceled)
 	require.True(t, strings.HasPrefix(err.Error(), "storm open:"))
 	require.Nil(t, db)
@@ -117,7 +117,7 @@ func TestWrap_OpenBorrowedInitFailure(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	db, err := Open(context.Background(), bDB, nil, Config{})
+	db, err := Open(context.Background(), bDB, Config{})
 	require.ErrorIs(t, err, ErrDifferentCodec)
 	require.True(t, strings.HasPrefix(err.Error(), "storm open:"))
 	require.Nil(t, db)
@@ -151,7 +151,7 @@ func TestWrap_CloseDoesNotCloseBackend(t *testing.T) {
 	bDB, err := bolt.Open(filepath.Join(dir, "b.db"), 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
 
-	db, err := Open(context.Background(), bDB, nil, Config{})
+	db, err := Open(context.Background(), bDB, Config{})
 	require.NoError(t, err)
 
 	err = db.Close()
@@ -168,7 +168,7 @@ func TestWrap_CloseIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	defer bDB.Close()
 
-	db, err := Open(context.Background(), bDB, nil, Config{})
+	db, err := Open(context.Background(), bDB, Config{})
 	require.NoError(t, err)
 
 	require.NoError(t, db.Close())
@@ -696,7 +696,7 @@ func TestWrap_OpenNestedWrapping(t *testing.T) {
 
 	// Open with default json codec — checkVersion calls Set which calls SetBytes,
 	// triggering nested KV wrapping under the open prefix.
-	_, err = Open(context.Background(), bDB, nil, Config{})
+	_, err = Open(context.Background(), bDB, Config{})
 	require.Error(t, err)
 	require.True(t, strings.HasPrefix(err.Error(), "storm open:"),
 		"outermost error must start with requested operation label")
@@ -704,7 +704,7 @@ func TestWrap_OpenNestedWrapping(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 9. All operation labels covered
+// 9. Copy operation labels covered
 // ---------------------------------------------------------------------------
 
 func TestWrap_AllOperationLabelsCovered(t *testing.T) {
@@ -741,7 +741,7 @@ func TestWrap_AllOperationLabelsCovered(t *testing.T) {
 		prefix string
 		op     func() error
 	}{
-		{"open", "storm open:", func() error { _, err := Open(nilCtx, nil, nil, Config{}); return err }},
+		{"open", "storm open:", func() error { _, err := Open(nilCtx, nil, Config{}); return err }},
 		{"close", "storm close:", func() error { return (*Store)(nil).Close() }},
 		{"read transaction", "storm read transaction:", func() error { return db.ReadTransaction(nilCtx, nil) }},
 		{"write transaction", "storm write transaction:", func() error { return db.WriteTransaction(nilCtx, nil) }},
@@ -814,10 +814,10 @@ func TestWrap_BboltErrorClassification(t *testing.T) {
 	bDB, err := bolt.Open(filepath.Join(dir, "bolt-err.db"), 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
 
-	db, err := Open(context.Background(), bDB, nil, Config{})
+	db, err := Open(context.Background(), bDB, Config{})
 	require.NoError(t, err)
 
-	require.NoError(t, db.NativeDB().Close())
+	require.NoError(t, db.bolt.Close())
 
 	ctx := context.Background()
 	err = db.Save(ctx, &User{ID: 1, Name: "x", Slug: "x"})

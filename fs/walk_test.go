@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func newWalkTestFS(t *testing.T) *FileSystem {
+func newWalkTestFS(t *testing.T) *FS {
 	t.Helper()
 
 	path := tempFile()

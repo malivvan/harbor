@@ -13,7 +13,7 @@ type Node interface {
 	BucketScanner
 
 	// From returns a new Storm node with a new bucket root below the current.
-	// All Store operations on the new node will be executed relative to this bucket.
+	// Copy Store operations on the new node will be executed relative to this bucket.
 	From(addend ...string) Node
 
 	// Bucket returns the bucket name as a slice from the root.
@@ -34,8 +34,8 @@ var _ Node = (*node)(nil)
 type node struct {
 	s *Store
 
-	// The root bucket. In the normal, simple case this will be empty.
-	rootBucket []string
+	// The root bucket path. In the normal, simple case this is ["db"].
+	root [][]byte
 
 	// Transaction object. Nil if not in transaction
 	tx *bolt.Tx
@@ -44,25 +44,29 @@ type node struct {
 	codec Codec
 }
 
-// cloneBucketPath returns a defensive copy of the given path slice.
-// nil is preserved as nil; []string{} is preserved as an empty non-nil slice.
-func cloneBucketPath(path []string) []string {
+// cloneBucketPath returns a defensive copy of the given bucket path.
+// nil is preserved as nil; an empty non-nil slice is preserved.
+func cloneBucketPath(path [][]byte) [][]byte {
 	if path == nil {
 		return nil
 	}
 
-	cloned := make([]string, len(path))
-	copy(cloned, path)
+	cloned := make([][]byte, len(path))
+	for i, part := range path {
+		cloned[i] = append([]byte(nil), part...)
+	}
 	return cloned
 }
 
 // From returns a new Storm Node with a new bucket root below the current.
 // All Store operations on the new node will be executed relative to this bucket.
 func (n node) From(addend ...string) Node {
-	path := make([]string, 0, len(n.rootBucket)+len(addend))
-	path = append(path, n.rootBucket...)
-	path = append(path, addend...)
-	n.rootBucket = path
+	path := make([][]byte, 0, len(n.root)+len(addend))
+	path = append(path, cloneBucketPath(n.root)...)
+	for _, part := range addend {
+		path = append(path, []byte(part))
+	}
+	n.root = path
 	return &n
 }
 
@@ -81,7 +85,14 @@ func (n node) WithCodec(codec Codec) Node {
 // Bucket returns the bucket name as a slice from the root.
 // In the normal, simple case this will be empty.
 func (n *node) Bucket() []string {
-	return cloneBucketPath(n.rootBucket)
+	if n.root == nil {
+		return nil
+	}
+	parts := make([]string, len(n.root))
+	for i, part := range n.root {
+		parts[i] = string(part)
+	}
+	return parts
 }
 
 // Codec returns the EncodeDecoder used by this instance of Storm

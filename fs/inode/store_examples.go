@@ -121,8 +121,8 @@ type MemBlockChainStore struct {
 	blockSize int
 	mu        sync.RWMutex
 	nextID    uint64
-	blocks    map[uint64][]byte      // blockID -> data
-	chains    map[uint64][]uint64    // ino -> block IDs
+	blocks    map[uint64][]byte   // blockID -> data
+	chains    map[uint64][]uint64 // ino -> block IDs
 }
 
 // NewMemBlockChainStore creates a new in-memory BlockChainStore.
@@ -229,8 +229,8 @@ type MemExtentStore struct {
 	blockSize int
 	mu        sync.RWMutex
 	nextID    uint64
-	blocks    map[uint64][]byte      // physical blockID -> data
-	extents   map[uint64]ExtentList  // ino -> extents
+	blocks    map[uint64][]byte     // physical blockID -> data
+	extents   map[uint64]ExtentList // ino -> extents
 }
 
 // NewMemExtentStore creates a new in-memory ExtentStore.

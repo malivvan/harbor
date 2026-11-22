@@ -12,6 +12,8 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+const Name = "fs"
+
 var (
 	// ErrNilContext is returned when a nil context is passed to an operation.
 	ErrNilContext = errors.New("fs: nil context")
@@ -24,22 +26,22 @@ var (
 // Every file system lives under the Store's root bucket.
 type Store struct {
 	db   *bolt.DB
-	root []byte
+	root [][]byte
 	enc  *encState // nil when encryption is disabled
 
 	mu          sync.Mutex
-	filesystems []*FileSystem
+	filesystems []*FS
 }
 
 // Open creates a Store over an already-open bbolt database.
 //
 // The caller owns db and must keep it open for the lifetime of the Store. The
-// Store never closes db. root is an optional parent bucket key for all file
-// systems; nil or an empty slice means the database root.
+// Store never closes db.
 //
-// cfg enables optional encryption. A zero Config, or one with no encryption
-// enabled, creates a plaintext store.
-func Open(ctx context.Context, bdb *bolt.DB, key []byte, cfg Config) (*Store, error) {
+// cfg enables optional encryption. cfg.Root is an optional bucket path for all
+// file systems; an empty path means the database root. A zero Config, or one
+// with no encryption enabled, creates a plaintext store.
+func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 	if ctx == nil {
 		return nil, ErrNilContext
 	}
@@ -57,25 +59,17 @@ func Open(ctx context.Context, bdb *bolt.DB, key []byte, cfg Config) (*Store, er
 
 	return &Store{
 		db:   bdb,
-		root: append([]byte(nil), key...),
+		root: cloneRoot(cfg.Root),
 		enc:  enc,
 	}, nil
 }
 
-// NativeDB returns the underlying bbolt database.
-func (s *Store) NativeDB() *bolt.DB {
+// Root returns a copy of the Store's root bucket path.
+func (s *Store) Root() [][]byte {
 	if s == nil {
 		return nil
 	}
-	return s.db
-}
-
-// Root returns a copy of the Store's root bucket key.
-func (s *Store) Root() []byte {
-	if s == nil {
-		return nil
-	}
-	return append([]byte(nil), s.root...)
+	return cloneRoot(s.root)
 }
 
 // Close releases the Store wrapper. The underlying bbolt database remains open
@@ -89,7 +83,7 @@ func (s *Store) Close() error {
 
 // Open creates or opens the named file system under the Store's root. An
 // empty name uses the Store's root bucket itself.
-func (s *Store) Open(name string) (*FileSystem, error) {
+func (s *Store) Open(name string) (*FS, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrNilParam
 	}
@@ -108,7 +102,7 @@ func (s *Store) Open(name string) (*FileSystem, error) {
 
 // OpenWithContentFS creates or opens the named file system with an external
 // content filesystem.
-func (s *Store) OpenWithContentFS(name string, contentFS absfs.FileSystem) (*FileSystem, error) {
+func (s *Store) OpenWithContentFS(name string, contentFS absfs.FileSystem) (*FS, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrNilParam
 	}
@@ -136,7 +130,7 @@ func (s *Store) FileSystems() ([]string, error) {
 	var names []string
 	err := s.db.View(func(tx *bolt.Tx) error {
 		if len(s.root) > 0 {
-			root := tx.Bucket(s.root)
+			root := s.rootBucket(tx)
 			if root == nil {
 				return nil
 			}
@@ -176,7 +170,7 @@ func (s *Store) DeleteFS(name string) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		var parent *bolt.Bucket
 		if len(s.root) > 0 {
-			parent = tx.Bucket(s.root)
+			parent = s.rootBucket(tx)
 			if parent == nil {
 				return os.ErrNotExist
 			}
@@ -308,7 +302,7 @@ func (s *Store) hasUserData(path string) (bool, error) {
 
 // track remembers an opened file system so key rotation can update its
 // encryption state.
-func (s *Store) track(filesystem *FileSystem) {
+func (s *Store) track(filesystem *FS) {
 	s.mu.Lock()
 	s.filesystems = append(s.filesystems, filesystem)
 	s.mu.Unlock()
@@ -325,10 +319,67 @@ func (s *Store) adoptEnc(next *encState) {
 }
 
 func (s *Store) bucketPath(name string) string {
-	if len(s.root) == 0 {
-		return name
+	parts := make([]string, 0, len(s.root)+1)
+	for _, part := range s.root {
+		parts = append(parts, string(part))
 	}
-	return path.Join(string(s.root), name)
+	if name != "" {
+		parts = append(parts, name)
+	}
+	return path.Join(parts...)
+}
+
+// rootBucket traverses the configured root path and returns the bucket, or nil
+// when the path is empty or any element is missing.
+func (s *Store) rootBucket(tx *bolt.Tx) *bolt.Bucket {
+	var b *bolt.Bucket
+	for _, name := range s.root {
+		if len(name) == 0 {
+			continue
+		}
+		if b == nil {
+			b = tx.Bucket(name)
+		} else {
+			b = b.Bucket(name)
+		}
+		if b == nil {
+			return nil
+		}
+	}
+	return b
+}
+
+// createRootBucket creates the configured root path, returning the innermost
+// bucket. An empty path returns nil.
+func (s *Store) createRootBucket(tx *bolt.Tx) (*bolt.Bucket, error) {
+	var b *bolt.Bucket
+	for _, name := range s.root {
+		if len(name) == 0 {
+			continue
+		}
+		var err error
+		if b == nil {
+			b, err = tx.CreateBucketIfNotExists(name)
+		} else {
+			b, err = b.CreateBucketIfNotExists(name)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return b, nil
+}
+
+// cloneRoot returns a deep copy of a bucket path.
+func cloneRoot(root [][]byte) [][]byte {
+	if root == nil {
+		return nil
+	}
+	out := make([][]byte, len(root))
+	for i, part := range root {
+		out[i] = append([]byte(nil), part...)
+	}
+	return out
 }
 
 func isFSBucket(bucket *bolt.Bucket) bool {

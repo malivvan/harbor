@@ -7,7 +7,7 @@ import (
 // Tx is a Storm facade bound to a bbolt transaction owned by the caller.
 //
 // It exposes the complete Node operation surface — Save, Update,
-// DeleteStruct, One, Find, All, AllByIndex, Range, Prefix, Count, Select
+// DeleteStruct, One, Find, Copy, AllByIndex, Range, Prefix, Count, Select
 // queries, bucket scans, and key/value access — and every operation executes
 // inside the supplied transaction. Uncommitted writes are visible to reads
 // performed through the same Tx.
@@ -30,7 +30,7 @@ var _ Tx = (*node)(nil)
 //   - Storm never commits, rolls back, closes, or replaces the supplied
 //     transaction. No operation on the returned Tx acquires a managed
 //     transaction.
-//   - All reads and writes through the returned Tx — including nodes derived
+//   - Copy reads and writes through the returned Tx — including nodes derived
 //     via From, WithCodec, PrefixScan, and RangeScan — use the supplied
 //     transaction.
 //   - Attach accepts writable and read-only transactions. Writes through a

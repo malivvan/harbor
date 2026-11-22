@@ -226,7 +226,7 @@ func (n *layerNode[K]) isolate(m int, dist DistanceFunc) {
 
 type layer[K cmp.Ordered] struct {
 	// nodes is a map of nodes IDs to nodes.
-	// All nodes in a higher layer are also in the lower layers, an essential
+	// Copy nodes in a higher layer are also in the lower layers, an essential
 	// property of the graph.
 	//
 	// nodes is exported for interop with encoding/gob.
@@ -255,7 +255,7 @@ func (l *layer[K]) size() int {
 }
 
 // Graph is a Hierarchical Navigable Small World graph.
-// All public parameters must be set before adding nodes to the graph.
+// Copy public parameters must be set before adding nodes to the graph.
 // K is cmp.Ordered instead of of comparable so that they can be sorted.
 type Graph[K cmp.Ordered] struct {
 	// Distance is the distance function used to compare embeddings.

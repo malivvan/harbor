@@ -1640,7 +1640,7 @@ func TestFileSystem(t *testing.T) {
 		}
 		testloop(testsAfter)
 
-		// func (fs *FileSystem) Copy(source, destination string) error
+		// func (fs *FS) Copy(source, destination string) error
 	})
 
 	t.Run("stat", func(t *testing.T) {

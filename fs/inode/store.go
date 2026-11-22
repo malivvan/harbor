@@ -157,7 +157,7 @@ type ExtentStore interface {
 
 	// FreeExtent releases a contiguous range of blocks for reuse.
 	// The blocks' contents become undefined after freeing.
-	// All blocks [physical, physical+length) must be currently allocated.
+	// Copy blocks [physical, physical+length) must be currently allocated.
 	FreeExtent(physical uint64, length uint64) error
 
 	// ReadExtent reads data from a physical extent.
@@ -167,7 +167,7 @@ type ExtentStore interface {
 
 	// WriteExtent writes data to a physical extent.
 	// The data length must equal (length * BlockSize()).
-	// All blocks in the range must be currently allocated.
+	// Copy blocks in the range must be currently allocated.
 	WriteExtent(physical uint64, length uint64, data []byte) error
 
 	// GetExtents returns the extent list for an inode.

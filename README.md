@@ -22,12 +22,10 @@ Storm is a simple and powerful toolkit for [BoltDB](https://github.com/etcd-io/b
   - [Attaching to a caller-owned transaction](#attaching-to-a-caller-owned-transaction)
 - [Nodes and nested buckets](#nodes-and-nested-buckets)
 - [Key/value store](#keyvalue-store)
-  - [Bucket store (kv)](#bucket-store-kv)
   - [Time series store (ts)](#time-series-store-ts)
 - [Context and cancellation](#context-and-cancellation)
 - [Error handling](#error-handling)
 - [Database lifecycle](#database-lifecycle)
-- [Native BoltDB access](#native-boltdb-access)
 - [Codecs](#codecs)
 - [Testing and CI](#testing-and-ci)
 - [License](#license)
@@ -82,7 +80,7 @@ func main() {
 		}
 	}()
 
-	db, err := storm.Open(ctx, bDB, nil, storm.Config{})
+	db, err := storm.Open(ctx, bDB, storm.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -206,14 +204,13 @@ Use the same reconstructed runtime type and explicit node path for subsequent re
 `Open` wraps an already-open bbolt database:
 
 ```go
-func Open(ctx context.Context, db *bolt.DB, root []byte, cfg db.Config) (*DB, error)
+func Open(ctx context.Context, db *bolt.DB, cfg db.Config) (*Store, error)
 ```
 
 The parameters are:
 
 - `db` — a caller-owned `*bolt.DB`. It must be non-nil and remain open while Storm is in use.
-- `root` — an optional root bucket key. Pass `nil` or an empty slice to operate from the database root.
-- `cfg` — optional store configuration. `cfg.Codec` selects the codec used for entities; pass a zero `Config` (or a nil `Codec`) to use the default JSON codec.
+- `cfg` — optional store configuration. `cfg.Root` is an optional bucket path (`[][]byte`); each element is one nested bucket name, and an empty path operates from the database root. `cfg.Codec` selects the codec used for entities; pass a zero `Config` (or a nil `Codec`) to use the default JSON codec.
 
 `Open` does not take ownership of `db`. `DB.Close()` releases the Storm wrapper but
 leaves the bbolt database open; the caller remains responsible for closing it.
@@ -229,7 +226,7 @@ defer func() {
 	}
 }()
 
-db, err := storm.Open(ctx, bDB, nil, storm.Config{})
+db, err := storm.Open(ctx, bDB, storm.Config{})
 if err != nil {
 	log.Fatal(err)
 }
@@ -246,7 +243,7 @@ node.
 
 ## CRUD operations
 
-Database open, CRUD, finder, query, scanner, KV, and managed-transaction operations accept `context.Context`. Lifecycle and escape-hatch methods such as `Close` and `NativeDB` do not.
+Database open, CRUD, finder, query, scanner, KV, and managed-transaction operations accept `context.Context`. Lifecycle methods such as `Close` do not.
 
 ### Save
 
@@ -444,7 +441,8 @@ Storm record/index operations with raw BoltDB bucket writes), use `Attach`
 to bind a Storm facade to an existing transaction:
 
 ```go
-tx, err := db.NativeDB().Begin(true)
+// bDB is the caller-owned *bbolt.DB passed to storm.Open.
+tx, err := bDB.Begin(true)
 if err != nil {
 	return err
 }
@@ -539,48 +537,6 @@ exists, err := db.KeyExists(ctx, "sessions", sessionID)
 err = db.Delete(ctx, "sessions", sessionID)
 ```
 
-### Bucket store (kv)
-
-The `kv` package provides a bucket-oriented facade over the same database. A
-`Store` manages named `Bucket` structs, creating and caching them on demand:
-
-```go
-import "github.com/malivvan/storm/kv"
-
-store, err := kv.Open(ctx, bDB, nil, nil)
-if err != nil {
-	log.Fatal(err)
-}
-defer store.Close()
-
-users := store.Bucket("users")
-sessions := store.Bucket("sessions")
-
-err = users.Set(ctx, "alice", &user)
-err = sessions.Set(ctx, sessionID, "active")
-
-var found User
-err = users.Get(ctx, "alice", &found)
-
-exists, err := sessions.Exists(ctx, sessionID)
-keys, err := users.Keys(ctx)
-count, err := users.Len(ctx)
-
-err = users.ForEach(ctx, func(key, value []byte) error {
-	// key and value are raw encoded bytes
-	return nil
-})
-
-// Delete one bucket and its keys.
-err = users.Drop(ctx)
-```
-
-`kv.Open` has the same database, root bucket, and codec parameters as
-`db.Open`. The package uses bbolt and the selected codec directly and does not
-depend on the `db` package. The `Store` borrows the bbolt database; closing it
-does not close the native database. `Bucket.Keys`, `Bucket.Len`, and
-`Bucket.ForEach` operate on raw encoded keys and skip nested metadata buckets.
-
 ### Time series store (ts)
 
 The `ts` package stores named series of timestamped points. A `Store` manages
@@ -590,7 +546,7 @@ series under a root bucket, and each point is stored as an order-preserving
 ```go
 import "github.com/malivvan/storm/ts"
 
-store, err := ts.Open(ctx, bDB, []byte("metrics"), ts.Config{})
+store, err := ts.Open(ctx, bDB, ts.Config{Root: [][]byte{[]byte("metrics")}})
 if err != nil {
 	log.Fatal(err)
 }
@@ -612,7 +568,7 @@ err = cpu.SetRetention(ctx, ts.Retention{MaxAge: 24 * time.Hour, MaxPoints: 10_0
 removed, err := cpu.EnforceRetention(ctx, time.Now().UnixNano())
 ```
 
-`ts.Open(ctx, db, root, cfg)` borrows the caller-owned bbolt database and never
+`ts.Open(ctx, db, cfg)` borrows the caller-owned bbolt database and never
 closes it. Because keys are chronological, `Range` and `RangeEach` scan in time
 order without an in-memory index. Aggregations support `min`, `max`, `avg`,
 `sum`, `count`, `first`, and `last`; `DeleteRange`, `Drop`, and `DeleteSeries`
@@ -627,7 +583,7 @@ policy, and `Store.SetNow` injects a clock for deterministic tests.
 
 ## Context and cancellation
 
-Database open, CRUD, finder, query, scanner, KV, and managed-transaction paths accept `context.Context`; passing nil to those context-aware operations returns an error matching `ErrNilContext`. `Close` and `NativeDB` are lifecycle/escape-hatch exceptions.
+Database open, CRUD, finder, query, scanner, KV, and managed-transaction paths accept `context.Context`; passing nil to those context-aware operations returns an error matching `ErrNilContext`. `Close` is a lifecycle exception.
 
 Cancellation is cooperative, not preemptive. Storm checks the context at operation boundaries and loop checkpoints. It cannot interrupt:
 
@@ -700,20 +656,6 @@ Storm always borrows the bbolt database supplied to `Open`:
 
 Close the bbolt database after `DB.Close()` when it is no longer needed.
 
-## Native BoltDB access
-
-`NativeDB()` returns the underlying `*bbolt.DB` pointer. This is an **advanced interoperability escape hatch**.
-
-**Warnings:**
-
-- Native operations bypass Storm context checkpoints.
-- Native writes can bypass codecs, indexes, metadata, and invariants.
-- Storm cannot guarantee index consistency or cancellation for native operations.
-- Callers must coordinate native and Storm transactions internally.
-- Callers must not close the native database while Storm is active.
-
-Normal application code should prefer the managed Storm APIs.
-
 ## Codecs
 
 Storm marshals data to BoltDB using a codec. The default is JSON, exposed as
@@ -722,8 +664,8 @@ Storm marshals data to BoltDB using a codec. The default is JSON, exposed as
 ```go
 import stormdb "github.com/malivvan/storm/db"
 
-store, err := storm.Open(ctx, bDB, nil, storm.Config{}) // JSON, the default
-store, err = storm.Open(ctx, bDB, nil, stormdb.Config{
+store, err := storm.Open(ctx, bDB, storm.Config{}) // JSON, the default
+store, err = storm.Open(ctx, bDB, stormdb.Config{
 	Codec: stormdb.JSONCodec, // explicit
 })
 ```
@@ -739,7 +681,7 @@ native, optional AEAD encryption for a store; a zero config keeps creating
 plaintext stores.
 
 ```go
-store, err := storm.Open(ctx, bDB, nil, storm.Config{
+store, err := storm.Open(ctx, bDB, storm.Config{
 	Secret:          key,  // raw 32-byte key
 	EncryptValues:   true, // seal record and key/value values
 	EncryptMetadata: true, // seal auto-increment counters

@@ -15,7 +15,7 @@ import (
 )
 
 // newFastWalkTestFS returns the in-repo filesystem used to exercise FastWalk.
-func newFastWalkTestFS(t *testing.T) *fs.FileSystem {
+func newFastWalkTestFS(t *testing.T) *fs.FS {
 	t.Helper()
 
 	db, err := bolt.Open(filepath.Join(t.TempDir(), "fastwalk.db"), 0600, &bolt.Options{Timeout: time.Second})
@@ -24,7 +24,7 @@ func newFastWalkTestFS(t *testing.T) *fs.FileSystem {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	store, err := fs.Open(context.Background(), db, nil, fs.Config{})
+	store, err := fs.Open(context.Background(), db, fs.Config{})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

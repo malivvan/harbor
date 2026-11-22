@@ -16,8 +16,8 @@ import (
 // [filepath.SkipDir] for a directory, its contents are skipped. Any other
 // non-nil error stops the walk and is returned.
 //
-// Walk accepts any [absfs.Filer], including [FileSystem] and the snapshots
-// created by [FileSystem.CreateSnapshot].
+// Walk accepts any [absfs.Filer], including [FS] and the snapshots
+// created by [FS.CreateSnapshot].
 func Walk(filer absfs.Filer, path string, fn filepath.WalkFunc) error {
 	info, err := filer.Stat(path)
 	if err != nil {

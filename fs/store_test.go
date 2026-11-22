@@ -27,7 +27,7 @@ func openStoreTestDB(t *testing.T) *bolt.DB {
 	return db
 }
 
-func writeStoreFile(t *testing.T, filesystem *FileSystem, name, content string) {
+func writeStoreFile(t *testing.T, filesystem *FS, name, content string) {
 	t.Helper()
 
 	file, err := filesystem.Create(name)
@@ -73,7 +73,7 @@ func assertFSBucket(t *testing.T, db *bolt.DB, parts ...string) {
 func TestStoreOpen(t *testing.T) {
 	ctx := context.Background()
 
-	store, err := Open(nil, nil, nil, Config{})
+	store, err := Open(nil, nil, Config{})
 	if !errors.Is(err, ErrNilContext) {
 		t.Fatalf("expected ErrNilContext, got %v", err)
 	}
@@ -82,7 +82,7 @@ func TestStoreOpen(t *testing.T) {
 	}
 
 	db := openStoreTestDB(t)
-	store, err = Open(ctx, nil, nil, Config{})
+	store, err = Open(ctx, nil, Config{})
 	if !errors.Is(err, ErrNilParam) {
 		t.Fatalf("expected ErrNilParam, got %v", err)
 	}
@@ -92,7 +92,7 @@ func TestStoreOpen(t *testing.T) {
 
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	store, err = Open(canceled, db, nil, Config{})
+	store, err = Open(canceled, db, Config{})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
@@ -104,20 +104,20 @@ func TestStoreOpen(t *testing.T) {
 func TestStoreOpenAndDelete(t *testing.T) {
 	db := openStoreTestDB(t)
 	root := []byte("tenant")
-	store, err := Open(context.Background(), db, root, Config{})
+	store, err := openStore(context.Background(), db, root, Config{})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
 
-	if !reflect.DeepEqual(root, store.Root()) {
+	if !reflect.DeepEqual([][]byte{root}, store.Root()) {
 		t.Fatalf("unexpected root: %q", store.Root())
 	}
 	root[0] = 'X'
-	if !reflect.DeepEqual([]byte("tenant"), store.Root()) {
+	if !reflect.DeepEqual([][]byte{[]byte("tenant")}, store.Root()) {
 		t.Fatal("Store.Root must return a copy")
 	}
-	if store.NativeDB() != db {
-		t.Fatal("NativeDB must return the supplied database")
+	if store.db != db {
+		t.Fatal("Store must keep the supplied database")
 	}
 
 	docs, err := store.Open("docs")
@@ -156,7 +156,7 @@ func TestStoreOpenAndDelete(t *testing.T) {
 		t.Fatalf("close docs fs: %v", err)
 	}
 	if err := db.View(func(tx *bolt.Tx) error { return nil }); err != nil {
-		t.Fatalf("database was closed by FileSystem.Close: %v", err)
+		t.Fatalf("database was closed by FS.Close: %v", err)
 	}
 
 	if err := store.DeleteFS("docs"); err != nil {
@@ -182,11 +182,11 @@ func TestStoreOpenAndDelete(t *testing.T) {
 
 func TestStoreRootsAreIsolated(t *testing.T) {
 	db := openStoreTestDB(t)
-	storeA, err := Open(context.Background(), db, []byte("a"), Config{})
+	storeA, err := openStore(context.Background(), db, []byte("a"), Config{})
 	if err != nil {
 		t.Fatalf("open store a: %v", err)
 	}
-	storeB, err := Open(context.Background(), db, []byte("b"), Config{})
+	storeB, err := openStore(context.Background(), db, []byte("b"), Config{})
 	if err != nil {
 		t.Fatalf("open store b: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestStoreRootsAreIsolated(t *testing.T) {
 
 func TestStoreWithoutRoot(t *testing.T) {
 	db := openStoreTestDB(t)
-	store, err := Open(context.Background(), db, nil, Config{})
+	store, err := Open(context.Background(), db, Config{})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -534,7 +534,7 @@ func TestOpenWithContentFS(t *testing.T) {
 // owns the bbolt database and closes it during test cleanup.
 // newContentStorageFS returns an in-repo filesystem to use as the external
 // content storage of another filesystem.
-func newContentStorageFS(t *testing.T) *FileSystem {
+func newContentStorageFS(t *testing.T) *FS {
 	t.Helper()
 
 	filesystem, err := openFSForTest(t, filepath.Join(t.TempDir(), "content.db"), "")
@@ -545,7 +545,7 @@ func newContentStorageFS(t *testing.T) *FileSystem {
 	return filesystem
 }
 
-func openFSForTest(tb testing.TB, path, bucketpath string) (*FileSystem, error) {
+func openFSForTest(tb testing.TB, path, bucketpath string) (*FS, error) {
 	tb.Helper()
 
 	db, err := bolt.Open(path, 0644, &bolt.Options{Timeout: time.Second})
@@ -556,7 +556,7 @@ func openFSForTest(tb testing.TB, path, bucketpath string) (*FileSystem, error) 
 		_ = db.Close()
 	})
 
-	store, err := Open(context.Background(), db, nil, Config{})
+	store, err := Open(context.Background(), db, Config{})
 	if err != nil {
 		return nil, err
 	}
@@ -564,7 +564,7 @@ func openFSForTest(tb testing.TB, path, bucketpath string) (*FileSystem, error) 
 	return store.Open(bucketpath)
 }
 
-func openFSWithContentForTest(tb testing.TB, path, bucketpath string, contentFS absfs.FileSystem) (*FileSystem, error) {
+func openFSWithContentForTest(tb testing.TB, path, bucketpath string, contentFS absfs.FileSystem) (*FS, error) {
 	tb.Helper()
 
 	filesystem, err := openFSForTest(tb, path, bucketpath)
@@ -575,11 +575,45 @@ func openFSWithContentForTest(tb testing.TB, path, bucketpath string, contentFS 
 	return filesystem, nil
 }
 
-func newFSWithContentForTest(db *bolt.DB, bucketpath string, contentFS absfs.FileSystem) (*FileSystem, error) {
+func newFSWithContentForTest(db *bolt.DB, bucketpath string, contentFS absfs.FileSystem) (*FS, error) {
 	filesystem, err := newFS(db, bucketpath, nil)
 	if err != nil {
 		return nil, err
 	}
 	filesystem.SetContentFS(contentFS)
 	return filesystem, nil
+}
+
+func TestStoreNestedRoot(t *testing.T) {
+	db := openStoreTestDB(t)
+	root := [][]byte{[]byte("tenant"), []byte("app")}
+	store, err := Open(context.Background(), db, Config{Root: root})
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if !reflect.DeepEqual(root, store.Root()) {
+		t.Fatalf("Root() = %q, want %q", store.Root(), root)
+	}
+
+	filesystem, err := store.Open("docs")
+	if err != nil {
+		t.Fatalf("new fs: %v", err)
+	}
+	writeStoreFile(t, filesystem, "readme.txt", "nested")
+
+	content, err := filesystem.ReadFile("readme.txt")
+	if err != nil || string(content) != "nested" {
+		t.Fatalf("content = %q, %v", content, err)
+	}
+
+	// The fs buckets must live below every root element.
+	assertFSBucket(t, db, "tenant", "app", "docs")
+
+	names, err := store.FileSystems()
+	if err != nil {
+		t.Fatalf("list file systems: %v", err)
+	}
+	if !reflect.DeepEqual(names, []string{"docs"}) {
+		t.Fatalf("file systems = %v, want [docs]", names)
+	}
 }

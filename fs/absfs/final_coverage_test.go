@@ -20,10 +20,10 @@ func (s *seekableWithErrors) Write(p []byte) (int, error) {
 	s.data = append(s.data, p...)
 	return len(p), nil
 }
-func (s *seekableWithErrors) Close() error                             { return nil }
-func (s *seekableWithErrors) Sync() error                              { return nil }
-func (s *seekableWithErrors) Stat() (os.FileInfo, error)               { return nil, nil }
-func (s *seekableWithErrors) Readdir(int) ([]os.FileInfo, error)       { return nil, nil }
+func (s *seekableWithErrors) Close() error                       { return nil }
+func (s *seekableWithErrors) Sync() error                        { return nil }
+func (s *seekableWithErrors) Stat() (os.FileInfo, error)         { return nil, nil }
+func (s *seekableWithErrors) Readdir(int) ([]os.FileInfo, error) { return nil, nil }
 func (s *seekableWithErrors) Seek(offset int64, whence int) (int64, error) {
 	return 0, errors.New("seek error")
 }

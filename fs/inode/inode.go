@@ -3,7 +3,7 @@
 //
 // # Thread Safety
 //
-// All exported methods are safe for concurrent use by multiple goroutines.
+// Copy exported methods are safe for concurrent use by multiple goroutines.
 // The package uses a hybrid approach to minimize lock contention:
 //
 // Lock-Free Operations (using sync/atomic):
@@ -91,7 +91,7 @@ var DirMapThreshold = 4
 //   - Nlink, Size, Mode, Uid, Gid use atomic operations (lock-free)
 //   - ctime, atime, mtime use atomic operations (lock-free, accessed via methods)
 //   - Dir and dirMap are protected by an internal RWMutex
-//   - All exported methods are safe for concurrent use
+//   - Copy exported methods are safe for concurrent use
 //   - Direct field access requires external synchronization or use of Lock/RLock methods
 type Inode struct {
 	Ino   uint64

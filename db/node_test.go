@@ -21,12 +21,12 @@ func TestNode(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, db, node1.s)
 	require.NotEqual(t, db.Node, n1)
-	require.Equal(t, []string{"a"}, db.Node.(*node).rootBucket)
-	require.Equal(t, []string{"a", "b", "c"}, node1.rootBucket)
+	require.Equal(t, bpath("a"), db.Node.(*node).root)
+	require.Equal(t, bpath("a", "b", "c"), node1.root)
 	n2 := n1.From("d", "e")
 	node2, ok := n2.(*node)
 	require.True(t, ok)
-	require.Equal(t, []string{"a", "b", "c", "d", "e"}, node2.rootBucket)
+	require.Equal(t, bpath("a", "b", "c", "d", "e"), node2.root)
 }
 
 func TestNodeWithTransaction(t *testing.T) {
@@ -36,7 +36,7 @@ func TestNodeWithTransaction(t *testing.T) {
 	ctx := context.Background()
 
 	var user User
-	db.NativeDB().Update(func(tx *bolt.Tx) error {
+	db.bolt.Update(func(tx *bolt.Tx) error {
 		dbx := db.Node.(*node).withTransaction(tx)
 		err := dbx.Save(ctx, &User{ID: 10, Name: "John"})
 		require.NoError(t, err)
@@ -152,12 +152,12 @@ type testOpenOptions struct {
 	boltOptions *bolt.Options
 }
 
-// testRoot selects a root bucket path for tests. Only the first element is passed
-// to Open as its root key; the remaining elements are applied through From.
+// testRoot selects a root bucket path for tests. The whole path is passed to
+// Open through Config.Root.
 func testRoot(root ...string) testOpenOption {
-	path := cloneBucketPath(root)
+	path := append([]string(nil), root...)
 	return func(opts *testOpenOptions) {
-		opts.root = cloneBucketPath(path)
+		opts.root = append([]string(nil), path...)
 	}
 }
 
@@ -199,7 +199,7 @@ func TestNode_ConsumerCanUseNode(t *testing.T) {
 		require.NoError(t, bDB.Close())
 	})
 
-	db, err := Open(context.Background(), bDB, nil, Config{Codec: altCodec})
+	db, err := Open(context.Background(), bDB, Config{Codec: altCodec})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, db.Close())
@@ -322,7 +322,7 @@ func TestNodeInterface_NoBboltExposure(t *testing.T) {
 // TestDBInterface_NoBboltExposure uses reflection on the Store type to prove:
 // - Store has no exported field named Bolt;
 // - Store has no exported field recursively containing a bbolt type;
-// - NativeDB is the only method returning a bbolt type.
+// - no method returns a bbolt type.
 func TestDBInterface_NoBboltExposure(t *testing.T) {
 	dbType := reflect.TypeOf((*Store)(nil)).Elem()
 	dbPtrType := reflect.TypeOf((*Store)(nil))
@@ -343,21 +343,9 @@ func TestDBInterface_NoBboltExposure(t *testing.T) {
 			"Store field %q exposes bbolt type %v", f.Name, f.Type)
 	}
 
-	// Verify NativeDB exists and returns the expected type.
-	// NativeDB has a pointer receiver, so look it up on *Store.
-	nativeDB, ok := dbPtrType.MethodByName("NativeDB")
-	require.True(t, ok, "Store must have a NativeDB method")
-	require.Equal(t, 1, nativeDB.Type.NumOut(), "NativeDB must return exactly one value")
-	outType := nativeDB.Type.Out(0)
-	require.Equal(t, reflect.Pointer, outType.Kind(), "NativeDB must return a pointer")
-	require.Equal(t, bboltPkg, outType.Elem().PkgPath(), "NativeDB must return *bolt.Store")
-
-	// Verify no other method on *Store returns a bbolt type (except NativeDB).
+	// No method on *Store exposes a bbolt type.
 	for i := 0; i < dbPtrType.NumMethod(); i++ {
 		m := dbPtrType.Method(i)
-		if m.Name == "NativeDB" {
-			continue // already validated above
-		}
 		for j := 0; j < m.Type.NumOut(); j++ {
 			outType := m.Type.Out(j)
 			require.False(t, containsBboltType(outType, bboltPkg),

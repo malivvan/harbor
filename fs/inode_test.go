@@ -7,7 +7,7 @@ import (
 )
 
 // Benchmark helpers
-func setupBenchFS(b *testing.B, cacheSize int) (*FileSystem, func()) {
+func setupBenchFS(b *testing.B, cacheSize int) (*FS, func()) {
 	path := fmt.Sprintf("bench_fs_%d.db", b.N)
 	fs, err := openFSForTest(b, path, "")
 	if err != nil {
@@ -25,7 +25,7 @@ func setupBenchFS(b *testing.B, cacheSize int) (*FileSystem, func()) {
 	return fs, cleanup
 }
 
-func createBenchFiles(b *testing.B, fs *FileSystem, numFiles int) {
+func createBenchFiles(b *testing.B, fs *FS, numFiles int) {
 	b.Helper()
 	for i := 0; i < numFiles; i++ {
 		name := fmt.Sprintf("/file_%d.txt", i)
@@ -43,7 +43,7 @@ func createBenchFiles(b *testing.B, fs *FileSystem, numFiles int) {
 	}
 }
 
-func createBenchDirs(b *testing.B, fs *FileSystem, depth int) {
+func createBenchDirs(b *testing.B, fs *FS, depth int) {
 	b.Helper()
 	path := "/"
 	for i := 0; i < depth; i++ {

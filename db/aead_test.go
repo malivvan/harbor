@@ -42,7 +42,7 @@ func aeadOpenBolt(t *testing.T, path string) *bolt.DB {
 // aeadOpenStore opens a Storm store on bdb with the given encryption config.
 func aeadOpenStore(t *testing.T, bdb *bolt.DB, cfg Config) *Store {
 	t.Helper()
-	st, err := Open(context.Background(), bdb, nil, cfg)
+	st, err := Open(context.Background(), bdb, cfg)
 	require.NoError(t, err)
 	return st
 }
@@ -301,7 +301,7 @@ func TestAEADWrongKeyFails(t *testing.T) {
 	require.NoError(t, bdb.Close())
 
 	bdb = aeadOpenBolt(t, path)
-	_, err := Open(ctx, bdb, nil, Config{Secret: aeadKey(2), EncryptValues: true})
+	_, err := Open(ctx, bdb, Config{Secret: aeadKey(2), EncryptValues: true})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrAuthFailed)
 	require.NoError(t, bdb.Close())
@@ -400,7 +400,7 @@ func TestAEADModeMismatch(t *testing.T) {
 
 		bdb = aeadOpenBolt(t, path)
 		defer bdb.Close()
-		_, err := Open(ctx, bdb, nil, Config{})
+		_, err := Open(ctx, bdb, Config{})
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrWrongMode)
 	})
@@ -414,7 +414,7 @@ func TestAEADModeMismatch(t *testing.T) {
 
 		bdb = aeadOpenBolt(t, path)
 		defer bdb.Close()
-		_, err := Open(ctx, bdb, nil, Config{Secret: aeadKey(6), EncryptValues: true})
+		_, err := Open(ctx, bdb, Config{Secret: aeadKey(6), EncryptValues: true})
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrWrongMode)
 	})
@@ -428,7 +428,7 @@ func TestAEADModeMismatch(t *testing.T) {
 
 		bdb = aeadOpenBolt(t, path)
 		defer bdb.Close()
-		_, err := Open(ctx, bdb, nil, Config{
+		_, err := Open(ctx, bdb, Config{
 			Secret:          aeadKey(6),
 			EncryptValues:   true,
 			EncryptMetadata: true,
@@ -467,7 +467,7 @@ func TestAEADEmptyPlaintextStoreAdoptsEncryption(t *testing.T) {
 
 	bdb = aeadOpenBolt(t, path)
 	defer bdb.Close()
-	_, err = Open(ctx, bdb, nil, Config{})
+	_, err = Open(ctx, bdb, Config{})
 	require.ErrorIs(t, err, ErrWrongMode)
 }
 
@@ -479,6 +479,6 @@ func TestAEADInvalidConfig(t *testing.T) {
 	bdb := aeadOpenBolt(t, path)
 	defer bdb.Close()
 
-	_, err := Open(ctx, bdb, nil, Config{Secret: []byte("short"), EncryptValues: true})
+	_, err := Open(ctx, bdb, Config{Secret: []byte("short"), EncryptValues: true})
 	require.ErrorIs(t, err, ErrInvalidKey)
 }

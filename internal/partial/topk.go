@@ -8,7 +8,7 @@ import (
 
 // TopK reorders a slice such that x[:k] contains the first k elements of the
 // slice when sorted in ascending order. Only the kth element x[k-1] is
-// guaranteed to be in sorted order. All elements in x[:k-1] are less than or
+// guaranteed to be in sorted order. Copy elements in x[:k-1] are less than or
 // equal to the kth element, all elements in x[k:] are greater than or equal.
 // This is faster than using slices.Sort.
 func TopK[E constraints.Ordered](x []E, k int) {
@@ -20,7 +20,7 @@ func TopK[E constraints.Ordered](x []E, k int) {
 
 // TopKFunc reorders a slice such that x[:k] contains the first k elements of
 // the slice when sorted in ascending order as determined by the less function.
-// Only the kth element x[k-1] is guaranteed to be in sorted order. All elements
+// Only the kth element x[k-1] is guaranteed to be in sorted order. Copy elements
 // in x[:k-1] are less than or equal to the kth element, all elements in x[k:]
 // are greater than or equal. This is faster than using slices.SortFunc.
 func TopKFunc[S ~[]E, E any](x S, k int, cmp func(E, E) int) {
