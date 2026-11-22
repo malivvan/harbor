@@ -7,8 +7,6 @@ import (
 	"math/rand"
 	"slices"
 	"time"
-
-	"github.com/malivvan/storm/vec/hnsw/heap"
 )
 
 type Vector = []float32
@@ -75,6 +73,218 @@ func (s searchCandidate[K]) Less(o searchCandidate[K]) bool {
 	return s.dist < o.dist
 }
 
+// deterministicNeighbors makes searches visit neighbors in sorted order. It is
+// enabled only by tests; production keeps the cheaper native map iteration.
+var deterministicNeighbors bool
+
+// searchEntry is one candidate in the search frontier. alive is used for lazy
+// deletion when an entry is removed from the min-heap or the max-heap.
+type searchEntry[K cmp.Ordered] struct {
+	node  *layerNode[K]
+	dist  float32
+	alive bool
+}
+
+// candidateSet keeps the frontier in two heaps: a min-heap for best-first
+// exploration and a max-heap for O(log n) eviction of the worst candidate.
+// Entries removed from one heap stay in the other and are skipped lazily.
+type candidateSet[K cmp.Ordered] struct {
+	min    []*searchEntry[K]
+	max    []*searchEntry[K]
+	active int
+}
+
+func (c *candidateSet[K]) Len() int { return c.active }
+
+func (c *candidateSet[K]) Push(node *layerNode[K], dist float32) {
+	e := &searchEntry[K]{node: node, dist: dist, alive: true}
+
+	c.min = append(c.min, e)
+	c.minUp(len(c.min) - 1)
+
+	c.max = append(c.max, e)
+	c.maxUp(len(c.max) - 1)
+
+	c.active++
+}
+
+func (c *candidateSet[K]) Min() *searchEntry[K] {
+	c.cleanMin()
+	return c.min[0]
+}
+
+func (c *candidateSet[K]) PopMin() *searchEntry[K] {
+	c.cleanMin()
+	e := c.min[0]
+	e.alive = false
+	c.popMinRoot()
+	c.active--
+	return e
+}
+
+func (c *candidateSet[K]) PopWorst() *searchEntry[K] {
+	c.cleanMax()
+	e := c.max[0]
+	e.alive = false
+	c.popMaxRoot()
+	c.active--
+	return e
+}
+
+func (c *candidateSet[K]) cleanMin() {
+	for len(c.min) > 0 && !c.min[0].alive {
+		c.popMinRoot()
+	}
+}
+
+func (c *candidateSet[K]) cleanMax() {
+	for len(c.max) > 0 && !c.max[0].alive {
+		c.popMaxRoot()
+	}
+}
+
+func (c *candidateSet[K]) popMinRoot() {
+	n := len(c.min) - 1
+	c.min[0] = c.min[n]
+	c.min = c.min[:n]
+	if n > 0 {
+		c.minDown(0)
+	}
+}
+
+func (c *candidateSet[K]) popMaxRoot() {
+	n := len(c.max) - 1
+	c.max[0] = c.max[n]
+	c.max = c.max[:n]
+	if n > 0 {
+		c.maxDown(0)
+	}
+}
+
+func (c *candidateSet[K]) minUp(i int) {
+	for i > 0 {
+		parent := (i - 1) / 2
+		if !(c.min[i].dist < c.min[parent].dist) {
+			return
+		}
+		c.min[i], c.min[parent] = c.min[parent], c.min[i]
+		i = parent
+	}
+}
+
+func (c *candidateSet[K]) minDown(i int) {
+	n := len(c.min)
+	for {
+		left := 2*i + 1
+		if left >= n {
+			return
+		}
+		smallest := left
+		if right := left + 1; right < n && c.min[right].dist < c.min[left].dist {
+			smallest = right
+		}
+		if !(c.min[smallest].dist < c.min[i].dist) {
+			return
+		}
+		c.min[i], c.min[smallest] = c.min[smallest], c.min[i]
+		i = smallest
+	}
+}
+
+func (c *candidateSet[K]) maxUp(i int) {
+	for i > 0 {
+		parent := (i - 1) / 2
+		if !(c.max[i].dist > c.max[parent].dist) {
+			return
+		}
+		c.max[i], c.max[parent] = c.max[parent], c.max[i]
+		i = parent
+	}
+}
+
+func (c *candidateSet[K]) maxDown(i int) {
+	n := len(c.max)
+	for {
+		left := 2*i + 1
+		if left >= n {
+			return
+		}
+		largest := left
+		if right := left + 1; right < n && c.max[right].dist > c.max[left].dist {
+			largest = right
+		}
+		if !(c.max[largest].dist > c.max[i].dist) {
+			return
+		}
+		c.max[i], c.max[largest] = c.max[largest], c.max[i]
+		i = largest
+	}
+}
+
+// resultSet is a max-heap of the retained nearest neighbors, so the current
+// worst is at the root.
+type resultSet[K cmp.Ordered] struct {
+	data []*searchEntry[K]
+}
+
+func (r *resultSet[K]) Len() int { return len(r.data) }
+
+func (r *resultSet[K]) Push(node *layerNode[K], dist float32) {
+	r.data = append(r.data, &searchEntry[K]{node: node, dist: dist, alive: true})
+	i := len(r.data) - 1
+	for i > 0 {
+		parent := (i - 1) / 2
+		if !(r.data[i].dist > r.data[parent].dist) {
+			return
+		}
+		r.data[i], r.data[parent] = r.data[parent], r.data[i]
+		i = parent
+	}
+}
+
+func (r *resultSet[K]) Worst() float32 { return r.data[0].dist }
+
+func (r *resultSet[K]) PopWorst() {
+	n := len(r.data) - 1
+	r.data[0] = r.data[n]
+	r.data = r.data[:n]
+	i := 0
+	for {
+		left := 2*i + 1
+		if left >= n {
+			return
+		}
+		largest := left
+		if right := left + 1; right < n && r.data[right].dist > r.data[left].dist {
+			largest = right
+		}
+		if !(r.data[largest].dist > r.data[i].dist) {
+			return
+		}
+		r.data[i], r.data[largest] = r.data[largest], r.data[i]
+		i = largest
+	}
+}
+
+// Sorted returns the retained candidates ordered by ascending distance.
+func (r *resultSet[K]) Sorted() []searchCandidate[K] {
+	out := make([]searchCandidate[K], len(r.data))
+	for i, e := range r.data {
+		out[i] = searchCandidate[K]{node: e.node, dist: e.dist}
+	}
+	slices.SortStableFunc(out, func(a, b searchCandidate[K]) int {
+		switch {
+		case a.dist < b.dist:
+			return -1
+		case a.dist > b.dist:
+			return 1
+		default:
+			return 0
+		}
+	})
+	return out
+}
+
 // search returns the layer node closest to the target node
 // within the same layer.
 //
@@ -88,77 +298,62 @@ func (n *layerNode[K]) search(
 	target Vector,
 	distance DistanceFunc,
 ) []searchCandidate[K] {
-	// This is a basic greedy algorithm to find the entry point at the given level
-	// that is closest to the target node.
-	candidates := heap.Heap[searchCandidate[K]]{}
-	candidates.Init(make([]searchCandidate[K], 0, efSearch))
-	candidates.Push(
-		searchCandidate[K]{
-			node: n,
-			dist: distance(n.Value, target),
-		},
-	)
-	var (
-		result  = heap.Heap[searchCandidate[K]]{}
-		visited = make(map[K]bool)
-	)
-	result.Init(make([]searchCandidate[K], 0, k))
+	candidates := &candidateSet[K]{}
+	result := &resultSet[K]{}
+	visited := make(map[K]bool)
 
-	// Begin with the entry node in the result set.
-	result.Push(candidates.Min())
+	entryDist := distance(n.Value, target)
+	candidates.Push(n, entryDist)
+	result.Push(n, entryDist)
 	visited[n.Key] = true
+
+	visit := func(neighborID K, neighbor *layerNode[K]) {
+		if visited[neighborID] {
+			return
+		}
+		visited[neighborID] = true
+
+		dist := distance(neighbor.Value, target)
+		if result.Len() < k {
+			result.Push(neighbor, dist)
+		} else if dist < result.Worst() {
+			// Evict the farthest retained candidate in O(log k).
+			result.PopWorst()
+			result.Push(neighbor, dist)
+		}
+
+		candidates.Push(neighbor, dist)
+		if candidates.Len() > efSearch {
+			candidates.PopWorst()
+		}
+	}
 
 	for candidates.Len() > 0 {
 		// Standard HNSW termination: stop once the closest unexplored
 		// candidate is farther away than the worst retained result.
-		if result.Len() >= k && candidates.Min().dist > result.Max().dist {
+		if result.Len() >= k && candidates.Min().dist > result.Worst() {
 			break
 		}
 
-		current := candidates.Pop().node
+		current := candidates.PopMin().node
 
-		// We iterate the map in a sorted, deterministic fashion for
-		// tests.
-		neighborKeys := mapsKeys(current.neighbors)
-		slices.Sort(neighborKeys)
-		for _, neighborID := range neighborKeys {
-			neighbor := current.neighbors[neighborID]
-			if visited[neighborID] {
-				continue
+		if deterministicNeighbors {
+			// Sorted iteration is only needed by tests that compare graph
+			// structure across runs.
+			neighborKeys := mapsKeys(current.neighbors)
+			slices.Sort(neighborKeys)
+			for _, neighborID := range neighborKeys {
+				visit(neighborID, current.neighbors[neighborID])
 			}
-			visited[neighborID] = true
+			continue
+		}
 
-			dist := distance(neighbor.Value, target)
-			if result.Len() < k {
-				result.Push(searchCandidate[K]{node: neighbor, dist: dist})
-			} else if dist < result.Max().dist {
-				// Evict the farthest candidate, not an arbitrary heap leaf.
-				result.PopLast()
-				result.Push(searchCandidate[K]{node: neighbor, dist: dist})
-			}
-
-			candidates.Push(searchCandidate[K]{node: neighbor, dist: dist})
-			// Always store candidates if we haven't reached the limit.
-			if candidates.Len() > efSearch {
-				candidates.PopLast()
-			}
+		for neighborID, neighbor := range current.neighbors {
+			visit(neighborID, neighbor)
 		}
 	}
 
-	// The result set is a min-heap: only its root is guaranteed to be the
-	// nearest candidate. Sort it so callers get a properly ranked list.
-	out := result.Slice()
-	slices.SortStableFunc(out, func(a, b searchCandidate[K]) int {
-		switch {
-		case a.dist < b.dist:
-			return -1
-		case a.dist > b.dist:
-			return 1
-		default:
-			return 0
-		}
-	})
-	return out
+	return result.Sorted()
 }
 
 // replenish restores connectivity for a node that lost a neighbor, using the

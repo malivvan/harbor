@@ -481,6 +481,8 @@ build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 - **Risk:** Low-Medium (ordering semantics).
 
 ### 3.3 HNSW `search()` uses O(n) linear scans (`Max`, `PopLast`) inside the per-neighbor inner loop — HIGH
+
+> **Status:** ✅ FIXED — the result set is a max-heap (O(1) worst, O(log k) eviction) and the candidate frontier uses a min-heap plus a lazily-deleted max-heap, so both `PopMin` and `PopWorst` are O(log n); the per-neighbor `Max`/`PopLast` scans are gone. Property test interleaves both ends against a sorted reference.
 - **Location:** `vec/hnsw/graph.go:110-146` (`result.Max()` at `:114` and `:134`,
   `result.PopLast()` at `:136`), backed by `heap.Max`/`maxIndex` O(n) scans at
   `vec/hnsw/heap/heap.go:73-113`, and `candidates.PopLast()` at `:143`.
@@ -494,6 +496,8 @@ build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 - **Risk:** Medium (preserve eviction/ordering invariants; graph tests cover correctness).
 
 ### 3.4 HNSW `search()` allocates + sorts `mapsKeys` per popped candidate — HIGH/MEDIUM
+
+> **Status:** ✅ FIXED — neighbor iteration uses the map directly in production; sorted `mapsKeys` iteration is gated behind the unexported `deterministicNeighbors` flag for tests.
 - **Location:** `vec/hnsw/graph.go:122-123` (`neighborKeys := mapsKeys(...); slices.Sort(...)`),
   `mapsKeys` in `vec/hnsw/hnsw.go`.
 - **Problem:** One slice allocation + O(deg log deg) sort per popped node, on the hot path of
