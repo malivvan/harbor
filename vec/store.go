@@ -77,6 +77,12 @@ func (s *Store) update(fn func(tx *bbolt.Tx) error) error {
 	return s.db.Update(fn)
 }
 
+// payloadJSONKey is the reserved stored-payload key that carries one JSON
+// document for every complex payload value of a point. It keeps the wire
+// format backward compatible: records written by older versions simply have
+// per-key KindJSON values instead.
+const payloadJSONKey = "\x00__storm_json_payload__"
+
 func toStoredPoint(p *PointStruct) (*StoredPoint, error) {
 	stored := &StoredPoint{
 		ID:      p.ID,
@@ -86,6 +92,7 @@ func toStoredPoint(p *PointStruct) (*StoredPoint, error) {
 
 	if p.Payload != nil {
 		stored.Payload = make(map[string]*Value)
+		complexValues := make(map[string]any)
 		for k, v := range p.Payload {
 			value := &Value{}
 			switch val := v.(type) {
@@ -114,18 +121,29 @@ func toStoredPoint(p *PointStruct) (*StoredPoint, error) {
 				value.Kind = KindBytes
 				value.BytesValue = val
 			default:
-				// For complex types (map, slice, etc.), JSON-serialize and keep
-				// the document in a dedicated kind so that raw byte payloads are
-				// not mistaken for JSON on the way back. A value that cannot be
-				// encoded fails the write instead of being silently dropped.
-				jsonBytes, err := json.Marshal(val)
-				if err != nil {
-					return nil, fmt.Errorf("payload key %q: %w", k, err)
-				}
-				value.Kind = KindJSON
-				value.BytesValue = jsonBytes
+				// Complex values (maps, slices, ...) are collected and encoded
+				// once into a single JSON document below.
+				complexValues[k] = val
+				continue
 			}
 			stored.Payload[k] = value
+		}
+
+		if len(complexValues) > 0 {
+			jsonBytes, err := json.Marshal(complexValues)
+			if err != nil {
+				// Report which key failed, matching the old per-value errors.
+				for k := range complexValues {
+					if _, keyErr := json.Marshal(p.Payload[k]); keyErr != nil {
+						return nil, fmt.Errorf("payload key %q: %w", k, keyErr)
+					}
+				}
+				return nil, err
+			}
+			stored.Payload[payloadJSONKey] = &Value{
+				Kind:       KindJSON,
+				BytesValue: jsonBytes,
+			}
 		}
 	}
 
@@ -140,8 +158,21 @@ func fromStoredPoint(stored *StoredPoint) *PointStruct {
 	}
 
 	if stored.Payload != nil {
-		p.Payload = make(Payload)
+		p.Payload = make(Payload, len(stored.Payload))
+
+		// One JSON document holds every complex value of this point.
+		if blob, ok := stored.Payload[payloadJSONKey]; ok && blob != nil && blob.Kind == KindJSON {
+			if decoded, ok := decodeJSONPayload(blob.BytesValue).(map[string]any); ok {
+				for k, v := range decoded {
+					p.Payload[k] = v
+				}
+			}
+		}
+
 		for k, v := range stored.Payload {
+			if k == payloadJSONKey {
+				continue
+			}
 			if v == nil {
 				continue
 			}

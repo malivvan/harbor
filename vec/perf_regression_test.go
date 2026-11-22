@@ -106,3 +106,41 @@ func TestFlatSearchPayloadsAreIndependent(t *testing.T) {
 	require.NotEqual(t, "mutated", fresh[0].Payload["bucket"])
 	require.NotEqual(t, -1, fresh[0].Payload["nested"].(map[string]any)["i"])
 }
+
+// TestStoredPayloadUsesOneJSONDocument verifies that complex payload values
+// are encoded into a single reserved JSON document and round-trip correctly.
+func TestStoredPayloadUsesOneJSONDocument(t *testing.T) {
+	point := &PointStruct{
+		ID:      "p1",
+		Vector:  []float32{1, 2, 3},
+		Version: 7,
+		Payload: Payload{
+			"scalar": 42,
+			"name":   "x",
+			"nested": map[string]any{"n": 3},
+			"list":   []any{float64(1), "two"},
+		},
+	}
+
+	stored, err := toStoredPoint(point)
+	require.NoError(t, err)
+	require.Len(t, stored.Payload, 3)
+
+	jsonDocs := 0
+	for k, v := range stored.Payload {
+		if v != nil && v.Kind == KindJSON {
+			jsonDocs++
+			require.Equal(t, payloadJSONKey, k)
+		}
+	}
+	require.Equal(t, 1, jsonDocs, "complex values must share one JSON document")
+
+	got := fromStoredPoint(stored)
+	require.Equal(t, point.ID, got.ID)
+	require.Equal(t, point.Vector, got.Vector)
+	require.Equal(t, point.Version, got.Version)
+	require.EqualValues(t, 42, got.Payload["scalar"])
+	require.Equal(t, "x", got.Payload["name"])
+	require.EqualValues(t, 3, got.Payload["nested"].(map[string]any)["n"])
+	require.Equal(t, "two", got.Payload["list"].([]any)[1])
+}

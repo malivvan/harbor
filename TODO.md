@@ -535,6 +535,8 @@ build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 - **Risk:** Medium (preserve Delete-vs-flush ordering guarantees).
 
 ### 3.7 Storage JSON-encodes every complex payload value per point on flush and load — MEDIUM
+
+> **Status:** ✅ FIXED — all complex payload values of a point are collected and encoded into one reserved JSON document (`\\x00__storm_json_payload__`) on write and decoded once on load; scalar kinds and the per-key `KindJSON` format of older records remain supported. Regression test asserts one document and a full round-trip.
 - **Location:** `vec/store.go:117-127` (`toStoredPoint`, `json.Marshal` per non-scalar value),
   decode at `vec/store.go:672-675` + `decodeJSONPayload`/`normalizeJSONValue`
   (`vec/store.go:159-205`).
