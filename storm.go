@@ -490,21 +490,6 @@ func (s *Store) withDB(fn func(*bolt.DB) error) error {
 	return fn(s.bs)
 }
 
-// checkOpen reports ErrClosed unless the receiver is an open store. Every
-// public method calls it first, so ErrClosed takes precedence over key
-// validation.
-func (s *Store) checkOpen() error {
-	if s == nil {
-		return ErrClosed
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.bs == nil {
-		return ErrClosed
-	}
-	return nil
-}
-
 // sealValue encrypts a key/value payload when EncryptKVValues is enabled.
 func (s *Store) sealValue(plain []byte) ([]byte, error) {
 	if s.kvc == nil {
@@ -564,26 +549,6 @@ func (s *Store) lookupLocked(key string) (value string, found bool, err error) {
 		return nil
 	})
 	return value, found, err
-}
-
-// scanKeys calls fn once per user key in byte order.
-func (s *Store) scanKeys(fn func(string)) error {
-	return s.withDB(func(bdb *bolt.DB) error {
-		return bdb.View(func(tx *bolt.Tx) error {
-			b := tx.Bucket(kvBucket)
-			if b == nil {
-				return nil
-			}
-			c := b.Cursor()
-			for k, v := c.First(); k != nil; k, v = c.Next() {
-				if v == nil {
-					continue
-				}
-				fn(string(k))
-			}
-			return nil
-		})
-	})
 }
 
 // Get returns the value stored under key. An empty key returns ErrInvalidKey,

@@ -827,5 +827,7 @@ func (s *subFS) ReadFile(name string) ([]byte, error) {
 
 func (s *subFS) Sub(dir string) (iosfs.FS, error) {
 	fullDir := s.fullPath(dir)
-	return absfs.FilerToFS(s, fullDir)
+	// The new wrapper already prefixes paths with fullDir; the adapter root is
+	// relative to it.
+	return absfs.FilerToFS(&subFS{parent: s.parent, prefix: fullDir}, "/")
 }

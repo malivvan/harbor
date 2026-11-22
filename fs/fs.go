@@ -41,6 +41,11 @@ type FS struct {
 	// umask caches the persisted creation mask.
 	umask atomic.Uint32
 
+	// tempdir caches the persisted temp directory so reading it never needs a
+	// write transaction (which would deadlock while a snapshot holds a read
+	// transaction).
+	tempdir atomic.Value // string
+
 	// mu serializes inode load-modify-save cycles so concurrent operations on
 	// the same directory or inode do not lose updates. Read paths take RLock so
 	// a multi-transaction read cannot observe a concurrent mutation.
@@ -124,6 +129,12 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FS, error) {
 			return err
 		}
 		fs.umask.Store(binary.BigEndian.Uint32(umaskData))
+
+		tempdir, err := b.LoadOrSet("tempdir", []byte("/tmp"))
+		if err != nil {
+			return err
+		}
+		fs.tempdir.Store(string(tempdir))
 
 		// load the root Ino if one is available
 		data, err = b.LoadOrSet("rootIno", i2b(rootIno))
@@ -251,41 +262,33 @@ func (fs *FS) SetUmask(umask os.FileMode) {
 	fs.umask.Store(uint32(umask))
 }
 
-// TempDir returns the path to a temporary directory. Returns "/tmp" if an error occurs.
+// TempDir returns the path to a temporary directory. The value is cached at
+// open time so this is a pure read: starting a write transaction here would
+// deadlock while a snapshot holds a read transaction. Returns "/tmp" if unset.
 func (fs *FS) TempDir() string {
-	var tempdir string
-	tempdir = "/tmp"
-	err := fs.db.Update(func(tx *bolt.Tx) error {
-		b, err := fs.openFsBucket(tx)
-		if err != nil {
-			return err
-		}
-		data, err := b.Get("tempdir")
-		if err == nil && data != nil {
-			tempdir = string(data)
-			return nil
-		}
-		return b.Put("tempdir", []byte(tempdir))
-	})
-	if err != nil {
-		// Return default temp directory on error instead of panicking
+	if fs == nil {
 		return "/tmp"
 	}
-
-	return tempdir
+	if v := fs.tempdir.Load(); v != nil {
+		return v.(string)
+	}
+	return "/tmp"
 }
 
 // SetTempdir sets the path to a temporary directory, but does not create the
 // actual directories. Silently ignores errors.
 func (fs *FS) SetTempdir(tempdir string) {
 	// Ignore the error to maintain backwards compatibility
-	_ = fs.db.Update(func(tx *bolt.Tx) error {
+	err := fs.db.Update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucket(tx)
 		if err != nil {
 			return err
 		}
 		return b.Put("tempdir", []byte(tempdir))
 	})
+	if err == nil {
+		fs.tempdir.Store(tempdir)
+	}
 }
 
 // saveInode save an iNode to the databased.  If the iNode's `ino` number is
@@ -504,7 +507,9 @@ func (s *subFS) Sub(dir string) (fs.FS, error) {
 	if !node.IsDir() {
 		return nil, &os.PathError{Op: "sub", Path: dir, Err: errors.New("not a directory")}
 	}
-	return absfs.FilerToFS(&subFS{fs: s.fs, dir: path.Clean(fullDir)}, dir)
+	// The wrapper already prefixes paths with fullDir; the adapter root is
+	// relative to it, so "/" addresses the subtree itself.
+	return absfs.FilerToFS(&subFS{fs: s.fs, dir: path.Clean(fullDir)}, "/")
 }
 
 var errInvalidIno = errors.New("invalid ino")

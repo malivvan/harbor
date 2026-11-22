@@ -473,7 +473,8 @@ func (s *Snapshot) Sub(dir string) (fs.FS, error) {
 	}
 
 	// Return a subFS wrapper for the snapshot
-	return absfs.FilerToFS(&snapshotSubFS{snapshot: s, dir: path.Clean(p)}, dir)
+	// snapshotSubFS already prefixes paths with p; see subFS.Sub.
+	return absfs.FilerToFS(&snapshotSubFS{snapshot: s, dir: path.Clean(p)}, "/")
 }
 
 // snapshotSubFS wraps a Snapshot and prefixes all paths with a directory
@@ -536,7 +537,7 @@ func (ss *snapshotSubFS) Sub(dir string) (fs.FS, error) {
 	if !node.IsDir() {
 		return nil, &os.PathError{Op: "sub", Path: dir, Err: syscall.ENOTDIR}
 	}
-	return absfs.FilerToFS(&snapshotSubFS{snapshot: ss.snapshot, dir: path.Clean(fullDir)}, dir)
+	return absfs.FilerToFS(&snapshotSubFS{snapshot: ss.snapshot, dir: path.Clean(fullDir)}, "/")
 }
 
 // snapshotFile implements absfs.File for read-only access to files in a snapshot.

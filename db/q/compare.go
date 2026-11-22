@@ -158,7 +158,7 @@ func compareInt64(a, b int64, tok token.Token) bool {
 	case token.GEQ:
 		return a >= b
 	}
-	return constant.Compare(constant.MakeInt64(a), tok, constant.MakeInt64(b))
+	return false
 }
 
 // compareUint64 compares two unsigned integers without boxing.
@@ -177,7 +177,7 @@ func compareUint64(a, b uint64, tok token.Token) bool {
 	case token.GEQ:
 		return a >= b
 	}
-	return constant.Compare(constant.MakeUint64(a), tok, constant.MakeUint64(b))
+	return false
 }
 
 // compareFloat64 compares two floats directly. Unlike constant.MakeFloat64 it
@@ -197,5 +197,5 @@ func compareFloat64(a, b float64, tok token.Token) bool {
 	case token.GEQ:
 		return a >= b
 	}
-	return constant.Compare(constant.MakeFloat64(a), tok, constant.MakeFloat64(b))
+	return false
 }
