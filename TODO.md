@@ -328,6 +328,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low.
 
 ### 2.6 `loadData` makes a redundant full-file copy on the encrypted bbolt path — MEDIUM
+
+> **Status:** ✅ FIXED — when content encryption is enabled, `loadData` returns the fresh plaintext buffer from AEAD Open directly; the defensive copy remains only for the plaintext passthrough that aliases bbolt mmap memory.
 - **Location:** `fs/fs.go:609-610` (contrast the contentFS branch `:583-587`).
 - **Problem:** `openContent` already returns a fresh buffer (AES-GCM `Open(nil, …)`), but the
   code does `data = make(...); copy(data, plain)` — a second full allocation/copy per read. The

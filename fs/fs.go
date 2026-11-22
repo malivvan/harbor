@@ -663,12 +663,20 @@ func (fs *FS) loadData(ino uint64) ([]byte, error) {
 			data = []byte{}
 			return nil
 		}
-		plain, err := fs.enc.Load().openContent(d)
+		enc := fs.enc.Load()
+		plain, err := enc.openContent(d)
 		if err != nil {
 			return err
 		}
-		data = make([]byte, len(plain))
-		copy(data, plain)
+		if enc == nil || !enc.encContent {
+			// Without content encryption plain aliases bbolt's mmap, which is
+			// only valid for the lifetime of the transaction.
+			data = make([]byte, len(plain))
+			copy(data, plain)
+			return nil
+		}
+		// AEAD Open allocated a fresh plaintext buffer: hand it over directly.
+		data = plain
 		return nil
 	})
 	if err != nil {
