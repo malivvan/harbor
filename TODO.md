@@ -243,6 +243,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low-Medium (path-immutability assumptions).
 
 ### 1.17 `checkContext` is called ~6× per record inside `filter` — LOW
+
+> **Status:** ✅ FIXED — `filter` checks cancellation once at entry and once after decoding (so a cancellation raised during an error codec is still observed), and `sorter.add` checks once; the remaining per-record checks were redundant. Existing cancellation tests pin the contract.
 - **Location:** `db/sink.go:44-141`.
 - **Problem:** Cancellation is checked before/after unmarshal, match and add for every record.
 - **Fix:** check once per record (or per K records); the query-level check still guards

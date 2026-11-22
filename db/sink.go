@@ -108,10 +108,6 @@ func (s *sorter) filter(ctx context.Context, tree q.Matcher, bucket *bolt.Bucket
 		return s.add(ctx, itm)
 	}
 
-	if err := checkContext(ctx); err != nil {
-		return false, err
-	}
-
 	newElem := rsink.elem()
 	if err := s.node.unmarshal(v, newElem.Interface()); err != nil {
 		return false, err
@@ -132,16 +128,8 @@ func (s *sorter) filter(ctx context.Context, tree q.Matcher, bucket *bolt.Bucket
 		}
 	}
 
-	if err := checkContext(ctx); err != nil {
-		return false, err
-	}
-
 	if len(s.orderBy) == 0 {
 		return s.add(ctx, itm)
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return false, err
 	}
 
 	if _, ok := s.sink.(sliceSink); ok {
@@ -150,10 +138,6 @@ func (s *sorter) filter(ctx context.Context, tree q.Matcher, bucket *bolt.Bucket
 	}
 
 	s.list = append(s.list, &itm)
-
-	if err := checkContext(ctx); err != nil {
-		return false, err
-	}
 
 	return false, nil
 }
@@ -176,16 +160,7 @@ func (s *sorter) add(ctx context.Context, itm item) (bool, error) {
 		s.limit--
 	}
 
-	if err := checkContext(ctx); err != nil {
-		return false, err
-	}
-
-	err := s.sink.add(ctx, itm)
-	if err != nil {
-		return false, err
-	}
-
-	if err := checkContext(ctx); err != nil {
+	if err := s.sink.add(ctx, itm); err != nil {
 		return false, err
 	}
 
