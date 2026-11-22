@@ -34,7 +34,7 @@ func (f *failingContentFS) MkdirAll(path string, perm os.FileMode) error {
 // read would silently shrink the logical file to the content length.
 func TestContentFSFailedWriteDoesNotGrowInode(t *testing.T) {
 	content := &failingContentFS{FS: newContentStorageFS(t)}
-	fsys, err := openFSWithContentForTest(t, tempFile(), "", content)
+	fsys, err := openFSWithContentForTest(t, tempFile(t), "", content)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestContentFSFailedWriteDoesNotGrowInode(t *testing.T) {
 // adopting the shorter content as the new file size.
 func TestContentFSSizeMismatchIsReported(t *testing.T) {
 	content := &failingContentFS{FS: newContentStorageFS(t)}
-	fsys, err := openFSWithContentForTest(t, tempFile(), "", content)
+	fsys, err := openFSWithContentForTest(t, tempFile(t), "", content)
 	if err != nil {
 		t.Fatal(err)
 	}

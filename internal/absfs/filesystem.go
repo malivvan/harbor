@@ -150,7 +150,8 @@ type SymlinkFileSystem interface {
 // For OS filesystem wrappers (like osfs), use the osfs.ToNative() and
 // osfs.FromNative() helpers to convert between absfs paths and native OS paths.
 //
-// See PATH_HANDLING.md for detailed cross-platform behavior documentation.
+// See AGENTS.md at the repository root for cross-platform path rules and
+// interface contracts.
 func ExtendFiler(filer Filer) FileSystem {
 	return &extendedFS{"/", filer}
 }

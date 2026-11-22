@@ -260,7 +260,7 @@ cannot run when `EncryptPointIDs` or `EncryptCollectionNames` is enabled,
 because those physical names are derived from the master key; in that case it
 returns `vec.ErrInvalidConfig`. Plaintext stores cannot be migrated in place.
 
-See [../docs/encryption.md](../docs/encryption.md) for the complete model.
+See [Encryption](../README.md#encryption) and [AGENTS.md](../AGENTS.md#encryption-internals).
 
 ## Persistence format
 
@@ -305,4 +305,4 @@ See [../docs/encryption.md](../docs/encryption.md) for the complete model.
 ## License
 
 MIT — see [../LICENSE](../LICENSE). Start the whole-module tour at
-[../docs/getting-started.md](../docs/getting-started.md).
+[../README.md](../README.md).

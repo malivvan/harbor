@@ -9,8 +9,7 @@ import (
 func newWalkTestFS(t *testing.T) *FS {
 	t.Helper()
 
-	path := tempFile()
-	t.Cleanup(func() { _ = os.Remove(path) })
+	path := tempFile(t)
 
 	filesystem, err := openFSForTest(t, path, "")
 	if err != nil {

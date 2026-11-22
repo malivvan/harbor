@@ -2,14 +2,16 @@ package fs
 
 import (
 	"fmt"
-	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
-// tempFile returns a temporary file path for testing
-func tempFile() string {
-	return fmt.Sprintf("test_fs_%d.db", time.Now().UnixNano())
+// tempFile returns a database path inside the test's temporary directory.
+// The directory is removed by the testing package after the test finishes.
+func tempFile(tb testing.TB) string {
+	tb.Helper()
+	return filepath.Join(tb.TempDir(), "test_fs.db")
 }
 
 func TestInodeCache_Basic(t *testing.T) {
@@ -289,8 +291,7 @@ func TestInodeCache_ZeroSize(t *testing.T) {
 }
 
 func TestFileSystemCache_Integration(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {

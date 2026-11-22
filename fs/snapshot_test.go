@@ -12,8 +12,7 @@ import (
 // tempFile helper is defined in cache_test.go
 
 func TestSnapshot_Create(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {
@@ -37,8 +36,7 @@ func TestSnapshot_Create(t *testing.T) {
 }
 
 func TestSnapshot_Release(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {
@@ -70,8 +68,7 @@ func TestSnapshot_Release(t *testing.T) {
 }
 
 func TestSnapshot_Stat(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {
@@ -112,8 +109,7 @@ func TestSnapshot_Stat(t *testing.T) {
 }
 
 func TestSnapshot_IsolatedFromWrites(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {
@@ -188,8 +184,7 @@ func TestSnapshot_IsolatedFromWrites(t *testing.T) {
 }
 
 func TestSnapshot_ReadDir(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {
@@ -230,8 +225,7 @@ func TestSnapshot_ReadDir(t *testing.T) {
 }
 
 func TestSnapshot_ReadFile(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {
@@ -267,8 +261,7 @@ func TestSnapshot_ReadFile(t *testing.T) {
 }
 
 func TestSnapshot_Readlink(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {
@@ -307,8 +300,7 @@ func TestSnapshot_Readlink(t *testing.T) {
 }
 
 func TestSnapshot_Walk(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {
@@ -364,8 +356,7 @@ func TestSnapshot_Walk(t *testing.T) {
 }
 
 func TestSnapshot_WriteOperationsFail(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {
@@ -394,8 +385,7 @@ func TestSnapshot_WriteOperationsFail(t *testing.T) {
 }
 
 func TestSnapshotManager_CreateAndGet(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {
@@ -433,8 +423,7 @@ func TestSnapshotManager_CreateAndGet(t *testing.T) {
 }
 
 func TestSnapshotManager_CreateDuplicate(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {
@@ -458,8 +447,7 @@ func TestSnapshotManager_CreateDuplicate(t *testing.T) {
 }
 
 func TestSnapshotManager_Delete(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {
@@ -499,8 +487,7 @@ func TestSnapshotManager_Delete(t *testing.T) {
 }
 
 func TestSnapshotManager_List(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {
@@ -544,8 +531,7 @@ func TestSnapshotManager_List(t *testing.T) {
 }
 
 func TestSnapshotManager_ReleaseAll(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {
@@ -585,8 +571,7 @@ func TestSnapshotManager_ReleaseAll(t *testing.T) {
 }
 
 func TestSnapshot_CopyToFS(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fs, err := openFSForTest(t, path, "")
 	if err != nil {
@@ -706,8 +691,7 @@ func TestSnapshotLazyOpenSeeks(t *testing.T) {
 // a snapshot used to hold a bbolt read transaction, so a write that needed to
 // grow the mmap blocked forever. Snapshots are now materialized eagerly.
 func TestSnapshotDoesNotBlockWrites(t *testing.T) {
-	path := tempFile()
-	defer os.Remove(path)
+	path := tempFile(t)
 
 	fsys, err := openFSForTest(t, path, "")
 	if err != nil {

@@ -21,6 +21,26 @@ The root `harbor` package opens a single bbolt file behind one password, derives
 a separate key for each store, and exposes them through `DB()`, `FS()`, `TS()`
 and `Vec()`. Every store can also be used directly with its own `*bolt.DB`.
 
+## Table of contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Opening a store](#opening-a-store)
+- [Records with `db`](#records-with-db)
+- [Files with `fs`](#files-with-fs)
+- [Time series with `ts`](#time-series-with-ts)
+- [Vectors with `vec`](#vectors-with-vec)
+- [Encryption](#encryption)
+- [Database lifecycle](#database-lifecycle)
+- [Error handling](#error-handling)
+- [Contexts and cancellation](#contexts-and-cancellation)
+- [Performance notes](#performance-notes)
+- [Documentation](#documentation)
+- [Status](#status)
+- [License](#license)
+- [Credits](#credits)
+
 ## Features
 
 - **One file, one password.** Argon2id stretches the password; SLIP-0021
@@ -39,7 +59,7 @@ and `Vec()`. Every store can also be used directly with its own `*bolt.DB`.
 
 ## Installation
 
-Harbor requires Go 1.27.4 or later.
+Harbor requires Go 1.27.4 or later and a writable path for the database file.
 
 ```sh
 go get github.com/malivvan/harbor
@@ -49,7 +69,7 @@ The module contains the root `harbor` package and four sub-packages:
 
 | Package | Import path | Guide |
 |---------|-------------|-------|
-| `harbor` | `github.com/malivvan/harbor` | this file, [docs/getting-started.md](docs/getting-started.md) |
+| `harbor` | `github.com/malivvan/harbor` | this file |
 | `db` | `github.com/malivvan/harbor/db` | [db/README.md](db/README.md) |
 | `fs` | `github.com/malivvan/harbor/fs` | [fs/README.md](fs/README.md) |
 | `ts` | `github.com/malivvan/harbor/ts` | [ts/README.md](ts/README.md) |
@@ -139,47 +159,199 @@ pending vector writes and closes it. The sub-store packages (`db.Open`, `fs.Open
 `ts.Open`, `vec.Open`) borrow a caller-owned `*bolt.DB` instead and never close
 it. See [Database lifecycle](#database-lifecycle).
 
-## What each store gives you
+## Opening a store
 
-### Records — `db`
+`harbor.Open` opens or creates the database and returns `*harbor.Store`:
+
+```go
+store, err := harbor.Open(ctx, "app.db", 0o600, &harbor.Options{
+	// Set a lock timeout so a second process fails instead of hanging.
+	Options:  bolt.Options{Timeout: 2 * time.Second},
+	Password: "correct horse battery staple",
+
+	// Optional: tune Argon2id for a new store. These are the defaults.
+	KDFTime:    3,
+	KDFMemory:  64 * harbor.MiB, // KiB
+	KDFThreads: 4,
+})
+if err != nil {
+	log.Fatal(err)
+}
+defer func() {
+	if err := store.Close(); err != nil {
+		log.Println("close:", err)
+	}
+}()
+```
+
+Important properties:
+
+- The first call creates the file and writes unencrypted metadata: the salt,
+  Argon2id parameters, encryption flags, and a sealed canary.
+- Later calls use the persisted settings. `KDFTime`, `KDFMemory`, `KDFThreads`,
+  `Encrypt` and `Plaintext` are ignored for an existing store.
+- The password is always required, including for plaintext stores, because the
+  canary is used to detect a wrong password.
+- `Store.Close` flushes buffered vector writes and closes the database that
+  `Open` created. It is safe to call twice, and the sub-store accessors return
+  `nil` afterwards.
+
+Use `Options{Plaintext: true}` for an unencrypted store, or select individual
+encryption flags with `Options.Encrypt`. See [Encryption](#encryption) for the
+flags, rotation rules and threat model.
+
+## Records with `db`
 
 Map Go structs to buckets, declare indexes with struct tags, and query with
 `One`, `Find`, `All`, `Range`, `Prefix`, or the matcher API.
 
+Declare a struct and describe indexes with the `db` tag namespace:
+
 ```go
 type User struct {
 	ID        int       `db:"id,increment"`
-	Team      string    `db:"index"`
+	Name      string    `db:"index"`
 	Email     string    `db:"unique"`
-	Name      string
+	Team      string    `db:"index"`
 	CreatedAt time.Time `db:"index"`
 }
-
-users := store.DB()
-if err := users.Save(ctx, &User{Team: "core", Email: "a@example.com"}); err != nil {
-	return err
-}
-
-var team []User
-err := users.Find(ctx, "Team", "core", &team, db.Limit(20), db.Skip(0))
 ```
+
+Supported tags are:
+
+| Tag | Meaning |
+|-----|---------|
+| `id` | Primary key. A field named `ID` is used when no tag is present. |
+| `increment` | Auto-increments integer fields. `increment=100` sets the start. |
+| `index` | Creates a list index for the field. |
+| `unique` | Creates a unique index for the field. |
+| `inline` | Flattens an embedded struct into the parent. |
+
+Implement `db.BucketNamer` (`HarborBucketName() string`) for a custom bucket
+name. Runtime-created structs can use `records.From("bucket")` to provide an
+explicit bucket.
+
+### Save and fetch
 
 ```go
-import (
-	"github.com/malivvan/harbor/db"
-	"github.com/malivvan/harbor/db/q"
-)
+users := store.DB()
 
-var recent []User
-err := users.Select(q.Gte("CreatedAt", cutoff)).
-	OrderBy("CreatedAt").Reverse().Limit(50).Find(ctx, &recent)
+u := User{Name: "alice", Email: "alice@example.com", Team: "core"}
+if err := users.Save(ctx, &u); err != nil {
+	return err // duplicate unique values match db.ErrAlreadyExists
+}
+
+var found User
+if err := users.One(ctx, "Email", "alice@example.com", &found); err != nil {
+	return err // no match matches db.ErrNotFound
+}
 ```
 
-Full guide: [db/README.md](db/README.md). Supported tags are `id`, `increment`,
-`index`, `unique` and `inline`; implement `db.BucketNamer` for a custom bucket
-name.
+`Save` creates the bucket and indexes on first use, assigns auto-increment
+values, and enforces unique constraints. `Update` updates non-zero fields;
+`UpdateField` updates one field, including zero values. The primary key cannot
+be updated (`db.ErrImmutableID`).
 
-### Files — `fs`
+### Find, range, prefix
+
+```go
+var team []User
+err := users.Find(ctx, "Team", "core", &team, db.Limit(20), db.Skip(0))
+
+var all []User
+err = users.All(ctx, &all)
+err = users.AllByIndex(ctx, "CreatedAt", &all, db.Reverse())
+
+var recent []User
+err = users.Range(ctx, "CreatedAt", since, time.Now(), &recent)
+
+var prefixed []User
+err = users.Prefix(ctx, "Name", "al", &prefixed)
+```
+
+`Find`, `Range` and `Prefix` return `db.ErrNotFound` when nothing matches; use
+`All` if you want an empty slice contract. Pagination and ordering are
+`FindOption` values: `db.Limit`, `db.Skip` and `db.Reverse`.
+
+### Matcher queries
+
+```go
+import "github.com/malivvan/harbor/db/q"
+
+var admins []User
+err := users.Select(q.In("Team", []string{"core", "admin"})).
+	OrderBy("CreatedAt").
+	Limit(50).
+	Find(ctx, &admins)
+
+count, err := users.Select(q.Lt("CreatedAt", cutoff)).Count(ctx, &User{})
+err = users.Select(q.Eq("Team", "blocked")).Delete(ctx, &User{})
+```
+
+Matchers include `Eq`, `StrictEq`, `Gt`, `Gte`, `Lt`, `Lte`, `In`, `Re`,
+`EqF`, `GtF`, `LtF`, and the combinators `And`, `Or`, `Not`.
+
+### Transactions
+
+Harbor exposes callback-managed transactions only:
+
+```go
+err := users.WriteTransaction(ctx, func(tx db.Node) error {
+	if err := tx.Save(ctx, &from); err != nil {
+		return err
+	}
+	return tx.Save(ctx, &to)
+})
+```
+
+A returned error rolls back. If the context is cancelled before commit, the
+transaction is rolled back and `ctx.Err()` is returned. Panics propagate after
+bbolt unwinds the transaction. Read-only work uses `ReadTransaction`.
+
+To mix Harbor operations with raw bbolt writes, attach Harbor to a transaction
+you own:
+
+```go
+tx, err := bdb.Begin(true)
+if err != nil {
+	return err
+}
+defer tx.Rollback()
+
+txn, err := users.Attach(tx)
+if err != nil {
+	return err
+}
+if err := txn.Save(ctx, &record); err != nil {
+	return err
+}
+if _, err := tx.CreateBucketIfNotExists([]byte("audit")); err != nil {
+	return err
+}
+return tx.Commit()
+```
+
+Harbor never commits or rolls back an attached transaction.
+
+### Nested buckets and key/value access
+
+```go
+notes := users.From("notes")       // nested bucket
+private := notes.From("private")   // deeper still
+
+err := users.Set(ctx, "sessions", sessionID, &session)
+var session Session
+err = users.Get(ctx, "sessions", sessionID, &session)
+
+raw, err := users.GetBytes(ctx, "cache", "key")
+err = users.SetBytes(ctx, "cache", "key", []byte("value"))
+exists, err := users.KeyExists(ctx, "sessions", sessionID)
+err = users.Delete(ctx, "sessions", sessionID)
+```
+
+Full reference: [db/README.md](db/README.md).
+
+## Files with `fs`
 
 An `absfs`-compatible file system stored in the same bbolt file. File systems
 are named, so one store can hold many independent roots.
@@ -193,11 +365,12 @@ if err != nil {
 if err := vfs.MkdirAll("/reports/2026", 0o755); err != nil {
 	return err
 }
+
 f, err := vfs.Create("/reports/2026/q1.txt")
 if err != nil {
 	return err
 }
-if _, err := f.Write([]byte("ok")); err != nil {
+if _, err := f.Write([]byte("hello")); err != nil {
 	return err
 }
 if err := f.Close(); err != nil {
@@ -205,73 +378,269 @@ if err := f.Close(); err != nil {
 }
 
 data, err := vfs.ReadFile("/reports/2026/q1.txt")
-snapshot, err := vfs.CreateSnapshot("before-import")
-defer snapshot.Release()
+```
+
+Common operations:
+
+```go
+err = vfs.Rename("/reports/2026/q1.txt", "/reports/2026/q1-final.txt")
+err = vfs.Truncate("/reports/2026/q1-final.txt", 0)
+err = vfs.Symlink("/reports/2026/q1-final.txt", "/latest.txt")
+
+names, err := vfs.ReadDir("/reports")
+info, err := vfs.Stat("/latest.txt")
+link, err := vfs.Readlink("/latest.txt")
 ```
 
 `fs` supports symbolic links, `filepath.Walk`-style traversal, concurrent
 `FastWalk`, read-only snapshots, an inode cache, external content back ends, and
-chunked encrypted content. Full guide: [fs/README.md](fs/README.md).
+chunked encrypted content.
 
-### Time series — `ts`
+### Walk
+
+`fs.Walk` has the shape of `filepath.Walk`:
+
+```go
+err := fs.Walk(vfs, "/", func(path string, info os.FileInfo, err error) error {
+	if err != nil {
+		return err
+	}
+	if info.IsDir() && info.Name() == ".trash" {
+		return filepath.SkipDir
+	}
+	fmt.Println(path)
+	return nil
+})
+```
+
+For large trees, `fs.FastWalk` traverses concurrently and passes an
+`io/fs.DirEntry` instead of a full `FileInfo`:
+
+```go
+err := fs.FastWalk(vfs, "/", func(path string, d iofs.DirEntry, err error) error {
+	if err != nil {
+		return err
+	}
+	fmt.Println(path)
+	return nil
+})
+```
+
+### Snapshots
+
+```go
+snap, err := vfs.CreateSnapshot("before-import")
+if err != nil {
+	return err
+}
+defer snap.Release()
+
+data, err := snap.ReadFile("/reports/2026/q1-final.txt")
+err = snap.CopyToFS("/reports/2026/q1-final.txt", "/restored.txt")
+```
+
+Snapshots are read-only and materialized in memory when created. They do not
+pin the bbolt read transaction, so they do not block writers or grow the
+database file.
+
+### Encryption and content storage
+
+`fs.Config` enables encryption per store; `Config.ChunkSize` stores encrypted
+content as independently sealed chunks. When using the root package, encryption
+is selected at `harbor.Open` time instead:
+
+```go
+store, err := harbor.Open(ctx, "encrypted.db", 0o600, &harbor.Options{
+	Password: password,
+	Encrypt:  harbor.EncryptFS,
+})
+```
+
+Opening `fs` directly with a caller-owned `*bolt.DB` gives full control over
+the key and chunk size:
+
+```go
+fsStore, err := fs.Open(ctx, bdb, fs.Config{
+	Root:            [][]byte{[]byte("fs")},
+	Secret:          key, // 32 bytes
+	EncryptMetadata: true,
+	EncryptContent:  true,
+	ChunkSize:       64 * 1024,
+})
+
+vfs, err := fsStore.Open("vault")
+```
+
+### The `absfs` interface and paths
+
+`fs` implements the module's internal `absfs` interfaces (`Filer`,
+`FileSystem` and `SymlinkFileSystem`). The in-tree `fs/s3fs` adapter implements
+the `Filer` subset, and the interfaces make file systems work with standard
+`io/fs` functions. The interface package itself is internal and cannot be
+imported by other modules.
+
+All Harbor file systems use Unix-style `/` paths on every platform. On
+Windows, drives are `/c/`, `/d/`, etc., and UNC paths are `//server/share`.
+Use `path.Join` for virtual paths (`filepath.Join` can introduce backslashes);
+convert to native paths only when calling OS APIs. `ReadDir`, `ReadFile` and
+`Sub` follow `io/fs` conventions, and `Sub` returns a read-only view.
+
+As with upstream absfs, a `FileSystem` wrapper keeps per-instance working
+directory state. Avoid sharing one wrapper across goroutines that use `Chdir`
+or relative paths; prefer absolute paths, one wrapper per goroutine, or
+external synchronization. Individual `File` values should be used by a single
+goroutine. See [AGENTS.md](AGENTS.md#internalabsfs) for the interface contracts
+and implementer guidance.
+
+Full reference: [fs/README.md](fs/README.md).
+
+## Time series with `ts`
 
 Points are keyed by their timestamp, so no secondary index is needed for range
 scans. Series carry labels and an optional retention policy.
 
 ```go
-import "github.com/malivvan/harbor/ts"
-
 series := store.TS().Series("requests")
 now := time.Now().UnixNano()
 
+if err := series.Insert(ctx, ts.Point{Timestamp: now, Value: 148}); err != nil {
+	return err
+}
+
 if err := series.InsertMany(ctx, []ts.Point{
 	{Timestamp: now - int64(time.Minute), Value: 120},
-	{Timestamp: now, Value: 148},
+	{Timestamp: now - 2*int64(time.Minute), Value: 133},
 }); err != nil {
 	return err
 }
 
 points, err := series.Range(ctx, now-int64(time.Hour), now)
-samples, err := series.Aggregate(ctx, now-int64(time.Hour), now,
-	int64(time.Minute), ts.AggAvg)
+first, err := series.First(ctx)
+last, err := series.Last(ctx)
+count, err := series.Count(ctx)
+```
+
+Timestamps are Unix nanoseconds and ranges are inclusive on both ends. Points
+are stored in chronological key order, so `Range` and `RangeEach` stream in
+time order without an index. `Insert` replaces a point with the same timestamp;
+`InsertMany` accepts out-of-order timestamps and the last value wins.
+
+### Aggregation
+
+```go
+samples, err := series.Aggregate(ctx, start, end, int64(time.Minute), ts.AggAvg)
+```
+
+Aggregations are `AggMin`, `AggMax`, `AggAvg`, `AggSum`, `AggCount`,
+`AggFirst` and `AggLast`. Each returned sample timestamp is the aligned start
+of its window.
+
+### Labels and retention
+
+```go
+err = series.SetLabels(ctx, map[string]string{"host": "web-1"})
+labels, err := series.Labels(ctx)
 
 err = series.SetRetention(ctx, ts.Retention{
 	MaxAge:    24 * time.Hour,
 	MaxPoints: 100_000,
 })
+removed, err := series.EnforceRetention(ctx, time.Now().UnixNano())
 ```
 
-Full guide: [ts/README.md](ts/README.md).
+Retention policies are persisted with the series and enforced automatically by
+`Insert`/`InsertMany`. `Store.EnforceRetention` applies every persisted policy.
+`Store.SetNow` injects a clock for deterministic tests. Full reference:
+[ts/README.md](ts/README.md).
 
-### Vectors — `vec`
+## Vectors with `vec`
 
 Collections store fixed-dimension vectors with payload filters. Choose HNSW for
 large collections or `FlatIndex` for exact search.
 
 ```go
-import "github.com/malivvan/harbor/vec"
-
 docs, err := store.Vec().NewCollection("docs", 3, vec.Cosine, true)
 if err != nil {
 	return err
 }
 
 err = docs.Upsert([]vec.PointStruct{
-	{ID: "a", Vector: []float32{1, 0, 0}, Payload: vec.Payload{"lang": "en"}},
-	{ID: "b", Vector: []float32{0, 1, 0}, Payload: vec.Payload{"lang": "de"}},
+	{
+		ID:      "doc-1",
+		Vector:  []float32{1, 0, 0},
+		Payload: vec.Payload{"lang": "en", "year": 2026},
+	},
+	{
+		ID:      "doc-2",
+		Vector:  []float32{0, 1, 0},
+		Payload: vec.Payload{"lang": "de", "year": 2025},
+	},
 })
 if err != nil {
 	return err
 }
 
-filter := &vec.Filter{Must: []vec.Condition{
-	{Key: "lang", Match: vec.MatchValue{Value: "en"}},
-}}
-hits, err := docs.Search([]float32{1, 0, 0}, filter, 5)
+hits, err := docs.Search([]float32{1, 0, 0}, nil, 5)
 ```
 
-Writes are buffered and flushed in batches; call `docs.Flush()` or
-`store.Close()` before shutting down. Full guide: [vec/README.md](vec/README.md).
+Distance metrics are `vec.Cosine`, `vec.Euclid` and `vec.Dot`. Pass `true` as
+the last `NewCollection` argument for HNSW; pass `false` for exact flat search.
+Results are ordered by relevance: descending for Cosine/Dot, ascending for
+Euclid.
+
+### Filters
+
+```go
+filter := &vec.Filter{
+	Must: []vec.Condition{
+		{Key: "lang", Type: vec.MatchTypeExact, Match: vec.MatchValue{Value: "en"}},
+		{Key: "year", Type: vec.MatchTypeRange, Range: &vec.RangeValue{GTE: 2020}},
+	},
+	MustNot: []vec.Condition{
+		{Key: "status", Match: vec.MatchValue{Value: "deleted"}},
+	},
+}
+
+hits, err := docs.Search(query, filter, 10)
+_, err = docs.Delete(nil, filter) // delete every match
+```
+
+`Must` conditions all have to match; no `MustNot` condition may match. Condition
+types are `MatchTypeExact`, `MatchTypeRange`, `MatchTypePrefix`,
+`MatchTypeContains` and `MatchTypeRegex`. Numbers compare numerically across
+Go types, so a filter built with `5` keeps matching after a round-trip that
+returns `int64`.
+
+### Buffering and lifecycle
+
+`Upsert` updates the in-memory index immediately and buffers points for bbolt.
+The buffer is flushed when `vec.DefaultFlushThreshold` points accumulate, or
+when you call `docs.Flush()` / `store.Close()`. The root `Store.Close` flushes
+the vec store before closing the shared handle.
+
+If you open `vec` directly with your own bbolt handle, call `vecStore.Flush()`
+before closing that handle, or use `SetOwnsDB(false)` when the handle is shared.
+
+### Quantization
+
+Enable scalar quantization to reduce stored vector size:
+
+```go
+vstore, err := vec.Open(ctx, bdb, vec.Config{
+	Root:     [][]byte{[]byte("vec")},
+	UseQuant: true, // nil Quantizer selects SQ8
+})
+```
+
+`bdb` here is a caller-owned `*bolt.DB` opened with `bolt.Open`. The root
+package exposes the same setting as `harbor.Options{UseQuant: true}`.
+
+The quantization mode is persisted in collection metadata: reopening a
+quantized collection without quantization, or a plaintext collection with
+quantization, is rejected. The quantizer implementation itself is not recorded;
+use the same one for every process that opens the collection.
+
+Full reference: [vec/README.md](vec/README.md).
 
 ## Encryption
 
@@ -300,7 +669,7 @@ flags:
 | `EncryptFSMetadata` | fs inode blobs (names, modes, sizes, times) |
 | `EncryptTSValues` | ts point values and series metadata |
 | `EncryptTSSeriesNames` | ts series and metadata names |
-| `EncryptVecPointIDs` | vec point IDs |
+| `EncryptVecPointIDs` | vec point IDs; also the stored point value |
 | `EncryptVecCollectionNames` | vec collection names |
 | `EncryptVecPoints` | vec point blobs and collection metadata |
 
@@ -309,14 +678,92 @@ Aggregates (`EncryptDB`, `EncryptFS`, `EncryptTS`, `EncryptVec`) and
 only apply when creating a store; an existing store always uses its persisted
 settings.
 
-Key rotation is available on the sub-store packages through `RotateAll` /
-`ReEncrypt` (and `VerifyAll` verifies that every value decrypts). A full
-rotation requires exclusive access to the store. The root `harbor` package
-derives its keys from the password and does not expose rotation: use the
-sub-store packages directly with keys you manage, or export and re-import to
-change the password. Migrating a plaintext store to an encrypted one in place
-is not supported. See [docs/encryption.md](docs/encryption.md) for the threat
-model and the partial rotation caveats.
+### Opening modes
+
+- Opening an encrypted store with a plaintext config or a different mode fails
+  with `ErrWrongMode`.
+- Opening an encrypted store with the wrong key fails with `ErrAuthFailed`.
+- Asking for encryption on a store that already holds plaintext data fails with
+  `ErrWrongMode`.
+- `ErrInvalidKey` reports a missing or malformed key; a key must be exactly 32
+  bytes.
+- `ErrInvalidConfig` reports an internally inconsistent configuration.
+- The root package reports an empty or wrong password as `ErrInvalidPassword`
+  and malformed metadata as `ErrCorruptStore`.
+
+Migration from plaintext to encrypted storage is not supported. Export the data
+and import it into a new encrypted store.
+
+### Rotation
+
+Key rotation rewrites existing data under a new raw 32-byte key. It does not
+change the password: the root `harbor` package derives its keys from the
+password and does not expose a rotation API. Rotate keys only when you open a
+sub-store directly with your own key, or export and re-import to change the
+password.
+
+Full rotation uses the whole-store methods:
+
+| Store | Method |
+|-------|--------|
+| `db` | `ReEncrypt` or `RotateAll` (aliases) |
+| `fs` | `RotateAll` |
+| `ts` | `RotateAll` |
+| `vec` | `RotateAll` |
+
+A full rotation is atomic within its store and adopts the new key when it
+completes. Run it with **exclusive access** to the store; do not write from
+other goroutines while it runs. `VerifyAll` re-reads every value and confirms
+it decrypts with the configured keys.
+
+The per-entity methods (`fs.ReEncryptFS`, `ts.ReEncryptSeries`,
+`vec.ReEncryptCollection`) are **partial** migrations. The marker stays under
+the current key and the previous key remains available in the running process,
+so entities that have not been rewritten keep working. Rewrite every entity,
+call `RotateAll`, and only then close the store or reopen it from a fresh
+process. Closing a store between a partial rotation and `RotateAll` is
+unsupported.
+
+Partial rotation cannot run when deterministic names are encrypted: `ts` with
+`EncryptSeriesNames`, or `vec` with `EncryptPointIDs` or
+`EncryptVecCollectionNames`. In those modes the physical names are derived from
+one master key, so the remaining entities could neither be found nor decrypted
+after the new key is installed. The methods return `ErrInvalidConfig`; use
+`RotateAll`.
+
+### Threat model
+
+Harbor's encryption protects **data at rest** against someone who obtains the
+database file without the password or key.
+
+It does **not** protect against:
+
+- a compromised running process, memory disclosure, or debugger access to keys,
+- an attacker who can call the application's API with valid credentials,
+- traffic analysis of metadata that is intentionally left readable,
+- rollback or deletion of whole database pages (values are authenticated, but
+  bbolt's page structure is not a globally authenticated log),
+- weak passwords. Use a high-entropy password and consider `StrongKDF*` for
+  high-value data.
+
+Metadata that remains visible includes the salt, KDF parameters, encryption
+flags, the sealed canary, bucket structure, record counts, and the sizes and
+timestamps of encrypted values. Use the per-component flags above to reduce
+what is exposed. Database file permissions (for example `0600`) are still your
+responsibility.
+
+### Operational checklist
+
+- Create the database with restrictive permissions and pass a lock timeout in
+  `bolt.Options`.
+- Keep the password out of logs, crash reports, and command-line arguments.
+- Back up the database file and the password/key separately.
+- Test restores and run `VerifyAll` after moving data between environments.
+- Do not copy a database out of a running rotation or partial migration.
+
+For the key-derivation pipeline, canary design, ciphertext format and
+store-specific encryption internals, see
+[AGENTS.md](AGENTS.md#encryption-internals).
 
 ## Database lifecycle
 
@@ -351,6 +798,8 @@ case errors.Is(err, context.Canceled):
 
 Errors are wrapped as `harbor <operation>: <cause>` while preserving the
 original cause, context errors, bbolt errors and callback errors in the chain.
+The package guides list each store's sentinels; use `errors.Is` with those
+values rather than parsing messages.
 
 ## Contexts and cancellation
 
@@ -382,12 +831,6 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
 
 ## Documentation
 
-- [docs/getting-started.md](docs/getting-started.md) — a guided tour of all four
-  stores, transactions, and lifecycle.
-- [docs/encryption.md](docs/encryption.md) — key derivation, encryption flags,
-  rotation, and threat model.
-- [docs/architecture.md](docs/architecture.md) — package map, on-disk layout,
-  concurrency model, and compatibility.
 - [db/README.md](db/README.md) — models, tags, CRUD, queries, transactions,
   key/value access, and codecs.
 - [fs/README.md](fs/README.md) — file systems, snapshots, external content, and
@@ -397,29 +840,34 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
 - [vec/README.md](vec/README.md) — collections, indexes, filters, quantization,
   and buffering.
 - [fs/s3fs/README.md](fs/s3fs/README.md) — the S3-backed `absfs.Filer`.
+- [AGENTS.md](AGENTS.md) — architecture, on-disk layout, encryption internals,
+  development workflow, and repository conventions for contributors and coding
+  agents.
 
-## Development
+Generated API documentation is published on pkg.go.dev:
 
-```sh
-# Formatting, vet and build
-test -z "$(gofmt -l .)"
-go vet ./...
-go build ./...
+- [github.com/malivvan/harbor](https://pkg.go.dev/github.com/malivvan/harbor)
+- [github.com/malivvan/harbor/db](https://pkg.go.dev/github.com/malivvan/harbor/db)
+- [github.com/malivvan/harbor/fs](https://pkg.go.dev/github.com/malivvan/harbor/fs)
+- [github.com/malivvan/harbor/ts](https://pkg.go.dev/github.com/malivvan/harbor/ts)
+- [github.com/malivvan/harbor/vec](https://pkg.go.dev/github.com/malivvan/harbor/vec)
 
-# Tests
-go test -count=1 -timeout 180s ./...
-go test -race -count=1 -timeout 300s ./...
+Where to start:
 
-# Static analysis
-go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+- **New to Harbor:** [Quick start](#quick-start), then the guide sections for
+  the stores you need.
+- **Records, indexes and transactions:** [db/README.md](db/README.md).
+- **Files, snapshots or external content:** [fs/README.md](fs/README.md) and
+  [fs/s3fs/README.md](fs/s3fs/README.md).
+- **Metrics and time series:** [ts/README.md](ts/README.md).
+- **Embeddings and similarity search:** [vec/README.md](vec/README.md).
+- **Security review or operations:** [Encryption](#encryption) and
+  [AGENTS.md](AGENTS.md#architecture).
 
-# Coverage
-go test -count=1 -timeout 180s -covermode=atomic -coverprofile=coverage.out ./...
-go tool cover -func=coverage.out
-```
-
-CI runs the same checks on every push to `master` and every pull request; see
-[.github/workflows/ci.yml](.github/workflows/ci.yml).
+Every public package has a package-level overview in its doc comment, and every
+exported identifier is documented. Compile-checked examples live next to the
+code where they are most useful (for the `db` package, see
+`db/examples_test.go`).
 
 ## Status
 

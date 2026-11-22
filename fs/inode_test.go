@@ -3,12 +3,13 @@ package fs
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
 // Benchmark helpers
 func setupBenchFS(b *testing.B, cacheSize int) (*FS, func()) {
-	path := fmt.Sprintf("bench_fs_%d.db", b.N)
+	path := filepath.Join(b.TempDir(), "bench_fs.db")
 	fs, err := openFSForTest(b, path, "")
 	if err != nil {
 		b.Fatal(err)
@@ -18,8 +19,7 @@ func setupBenchFS(b *testing.B, cacheSize int) (*FS, func()) {
 	fs.SetCacheSize(cacheSize)
 
 	cleanup := func() {
-		fs.Close()
-		os.Remove(path)
+		_ = fs.Close()
 	}
 
 	return fs, cleanup

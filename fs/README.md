@@ -263,7 +263,7 @@ partial rotation for one file system: finish with `RotateAll` before closing
 the store. Rotation requires an already encrypted store; there is no in-place
 plaintext migration.
 
-See [../docs/encryption.md](../docs/encryption.md).
+See [Encryption](../README.md#encryption) and [AGENTS.md](../AGENTS.md#encryption-internals).
 
 ## On-disk layout and limits
 
@@ -306,4 +306,4 @@ returned through `*os.PathError`/`*os.LinkError` where applicable.
 ## License
 
 MIT — see [../LICENSE](../LICENSE). Start the whole-module tour at
-[../docs/getting-started.md](../docs/getting-started.md).
+[../README.md](../README.md).

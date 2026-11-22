@@ -420,7 +420,7 @@ records, err := db.Open(ctx, bdb, db.Config{
   Run them with exclusive access. `VerifyAll` checks every value decrypts.
 - In-place migration from plaintext to encrypted storage is not supported.
 
-See [../docs/encryption.md](../docs/encryption.md) for the complete model.
+See [Encryption](../README.md#encryption) for the complete model, and [AGENTS.md](../AGENTS.md#encryption-internals) for the implementation details.
 
 ## Errors
 
@@ -482,4 +482,4 @@ rejected with `ErrIncompatibleVersion` instead of being misread. MIT licensed;
 see [../LICENSE](../LICENSE).
 
 For a guided tour of the whole module, start at
-[../docs/getting-started.md](../docs/getting-started.md).
+[../README.md](../README.md).
