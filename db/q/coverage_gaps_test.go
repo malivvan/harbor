@@ -139,3 +139,33 @@ func TestStrictEqAndCmpMatchers(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 }
+
+type fmWithHidden struct {
+	hidden int
+	Name   string
+}
+
+func TestMatcherInvalidValues(t *testing.T) {
+	m := Eq("A", 1)
+	var invalid reflect.Value
+	_, err := m.(ValueMatcher).MatchValue(nil)
+	require.ErrorIs(t, err, ErrUnknownField)
+	_, err = m.(ValueMatcher).MatchValue(&invalid)
+	require.ErrorIs(t, err, ErrUnknownField)
+
+	nonStruct := reflect.ValueOf(42)
+	_, err = m.(ValueMatcher).MatchValue(&nonStruct)
+	require.ErrorIs(t, err, ErrUnknownField)
+
+	rec := reflect.ValueOf(&fmWithHidden{hidden: 1, Name: "x"})
+	_, err = Eq("hidden", 1).(ValueMatcher).MatchValue(&rec)
+	require.ErrorIs(t, err, ErrUnknownField)
+
+	// Two-field matchers report a missing promoted field.
+	_, err = EqF("Name", "Missing").(ValueMatcher).MatchValue(&rec)
+	require.ErrorIs(t, err, ErrUnknownField)
+
+	ok, err := EqF("Name", "Name").(ValueMatcher).MatchValue(&rec)
+	require.NoError(t, err)
+	require.True(t, ok)
+}

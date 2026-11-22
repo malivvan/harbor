@@ -600,3 +600,13 @@ func TestInodeGobRoundTrip(t *testing.T) {
 	require.Equal(t, int64(42), out.Size)
 	require.Len(t, out.Children, 1)
 }
+
+func TestFSEncStateAccessor(t *testing.T) {
+	plain := openTestFS(t)
+	require.Nil(t, plain.encState())
+
+	store, _ := openEncStore(t, []byte("ts"), Config{Secret: testEncKey(81), EncryptContent: true, Root: [][]byte{[]byte("ts")}})
+	encrypted, err := store.Open("fs")
+	require.NoError(t, err)
+	require.NotNil(t, encrypted.encState())
+}

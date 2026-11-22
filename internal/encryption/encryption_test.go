@@ -75,3 +75,29 @@ func mustAESEngine(t *testing.T) *AESGCMEngine {
 	require.NoError(t, err)
 	return engine
 }
+
+func TestEngineValidationAndCanaryHelpers(t *testing.T) {
+	_, err := NewAESGCMEngine(make([]byte, KeySize-1))
+	require.ErrorIs(t, err, ErrInvalidKey)
+	_, err = NewAESGCMEngine(make([]byte, KeySize+1))
+	require.ErrorIs(t, err, ErrInvalidKey)
+
+	engine, err := NewAESGCMEngine(testKey(71))
+	require.NoError(t, err)
+	_, err = engine.SealInto(nil, []byte("short"), []byte("plain"))
+	require.Error(t, err)
+
+	dst := make([]byte, 0, 64)
+	sealed, err := engine.SealInto(dst, make([]byte, engine.NonceSize()), []byte("plain"))
+	require.NoError(t, err)
+	require.NotEmpty(t, sealed)
+
+	require.Equal(t, "base/0x01/0x0000000000000002", CanaryPlaintext("base", 1, 2))
+
+	siv, err := NewSIVEngine(make([]byte, 32))
+	require.NoError(t, err)
+	require.Zero(t, siv.NonceSize())
+	require.Equal(t, 16, siv.Overhead())
+	_, err = NewSIVEngine(make([]byte, 31))
+	require.ErrorIs(t, err, ErrInvalidKey)
+}

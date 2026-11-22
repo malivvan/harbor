@@ -323,3 +323,193 @@ func TestPathNormalizationHelpers(t *testing.T) {
 	require.False(t, isVirtualAbs("a"))
 	require.Equal(t, "/a/b", path.Clean("/a/./b/../b"))
 }
+
+func TestSubFilerWritableWrapper(t *testing.T) {
+	m := newCoverFiler()
+	efs := ExtendFiler(m).(*extendedFS)
+	sf := &subFiler{efs: efs, dir: "/dir"}
+
+	require.Equal(t, "/dir/a.txt", sf.fullPath("a.txt"))
+	require.Equal(t, "/dir/a.txt", sf.fullPath("../a.txt"))
+
+	f, err := sf.OpenFile("a.txt", os.O_RDONLY, 0)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	require.NoError(t, sf.Mkdir("newdir", 0755))
+	require.True(t, m.files["/dir/newdir"].isDir)
+	require.NoError(t, sf.Rename("a.txt", "b.txt"))
+	require.Error(t, sf.Rename("missing", "x"))
+	_, err = sf.Stat("b.txt")
+	require.NoError(t, err)
+	require.NoError(t, sf.Chmod("b.txt", 0600))
+	require.NoError(t, sf.Chtimes("b.txt", time.Now(), time.Now()))
+	require.NoError(t, sf.Chown("b.txt", 0, 0))
+	_, err = sf.ReadDir(".")
+	require.NoError(t, err)
+	_, err = sf.ReadFile("b.txt")
+	require.NoError(t, err)
+	require.NoError(t, sf.Remove("b.txt"))
+
+	sub, err := sf.Sub("sub")
+	require.NoError(t, err)
+	require.Equal(t, "B", string(mustFSRead(t, sub, "b.txt")))
+}
+
+// symlinkOnlyFiler is a Filer with SymLinker but no FileSystem methods.
+type symlinkOnlyFiler struct{ *mockFiler }
+
+func (s *symlinkOnlyFiler) Lstat(name string) (os.FileInfo, error) { return s.Stat(name) }
+func (s *symlinkOnlyFiler) Lchown(name string, uid, gid int) error { return s.Chown(name, uid, gid) }
+func (s *symlinkOnlyFiler) Readlink(name string) (string, error)   { return "target", nil }
+func (s *symlinkOnlyFiler) Symlink(oldname, newname string) error  { return nil }
+
+// combinedFiler is FileSystem plus SymLinker but not SymlinkFileSystem.
+type combinedFiler struct {
+	FileSystem
+}
+
+func (c *combinedFiler) Lstat(name string) (os.FileInfo, error) { return c.Stat(name) }
+func (c *combinedFiler) Lchown(name string, uid, gid int) error { return c.Chown(name, uid, gid) }
+func (c *combinedFiler) Readlink(name string) (string, error)   { return "", nil }
+func (c *combinedFiler) Symlink(oldname, newname string) error  { return nil }
+
+func TestExtendSymlinkFilerBranches(t *testing.T) {
+	base := ExtendFiler(newCoverFiler())
+
+	// Already a SymlinkFileSystem: returned unchanged.
+	overlay := NewSymlinkOverlay(base)
+	require.Same(t, overlay, ExtendSymlinkFiler(overlay))
+
+	// FileSystem + SymLinker already satisfies SymlinkFileSystem, so it is
+	// returned as-is.
+	combined := &combinedFiler{FileSystem: base}
+	require.Same(t, combined, ExtendSymlinkFiler(combined))
+
+	// SymLinker without FileSystem: the filer is extended and combined.
+	linkOnly := ExtendSymlinkFiler(&symlinkOnlyFiler{newCoverFiler()})
+	require.IsType(t, &symlinkFS{}, linkOnly)
+	_, err := linkOnly.Lstat("/dir/a.txt")
+	require.NoError(t, err)
+
+	// No symlink support: an overlay is added.
+	plain := ExtendSymlinkFiler(newCoverFiler())
+	require.IsType(t, &SymlinkOverlay{}, plain)
+	require.NoError(t, plain.Symlink("/target", "/link2"))
+}
+
+func TestInvalidFileReadDir(t *testing.T) {
+	f := &InvalidFile{Path: "bad"}
+	_, err := f.ReadDir(-1)
+	require.True(t, errors.Is(err, syscall.EBADF))
+}
+
+func TestOverlayRenameAndRenamedInfo(t *testing.T) {
+	m := newCoverFiler()
+	o := NewSymlinkOverlay(ExtendFiler(&finiteDirFiler{m}))
+
+	info, err := o.Stat("/target")
+	require.NoError(t, err)
+	renamed, ok := info.(*renamedFileInfo)
+	require.True(t, ok)
+	require.Equal(t, "target", renamed.Name())
+
+	require.NoError(t, o.Rename("/target", "/moved"))
+	_, err = o.Stat("/moved")
+	require.NoError(t, err)
+	_, err = o.Stat("/target")
+	require.Error(t, err)
+}
+
+// failingFiler lets a test fail a specific operation.
+type failingFiler struct {
+	*mockFiler
+	failOpen    map[string]error
+	failStat    map[string]error
+	failReaddir map[string]error
+	failClose   bool
+}
+
+func (f *failingFiler) OpenFile(name string, flag int, perm os.FileMode) (File, error) {
+	if err := f.failOpen[name]; err != nil {
+		return nil, err
+	}
+	file, err := f.mockFiler.OpenFile(name, flag, perm)
+	if err != nil {
+		return file, err
+	}
+	return &failingHandle{File: file, name: name, parent: f}, nil
+}
+
+type failingHandle struct {
+	File
+	name    string
+	parent  *failingFiler
+	drained bool
+}
+
+func (h *failingHandle) Stat() (os.FileInfo, error) {
+	if err := h.parent.failStat[h.name]; err != nil {
+		return nil, err
+	}
+	return h.File.Stat()
+}
+
+func (h *failingHandle) Readdirnames(n int) ([]string, error) {
+	if err := h.parent.failReaddir[h.name]; err != nil {
+		return nil, err
+	}
+	if h.drained {
+		return nil, io.EOF
+	}
+	h.drained = true
+	return h.File.Readdirnames(n)
+}
+
+func (h *failingHandle) Close() error {
+	if h.parent.failClose {
+		return errors.New("close failed")
+	}
+	return h.File.Close()
+}
+
+func TestExtendedFSRemoveAllErrorBranches(t *testing.T) {
+	m := newCoverFiler()
+	ff := &failingFiler{
+		mockFiler:   m,
+		failOpen:    map[string]error{"/denied": os.ErrPermission},
+		failStat:    map[string]error{"/badstat": errors.New("stat")},
+		failReaddir: map[string]error{"/badread": errors.New("readdir")},
+	}
+	m.files["/badstat"] = &mockFile{name: "/badstat", mode: os.ModeDir | 0755, isDir: true}
+	m.files["/badread"] = &mockFile{name: "/badread", mode: os.ModeDir | 0755, isDir: true}
+	m.files["/empty"] = &mockFile{name: "/empty", mode: os.ModeDir | 0755, isDir: true}
+	efs := ExtendFiler(ff).(*extendedFS)
+
+	require.ErrorIs(t, efs.RemoveAll("/denied"), os.ErrPermission)
+	require.Error(t, efs.RemoveAll("/badstat"))
+	require.Error(t, efs.RemoveAll("/badread"))
+
+	// A Close error from the final handle of a directory is surfaced.
+	ff.failClose = true
+	require.Error(t, efs.RemoveAll("/empty"))
+}
+
+func TestExtendedFSSymlinkDelegation(t *testing.T) {
+	base := ExtendFiler(newCoverFiler())
+	overlay := NewSymlinkOverlay(base)
+	require.NoError(t, overlay.Symlink("/target", "/link"))
+	efs := ExtendFiler(overlay).(*extendedFS)
+
+	// Delegation branch of each symlink method.
+	info, err := efs.Lstat("/link")
+	require.NoError(t, err)
+	require.NotZero(t, info.Mode()&os.ModeSymlink)
+	require.NoError(t, efs.Lchown("/link", 0, 0))
+	target, err := efs.Readlink("/link")
+	require.NoError(t, err)
+	require.Equal(t, "/target", target)
+	require.NoError(t, efs.Symlink("/target", "/link2"))
+	_, err = efs.Readlink("/link2")
+	require.NoError(t, err)
+}

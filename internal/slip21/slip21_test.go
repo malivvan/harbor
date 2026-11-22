@@ -6,6 +6,8 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func hexMustDecode(s string) []byte {
@@ -200,4 +202,28 @@ func TestNodeDestroy(t *testing.T) {
 
 	var nilNode Node
 	Destroy(nilNode) // must not panic
+}
+
+func TestDeriveErrorBranches(t *testing.T) {
+	_, err := Derive("not-a-path", []byte("seed"))
+	require.ErrorIs(t, err, ErrInvalidPath)
+
+	_, err = Derive(Prefix+"/key", nil)
+	require.ErrorIs(t, err, ErrInvalidSeed)
+
+	_, err = New(nil)
+	require.ErrorIs(t, err, ErrInvalidSeed)
+
+	derived, err := Derive(Prefix+"/key", []byte("seed"))
+	require.NoError(t, err)
+	require.NotEmpty(t, derived.Key())
+
+	derived.Destroy()
+	require.Empty(t, derived.Key())
+	_, err = derived.Derive([]byte("child"))
+	require.ErrorIs(t, err, ErrDestroyed)
+
+	var nilNode *node
+	_, err = nilNode.Derive([]byte("child"))
+	require.ErrorIs(t, err, ErrDestroyed)
 }

@@ -204,3 +204,19 @@ func TestResultCapCommittedBucket(t *testing.T) {
 		return nil
 	}))
 }
+
+func TestIndexConstructorErrors(t *testing.T) {
+	ctx := context.Background()
+	withIndexBuckets(t, func(b *bolt.Bucket) {
+		_, err := NewListIndex(nil, []byte("x"))
+		require.ErrorIs(t, err, ErrNilParam)
+		_, err = NewListIndex(b, nil)
+		require.ErrorIs(t, err, ErrNilParam)
+
+		list, err := NewListIndex(b, []byte("__new-list"))
+		require.NoError(t, err)
+		require.NotNil(t, list.IDs)
+		require.ErrorIs(t, list.Add(ctx, nil, []byte("a")), ErrNilParam)
+		require.ErrorIs(t, list.Add(ctx, []byte("a"), nil), ErrNilParam)
+	})
+}

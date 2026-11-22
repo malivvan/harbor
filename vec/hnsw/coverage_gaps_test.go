@@ -1,6 +1,9 @@
 package hnsw
 
 import (
+	"bytes"
+	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -115,4 +118,75 @@ func TestMapsKeysAndCandidateLess(t *testing.T) {
 	high := searchCandidate[string]{dist: 2}
 	require.True(t, low.Less(high))
 	require.False(t, high.Less(low))
+}
+
+func TestCandidateSetCleanMin(t *testing.T) {
+	var set candidateSet[int]
+	n1 := &layerNode[int]{Node: Node[int]{Key: 1}}
+	n2 := &layerNode[int]{Node: Node[int]{Key: 2}}
+	set.Push(n1, 1)
+	set.Push(n2, 2)
+
+	// PopMin marks the root dead in both heaps; the next Min must clean it.
+	require.Equal(t, n1, set.PopMin().node)
+	require.Equal(t, 1, set.Len())
+	require.Equal(t, n2, set.Min().node)
+	require.Equal(t, n2, set.PopMin().node)
+	require.Zero(t, set.Len())
+}
+
+func TestLayerSize(t *testing.T) {
+	require.Zero(t, (&layer[string]{}).size())
+	l := &layer[string]{nodes: map[string]*layerNode[string]{
+		"a": {},
+		"b": {},
+	}}
+	require.Equal(t, 2, l.size())
+}
+
+func TestSearchWithDistancesEdges(t *testing.T) {
+	var empty Graph[string]
+	require.Nil(t, empty.SearchWithDistances([]float32{1}, 1))
+	require.Nil(t, empty.SearchWithDistances([]float32{1}, 0))
+
+	g := graphWithNodes(5)
+	// k larger than the graph is clamped.
+	got := g.SearchWithDistances([]float32{1, 1, 1}, 100)
+	require.Len(t, got, 5)
+	for _, node := range got {
+		require.Equal(t, g.Distance([]float32{1, 1, 1}, node.Node.Value), node.Distance)
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
+
+func TestExportImportAndSaveErrors(t *testing.T) {
+	g := graphWithNodes(3)
+
+	var buf bytes.Buffer
+	require.NoError(t, g.Export(&buf))
+	require.NotZero(t, buf.Len())
+
+	var imported Graph[string]
+	require.NoError(t, imported.Import(bytes.NewReader(buf.Bytes())))
+	require.Equal(t, g.Len(), imported.Len())
+
+	// A truncated stream is rejected.
+	require.Error(t, imported.Import(bytes.NewReader(buf.Bytes()[:4])))
+	require.Error(t, imported.Import(bytes.NewReader(nil)))
+
+	// Export to a failing writer.
+	require.Error(t, g.Export(failingWriter{}))
+
+	// Saving into a missing directory fails.
+	saved := &SavedGraph[string]{Graph: g, Path: filepath.Join(t.TempDir(), "missing", "g.bin")}
+	require.Error(t, saved.Save())
+
+	// Loading a corrupt file fails.
+	corrupt := filepath.Join(t.TempDir(), "corrupt.bin")
+	require.NoError(t, os.WriteFile(corrupt, []byte("not a graph"), 0600))
+	_, err := LoadSavedGraph[string](corrupt)
+	require.Error(t, err)
 }
