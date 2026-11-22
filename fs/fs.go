@@ -140,6 +140,9 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FS, error) {
 		if err != nil {
 			return err
 		}
+		if len(data) != 8 {
+			return fmt.Errorf("fs: corrupt root inode value: %d bytes", len(data))
+		}
 		rootIno = b2i(data)
 
 		_, err = b.GetInode(rootIno)

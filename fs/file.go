@@ -197,13 +197,20 @@ func (f *File) Write(p []byte) (int, error) {
 	}
 
 	if f.fs.chunked() && f.fs.contentFS == nil {
-		f.offset += int64(len(p))
-		if f.offset > f.node.Size {
-			f.node.Size = f.offset
+		// Commit the handle state only after the transaction succeeds. The
+		// inode passed to the transaction must already carry the new size, so
+		// restore it when the write fails and leave the offset untouched.
+		start := f.offset
+		end := start + int64(len(p))
+		oldSize := f.node.Size
+		if end > f.node.Size {
+			f.node.Size = end
 		}
-		if err := f.fs.writeRangeAndInode(f.node.Ino, f.offset-int64(len(p)), p, f.node); err != nil {
+		if err := f.fs.writeRangeAndInode(f.node.Ino, start, p, f.node); err != nil {
+			f.node.Size = oldSize
 			return 0, err
 		}
+		f.offset = end
 		return len(p), nil
 	}
 

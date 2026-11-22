@@ -3,6 +3,7 @@ package fs
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"os"
 
 	bolt "go.etcd.io/bbolt"
@@ -192,6 +193,9 @@ func (b *fsBucket) truncateData(ino uint64, size, chunkSize int64) error {
 	var keys [][]byte
 	cursor := b.chunks.Cursor()
 	for key, _ := cursor.Seek(prefix); key != nil && bytes.HasPrefix(key, prefix); key, _ = cursor.Next() {
+		if len(key) != 16 {
+			return fmt.Errorf("fs: corrupt chunk key for inode %d: %d bytes", ino, len(key))
+		}
 		idx := int64(binary.BigEndian.Uint64(key[8:]))
 		if idx >= firstDelete {
 			keys = append(keys, append([]byte(nil), key...))

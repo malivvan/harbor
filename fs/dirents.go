@@ -3,6 +3,7 @@ package fs
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 )
 
 const direntsBucketName = "dirents"
@@ -98,6 +99,10 @@ func (f *fsBucket) decodeDirents(ino uint64, node *iNode) error {
 	for key, value := c.Seek(prefix); key != nil && bytes.HasPrefix(key, prefix); key, value = c.Next() {
 		if value == nil {
 			continue
+		}
+		// A truncated value would make b2i panic on a corrupted database.
+		if len(value) != 8 {
+			return fmt.Errorf("fs: corrupt directory entry %q for inode %d: value is %d bytes", key[8:], ino, len(value))
 		}
 		children = append(children, &entry{
 			Name: string(key[8:]),

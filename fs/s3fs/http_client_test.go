@@ -273,6 +273,21 @@ func verifySigV4(r *http.Request, secret string) error {
 		return fmt.Errorf("malformed credential %q", credential)
 	}
 
+	// Real S3 rejects a request that sends an x-amz-* header without signing
+	// it. Enforce the same rule here so tests cannot miss an unsigned header.
+	signedSet := make(map[string]struct{}, len(signedHeaders))
+	for _, name := range strings.Split(signedHeaders, ";") {
+		signedSet[name] = struct{}{}
+	}
+	for name := range r.Header {
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(lower, "x-amz-") {
+			if _, ok := signedSet[lower]; !ok {
+				return fmt.Errorf("header %s is not in SignedHeaders", lower)
+			}
+		}
+	}
+
 	var canonicalHeaders strings.Builder
 	for _, name := range strings.Split(signedHeaders, ";") {
 		value := r.Header.Get(name)

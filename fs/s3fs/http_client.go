@@ -127,10 +127,23 @@ func (c *httpS3Client) sign(req *http.Request, canonPath, canonQuery, payloadHas
 	req.Header.Set("X-Amz-Date", amzDate)
 	req.Header.Set("X-Amz-Content-Sha256", payloadHash)
 
-	signedHeaderNames := []string{"host", "x-amz-content-sha256", "x-amz-date"}
+	// SigV4 requires every x-amz-* header that is sent to be signed. Build the
+	// list from the request instead of a fixed set: operation-specific headers
+	// such as X-Amz-Copy-Source would otherwise be sent unsigned, which real S3
+	// and current MinIO reject.
 	if c.creds.sessionToken != "" {
 		req.Header.Set("X-Amz-Security-Token", c.creds.sessionToken)
-		signedHeaderNames = append(signedHeaderNames, "x-amz-security-token")
+	}
+	signed := map[string]struct{}{"host": {}}
+	for name := range req.Header {
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(lower, "x-amz-") {
+			signed[lower] = struct{}{}
+		}
+	}
+	signedHeaderNames := make([]string, 0, len(signed))
+	for name := range signed {
+		signedHeaderNames = append(signedHeaderNames, name)
 	}
 	sort.Strings(signedHeaderNames)
 
