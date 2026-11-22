@@ -130,6 +130,17 @@ func (se *Series) EnforceRetention(ctx context.Context, now int64) (int, error) 
 		if err != nil {
 			return err
 		}
+		if removed > 0 {
+			// Persist the pruned count, mirroring the store-wide variant.
+			// Otherwise Count() keeps over-reporting and every write re-prunes.
+			meta.Count -= int64(removed)
+			if meta.Count < 0 {
+				meta.Count = 0
+			}
+			if err := se.store.writeMeta(tx, se.name, meta); err != nil {
+				return err
+			}
+		}
 		return checkContext(ctx)
 	})
 	if err != nil {

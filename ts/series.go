@@ -54,6 +54,20 @@ func (s *Store) readMeta(tx *bolt.Tx, name string) (seriesMeta, error) {
 	return s.decodeMeta(raw)
 }
 
+// metaExists reports whether a metadata record is persisted for name. A series
+// created by a plain Insert has no record, so its stored Count reads as zero.
+func (s *Store) metaExists(tx *bolt.Tx, name string) (bool, error) {
+	bucket, err := s.metaBucket(tx, false)
+	if err != nil || bucket == nil {
+		return false, err
+	}
+	key, err := s.bucketKey(name)
+	if err != nil {
+		return false, err
+	}
+	return bucket.Get(key) != nil, nil
+}
+
 // decodeMeta unmarshals series metadata, decrypting it when value encryption is
 // enabled.
 func (s *Store) decodeMeta(raw []byte) (seriesMeta, error) {
@@ -713,15 +727,36 @@ func (se *Series) DeleteRange(ctx context.Context, start, end int64) (int, error
 			return nil
 		}
 
+		// Seed the count from the data before subtracting: a series created by
+		// a plain Insert has no metadata record, so Count reads as zero and
+		// the subtraction would persist a false count while points remain.
+		meta, err := se.store.readMeta(tx, se.name)
+		if err != nil {
+			return err
+		}
+		exists, err := se.store.metaExists(tx, se.name)
+		if err != nil {
+			return err
+		}
+		if !exists || meta.Count == 0 {
+			count, err := se.store.seriesCount(ctx, tx, se.name)
+			if err != nil {
+				return err
+			}
+			meta.Count = count
+		}
+
 		if se.store.blockDuration() > 0 {
 			var blockErr error
 			deleted, blockErr = se.store.deleteBlocks(ctx, bucket, start, end)
 			if blockErr != nil {
 				return blockErr
 			}
-			meta, err := se.store.readMeta(tx, se.name)
-			if err != nil {
-				return err
+			if deleted == 0 && !exists {
+				// Nothing was deleted and there was no record to keep: do not
+				// create a metadata record that reports Count 0 for a series
+				// that still holds points.
+				return nil
 			}
 			meta.Count -= int64(deleted)
 			if meta.Count < 0 {
@@ -759,9 +794,8 @@ func (se *Series) DeleteRange(ctx context.Context, start, end int64) (int, error
 			}
 			deleted++
 		}
-		meta, err := se.store.readMeta(tx, se.name)
-		if err != nil {
-			return err
+		if deleted == 0 && !exists {
+			return nil
 		}
 		meta.Count -= int64(deleted)
 		if meta.Count < 0 {
