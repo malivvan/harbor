@@ -190,3 +190,16 @@ func TestExportImportAndSaveErrors(t *testing.T) {
 	_, err := LoadSavedGraph[string](corrupt)
 	require.Error(t, err)
 }
+
+func TestLayerNilSizeAndDrainedClean(t *testing.T) {
+	var nilLayer *layer[string]
+	require.Zero(t, nilLayer.size())
+
+	var set candidateSet[int]
+	set.Push(&layerNode[int]{Node: Node[int]{Key: 1}}, 1)
+	require.Equal(t, 1, set.PopMin().node.Key)
+	set.cleanMin()
+	require.Zero(t, len(set.min))
+	set.cleanMax()
+	require.Zero(t, len(set.max))
+}

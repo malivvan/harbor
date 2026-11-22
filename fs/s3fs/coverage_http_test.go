@@ -261,3 +261,31 @@ func TestFileSystemErrorBranches(t *testing.T) {
 	_, err = fsys.ReadFile("dir/")
 	require.Error(t, err)
 }
+
+func TestReadAllAndMockRange(t *testing.T) {
+	data, err := readAll(nil)
+	require.NoError(t, err)
+	require.Nil(t, data)
+
+	data, err = readAll(strings.NewReader("body"))
+	require.NoError(t, err)
+	require.Equal(t, "body", string(data))
+
+	_, mock := newTestFS()
+	mock.PutTestObject("f", []byte("0123456789"))
+
+	out, err := mock.GetObject(context.Background(), &GetObjectInput{Key: "f", Range: "bytes=2-4"})
+	require.NoError(t, err)
+	body, err := io.ReadAll(out.Body)
+	require.NoError(t, err)
+	require.Equal(t, "234", string(body))
+
+	_, err = mock.GetObject(context.Background(), &GetObjectInput{Key: "f", Range: "bytes=9-2"})
+	require.Error(t, err)
+	_, err = mock.GetObject(context.Background(), &GetObjectInput{Key: "missing"})
+	require.ErrorIs(t, err, ErrNotFound)
+
+	mock.GetObjectErr = errors.New("boom")
+	_, err = mock.GetObject(context.Background(), &GetObjectInput{Key: "f"})
+	require.Error(t, err)
+}

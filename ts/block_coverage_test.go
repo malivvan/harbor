@@ -233,3 +233,51 @@ func TestCreateSeriesBucketErrors(t *testing.T) {
 		return nil
 	}))
 }
+
+func TestEncryptedVerifyRotateAndMetadataWrites(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "enc-meta.db")
+	store, db := openStoreAtPath(t, path, []byte("ts"), Config{
+		Secret:        testKey(90),
+		EncryptValues: true,
+	})
+	series := store.Series("s")
+	require.NoError(t, series.Insert(ctx, Point{Timestamp: 1, Value: 1}))
+	require.NoError(t, series.SetLabels(ctx, map[string]string{"host": "a"}))
+	labels, err := series.Labels(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "a", labels["host"])
+	require.NoError(t, store.VerifyAll(ctx))
+
+	// Duplicate inserts change nothing; the next new point updates the count.
+	require.NoError(t, series.Insert(ctx, Point{Timestamp: 1, Value: 2}))
+	count, err := series.Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.NoError(t, series.Insert(ctx, Point{Timestamp: 2, Value: 2}))
+	count, err = series.Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, count)
+
+	// Rotating the value key keeps the series readable.
+	require.NoError(t, store.RotateAll(ctx, testKey(91)))
+	require.NoError(t, store.VerifyAll(ctx))
+	count, err = series.Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, count)
+
+	// A corrupted point value fails verification.
+	require.NoError(t, db.Update(func(tx *bolt.Tx) error {
+		b, err := store.seriesBucket(tx, "s")
+		if err != nil {
+			return err
+		}
+		c := b.Cursor()
+		key, value := c.First()
+		require.NotNil(t, key)
+		corrupt := append([]byte(nil), value...)
+		corrupt[len(corrupt)-1] ^= 0xff
+		return b.Put(key, corrupt)
+	}))
+	require.Error(t, store.VerifyAll(ctx))
+}

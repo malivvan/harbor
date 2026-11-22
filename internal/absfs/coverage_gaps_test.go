@@ -513,3 +513,108 @@ func TestExtendedFSSymlinkDelegation(t *testing.T) {
 	_, err = efs.Readlink("/link2")
 	require.NoError(t, err)
 }
+
+// failingPropsFiler injects failures into individual operations.
+type failingPropsFiler struct {
+	*mockFiler
+	failMkdirAll bool
+	failRemove   bool
+	failWrite    bool
+	failClose    bool
+}
+
+func (f *failingPropsFiler) MkdirAll(name string, perm os.FileMode) error {
+	if f.failMkdirAll {
+		return errors.New("mkdirall failed")
+	}
+	return ExtendFiler(f.mockFiler).MkdirAll(name, perm)
+}
+
+func (f *failingPropsFiler) Remove(name string) error {
+	if f.failRemove {
+		return errors.New("remove failed")
+	}
+	return f.mockFiler.Remove(name)
+}
+
+func (f *failingPropsFiler) OpenFile(name string, flag int, perm os.FileMode) (File, error) {
+	if f.failWrite && flag&(os.O_WRONLY|os.O_RDWR) != 0 {
+		return nil, errors.New("write open failed")
+	}
+	file, err := f.mockFiler.OpenFile(name, flag, perm)
+	if err != nil {
+		return file, err
+	}
+	return &closingHandle{File: file, fail: f.failClose}, nil
+}
+
+type closingHandle struct {
+	File
+	fail bool
+}
+
+func (h *closingHandle) Close() error {
+	if h.fail {
+		return errors.New("close failed")
+	}
+	return h.File.Close()
+}
+
+func TestExtendedFSTruncateErrorPaths(t *testing.T) {
+	m := newCoverFiler()
+	efs := ExtendFiler(m).(*extendedFS)
+
+	// Read error.
+	require.Error(t, efs.Truncate("/missing", 1))
+
+	// Open-for-write error.
+	ff := &failingPropsFiler{mockFiler: newCoverFiler(), failWrite: true}
+	require.Error(t, ExtendFiler(ff).Truncate("/dir/a.txt", 1))
+
+	// Close error.
+	cf := &failingPropsFiler{mockFiler: newCoverFiler(), failClose: true}
+	require.Error(t, ExtendFiler(cf).Truncate("/dir/a.txt", 1))
+}
+
+func TestExtendedFSRemoveAllRemoveError(t *testing.T) {
+	ff := &failingPropsFiler{mockFiler: newCoverFiler(), failRemove: true}
+	require.Error(t, ExtendFiler(ff).RemoveAll("/dir/a.txt"))
+}
+
+func TestOverlayErrorPaths(t *testing.T) {
+	base := ExtendFiler(newCoverFiler())
+	o := NewSymlinkOverlay(base)
+	require.NoError(t, o.Symlink("/missing", "/broken"))
+
+	// Resolution fails for every operation that follows links.
+	_, err := o.OpenFile("/broken", os.O_RDONLY, 0)
+	require.Error(t, err)
+	require.Error(t, o.Mkdir("/broken", 0755))
+	_, err = o.Stat("/broken")
+	require.Error(t, err)
+	require.Error(t, o.Chmod("/broken", 0600))
+	require.Error(t, o.Chtimes("/broken", time.Now(), time.Now()))
+	require.Error(t, o.Chown("/broken", 0, 0))
+	require.Error(t, o.Truncate("/broken", 1))
+	_, err = o.ReadDir("/broken")
+	require.Error(t, err)
+	_, err = o.ReadFile("/broken")
+	require.Error(t, err)
+	// Rename and Remove do not follow links.
+	require.NoError(t, o.Rename("/broken", "/renamed-broken"))
+	require.NoError(t, o.Remove("/renamed-broken"))
+
+	// A missing parent during symlink creation is reported.
+	failing := &failingPropsFiler{mockFiler: newCoverFiler(), failMkdirAll: true}
+	fo := NewSymlinkOverlay(ExtendFiler(failing))
+	require.Error(t, fo.Symlink("/target", "/nested/link"))
+
+	// Relative path resolution with a non-navigating filer.
+	efs := ExtendFiler(o).(*extendedFS)
+	_, err = efs.Lstat("relative")
+	require.Error(t, err)
+	require.Error(t, efs.Lchown("relative", 0, 0))
+	_, err = efs.Readlink("relative")
+	require.Error(t, err)
+	require.NoError(t, efs.Symlink("/target", "relative-link"))
+}

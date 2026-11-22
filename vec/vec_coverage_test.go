@@ -217,3 +217,38 @@ func TestStoreMetaAndDropBranches(t *testing.T) {
 
 	require.NoError(t, store.DropCollection("c"))
 }
+
+func TestStoreMetaCorruptionAndClosed(t *testing.T) {
+	ctx := context.Background()
+	bdb, err := bolt.Open(filepath.Join(t.TempDir(), "meta2.db"), 0600, nil)
+	require.NoError(t, err)
+	store, err := Open(ctx, bdb, Config{})
+	require.NoError(t, err)
+
+	// Corrupt metadata entries are reported by both readers.
+	require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
+		b, err := store.metaBucket(tx, true)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte("bad"), []byte("not-json"))
+	}))
+	_, err = store.LoadCollectionMeta("bad")
+	require.Error(t, err)
+	_, err = store.ListCollectionMetas()
+	require.Error(t, err)
+
+	// An empty collection name cannot be stored.
+	require.Error(t, store.SaveCollectionMeta("", CollectionMeta{Name: "x"}))
+
+	store.SetOwnsDB(false)
+	require.NoError(t, store.Close())
+	require.Error(t, store.SaveCollectionMeta("x", CollectionMeta{Name: "x"}))
+	_, err = store.LoadCollectionMeta("x")
+	require.Error(t, err)
+	_, err = store.ListCollectionMetas()
+	require.Error(t, err)
+	require.Error(t, store.DropCollection("x"))
+	require.Error(t, store.EnsureCollection("x"))
+	require.NoError(t, bdb.Close())
+}

@@ -220,3 +220,82 @@ func TestIndexConstructorErrors(t *testing.T) {
 		require.ErrorIs(t, list.Add(ctx, []byte("a"), nil), ErrNilParam)
 	})
 }
+
+func TestIndexNilContextAndLazyIDErrors(t *testing.T) {
+	//nolint:staticcheck // deliberately nil to exercise the guard
+	require.ErrorIs(t, checkContext(nil), ErrNilContext)
+
+	ctx := context.Background()
+	empty := &ListIndex{}
+	require.ErrorIs(t, empty.Add(ctx, []byte("v"), []byte("id")), ErrNilParam)
+	require.ErrorIs(t, empty.Remove(ctx, []byte("v")), ErrNilParam)
+	require.ErrorIs(t, empty.RemoveID(ctx, []byte("id")), ErrNilParam)
+	_, err := empty.HasValueID(ctx, []byte("v"), []byte("id"))
+	require.ErrorIs(t, err, ErrNilParam)
+}
+
+func TestListIndexReaddAndRemove(t *testing.T) {
+	ctx := context.Background()
+	withIndexBuckets(t, func(b *bolt.Bucket) {
+		list, err := NewListIndex(b, []byte("__move"))
+		require.NoError(t, err)
+
+		require.NoError(t, list.Add(ctx, []byte("old"), []byte("id")))
+		// Re-adding the same ID replaces its value.
+		require.NoError(t, list.Add(ctx, []byte("new"), []byte("id")))
+		ids, err := list.All(ctx, []byte("new"), nil)
+		require.NoError(t, err)
+		require.Equal(t, [][]byte{[]byte("id")}, ids)
+		ids, err = list.All(ctx, []byte("old"), nil)
+		require.NoError(t, err)
+		require.Empty(t, ids)
+
+		// Two IDs under one value, then remove the value.
+		require.NoError(t, list.Add(ctx, []byte("shared"), []byte("id1")))
+		require.NoError(t, list.Add(ctx, []byte("shared"), []byte("id2")))
+		require.NoError(t, list.Remove(ctx, []byte("shared")))
+		ids, err = list.All(ctx, []byte("shared"), nil)
+		require.NoError(t, err)
+		require.Empty(t, ids)
+
+		// Empty values are no-ops for Remove/Get, and the sentinel bucket is
+		// skipped by prefix lookups.
+		require.NoError(t, list.Remove(ctx, nil))
+		got, err := list.Get(ctx, nil)
+		require.NoError(t, err)
+		require.Nil(t, got)
+		got, err = list.Get(ctx, []byte("storm"))
+		require.NoError(t, err)
+		require.Nil(t, got)
+		require.NoError(t, list.Remove(ctx, []byte("storm")))
+
+		canceled, cancel := context.WithCancel(context.Background())
+		cancel()
+		require.ErrorIs(t, list.Remove(canceled, []byte("x")), context.Canceled)
+		require.ErrorIs(t, list.RemoveID(canceled, []byte("id")), context.Canceled)
+		_, err = list.HasValueID(canceled, []byte("x"), []byte("id"))
+		require.ErrorIs(t, err, context.Canceled)
+	})
+}
+
+func TestUniqueIndexAllVariants(t *testing.T) {
+	ctx := context.Background()
+	withIndexBuckets(t, func(b *bolt.Bucket) {
+		unique, err := NewUniqueIndex(b, []byte("__unique-all"))
+		require.NoError(t, err)
+		require.NoError(t, unique.Add(ctx, []byte("v"), []byte("id")))
+
+		ids, err := unique.All(ctx, []byte("v"), nil)
+		require.NoError(t, err)
+		require.Equal(t, [][]byte{[]byte("id")}, ids)
+
+		ids, err = unique.All(ctx, []byte("missing"), nil)
+		require.NoError(t, err)
+		require.Nil(t, ids)
+
+		canceled, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err = unique.All(canceled, []byte("v"), nil)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+}
