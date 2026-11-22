@@ -29,6 +29,9 @@ type Series struct {
 type seriesMeta struct {
 	Labels    map[string]string `json:"labels,omitempty"`
 	Retention Retention         `json:"retention,omitempty"`
+	// Count is the number of live points. It lets Count avoid decrypting every
+	// block and lets a satisfied retention policy skip pruning entirely.
+	Count int64 `json:"count,omitempty"`
 }
 
 func (s *Store) readMeta(tx *bolt.Tx, name string) (seriesMeta, error) {
@@ -200,8 +203,11 @@ func (se *Series) InsertMany(ctx context.Context, points []Point) error {
 			return err
 		}
 
+		added := 0
 		if se.store.blockDuration() > 0 {
-			if err := se.store.insertBlocks(ctx, bucket, points); err != nil {
+			var err error
+			added, err = se.store.insertBlocks(ctx, bucket, points)
+			if err != nil {
 				return err
 			}
 		} else {
@@ -214,6 +220,9 @@ func (se *Series) InsertMany(ctx context.Context, points []Point) error {
 				if err != nil {
 					return err
 				}
+				if bucket.Get(key[:]) == nil {
+					added++
+				}
 				if err := bucket.Put(key[:], value); err != nil {
 					return err
 				}
@@ -224,8 +233,33 @@ func (se *Series) InsertMany(ctx context.Context, points []Point) error {
 		if err != nil {
 			return err
 		}
-		if _, err := se.store.pruneSeriesBucket(ctx, bucket, meta.Retention, se.store.nowNanos()); err != nil {
+		metaKey, err := se.store.bucketKey(se.name)
+		if err != nil {
 			return err
+		}
+		metaBucket, err := se.store.metaBucket(tx, false)
+		if err != nil {
+			return err
+		}
+		hadMeta := metaBucket != nil && metaBucket.Get(metaKey) != nil
+
+		meta.Count += int64(added)
+		if !meta.Retention.satisfied(meta.Count) {
+			removed, err := se.store.pruneSeriesBucket(ctx, bucket, meta.Retention, se.store.nowNanos())
+			if err != nil {
+				return err
+			}
+			meta.Count -= int64(removed)
+		}
+		if meta.Count < 0 {
+			meta.Count = 0
+		}
+		// A series with no metadata and no retention policy must not gain a
+		// metadata record just from an insert.
+		if hadMeta || meta.Retention != (Retention{}) {
+			if err := se.store.writeMeta(tx, se.name, meta); err != nil {
+				return err
+			}
 		}
 
 		return checkContext(ctx)
@@ -534,6 +568,14 @@ func (se *Series) Count(ctx context.Context) (int, error) {
 		if bucket == nil {
 			return checkContext(ctx)
 		}
+		meta, err := se.store.readMeta(tx, se.name)
+		if err != nil {
+			return err
+		}
+		if meta.Count > 0 {
+			count = int(meta.Count)
+			return checkContext(ctx)
+		}
 		if se.store.blockDuration() > 0 {
 			var blockErr error
 			count, blockErr = se.store.countBlocks(ctx, bucket)
@@ -582,7 +624,18 @@ func (se *Series) DeleteRange(ctx context.Context, start, end int64) (int, error
 		if se.store.blockDuration() > 0 {
 			var blockErr error
 			deleted, blockErr = se.store.deleteBlocks(ctx, bucket, start, end)
-			return blockErr
+			if blockErr != nil {
+				return blockErr
+			}
+			meta, err := se.store.readMeta(tx, se.name)
+			if err != nil {
+				return err
+			}
+			meta.Count -= int64(deleted)
+			if meta.Count < 0 {
+				meta.Count = 0
+			}
+			return se.store.writeMeta(tx, se.name, meta)
 		}
 
 		var keys [][]byte
@@ -614,7 +667,15 @@ func (se *Series) DeleteRange(ctx context.Context, start, end int64) (int, error
 			}
 			deleted++
 		}
-		return checkContext(ctx)
+		meta, err := se.store.readMeta(tx, se.name)
+		if err != nil {
+			return err
+		}
+		meta.Count -= int64(deleted)
+		if meta.Count < 0 {
+			meta.Count = 0
+		}
+		return se.store.writeMeta(tx, se.name, meta)
 	})
 	if err != nil {
 		return 0, err

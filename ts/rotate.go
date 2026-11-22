@@ -219,7 +219,7 @@ func (s *Store) reEncryptSeriesTx(ctx context.Context, tx *bolt.Tx, name string,
 			return err
 		}
 		if next.blockDuration() > 0 {
-			if err := next.insertBlocks(ctx, bucket, points); err != nil {
+			if _, err := next.insertBlocks(ctx, bucket, points); err != nil {
 				return err
 			}
 		} else {

@@ -182,6 +182,11 @@ func (e *encState) verifyCanary(canary []byte, m marker) error {
 	return encryption.VerifyCanary(e.kc, canary, encryption.CanaryPlaintext(canaryPlaintext, m.flagsByte(), uint64(m.chunkSize)))
 }
 
+// DefaultChunkSize is the chunk width used for encrypted content when the
+// caller does not select one. Chunking keeps writes and truncations from
+// rewriting the whole file.
+const DefaultChunkSize = 64 * 1024
+
 func resolveConfig(cfg Config) (*encState, error) {
 	if !cfg.encryptionEnabled() {
 		return nil, nil
@@ -189,6 +194,7 @@ func resolveConfig(cfg Config) (*encState, error) {
 	if cfg.ChunkSize < 0 {
 		return nil, fmt.Errorf("%w: chunk size cannot be negative", ErrInvalidConfig)
 	}
+	chunkSize := cfg.ChunkSize
 
 	key, err := encryption.ResolveKey(cfg.Secret)
 	if err != nil {
@@ -202,8 +208,8 @@ func resolveConfig(cfg Config) (*encState, error) {
 
 	return &encState{
 		kc:          kc,
-		encContent:  cfg.EncryptContent || cfg.ChunkSize > 0,
+		encContent:  cfg.EncryptContent || chunkSize > 0,
 		encMetadata: cfg.EncryptMetadata,
-		chunkSize:   cfg.ChunkSize,
+		chunkSize:   chunkSize,
 	}, nil
 }

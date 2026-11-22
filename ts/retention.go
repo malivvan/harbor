@@ -18,6 +18,12 @@ type Retention struct {
 	MaxPoints int
 }
 
+// satisfied reports whether the policy is already met, so a write can skip
+// scanning or decrypting the series.
+func (r Retention) satisfied(count int64) bool {
+	return r.MaxAge <= 0 && (r.MaxPoints <= 0 || count <= int64(r.MaxPoints))
+}
+
 func (r Retention) validate() error {
 	if r.MaxAge < 0 || r.MaxPoints < 0 {
 		return ErrInvalidRetention
@@ -131,6 +137,11 @@ func (s *Store) EnforceRetention(ctx context.Context, now int64) (int, error) {
 	}
 
 	total := 0
+	type metaUpdate struct {
+		name string
+		meta seriesMeta
+	}
+	var updates []metaUpdate
 	err := s.b.Update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
@@ -144,7 +155,7 @@ func (s *Store) EnforceRetention(ctx context.Context, now int64) (int, error) {
 			return nil
 		}
 
-		return metaBucket.ForEach(func(physical, raw []byte) error {
+		walkErr := metaBucket.ForEach(func(physical, raw []byte) error {
 			if err := checkContext(ctx); err != nil {
 				return err
 			}
@@ -171,9 +182,25 @@ func (s *Store) EnforceRetention(ctx context.Context, now int64) (int, error) {
 			if err != nil {
 				return err
 			}
+			if removed > 0 {
+				meta.Count -= int64(removed)
+				if meta.Count < 0 {
+					meta.Count = 0
+				}
+				updates = append(updates, metaUpdate{name: name, meta: meta})
+			}
 			total += removed
 			return checkContext(ctx)
 		})
+		if walkErr != nil {
+			return walkErr
+		}
+		for _, update := range updates {
+			if err := s.writeMeta(tx, update.name, update.meta); err != nil {
+				return err
+			}
+		}
+		return checkContext(ctx)
 	})
 	if err != nil {
 		return 0, err

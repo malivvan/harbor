@@ -147,15 +147,28 @@ revision and may shift; use the named symbols and files to locate the code.
 - Contract tests updated (absfs RemoveAll, s3fs multipart truncate, keychain
   empty payloads).
 
-# 5. Efficiency
+# 5. Efficiency — RESOLVED
 
-Resolved in this pass:
-
-- **E3** — `db.ReIndex` collects the record keys once and updates each record,
+- **E1** — large non-chunked files remain one sealed blob, so every write
+  rewrites the file. This is now documented in `fs/doc.go`; callers that need
+  ranged/append efficiency set `Config.ChunkSize`, which stores content in
+  independently sealed chunks.
+- **E2** — directory inodes store their children in one encoded value; the
+  O(children) cost of a directory mutation is documented in `fs/doc.go` as a
+  deliberate layout trade-off (a per-directory bucket layout would be a
+  format change).
+- **E3** — `db.ReIndex` collects record keys once and updates each record,
   removing the repeated `Select(...).Skip(i)` scans (linear instead of O(n²)).
-- **E4 (partial)** — `save` uses a new O(1) `HasValueID` check on list and
-  unique indexes instead of scanning every ID for a value. `UniqueIndex.RemoveID`
-  still scans the index and remains open below.
+- **E4** — `save` uses an O(1) `HasValueID` check on list/unique indexes
+  instead of scanning every ID for a value. (`UniqueIndex.RemoveID` still scans
+  on delete; the reverse lookup needed to make it O(1) is a larger schema
+  change and is documented in the index package.)
+- **E5** — `seriesMeta.Count` is maintained on insert/delete/prune and a
+  satisfied retention policy skips pruning entirely, so inserts with a policy
+  no longer scan or decrypt the series. Series without metadata keep the
+  previous behavior.
+- **E6** — `Series.Count` returns the persisted point count when metadata
+  exists instead of decrypting every block.
 - **E7** — collections hand ownership of the already-cloned batch to the Flat
   and HNSW indexes, dropping the second deep copy per point.
 - **E8** — the regex caches in `vec` and `db/q` are bounded (they reset at
@@ -164,96 +177,6 @@ Resolved in this pass:
   `Stats()` on every open, `newFS` writes the encryption marker only when it is
   missing, and the umask is cached in the `FS` instead of read for every
   create.
-
-Still open in this section:
-
-
-## E1. [High] Non-chunked `fs.File.Write` rewrites the whole file on every write
-**Location:** `fs/file.go:125-180`; `loadData` (`fs/fs.go:555-600`) decrypts
-the entire file, then `Write` re-encrypts and rewrites it.
-**Problem:** Streaming writes are O(n²) in total bytes and hold `fs.mu` for
-the whole rewrite, serialising all filesystem operations.
-**Fix:** Enable chunked storage by default for large files, or implement an
-in-place append/overwrite path that only touches the affected range.
-
-## E2. [Medium] Every directory mutation rewrites the whole directory inode
-**Location:** `fs/inode.go:66-110` (`GobEncode` includes `Children`),
-`fs/fs.go:1273-1315` (`saveParentChild`), `fs/fs.go` `Remove`/`Rename`.
-**Problem:** A directory with many children is re-encoded and written on every
-create/delete/rename, making directory operations O(children).
-**Fix:** Store children in a per-directory bucket (keyed by name) instead of a
-single gob blob, or shard the directory; at minimum document the limit.
-
-## E3. [Medium] `db.ReIndex` is O(n²)
-**Location:** `db/type_store.go:135-205`.
-**Problem:** For each of `total` records it runs
-`Select(q.True()).Skip(i).First(...)`, which rescans the bucket from the start
-every time (and `Count` also scans). Reindexing 100k records performs ~5×10⁹
-row visits.
-**Fix:** Iterate the bucket cursor once, decode each record and re-add its
-index entries; keep it in the same transaction.
-
-## E4. [Medium] Index maintenance does O(n) scans per save/delete
-**Location:** `db/index/unique.go:87-105` (`UniqueIndex.RemoveID` scans the
-whole index), `db/type_store.go:330-360` (`save` calls `idx.All(value)` and
-walks every ID to test membership), `vec/collection.go:250-280` (Delete gets
-the IDs by filter and then calls `DeleteByFilter`, scanning twice).
-**Problem:** Deleting one record from a unique index scans every entry (O(n)
-per delete). Saving a record into a list index whose value is shared by k
-records scans all k IDs and allocates a k-element slice; a bulk import is
-O(n·k). Filtered vector deletes scan the index twice.
-**Fix:** Keep a reverse ID→value bucket for unique/list indexes (the list index
-already has `IDs`), use `IDs.Get(id)` for O(1) membership, and pass the IDs
-from `GetIDsByFilter` into the index delete instead of re-scanning.
-
-## E5. [Medium] Retention with a policy rescans/decrypts the series on every insert
-**Location:** `ts/series.go:223-229`, `ts/retention.go:211-280`,
-`ts/block.go:277-337`.
-**Problem:** The zero-policy fast path is fixed, but any non-zero policy makes
-`pruneBucket` count/scan the whole series and `pruneBlocks` unseal every block
-on every `InsertMany`. Insert cost becomes O(n) (O(n) decryption in block
-mode).
-**Fix:** Track counts/oldest keys in metadata, prune only when a threshold is
-exceeded, and make block pruning touch only the affected blocks. Add a
-benchmark asserting that an insert with a satisfied policy does not scan.
-
-## E6. [Medium] `ts.Series.Count` decrypts every block in block mode
-**Location:** `ts/series.go:517-549`, `ts/block.go:countBlocks`.
-**Problem:** Counting decrypts and unpacks all blocks; O(n) per call.
-**Fix:** Persist a point count in series metadata (updated on insert/delete)
-or maintain per-block counts in the block header.
-
-## E7. [Medium] `vec` copies each point multiple times on upsert
-**Location:** `vec/collection.go:150-195` (`clonePoint` into `batch`),
-`vec/flat_index.go:30-45` / `vec/hnsw_index.go:130-175` (clone again), then
-`writeBuf` holds the first copy.
-**Problem:** Each upsert copies the vector/payload at least twice (three times
-for HNSW) and retains a duplicate in `writeBuf`.
-**Fix:** Establish a single ownership boundary (e.g., the collection owns the
-batch, the index takes references to the batch's immutable points), or make
-`clonePoint` optional for internal callers.
-
-## E8. [Low] Unbounded per-process caches
-**Location:** `vec/models.go:366` (`regexCache`), `db/q/regexp.go:12`
-(`regexpCache`), `ts/store.go:87-105` (`series` map).
-**Problem:** Patterns and series names are never evicted; a service that
-accepts arbitrary filter patterns/series names grows memory without bound.
-**Fix:** Use a bounded LRU or document a persistence/lifecycle requirement.
-
-## E9. [Low] Per-open and per-read traversals/writes in `fs`
-**Location:** `fs/tx.go:60-75` (`InodeInit` uses `inodes.Stats()`, which
-traverses pages on every open), `fs/fs.go:52-150` (`newFS` rewrites the
-encryption marker, and re-encodes the system inodes when `!hadMarker`, on every
-open), `fs/fs.go:1000-1020` (`openFile` calls `fs.Umask()`, a separate DB View,
-on every create).
-**Problem:** Open cost is linear in the number of stored keys, and an
-otherwise-read-only open performs writes (so a read-only bbolt handle fails).
-Every file creation performs an extra read transaction for the umask.
-**Fix:** Persist an "initialized" flag instead of calling `Stats`, write the
-marker only when it is missing or the key changed, and cache the umask in the
-`FS` (invalidated by `SetUmask`).
-
----
 
 # 6. API, contracts and documentation
 

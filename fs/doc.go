@@ -22,3 +22,15 @@
 // available through [Store.ReEncryptFS], [Store.RotateAll] and
 // [Store.VerifyAll].
 package fs
+
+// # Storage layout and performance
+//
+// Large file content should be stored with Config.ChunkSize: non-chunked
+// content is one sealed blob per file, so every write rewrites and re-seals the
+// whole file. With ChunkSize set, a write or truncation touches only the
+// affected chunks.
+//
+// Directory inodes are encoded as a single value containing their children, so
+// creating, removing or renaming an entry rewrites that directory's inode.
+// Directories with a very large number of direct children are therefore
+// O(children) per mutation.

@@ -113,7 +113,8 @@ func (s *Store) writeBlock(bucket *bolt.Bucket, start int64, points []Point) err
 }
 
 // insertBlocks merges points into the encrypted blocks of a bucket.
-func (s *Store) insertBlocks(ctx context.Context, bucket *bolt.Bucket, points []Point) error {
+func (s *Store) insertBlocks(ctx context.Context, bucket *bolt.Bucket, points []Point) (int, error) {
+	added := 0
 	groups := make(map[int64][]Point)
 	for _, point := range points {
 		start := blockStart(point.Timestamp, s.blockDuration())
@@ -128,17 +129,19 @@ func (s *Store) insertBlocks(ctx context.Context, bucket *bolt.Bucket, points []
 
 	for _, start := range starts {
 		if err := checkContext(ctx); err != nil {
-			return err
+			return 0, err
 		}
 		existing, _, err := s.readBlock(bucket, start)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		if err := s.writeBlock(bucket, start, mergePoints(existing, groups[start])); err != nil {
-			return err
+		merged := mergePoints(existing, groups[start])
+		added += len(merged) - len(existing)
+		if err := s.writeBlock(bucket, start, merged); err != nil {
+			return 0, err
 		}
 	}
-	return nil
+	return added, nil
 }
 
 // scanBlocks calls fn for every point in [start, end] in time order.
