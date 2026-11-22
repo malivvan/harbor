@@ -53,85 +53,29 @@ All items in this section are resolved:
 
 # 2. Root package (`storm`)
 
-## R1. [Medium] Root key/value API is plaintext even for an encrypted store
-**Location:** `storm.go` around `kvBucket`, `lookup`, `Set`, package doc.
-**Problem:** `Get/Set/Has/Keys/Len` read and write raw bytes in bucket
-`[]byte{0}` with no AEAD, regardless of the persisted encryption flags. The
-package documentation implies the store is protected “behind one password”.
-A user can reasonably assume `store.Set("secret", ...)` is encrypted at rest.
-**Why it matters:** Confidentiality footgun; plaintext secrets in an encrypted
-store.
-**Fix:** Either (a) document explicitly that the top-level KV bucket is plaintext
-and point users at the encrypted `db` KV API, or (b) derive a KV-domain key and
-seal values/keys through the shared `internal/encryption` keychain.
-**Test:** With `EncryptAll`, assert the raw bucket bytes do not equal the
-plaintext; or assert the documented plaintext contract.
+All items in this section are resolved:
 
-## R2. [Medium] Persisted encryption flags are not authenticated by the canary
-**Location:** `storm.go` (`verifyCanary`/`deriveKeys`), `meta.go`
-(`readMetadata`).
-**Problem:** The canary key depends on password/salt/KDF parameters, not on
-`Flags`. An attacker with write access can flip a flag (e.g. clear
-`EncryptDBValues`) and the canary still verifies, so `Open` succeeds in a
-different encryption mode.
-**Why it matters:** Silent tamper/downgrade; data may be misread as
-plaintext/ciphertext.
-**Fix:** Bind the flags into the canary, e.g. seal/verify
-`fmt.Sprintf("%s/0x%04x", canaryPlaintext, flags)`, or pass the flags as GCM
-additional data.
-**Test:** Flip one persisted flag bit and assert `Open` fails with an
-authentication/corruption error.
+- **R1** — the key/value bucket now seals values with a dedicated
+  `storm/kv/v1` AES-256-GCM key when the new `EncryptKVValues` flag is set
+  (part of `EncryptAll`, the default). Keys stay in the clear so byte-ordered
+  listing keeps working, and the package doc says so. New tests assert that the
+  stored bytes are not the plaintext, and that `Plaintext` stores them verbatim.
+- **R2** — the canary plaintext now embeds the persisted flags
+  (`canaryPlaintextFor`), so flipping a flag bit fails the canary with
+  `ErrAuthFailed`/`ErrInvalidPassword`. Covered by `TestCanaryBindsEncryptionFlags`.
+- **R3** — a missing Metadata bucket is only treated as a new store when the
+  database has no buckets at all; otherwise `Open` returns `ErrCorruptStore`.
+  Covered by `TestMissingMetadataBucketIsCorrupt`.
+- **R4** — `Get("")` now returns `ErrInvalidKey` like the other methods, and
+  every KV method checks `ErrClosed` first. Covered by
+  `TestEmptyKeyClosedPrecedence`.
+- **R5** — `TestDeriveKeys` covers lengths, domain separation, determinism,
+  password/salt sensitivity; `TestStoreKeysWipe` covers wiping.
+- **R6** — `Options.Password` documents that Go strings cannot be reliably
+  wiped and that only the derivation copy is zeroed.
+- **R7** — metadata var-block comment, `Metadata()` docstring and the malformed
+  fixture/subtest names are corrected.
 
-## R3. [Medium] Missing metadata bucket is silently treated as a brand-new store
-**Location:** `meta.go` `readMetadata` (`creating = true` when the metadata
-bucket is absent).
-**Problem:** If a real store loses/corrupts only the metadata bucket while
-`kvBucket` and the sub-store roots remain, `Open` initializes new metadata with a
-fresh salt/new keys, then sub-stores fail. A non-Storm bbolt file opened through
-`storm.Open` is silently initialized too.
-**Why it matters:** Wrong recovery action; can mask corruption.
-**Fix:** If metadata is absent but `kvBucket` or any sub-store root exists,
-return `ErrCorruptStore` instead of creating metadata.
-**Test:** Create `kvBucket`, delete `metadataBucket`, expect `ErrCorruptStore`.
-
-## R4. [Low] Empty-key error semantics are inconsistent
-**Location:** `storm.go` `Get`, `Set`, `Delete`, `Has`.
-**Problem:** `Get("")` returns `ErrKeyNotFound`, while `Set/Delete/Has("")`
-return `ErrInvalidKey`. On a nil/closed store, the empty-key error also wins
-over `ErrClosed`.
-**Fix:** Document the Get behavior explicitly, or make all methods use
-`ErrInvalidKey` for empty keys. Define and test nil/closed + empty-key
-precedence.
-
-## R5. [Low] `deriveKeys` has no focused unit tests
-**Location:** `storm.go` `deriveKeys`.
-**Problem:** The Argon2 → SLIP-0021 derivation is only exercised end-to-end.
-There is no assertion that keys are 32 bytes, pairwise distinct across
-`labelDB/FS/TS/Vec` + canary, deterministic for the same password/salt, and
-different for different password/salt.
-**Fix:** Add unit tests covering length, domain separation, determinism,
-password/salt sensitivity, and key wiping.
-
-## R6. [Low] Password strings cannot be wiped
-**Location:** `storm.go` `deriveKeys` / `Options.Password`.
-**Problem:** `[]byte(password)` is wiped, but the original `string` remains in
-memory. This is a general Go limitation, but it is undocumented.
-**Fix:** Document the limitation and consider accepting a `[]byte` password
-overload. Do not claim full password erasure.
-
-## R7. [Low] Root doc/comment polish
-**Location:** `meta.go` metadata var-block comment, `KDFParams` doc,
-`storm_test.go` bad-metadata fixture/subtest names.
-**Problem:**
-- The metadata var-block comment reads like a type doc and duplicates the type
-  comment.
-- `KDFParams` doc says it returns salt/KDF parameters but omits `flags`.
-- The “malformed metadata” fixture is `[]byte("not json")`, a stale reference to
-  the removed JSON format; the “missing Metadata” subtest actually tests a
-  missing record.
-**Fix:** Reword these comments/docstrings and rename/update the fixture.
-
----
 
 # 3. `internal/encryption`, `internal/slip10`, `internal/slip21`
 

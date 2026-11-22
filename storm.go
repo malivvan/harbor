@@ -8,7 +8,10 @@
 // disabled.
 //
 // The key/value API (Get, Set, Delete, Has, Keys, Len) uses its own bucket, so
-// user keys never collide with store Metadata.
+// user keys never collide with store Metadata. When the store was created with
+// EncryptKVValues (included in EncryptAll, the default), values are sealed with
+// a dedicated AES-256-GCM key; keys stay in the clear so byte-ordered listing
+// keeps working. Use EncryptNone/Plaintext to opt out.
 package storm
 
 import (
@@ -43,6 +46,7 @@ const (
 	labelFS  = "storm/fs/v1"
 	labelTS  = "storm/ts/v1"
 	labelVec = "storm/vec/v1"
+	labelKV  = "storm/kv/v1"
 )
 
 // Errors returned by the package.
@@ -78,6 +82,11 @@ type Options struct {
 	Codec db.Codec
 
 	// Password protects the store. It is required.
+	//
+	// Go strings are immutable, so the password cannot be reliably wiped from
+	// memory; only the temporary []byte copy used for key derivation is
+	// zeroed. Callers that need stronger erasure should keep the password out
+	// of long-lived process memory themselves.
 	Password string
 
 	// KDFTime, KDFMemory (KiB) and KDFThreads select the Argon2id cost
@@ -114,6 +123,10 @@ type Store struct {
 	fs  *fs.Store
 	ts  *ts.Store
 	vec *vec.Store
+
+	// kvc seals key/value payloads when EncryptKVValues is set. A nil keychain
+	// leaves the bucket in plaintext.
+	kvc *encryption.Keychain
 }
 
 // storeKeys holds the per-component keys derived for one Open call. They are
@@ -124,13 +137,14 @@ type storeKeys struct {
 	fs     []byte
 	ts     []byte
 	vec    []byte
+	kv     []byte
 }
 
 func (k *storeKeys) wipe() {
 	if k == nil {
 		return
 	}
-	for _, b := range [][]byte{k.canary, k.db, k.fs, k.ts, k.vec} {
+	for _, b := range [][]byte{k.canary, k.db, k.fs, k.ts, k.vec, k.kv} {
 		wipe(b)
 	}
 }
@@ -204,6 +218,11 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	}); err != nil {
 		return nil, fmt.Errorf("storm: open ts store: %w", err)
 	}
+	if hasFlag(md.Flags, EncryptKVValues) {
+		if s.kvc, err = encryption.NewKeychain([][]byte{keys.kv}); err != nil {
+			return nil, fmt.Errorf("storm: open key/value store: %w", err)
+		}
+	}
 	if s.vec, err = vec.Open(ctx, bdb, vec.Config{
 		Root:                   namedRoot(vec.Name),
 		Secret:                 keys.vec,
@@ -234,7 +253,7 @@ func loadOrCreateState(bdb *bolt.DB, options *Options) (Metadata, *storeKeys, er
 		if err != nil {
 			return Metadata{}, nil, err
 		}
-		if err := verifyCanary(keys.canary, md.Canary); err != nil {
+		if err := verifyCanary(keys.canary, md.Canary, md.Flags); err != nil {
 			keys.wipe()
 			return Metadata{}, nil, fmt.Errorf("%w: %w", ErrInvalidPassword, err)
 		}
@@ -249,7 +268,7 @@ func loadOrCreateState(bdb *bolt.DB, options *Options) (Metadata, *storeKeys, er
 	if err != nil {
 		return Metadata{}, nil, err
 	}
-	canary, err := sealCanary(keys.canary)
+	canary, err := sealCanary(keys.canary, flags)
 	if err != nil {
 		keys.wipe()
 		return Metadata{}, nil, err
@@ -314,26 +333,36 @@ func canaryKeychain(key []byte) (*encryption.Keychain, error) {
 	return encryption.NewKeychain([][]byte{key})
 }
 
-// sealCanary seals the fixed canary plaintext with the canary key.
-func sealCanary(key []byte) ([]byte, error) {
+// canaryPlaintextFor returns the canary plaintext bound to flags. The write
+// access attacker model this protects against is simple: without the binding, a
+// flipped encryption flag still verifies, so Open would silently succeed in a
+// different encryption mode. Binding the flags into the authenticated payload
+// turns that into an authentication failure.
+func canaryPlaintextFor(flags uint16) string {
+	return fmt.Sprintf("%s/0x%04x", canaryPlaintext, flags)
+}
+
+// sealCanary seals the flag-bound canary plaintext with the canary key.
+func sealCanary(key []byte, flags uint16) ([]byte, error) {
 	keychain, err := canaryKeychain(key)
 	if err != nil {
 		return nil, fmt.Errorf("storm: initialize canary key: %w", err)
 	}
-	sealed, err := keychain.Seal([]byte(canaryPlaintext))
+	sealed, err := keychain.Seal([]byte(canaryPlaintextFor(flags)))
 	if err != nil {
 		return nil, fmt.Errorf("storm: seal canary: %w", err)
 	}
 	return sealed, nil
 }
 
-// verifyCanary proves that key decrypts the stored canary.
-func verifyCanary(key, sealed []byte) error {
+// verifyCanary proves that key decrypts the stored canary and that the
+// persisted flags are the ones it was sealed with.
+func verifyCanary(key, sealed []byte, flags uint16) error {
 	keychain, err := canaryKeychain(key)
 	if err != nil {
 		return err
 	}
-	return encryption.VerifyCanary(keychain, sealed, canaryPlaintext)
+	return encryption.VerifyCanary(keychain, sealed, canaryPlaintextFor(flags))
 }
 
 // deriveKeys stretches the password and derives one key per component.
@@ -378,6 +407,7 @@ func deriveKeys(password string, salt []byte, time, memory uint32, threads uint8
 		{labelFS, &keys.fs},
 		{labelTS, &keys.ts},
 		{labelVec, &keys.vec},
+		{labelKV, &keys.kv},
 	}
 	for _, item := range labels {
 		*item.dst, err = derive(item.label)
@@ -457,7 +487,46 @@ func (s *Store) withDB(fn func(*bolt.DB) error) error {
 	return fn(s.bs)
 }
 
-// lookup returns the raw value and presence of key.
+// checkOpen reports ErrClosed unless the receiver is an open store. Every
+// public method calls it first, so ErrClosed takes precedence over key
+// validation.
+func (s *Store) checkOpen() error {
+	if s == nil {
+		return ErrClosed
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil {
+		return ErrClosed
+	}
+	return nil
+}
+
+// sealValue encrypts a key/value payload when EncryptKVValues is enabled.
+func (s *Store) sealValue(plain []byte) ([]byte, error) {
+	if s.kvc == nil {
+		return plain, nil
+	}
+	sealed, err := s.kvc.Seal(plain)
+	if err != nil {
+		return nil, fmt.Errorf("storm: seal value: %w", err)
+	}
+	return sealed, nil
+}
+
+// openValue reverses sealValue.
+func (s *Store) openValue(key string, raw []byte) ([]byte, error) {
+	if s.kvc == nil {
+		return raw, nil
+	}
+	plain, err := s.kvc.Open(raw)
+	if err != nil {
+		return nil, fmt.Errorf("storm: open value %q: %w", key, err)
+	}
+	return plain, nil
+}
+
+// lookup returns the decoded value and presence of key.
 func (s *Store) lookup(key string) (value string, found bool, err error) {
 	err = s.withDB(func(bdb *bolt.DB) error {
 		return bdb.View(func(tx *bolt.Tx) error {
@@ -469,7 +538,11 @@ func (s *Store) lookup(key string) (value string, found bool, err error) {
 			if raw == nil {
 				return nil
 			}
-			value = string(raw)
+			decoded, err := s.openValue(key, raw)
+			if err != nil {
+				return err
+			}
+			value = string(decoded)
 			found = true
 			return nil
 		})
@@ -497,10 +570,14 @@ func (s *Store) scanKeys(fn func(string)) error {
 	})
 }
 
-// Get returns the value stored under key.
+// Get returns the value stored under key. An empty key returns ErrInvalidKey,
+// and a nil or closed store returns ErrClosed before the key is validated.
 func (s *Store) Get(key string) (string, error) {
+	if err := s.checkOpen(); err != nil {
+		return "", err
+	}
 	if key == "" {
-		return "", ErrKeyNotFound
+		return "", ErrInvalidKey
 	}
 	value, found, err := s.lookup(key)
 	if err != nil {
@@ -514,6 +591,9 @@ func (s *Store) Get(key string) (string, error) {
 
 // Set stores key/value in the key/value bucket. An empty value removes the key.
 func (s *Store) Set(key, val string) error {
+	if err := s.checkOpen(); err != nil {
+		return err
+	}
 	if key == "" {
 		return ErrInvalidKey
 	}
@@ -526,13 +606,20 @@ func (s *Store) Set(key, val string) error {
 			if val == "" {
 				return b.Delete([]byte(key))
 			}
-			return b.Put([]byte(key), []byte(val))
+			raw, err := s.sealValue([]byte(val))
+			if err != nil {
+				return err
+			}
+			return b.Put([]byte(key), raw)
 		})
 	})
 }
 
 // Delete removes key. Deleting a missing key is not an error.
 func (s *Store) Delete(key string) error {
+	if err := s.checkOpen(); err != nil {
+		return err
+	}
 	if key == "" {
 		return ErrInvalidKey
 	}
@@ -549,6 +636,9 @@ func (s *Store) Delete(key string) error {
 
 // Has reports whether key exists.
 func (s *Store) Has(key string) (bool, error) {
+	if err := s.checkOpen(); err != nil {
+		return false, err
+	}
 	if key == "" {
 		return false, ErrInvalidKey
 	}
@@ -590,5 +680,6 @@ func (s *Store) Close() error {
 	s.fs = nil
 	s.ts = nil
 	s.vec = nil
+	s.kvc = nil
 	return err
 }

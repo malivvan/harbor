@@ -1,6 +1,7 @@
 package storm
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
+	"github.com/malivvan/storm/db"
 	"github.com/malivvan/storm/internal/encryption"
 	"github.com/malivvan/storm/ts"
 	"github.com/malivvan/storm/vec"
@@ -243,8 +245,8 @@ func TestKeyValueValidation(t *testing.T) {
 	s := mustOpen(t, filepath.Join(t.TempDir(), "kv.db"), "pw")
 	t.Cleanup(func() { _ = s.Close() })
 
-	if _, err := s.Get(""); !errors.Is(err, ErrKeyNotFound) {
-		t.Fatalf("Get(empty) = %v, want ErrKeyNotFound", err)
+	if _, err := s.Get(""); !errors.Is(err, ErrInvalidKey) {
+		t.Fatalf("Get(empty) = %v, want ErrInvalidKey", err)
 	}
 	if err := s.Set("", "v"); !errors.Is(err, ErrInvalidKey) {
 		t.Fatalf("Set(empty) = %v, want ErrInvalidKey", err)
@@ -263,6 +265,29 @@ func TestKeyValueValidation(t *testing.T) {
 	}
 	if _, err := s.Get("k"); !errors.Is(err, ErrKeyNotFound) {
 		t.Fatalf("Get after empty-value delete = %v, want ErrKeyNotFound", err)
+	}
+}
+
+func TestEmptyKeyClosedPrecedence(t *testing.T) {
+	s := mustOpen(t, filepath.Join(t.TempDir(), "kv.db"), "pw")
+	mustClose(t, s)
+
+	if _, err := s.Get(""); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Get(empty) after Close = %v, want ErrClosed", err)
+	}
+	if err := s.Set("", "v"); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Set(empty) after Close = %v, want ErrClosed", err)
+	}
+	if err := s.Delete(""); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Delete(empty) after Close = %v, want ErrClosed", err)
+	}
+	if _, err := s.Has(""); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Has(empty) after Close = %v, want ErrClosed", err)
+	}
+
+	var nilStore *Store
+	if _, err := nilStore.Get(""); !errors.Is(err, ErrClosed) {
+		t.Fatalf("nil Get(empty) = %v, want ErrClosed", err)
 	}
 }
 
@@ -480,7 +505,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 }
 
 func TestOpenRejectsBadMetadata(t *testing.T) {
-	t.Run("missing Metadata", func(t *testing.T) {
+	t.Run("missing Metadata record", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "missing.db")
 		bdb, err := bolt.Open(path, 0600, nil)
 		if err != nil {
@@ -510,7 +535,16 @@ func TestOpenRejectsBadMetadata(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			return meta.Put(metadataRecordKey, []byte("not json"))
+			md := Metadata{
+				Salt:    []byte("0123456789abcdef"),
+				Time:    FastKDFTime,
+				Flags:   EncryptAll,
+				Memory:  FastKDFMemory,
+				Threads: FastKDFThreads,
+				Canary:  []byte("canary"),
+			}
+			truncated := md.encode()
+			return meta.Put(metadataRecordKey, truncated[:len(truncated)-1])
 		}); err != nil {
 			t.Fatalf("write Metadata: %v", err)
 		}
@@ -520,4 +554,219 @@ func TestOpenRejectsBadMetadata(t *testing.T) {
 			t.Fatalf("Open malformed Metadata = %v, want ErrCorruptStore", err)
 		}
 	})
+}
+
+// TestKeyValueEncryptedAtRest proves the top-level key/value values are sealed
+// when EncryptKVValues is enabled (the default via EncryptAll).
+func TestKeyValueEncryptedAtRest(t *testing.T) {
+	s := mustOpen(t, filepath.Join(t.TempDir(), "kv-enc.db"), "pw")
+	t.Cleanup(func() { _ = s.Close() })
+
+	const (
+		key    = "token"
+		secret = "hunter2-super-secret"
+	)
+	if err := s.Set(key, secret); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	var raw []byte
+	if err := s.bs.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(kvBucket)
+		if b == nil {
+			t.Fatal("key/value bucket missing")
+		}
+		raw = append([]byte(nil), b.Get([]byte(key))...)
+		return nil
+	}); err != nil {
+		t.Fatalf("read raw bucket: %v", err)
+	}
+	if bytes.Equal(raw, []byte(secret)) || bytes.Contains(raw, []byte(secret)) {
+		t.Fatalf("stored value %q leaks the plaintext", raw)
+	}
+
+	got, err := s.Get(key)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != secret {
+		t.Fatalf("Get = %q, want %q", got, secret)
+	}
+}
+
+// TestKeyValuePlaintextAtRest documents the Plaintext contract: the value is
+// byte-for-byte identical in the bucket.
+func TestKeyValuePlaintextAtRest(t *testing.T) {
+	opts := testOptions("pw")
+	opts.Plaintext = true
+	s, err := Open(context.Background(), filepath.Join(t.TempDir(), "kv-plain.db"), 0600, opts)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	const secret = "hunter2"
+	if err := s.Set("token", secret); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	var raw []byte
+	if err := s.bs.View(func(tx *bolt.Tx) error {
+		raw = append([]byte(nil), tx.Bucket(kvBucket).Get([]byte("token"))...)
+		return nil
+	}); err != nil {
+		t.Fatalf("read raw bucket: %v", err)
+	}
+	if string(raw) != secret {
+		t.Fatalf("plaintext store value = %q, want %q", raw, secret)
+	}
+}
+
+// TestCanaryBindsEncryptionFlags flips one persisted flag bit and expects Open
+// to reject the store instead of silently opening it in another mode.
+func TestCanaryBindsEncryptionFlags(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "flags.db")
+	s := mustOpen(t, path, "pw")
+	if err := s.Set("k", "v"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	mustClose(t, s)
+
+	bdb, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
+	if err != nil {
+		t.Fatalf("bolt.Open: %v", err)
+	}
+	if err := bdb.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(metadataBucket)
+		md, err := decodeMetadata(append([]byte(nil), b.Get(metadataRecordKey)...))
+		if err != nil {
+			return err
+		}
+		md.Flags &^= EncryptKVValues
+		return b.Put(metadataRecordKey, md.encode())
+	}); err != nil {
+		_ = bdb.Close()
+		t.Fatalf("tamper flags: %v", err)
+	}
+	if err := bdb.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	_, err = Open(context.Background(), path, 0600, testOptions("pw"))
+	if !errors.Is(err, ErrInvalidPassword) {
+		t.Fatalf("Open after flag tampering = %v, want ErrInvalidPassword", err)
+	}
+	if !errors.Is(err, encryption.ErrAuthFailed) {
+		t.Fatalf("Open after flag tampering = %v, want it to wrap ErrAuthFailed", err)
+	}
+}
+
+// TestMissingMetadataBucketIsCorrupt ensures a store that lost only its
+// Metadata is not silently re-initialized.
+func TestMissingMetadataBucketIsCorrupt(t *testing.T) {
+	for name, buckets := range map[string][][]byte{
+		"key/value bucket": {kvBucket},
+		"sub-store root":   {[]byte(db.Name)},
+		"unrelated bucket": {[]byte("something-else")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "corrupt.db")
+			bdb, err := bolt.Open(path, 0600, nil)
+			if err != nil {
+				t.Fatalf("bolt.Open: %v", err)
+			}
+			if err := bdb.Update(func(tx *bolt.Tx) error {
+				for _, name := range buckets {
+					if _, err := tx.CreateBucket(name); err != nil {
+						return err
+					}
+				}
+				return nil
+			}); err != nil {
+				_ = bdb.Close()
+				t.Fatalf("create buckets: %v", err)
+			}
+			_ = bdb.Close()
+
+			if _, err := Open(context.Background(), path, 0600, testOptions("pw")); !errors.Is(err, ErrCorruptStore) {
+				t.Fatalf("Open = %v, want ErrCorruptStore", err)
+			}
+		})
+	}
+}
+
+func TestDeriveKeys(t *testing.T) {
+	salt := []byte("0123456789abcdef")
+	first, err := deriveKeys("password", salt, FastKDFTime, FastKDFMemory, FastKDFThreads)
+	if err != nil {
+		t.Fatalf("deriveKeys: %v", err)
+	}
+	t.Cleanup(first.wipe)
+
+	keys := map[string][]byte{
+		"canary": first.canary,
+		"db":     first.db,
+		"fs":     first.fs,
+		"ts":     first.ts,
+		"vec":    first.vec,
+		"kv":     first.kv,
+	}
+	seen := make(map[string]string, len(keys))
+	for name, key := range keys {
+		if len(key) != KeySize {
+			t.Errorf("%s key length = %d, want %d", name, len(key), KeySize)
+		}
+		if other, ok := seen[string(key)]; ok {
+			t.Errorf("%s and %s derived the same key", name, other)
+		}
+		seen[string(key)] = name
+	}
+
+	again, err := deriveKeys("password", salt, FastKDFTime, FastKDFMemory, FastKDFThreads)
+	if err != nil {
+		t.Fatalf("deriveKeys again: %v", err)
+	}
+	t.Cleanup(again.wipe)
+	if !bytes.Equal(first.db, again.db) {
+		t.Fatal("deriveKeys is not deterministic for the same password and salt")
+	}
+
+	otherPassword, err := deriveKeys("other", salt, FastKDFTime, FastKDFMemory, FastKDFThreads)
+	if err != nil {
+		t.Fatalf("deriveKeys other password: %v", err)
+	}
+	t.Cleanup(otherPassword.wipe)
+	if bytes.Equal(first.db, otherPassword.db) {
+		t.Fatal("different passwords derived the same key")
+	}
+
+	otherSalt, err := deriveKeys("password", []byte("fedcba9876543210"), FastKDFTime, FastKDFMemory, FastKDFThreads)
+	if err != nil {
+		t.Fatalf("deriveKeys other salt: %v", err)
+	}
+	t.Cleanup(otherSalt.wipe)
+	if bytes.Equal(first.db, otherSalt.db) {
+		t.Fatal("different salts derived the same key")
+	}
+}
+
+func TestStoreKeysWipe(t *testing.T) {
+	keys, err := deriveKeys("password", []byte("0123456789abcdef"), FastKDFTime, FastKDFMemory, FastKDFThreads)
+	if err != nil {
+		t.Fatalf("deriveKeys: %v", err)
+	}
+	keys.wipe()
+	for name, key := range map[string][]byte{
+		"canary": keys.canary,
+		"db":     keys.db,
+		"fs":     keys.fs,
+		"ts":     keys.ts,
+		"vec":    keys.vec,
+		"kv":     keys.kv,
+	} {
+		if !bytes.Equal(key, make([]byte, len(key))) {
+			t.Errorf("%s key was not wiped", name)
+		}
+	}
+	var nilKeys *storeKeys
+	nilKeys.wipe() // must not panic
 }

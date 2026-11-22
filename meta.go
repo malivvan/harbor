@@ -27,11 +27,13 @@ const (
 	EncryptVecPointIDs
 	EncryptVecCollectionNames
 	EncryptVecPoints
+	EncryptKVValues
 	EncryptDB  = EncryptDBKeys | EncryptDBValues | EncryptDBMetadata
 	EncryptFS  = EncryptFSContent | EncryptFSMetadata
 	EncryptTS  = EncryptTSValues | EncryptTSSeriesNames
 	EncryptVec = EncryptVecPointIDs | EncryptVecCollectionNames | EncryptVecPoints
-	EncryptAll = EncryptDB | EncryptFS | EncryptTS | EncryptVec
+	EncryptKV  = EncryptKVValues
+	EncryptAll = EncryptDB | EncryptFS | EncryptTS | EncryptVec | EncryptKV
 )
 
 // hasFlag reports whether all bits in other are set in flags.
@@ -101,9 +103,9 @@ func deriveSeed(password, salt []byte, time, memory uint32, threads uint8) []byt
 	return argon2.IDKey(password, salt, time, memory, threads, KeySize)
 }
 
-// Metadata is stored as one unencrypted binary record in its own bucket.
-// Keeping it under a single name makes the pre-decrypt configuration easy to
-// find and leaves no other header or KDF bookkeeping outside it.
+// Bucket and record names of the unencrypted store configuration. Keeping it
+// under a single record makes the pre-decrypt configuration easy to find and
+// leaves no other header or KDF bookkeeping outside it.
 var (
 	metadataBucket    = []byte("storm.Metadata")
 	metadataRecordKey = []byte("Metadata")
@@ -113,6 +115,9 @@ const (
 	// canaryPlaintext is sealed with a key derived from the password and
 	// stored in the Metadata record. Opening the store verifies it, so a wrong
 	// password is rejected even when the sub-stores are not encrypted.
+	//
+	// The sealed plaintext also binds the persisted encryption flags (see
+	// canaryPlaintextFor), so flipping a flag bit invalidates the canary.
 	canaryPlaintext = "storm/canary/v1"
 
 	// metadataFixedSize is salt | time | flags | memory | threads | canary
@@ -203,6 +208,20 @@ func readMetadata(bdb *bolt.DB) (meta Metadata, init bool, err error) {
 	err = bdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(metadataBucket)
 		if b == nil {
+			// A missing Metadata bucket only means a brand-new store when the
+			// database holds no buckets at all. Otherwise the metadata was
+			// lost or the file is not a Storm store; initializing fresh
+			// metadata would silently mask that.
+			empty := true
+			if err := tx.ForEach(func([]byte, *bolt.Bucket) error {
+				empty = false
+				return nil
+			}); err != nil {
+				return err
+			}
+			if !empty {
+				return fmt.Errorf("%w: missing Metadata bucket in a non-empty database", ErrCorruptStore)
+			}
 			init = true
 			return nil
 		}
@@ -256,8 +275,8 @@ func writeMetadata(bdb *bolt.DB, md Metadata) error {
 	return nil
 }
 
-// Metadata returns the persisted salt and Argon2id cost parameters. A closed
-// store returns ErrClosed.
+// Metadata returns the persisted salt, Argon2id cost parameters and encryption
+// flags. A closed store returns ErrClosed.
 func (s *Store) Metadata() (salt []byte, time, memory uint32, threads uint8, flags uint16, err error) {
 	err = s.withDB(func(bdb *bolt.DB) error {
 		meta, init, err := readMetadata(bdb)
