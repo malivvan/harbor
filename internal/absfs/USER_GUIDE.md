@@ -25,7 +25,7 @@ This guide provides comprehensive instructions for using the absfs package to wo
 ### Installation
 
 ```bash
-go get github.com/malivvan/storm/internal/absfs
+go get github.com/malivvan/harbor/internal/absfs
 ```
 
 ### Basic Example
@@ -35,7 +35,7 @@ package main
 
 import (
     "fmt"
-    "github.com/malivvan/storm/internal/absfs"
+    "github.com/malivvan/harbor/internal/absfs"
     "github.com/absfs/osfs"
 )
 
@@ -1304,13 +1304,13 @@ func ensureDir(fs absfs.FileSystem, path string) error {
 - [PATH_HANDLING.md](PATH_HANDLING.md) - Comprehensive cross-platform path documentation
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Design decisions and internal architecture
 - [SECURITY.md](SECURITY.md) - Security considerations
-- [GoDoc](https://pkg.go.dev/github.com/malivvan/storm/internal/absfs) - API reference
+- [GoDoc](https://pkg.go.dev/github.com/malivvan/harbor/internal/absfs) - API reference
 
 ---
 
 ## Getting Help
 
-- Open an issue: https://github.com/malivvan/storm/internal/absfs/issues
+- Open an issue: https://github.com/malivvan/harbor/internal/absfs/issues
 - Read the documentation files linked above
 - Check existing filesystem implementations for examples
 

@@ -21,7 +21,7 @@ var ErrClosed = errors.New("vec: storage is closed")
 
 const collectionsMetaBucket = "__collections_meta__"
 
-// reservedTopLevelBuckets are the top-level buckets Storm itself creates in a
+// reservedTopLevelBuckets are the top-level buckets Harbor itself creates in a
 // shared database. They are never vector collections, even when a vec Store is
 // opened at the database root.
 var reservedTopLevelBuckets = map[string]bool{
@@ -30,7 +30,7 @@ var reservedTopLevelBuckets = map[string]bool{
 	"fs":                  true,
 	"ts":                  true,
 	"vec":                 true,
-	"storm.Metadata":      true,
+	"harbor.Metadata":     true,
 }
 
 // Store handles local persistence using BoltDB (bbolt).
@@ -84,7 +84,7 @@ func (s *Store) update(fn func(tx *bbolt.Tx) error) error {
 // document for every complex payload value of a point. It keeps the wire
 // format backward compatible: records written by older versions simply have
 // per-key KindJSON values instead.
-const payloadJSONKey = "\x00__storm_json_payload__"
+const payloadJSONKey = "\x00__harbor_json_payload__"
 
 func toStoredPoint(p *PointStruct) (*StoredPoint, error) {
 	stored := &StoredPoint{
@@ -517,7 +517,7 @@ func (s *Store) metaBucket(tx *bbolt.Tx, create bool) (*bbolt.Bucket, error) {
 //
 // The caller owns the bbolt handle passed to Open; Store.Close closes it as a
 // convenience for standalone use. An embedding store that shares one handle
-// (the storm root package) must call Flush instead of Close and close the
+// (the harbor root package) must call Flush instead of Close and close the
 // handle itself. Close is idempotent.
 func (s *Store) Close() error {
 	s.closeMu.Lock()
@@ -544,7 +544,7 @@ func (s *Store) Close() error {
 }
 
 // SetOwnsDB controls whether Close closes the bbolt handle. An embedding store
-// that shares one handle (the storm root package) sets it to false; standalone
+// that shares one handle (the harbor root package) sets it to false; standalone
 // users keep the default true.
 func (s *Store) SetOwnsDB(owns bool) {
 	if s != nil {

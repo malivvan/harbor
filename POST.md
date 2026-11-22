@@ -33,7 +33,7 @@ authoritative list.
 - **P1** S3 `x-amz-*` headers are all signed (the fake verifier enforces it);
   chunked writes commit the offset only on success; corrupt dirent/root/chunk
   metadata returns errors; db/fs/ts/vec reject unknown format versions;
-  `ReadDir` distinguishes missing paths and files; `storm.Close` always releases
+  `ReadDir` distinguishes missing paths and files; `harbor.Close` always releases
   the bbolt handle; a failed vec flush cannot resurrect deleted points;
   `EncryptPointIDs` also encrypts the stored value.
 - **P2/P3** `Limit(0)` is an empty success; the pre-auth KDF ceiling is 1 GiB;
@@ -64,7 +64,7 @@ These are deliberately left as follow-ups; none is a P0 data-loss item.
    options cannot make quantized collections unusable or silently misread. Add
    a reopen test for the default and a custom quantizer.
 2. **Sub-store rotation through the root (P1-7).** Sub-store `RotateAll`
-   currently rotates a key that `storm.Open` re-derives from the password.
+   currently rotates a key that `harbor.Open` re-derives from the password.
    Either add root-level password re-derivation/re-sealing or make root-owned
    sub-stores reject rotation with a clear error. Until then, document the
    limitation in the rotation section of the README.

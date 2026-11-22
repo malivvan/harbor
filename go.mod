@@ -1,4 +1,4 @@
-module github.com/malivvan/storm
+module github.com/malivvan/harbor
 
 go 1.27.4
 

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/malivvan/storm/internal/crypto"
+	"github.com/malivvan/harbor/internal/crypto"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -16,9 +16,9 @@ const KeySize = crypto.KeySize
 // crypto. A zero Config, or one with no encryption feature enabled, keeps
 // the plaintext on-disk format and uses the default JSON codec.
 type Config struct {
-	// Root is the bucket path below which all Storm data lives. Each element
+	// Root is the bucket path below which all Harbor data lives. Each element
 	// is one nested bucket name. A nil or empty Root means the database root,
-	// so Storm's buckets are top-level. The storm root package passes
+	// so Harbor's buckets are top-level. The harbor root package passes
 	// [][]byte{[]byte("db")} explicitly.
 	Root [][]byte
 
@@ -57,7 +57,7 @@ const (
 )
 
 // sivInfoPrefix domain-separates the deterministic key ciphers.
-const sivInfoPrefix = "storm/db/keys/"
+const sivInfoPrefix = "harbor/db/keys/"
 
 // encState is the shared encryption configuration of a Store. Reachable from
 // every node through its Store pointer. A nil encState means plaintext: every
@@ -156,7 +156,7 @@ func (e *encState) openKey(cipherKey []byte, domain string) ([]byte, error) {
 const (
 	markerKey       = "\x00__db_enc__"
 	markerMagic     = "DENC"
-	canaryPlaintext = "storm/db/aead/v1"
+	canaryPlaintext = "harbor/db/aead/v1"
 )
 
 const (
@@ -330,7 +330,7 @@ func (n *node) hasUserData(ctx context.Context) (bool, error) {
 		if b == nil {
 			return nil
 		}
-		// The reserved entries of __database are written by Storm itself:
+		// The reserved entries of __database are written by Harbor itself:
 		// the marker, the version record and the per-bucket metadata bucket.
 		// Anything else counts as user data.
 		if err := b.ForEach(func(key, value []byte) error {

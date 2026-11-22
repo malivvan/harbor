@@ -1,4 +1,4 @@
-package storm
+package harbor
 
 import (
 	"bytes"
@@ -11,13 +11,13 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/malivvan/storm/db"
-	"github.com/malivvan/storm/internal/crypto"
-	"github.com/malivvan/storm/ts"
-	"github.com/malivvan/storm/vec"
+	"github.com/malivvan/harbor/db"
+	"github.com/malivvan/harbor/internal/crypto"
+	"github.com/malivvan/harbor/ts"
+	"github.com/malivvan/harbor/vec"
 )
 
-type stormRecord struct {
+type harborRecord struct {
 	ID   int    `db:"id,increment"`
 	Name string `db:"index"`
 }
@@ -52,7 +52,7 @@ func mustClose(t *testing.T, s *Store) {
 
 func TestStoreRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "storm.db")
+	path := filepath.Join(t.TempDir(), "harbor.db")
 	const password = "correct horse battery staple"
 
 	s := mustOpen(t, path, password)
@@ -109,7 +109,7 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatalf("ts aggregate returned %d samples, want 1", len(samples))
 	}
 
-	if err := s.DB().Save(ctx, &stormRecord{Name: "alice"}); err != nil {
+	if err := s.DB().Save(ctx, &harborRecord{Name: "alice"}); err != nil {
 		t.Fatalf("db save: %v", err)
 	}
 
@@ -149,7 +149,7 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatalf("ts range after reopen = %v, %v; want 1 point", points, err)
 	}
 
-	var rec stormRecord
+	var rec harborRecord
 	if err := s.DB().One(ctx, "Name", "alice", &rec); err != nil {
 		t.Fatalf("db one after reopen: %v", err)
 	}

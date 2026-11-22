@@ -5,23 +5,23 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/malivvan/storm/db/index"
+	"github.com/malivvan/harbor/db/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
 
 // TestNewListIndexReadSkipsIDsBucket verifies that read-only list indexes do
-// not require or open the storm__ids bucket: reads must work from the value
+// not require or open the harbor__ids bucket: reads must work from the value
 // bucket alone, and the IDs bucket is resolved only when a mutation needs it.
 func TestNewListIndexReadSkipsIDsBucket(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "storm.db")
+	path := filepath.Join(t.TempDir(), "harbor.db")
 
 	db, err := bolt.Open(path, 0600, nil)
 	require.NoError(t, err)
 	defer db.Close()
 
-	// Store a list-index entry without creating the storm__ids bucket, as an
+	// Store a list-index entry without creating the harbor__ids bucket, as an
 	// index written by an older version or a partially initialised index.
 	require.NoError(t, db.Update(func(tx *bolt.Tx) error {
 		records, err := tx.CreateBucket([]byte("records"))
@@ -39,7 +39,7 @@ func TestNewListIndexReadSkipsIDsBucket(t *testing.T) {
 		records := tx.Bucket([]byte("records"))
 		idx, err := index.NewListIndexRead(records, []byte("idx"))
 		require.NoError(t, err)
-		require.Nil(t, idx.IDs, "read-only construction must not open storm__ids")
+		require.Nil(t, idx.IDs, "read-only construction must not open harbor__ids")
 
 		ids, err := idx.All(ctx, []byte("hello"), nil)
 		require.NoError(t, err)

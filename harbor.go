@@ -1,8 +1,8 @@
-// Package storm exposes a single bbolt-backed store that combines the db, fs,
+// Package harbor exposes a single bbolt-backed store that combines the db, fs,
 // ts and vec sub-stores behind one password.
 //
 // The password is stretched with Argon2id using the salt and cost parameters
-// kept in an unencrypted "storm.Metadata" record, then one key is derived per
+// kept in an unencrypted "harbor.Metadata" record, then one key is derived per
 // sub-store. The password itself is never stored. A sealed canary in the
 // Metadata detects a wrong password even for stores created with encryption
 // disabled.
@@ -12,7 +12,7 @@
 // EncryptKVValues (included in EncryptAll, the default), values are sealed with
 // a dedicated AES-256-GCM key; keys stay in the clear so byte-ordered listing
 // keeps working. Use EncryptNone/Plaintext to opt out.
-package storm
+package harbor
 
 import (
 	"context"
@@ -22,17 +22,17 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/malivvan/storm/db"
-	"github.com/malivvan/storm/fs"
-	"github.com/malivvan/storm/internal/crypto"
-	"github.com/malivvan/storm/internal/slip21"
-	"github.com/malivvan/storm/ts"
-	"github.com/malivvan/storm/vec"
+	"github.com/malivvan/harbor/db"
+	"github.com/malivvan/harbor/fs"
+	"github.com/malivvan/harbor/internal/crypto"
+	"github.com/malivvan/harbor/internal/slip21"
+	"github.com/malivvan/harbor/ts"
+	"github.com/malivvan/harbor/vec"
 	bolt "go.etcd.io/bbolt"
 )
 
 // The key/value API uses bucket 0. Store Metadata lives in its own
-// "storm.Metadata" bucket (see meta.go), so user keys can never collide with it.
+// "harbor.Metadata" bucket (see meta.go), so user keys can never collide with it.
 var kvBucket = []byte{0}
 
 // namedRoot returns the default one-element bucket path for a sub-store.
@@ -42,31 +42,31 @@ func namedRoot(name string) [][]byte {
 
 // Domain-separated labels used to derive one key per component.
 const (
-	labelDB  = "storm/db/v1"
-	labelFS  = "storm/fs/v1"
-	labelTS  = "storm/ts/v1"
-	labelVec = "storm/vec/v1"
-	labelKV  = "storm/kv/v1"
+	labelDB  = "harbor/db/v1"
+	labelFS  = "harbor/fs/v1"
+	labelTS  = "harbor/ts/v1"
+	labelVec = "harbor/vec/v1"
+	labelKV  = "harbor/kv/v1"
 )
 
 // Errors returned by the package.
 var (
 	// ErrKeyNotFound is returned by Get for a missing key.
-	ErrKeyNotFound = errors.New("storm: key not found")
+	ErrKeyNotFound = errors.New("harbor: key not found")
 
 	// ErrInvalidKey is returned by Set, Delete and Has for an empty key.
-	ErrInvalidKey = errors.New("storm: empty key")
+	ErrInvalidKey = errors.New("harbor: empty key")
 
 	// ErrClosed is returned by operations on a closed Store.
-	ErrClosed = errors.New("storm: store is closed")
+	ErrClosed = errors.New("harbor: store is closed")
 
 	// ErrInvalidOptions reports a nil Options value or an unusable
 	// configuration.
-	ErrInvalidOptions = errors.New("storm: invalid options")
+	ErrInvalidOptions = errors.New("harbor: invalid options")
 
 	// ErrInvalidPassword reports an empty password or a password that does not
 	// decrypt the store canary.
-	ErrInvalidPassword = errors.New("storm: invalid password")
+	ErrInvalidPassword = errors.New("harbor: invalid password")
 )
 
 // Options configures Open.
@@ -200,7 +200,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptValues:   hasFlag(md.Flags, EncryptDBValues),
 		EncryptMetadata: hasFlag(md.Flags, EncryptDBMetadata),
 	}); err != nil {
-		return nil, fmt.Errorf("storm: open db store: %w", err)
+		return nil, fmt.Errorf("harbor: open db store: %w", err)
 	}
 	if s.fs, err = fs.Open(ctx, bdb, fs.Config{
 		Root:            namedRoot(fs.Name),
@@ -208,7 +208,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptMetadata: hasFlag(md.Flags, EncryptFSMetadata),
 		EncryptContent:  hasFlag(md.Flags, EncryptFSContent),
 	}); err != nil {
-		return nil, fmt.Errorf("storm: open fs store: %w", err)
+		return nil, fmt.Errorf("harbor: open fs store: %w", err)
 	}
 	if s.ts, err = ts.Open(ctx, bdb, ts.Config{
 		Root:               namedRoot(ts.Name),
@@ -216,11 +216,11 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptValues:      hasFlag(md.Flags, EncryptTSValues),
 		EncryptSeriesNames: hasFlag(md.Flags, EncryptTSSeriesNames),
 	}); err != nil {
-		return nil, fmt.Errorf("storm: open ts store: %w", err)
+		return nil, fmt.Errorf("harbor: open ts store: %w", err)
 	}
 	if hasFlag(md.Flags, EncryptKVValues) {
 		if s.kvc, err = crypto.NewKeychain([][]byte{keys.kv}); err != nil {
-			return nil, fmt.Errorf("storm: open key/value store: %w", err)
+			return nil, fmt.Errorf("harbor: open key/value store: %w", err)
 		}
 	}
 	if s.vec, err = vec.Open(ctx, bdb, vec.Config{
@@ -232,7 +232,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptPointIDs:        hasFlag(md.Flags, EncryptVecPointIDs),
 		EncryptCollectionNames: hasFlag(md.Flags, EncryptVecCollectionNames),
 	}); err != nil {
-		return nil, fmt.Errorf("storm: open vec store: %w", err)
+		return nil, fmt.Errorf("harbor: open vec store: %w", err)
 	}
 	// The vec store shares this handle with db, fs and ts; it must never close
 	// it on its own.
@@ -349,11 +349,11 @@ func canaryPlaintextFor(flags uint16) string {
 func sealCanary(key []byte, flags uint16) ([]byte, error) {
 	keychain, err := canaryKeychain(key)
 	if err != nil {
-		return nil, fmt.Errorf("storm: initialize canary key: %w", err)
+		return nil, fmt.Errorf("harbor: initialize canary key: %w", err)
 	}
 	sealed, err := keychain.Seal([]byte(canaryPlaintextFor(flags)))
 	if err != nil {
-		return nil, fmt.Errorf("storm: seal canary: %w", err)
+		return nil, fmt.Errorf("harbor: seal canary: %w", err)
 	}
 	return sealed, nil
 }
@@ -383,19 +383,19 @@ func deriveKeys(password string, salt []byte, time, memory uint32, threads uint8
 
 	master, err := slip21.New(seed)
 	if err != nil {
-		return nil, fmt.Errorf("storm: derive master key: %w", err)
+		return nil, fmt.Errorf("harbor: derive master key: %w", err)
 	}
 	defer master.Destroy()
 
 	derive := func(label string) ([]byte, error) {
 		node, err := master.Derive([]byte(label))
 		if err != nil {
-			return nil, fmt.Errorf("storm: derive %s key: %w", label, err)
+			return nil, fmt.Errorf("harbor: derive %s key: %w", label, err)
 		}
 		defer node.Destroy()
 		key := node.Key()
 		if len(key) != KeySize {
-			return nil, fmt.Errorf("storm: derived %s key has %d bytes", label, len(key))
+			return nil, fmt.Errorf("harbor: derived %s key has %d bytes", label, len(key))
 		}
 		return key, nil
 	}
@@ -497,7 +497,7 @@ func (s *Store) sealValue(plain []byte) ([]byte, error) {
 	}
 	sealed, err := s.kvc.Seal(plain)
 	if err != nil {
-		return nil, fmt.Errorf("storm: seal value: %w", err)
+		return nil, fmt.Errorf("harbor: seal value: %w", err)
 	}
 	return sealed, nil
 }
@@ -509,7 +509,7 @@ func (s *Store) openValue(key string, raw []byte) ([]byte, error) {
 	}
 	plain, err := s.kvc.Open(raw)
 	if err != nil {
-		return nil, fmt.Errorf("storm: open value %q: %w", key, err)
+		return nil, fmt.Errorf("harbor: open value %q: %w", key, err)
 	}
 	return plain, nil
 }
@@ -703,7 +703,7 @@ func (s *Store) Close() error {
 	var flushErr error
 	if s.vec != nil {
 		if err := s.vec.Flush(); err != nil && !errors.Is(err, vec.ErrClosed) {
-			flushErr = fmt.Errorf("storm: flush vec store: %w", err)
+			flushErr = fmt.Errorf("harbor: flush vec store: %w", err)
 		}
 	}
 	closeErr := s.bs.Close()

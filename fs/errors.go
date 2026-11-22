@@ -1,6 +1,6 @@
 package fs
 
-import "github.com/malivvan/storm/internal/crypto"
+import "github.com/malivvan/harbor/internal/crypto"
 
 var (
 	// ErrAuthFailed is returned when encrypted data fails authentication.

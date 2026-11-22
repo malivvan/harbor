@@ -4,7 +4,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// Tx is a Storm facade bound to a bbolt transaction owned by the caller.
+// Tx is a Harbor facade bound to a bbolt transaction owned by the caller.
 //
 // It exposes the complete Node operation surface — Save, Update,
 // DeleteStruct, One, Find, All, AllByIndex, Range, Prefix, Count, Select
@@ -27,7 +27,7 @@ var _ Tx = (*node)(nil)
 //
 // Guarantees:
 //
-//   - Storm never commits, rolls back, closes, or replaces the supplied
+//   - Harbor never commits, rolls back, closes, or replaces the supplied
 //     transaction. No operation on the returned Tx acquires a managed
 //     transaction.
 //   - All reads and writes through the returned Tx, including nodes derived
@@ -42,7 +42,7 @@ var _ Tx = (*node)(nil)
 // The returned Tx is valid only for the lifetime of the supplied transaction.
 // Using it after the caller commits or rolls back is undefined behavior, just
 // as using the bbolt transaction itself would be: reads may panic and writes
-// fail with bbolt's ErrTxClosed. Storm never falls back to a managed
+// fail with bbolt's ErrTxClosed. Harbor never falls back to a managed
 // transaction for a dead handle.
 func (s *Store) Attach(tx *bolt.Tx) (Tx, error) {
 	if s == nil || tx == nil {

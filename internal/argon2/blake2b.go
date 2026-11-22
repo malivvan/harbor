@@ -8,7 +8,7 @@ import (
 	"encoding/binary"
 	"hash"
 
-	"github.com/malivvan/storm/internal/argon2/blake2b"
+	"github.com/malivvan/harbor/internal/argon2/blake2b"
 )
 
 // blake2bHash computes an arbitrary long hash value of in

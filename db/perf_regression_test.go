@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/malivvan/storm/db/q"
+	"github.com/malivvan/harbor/db/q"
 	"github.com/stretchr/testify/require"
 )
 

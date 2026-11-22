@@ -1,6 +1,6 @@
-# storm [![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/storm/db.svg)](https://pkg.go.dev/github.com/malivvan/storm/db)
+# harbor [![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/harbor/db.svg)](https://pkg.go.dev/github.com/malivvan/harbor/db)
 
-Storm is a simple and powerful toolkit for [BoltDB](https://github.com/etcd-io/bbolt), forked from [Storm](https://github.com/asdine/storm). It provides indexes, a wide range of methods to store and fetch data, an advanced query system, and much more.
+Harbor is a simple and powerful toolkit for [BoltDB](https://github.com/etcd-io/bbolt), forked from [Storm](https://github.com/asdine/storm). It provides indexes, a wide range of methods to store and fetch data, an advanced query system, and much more.
 
 ## Table of Contents
 
@@ -33,14 +33,14 @@ Storm is a simple and powerful toolkit for [BoltDB](https://github.com/etcd-io/b
 
 ## Installation
 
-Storm requires **Go 1.27.3** or later.
+Harbor requires **Go 1.27.3** or later.
 
 ```sh
-go get github.com/malivvan/storm
+go get github.com/malivvan/harbor
 ```
 
 ```go
-import storm "github.com/malivvan/storm/db"
+import harbor "github.com/malivvan/harbor/db"
 ```
 
 The public API lives in the `db` package.
@@ -49,13 +49,13 @@ The public API lives in the `db` package.
 
 This module contains several packages:
 
-- `db` — the Storm toolkit documented in this README (indexes, queries, managed
+- `db` — the Harbor toolkit documented in this README (indexes, queries, managed
   transactions).
 - `ts` — the time-series store documented in [Time series store (ts)](#time-series-store-ts).
 - `fs` — a complete filesystem on top of bbolt; see [`fs/README.md`](fs/README.md).
 - `vec` — a vector store with Flat and HNSW indexes, filters, quantization and
   optional encryption.
-- `storm` (the module root) — opens one bbolt file behind one password and
+- `harbor` (the module root) — opens one bbolt file behind one password and
   exposes the `DB`, `FS`, `TS` and `Vec` sub-stores plus a small key/value API.
 
 The API reference below covers `db` and `ts`; the other packages are summarized
@@ -64,9 +64,9 @@ in this section.
 ### Root store
 
 ```go
-import storm "github.com/malivvan/storm"
+import harbor "github.com/malivvan/harbor"
 
-store, err := storm.Open(ctx, "app.db", 0600, &storm.Options{
+store, err := harbor.Open(ctx, "app.db", 0600, &harbor.Options{
     Password: "correct horse battery staple",
 })
 if err != nil {
@@ -89,7 +89,7 @@ _ = store.Vec()
 _ = store.Close()
 ```
 
-`storm.Open` creates Argon2id metadata and derives one domain-separated key per
+`harbor.Open` creates Argon2id metadata and derives one domain-separated key per
 sub-store; use `Options{Plaintext: true}` to opt out of encryption entirely.
 
 ## Quick start
@@ -103,7 +103,7 @@ import (
 	"log"
 	"time"
 
-	storm "github.com/malivvan/storm/db"
+	harbor "github.com/malivvan/harbor/db"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -127,7 +127,7 @@ func main() {
 		}
 	}()
 
-	db, err := storm.Open(ctx, bDB, storm.Config{})
+	db, err := harbor.Open(ctx, bDB, harbor.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func main() {
 
 ## Declaring models
 
-Storm maps Go structs to BoltDB buckets. The struct name becomes the bucket name unless a `BucketNamer` implementation provides a custom name.
+Harbor maps Go structs to BoltDB buckets. The struct name becomes the bucket name unless a `BucketNamer` implementation provides a custom name.
 
 ```go
 type User struct {
@@ -212,7 +212,7 @@ type User struct {
 	Name string `db:"index"`
 }
 
-func (u User) StormBucketName() string {
+func (u User) HarborBucketName() string {
 	return "customers"
 }
 ```
@@ -256,10 +256,10 @@ func Open(ctx context.Context, db *bolt.DB, cfg db.Config) (*Store, error)
 
 The parameters are:
 
-- `db` — a caller-owned `*bolt.DB`. It must be non-nil and remain open while Storm is in use.
+- `db` — a caller-owned `*bolt.DB`. It must be non-nil and remain open while Harbor is in use.
 - `cfg` — optional store configuration. `cfg.Root` is an optional bucket path (`[][]byte`); each element is one nested bucket name, and an empty path operates from the database root. `cfg.Codec` selects the codec used for entities; pass a zero `Config` (or a nil `Codec`) to use the default JSON codec.
 
-`Open` does not take ownership of `db`. `DB.Close()` releases the Storm wrapper but
+`Open` does not take ownership of `db`. `DB.Close()` releases the Harbor wrapper but
 leaves the bbolt database open; the caller remains responsible for closing it.
 
 ```go
@@ -273,13 +273,13 @@ defer func() {
 	}
 }()
 
-db, err := storm.Open(ctx, bDB, storm.Config{})
+db, err := harbor.Open(ctx, bDB, harbor.Config{})
 if err != nil {
 	log.Fatal(err)
 }
 defer func() {
 	if err := db.Close(); err != nil {
-		log.Println("storm close:", err)
+		log.Println("harbor close:", err)
 	}
 }()
 ```
@@ -357,8 +357,8 @@ err = db.Prefix(ctx, "Name", "Jo", &users)
 Pagination is available via `FindOption`:
 
 ```go
-err := db.Find(ctx, "Group", "staff", &users, storm.Limit(10), storm.Skip(5))
-err = db.All(ctx, &users, storm.Limit(10), storm.Skip(5), storm.Reverse())
+err := db.Find(ctx, "Group", "staff", &users, harbor.Limit(10), harbor.Skip(5))
+err = db.All(ctx, &users, harbor.Limit(10), harbor.Skip(5), harbor.Reverse())
 ```
 
 ### Query API
@@ -366,7 +366,7 @@ err = db.All(ctx, &users, storm.Limit(10), storm.Skip(5), storm.Reverse())
 For complex queries, use `Select` with matchers from the `q` package:
 
 ```go
-import "github.com/malivvan/storm/db/q"
+import "github.com/malivvan/harbor/db/q"
 
 // Matchers
 q.Eq("Name", "John")
@@ -443,12 +443,12 @@ err = db.ReIndex(ctx, &User{})
 
 ## Managed transactions
 
-Storm provides callback-managed transactions only. Manual `Begin`/`Commit`/`Rollback` APIs do not exist.
+Harbor provides callback-managed transactions only. Manual `Begin`/`Commit`/`Rollback` APIs do not exist.
 
 ### ReadTransaction
 
 ```go
-err := db.ReadTransaction(ctx, func(tx storm.Node) error {
+err := db.ReadTransaction(ctx, func(tx harbor.Node) error {
 	var u User
 	if err := tx.One(ctx, "ID", 1, &u); err != nil {
 		return err
@@ -461,7 +461,7 @@ err := db.ReadTransaction(ctx, func(tx storm.Node) error {
 ### WriteTransaction
 
 ```go
-err := db.WriteTransaction(ctx, func(tx storm.Node) error {
+err := db.WriteTransaction(ctx, func(tx harbor.Node) error {
 	if err := tx.Save(ctx, &accountA); err != nil {
 		return err
 	}
@@ -484,23 +484,23 @@ err := db.WriteTransaction(ctx, func(tx storm.Node) error {
 ### Attaching to a caller-owned transaction
 
 For units of work that must own their bbolt transaction (for example, to mix
-Storm record/index operations with raw BoltDB bucket writes), use `Attach`
-to bind a Storm facade to an existing transaction:
+Harbor record/index operations with raw BoltDB bucket writes), use `Attach`
+to bind a Harbor facade to an existing transaction:
 
 ```go
-// bDB is the caller-owned *bbolt.DB passed to storm.Open.
+// bDB is the caller-owned *bbolt.DB passed to harbor.Open.
 tx, err := bDB.Begin(true)
 if err != nil {
 	return err
 }
 defer tx.Rollback()
 
-txn, err := db.Attach(tx) // storm.Tx
+txn, err := db.Attach(tx) // harbor.Tx
 if err != nil {
 	return err
 }
 
-// Storm record write (record + indexes) in the caller's transaction…
+// Harbor record write (record + indexes) in the caller's transaction…
 if err := txn.Save(ctx, &account); err != nil {
 	return err
 }
@@ -522,7 +522,7 @@ return tx.Commit()
 - `Tx` exposes the full `Node` surface (`Save`, `Update`, `One`, `Find`,
   `All`, queries, scans, KV access); descendants from `From`, `WithCodec`,
   `PrefixScan`, and `RangeScan` remain transaction-bound.
-- Storm never commits, rolls back, closes, or replaces the supplied
+- Harbor never commits, rolls back, closes, or replaces the supplied
   transaction, and it never opens a managed transaction for a bound `Tx`.
 - Reads and writes through the bound `Tx` use the supplied transaction:
   uncommitted writes are visible to reads through the same `Tx` and invisible
@@ -562,7 +562,7 @@ The `Bucket()` method returns the bucket path as a `[]string`. The `BucketScanne
 
 ## Key/value store
 
-Storm can also be used as a simple key/value store:
+Harbor can also be used as a simple key/value store:
 
 ```go
 // Store
@@ -591,7 +591,7 @@ series under a root bucket, and each point is stored as an order-preserving
 8-byte timestamp key with an 8-byte `float64` value:
 
 ```go
-import "github.com/malivvan/storm/ts"
+import "github.com/malivvan/harbor/ts"
 
 store, err := ts.Open(ctx, bDB, ts.Config{Root: [][]byte{[]byte("metrics")}})
 if err != nil {
@@ -632,7 +632,7 @@ policy, and `Store.SetNow` injects a clock for deterministic tests.
 
 Database open, CRUD, finder, query, scanner, KV, and managed-transaction paths accept `context.Context`; passing nil to those context-aware operations returns an error matching `ErrNilContext`. `Close` is a lifecycle exception.
 
-Cancellation is cooperative, not preemptive. Storm checks the context at operation boundaries and loop checkpoints. It cannot interrupt:
+Cancellation is cooperative, not preemptive. Harbor checks the context at operation boundaries and loop checkpoints. It cannot interrupt:
 
 - a filesystem syscall,
 - a bbolt mutex or lock wait,
@@ -650,7 +650,7 @@ Always use `errors.Is` for sentinel classification, never direct equality or str
 ```go
 var user User
 if err := db.One(ctx, "ID", 999, &user); err != nil {
-	if errors.Is(err, storm.ErrNotFound) {
+	if errors.Is(err, harbor.ErrNotFound) {
 		// handle missing record
 	}
 	if errors.Is(err, context.Canceled) {
@@ -664,10 +664,10 @@ if err := db.One(ctx, "ID", 999, &user); err != nil {
 Errors are wrapped with an operation label:
 
 ```
-storm <operation>: <cause>
+harbor <operation>: <cause>
 ```
 
-Wrapping preserves Storm sentinels, `context.Canceled`, `context.DeadlineExceeded`, bbolt errors, callback errors, and codec errors in the error chain. Callers can match the innermost cause with `errors.Is` through the wrapper.
+Wrapping preserves Harbor sentinels, `context.Canceled`, `context.DeadlineExceeded`, bbolt errors, callback errors, and codec errors in the error chain. Callers can match the innermost cause with `errors.Is` through the wrapper.
 
 ### Sentinels
 
@@ -693,13 +693,13 @@ Do not parse error strings. Use `errors.Is` (and `errors.As` if a typed error is
 
 ## Database lifecycle
 
-Storm always borrows the bbolt database supplied to `Open`:
+Harbor always borrows the bbolt database supplied to `Open`:
 
 - `Open` accepts an already-open `*bolt.DB`.
 - A nil database returns an error matching `ErrNilParam`.
-- Storm does not close the database.
+- Harbor does not close the database.
 - `DB.Close()` returns nil and does not close the underlying database.
-- The caller owns the lifecycle and must keep the database open while Storm is active.
+- The caller owns the lifecycle and must keep the database open while Harbor is active.
 
 Close the bbolt database after `DB.Close()` when it is no longer needed.
 
@@ -710,7 +710,7 @@ A few defaults are chosen for portability, not maximum throughput:
 - **Codec.** Entity records use `encoding/json` by default. JSON decoding
   dominates unindexed scans, `Count` and `Delete` over large buckets. For
   throughput-sensitive workloads pass a faster codec through
-  `db.Config.Codec` (or `storm.Options.Codec`). `Count` and
+  `db.Config.Codec` (or `harbor.Options.Codec`). `Count` and
   matcher-less `Delete` already skip decoding entirely.
 - **fsync.** Every bbolt commit is an fsync. Batch writes instead of saving
   one record per loop: use `db.WriteTransaction` for multiple entity
@@ -727,15 +727,15 @@ requests, prints a `benchstat` comparison against the base commit.
 
 ## Codecs
 
-Storm marshals data to BoltDB using a codec. The default is JSON, exposed as
+Harbor marshals data to BoltDB using a codec. The default is JSON, exposed as
 `db.JSONCodec`. Set `Config.Codec` to override it:
 
 ```go
-import stormdb "github.com/malivvan/storm/db"
+import harbordb "github.com/malivvan/harbor/db"
 
-store, err := storm.Open(ctx, bDB, storm.Config{}) // JSON, the default
-store, err = storm.Open(ctx, bDB, stormdb.Config{
-	Codec: stormdb.JSONCodec, // explicit
+store, err := harbor.Open(ctx, bDB, harbor.Config{}) // JSON, the default
+store, err = harbor.Open(ctx, bDB, harbordb.Config{
+	Codec: harbordb.JSONCodec, // explicit
 })
 ```
 
@@ -743,14 +743,14 @@ store, err = storm.Open(ctx, bDB, stormdb.Config{
 
 | Package | Import path | Codec variable |
 |---------|-------------|----------------|
-| JSON (default) | `storm/db` | `db.JSONCodec` |
+| JSON (default) | `harbor/db` | `db.JSONCodec` |
 
 Encryption is not a codec. Pass a `Config` with a `Secret` to `Open` to enable
 native, optional AEAD encryption for a store; a zero config keeps creating
 plaintext stores.
 
 ```go
-store, err := storm.Open(ctx, bDB, storm.Config{
+store, err := harbor.Open(ctx, bDB, harbor.Config{
 	Secret:          key,  // raw 32-byte key
 	EncryptValues:   true, // seal record and key/value values
 	EncryptMetadata: true, // seal auto-increment counters
@@ -778,7 +778,7 @@ type Codec interface {
 
 ### Codec compatibility
 
-Storm records codec metadata for record/KV leaf buckets and an encoded database-version value used during `Open`. An incompatible root codec is classified with `ErrDifferentCodec`; metadata-validating initialization and write operations also classify a mismatched node codec this way. Read paths may instead return the underlying decode error, so nodes configured with `WithCodec` must continue using their matching codec.
+Harbor records codec metadata for record/KV leaf buckets and an encoded database-version value used during `Open`. An incompatible root codec is classified with `ErrDifferentCodec`; metadata-validating initialization and write operations also classify a mismatched node codec this way. Read paths may instead return the underlying decode error, so nodes configured with `WithCodec` must continue using their matching codec.
 
 ## Concurrency and rotation
 
@@ -825,7 +825,7 @@ The same commands run in CI (`.github/workflows/ci.yml`) on every push to
 
 MIT — see [LICENSE](LICENSE).
 
-Storm is a fork of [asdine/storm](https://github.com/asdine/storm); the
+Harbor is a fork of [asdine/storm](https://github.com/asdine/storm); the
 original MIT copyright notices are preserved in [LICENSE](LICENSE).
 
 ## Credits

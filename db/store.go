@@ -25,16 +25,16 @@ const (
 // a custom bucket name. This is essential for runtime-generated types
 // (via reflect.StructOf) that have no static type name.
 type BucketNamer interface {
-	StormBucketName() string
+	HarborBucketName() string
 }
 
 // defaultCodec is the codec used when none is supplied.
 var defaultCodec = JSONCodec
 
-// Open initializes Storm on an already-open bbolt database.
+// Open initializes Harbor on an already-open bbolt database.
 //
 // The caller owns db and must keep it open for the lifetime of the returned
-// Store. Storm never closes db.
+// Store. Harbor never closes db.
 //
 // cfg configures the store. cfg.Root is an optional bucket path; an empty path
 // means the database root. A zero cfg selects the default JSON codec and
@@ -112,7 +112,7 @@ type Store struct {
 	rotMu sync.RWMutex
 }
 
-// Close releases the Storm wrapper. The underlying bbolt database is owned by
+// Close releases the Harbor wrapper. The underlying bbolt database is owned by
 // the caller and is not closed.
 //
 // If the receiver is nil or the underlying bbolt database is nil, Close returns

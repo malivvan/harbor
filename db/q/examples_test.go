@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	storm "github.com/malivvan/storm/db"
-	"github.com/malivvan/storm/db/q"
+	harbor "github.com/malivvan/harbor/db"
+	"github.com/malivvan/harbor/db/q"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -49,17 +49,17 @@ type User struct {
 	CreatedAt time.Time `db:"index"`
 }
 
-func prepareDB() (string, *storm.Store, *bolt.DB) {
-	dir, err := os.MkdirTemp(os.TempDir(), "storm")
+func prepareDB() (string, *harbor.Store, *bolt.DB) {
+	dir, err := os.MkdirTemp(os.TempDir(), "harbor")
 	if err != nil {
 		log.Fatal(err)
 	}
 	ctx := context.Background()
-	bdb, err := bolt.Open(filepath.Join(dir, "storm.db"), 0600, nil)
+	bdb, err := bolt.Open(filepath.Join(dir, "harbor.db"), 0600, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	db, err := storm.Open(ctx, bdb, storm.Config{})
+	db, err := harbor.Open(ctx, bdb, harbor.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}

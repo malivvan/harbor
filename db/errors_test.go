@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/malivvan/storm/db/index"
+	"github.com/malivvan/harbor/db/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
@@ -24,19 +24,19 @@ import (
 func TestSharedSentinelIdentity(t *testing.T) {
 	t.Run("ErrNotFound", func(t *testing.T) {
 		require.Equal(t, index.ErrNotFound, ErrNotFound,
-			"storm.ErrNotFound must be identical to index.ErrNotFound")
+			"harbor.ErrNotFound must be identical to index.ErrNotFound")
 	})
 	t.Run("ErrAlreadyExists", func(t *testing.T) {
 		require.Equal(t, index.ErrAlreadyExists, ErrAlreadyExists,
-			"storm.ErrAlreadyExists must be identical to index.ErrAlreadyExists")
+			"harbor.ErrAlreadyExists must be identical to index.ErrAlreadyExists")
 	})
 	t.Run("ErrNilParam", func(t *testing.T) {
 		require.Equal(t, index.ErrNilParam, ErrNilParam,
-			"storm.ErrNilParam must be identical to index.ErrNilParam")
+			"harbor.ErrNilParam must be identical to index.ErrNilParam")
 	})
 	t.Run("ErrNilContext", func(t *testing.T) {
 		require.Equal(t, index.ErrNilContext, ErrNilContext,
-			"storm.ErrNilContext must be identical to index.ErrNilContext")
+			"harbor.ErrNilContext must be identical to index.ErrNilContext")
 	})
 }
 

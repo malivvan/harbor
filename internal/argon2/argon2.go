@@ -41,7 +41,7 @@ import (
 	"encoding/binary"
 	"sync"
 
-	"github.com/malivvan/storm/internal/argon2/blake2b"
+	"github.com/malivvan/harbor/internal/argon2/blake2b"
 )
 
 // The Argon2 version implemented by this package.

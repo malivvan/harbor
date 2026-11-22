@@ -1,8 +1,8 @@
 # absfs - Abstract File System for go
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/storm/internal/absfs.svg)](https://pkg.go.dev/github.com/malivvan/storm/internal/absfs)
-[![Go Report Card](https://goreportcard.com/badge/github.com/malivvan/storm/internal/absfs)](https://goreportcard.com/report/github.com/malivvan/storm/internal/absfs)
-[![CI](https://github.com/malivvan/storm/internal/absfs/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/storm/internal/absfs/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/harbor/internal/absfs.svg)](https://pkg.go.dev/github.com/malivvan/harbor/internal/absfs)
+[![Go Report Card](https://goreportcard.com/badge/github.com/malivvan/harbor/internal/absfs)](https://goreportcard.com/report/github.com/malivvan/harbor/internal/absfs)
+[![CI](https://github.com/malivvan/harbor/internal/absfs/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/harbor/internal/absfs/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 `absfs` is a go package that defines an abstract filesystem interface.
@@ -24,7 +24,7 @@ Implementors can create stand alone filesystems that implement the `absfs.Filer`
 ## Install 
 
 ```bash
-$ go get github.com/malivvan/storm/internal/absfs
+$ go get github.com/malivvan/harbor/internal/absfs
 ```
 
 ## The Interfaces 
@@ -285,7 +285,7 @@ See [PATH_HANDLING.md](PATH_HANDLING.md) for comprehensive cross-platform path b
 - [Architecture Guide](ARCHITECTURE.md) - Design decisions and internal architecture
 
 ### Reference
-- [GoDoc](https://pkg.go.dev/github.com/malivvan/storm/internal/absfs) - API documentation
+- [GoDoc](https://pkg.go.dev/github.com/malivvan/harbor/internal/absfs) - API documentation
 - [Changelog](CHANGELOG.md) - Version history and changes
 
 ## Contributing
@@ -296,5 +296,5 @@ New FileSystem types do not need to be added to this repo, but we'd be happy to 
 
 ## LICENSE
 
-This project is governed by the MIT License. See [LICENSE](https://github.com/malivvan/storm/internal/absfs/blob/master/LICENSE)
+This project is governed by the MIT License. See [LICENSE](https://github.com/malivvan/harbor/internal/absfs/blob/master/LICENSE)
 

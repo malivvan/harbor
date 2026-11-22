@@ -8,15 +8,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/malivvan/storm/db/index"
+	"github.com/malivvan/harbor/db/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
 
 func TestListIndex(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
 	defer os.RemoveAll(dir)
-	db := openStormDB(t, filepath.Join(dir, "storm.db"))
+	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
 	defer db.Close()
 
 	err := db.bdb.Update(func(tx *bolt.Tx) error {
@@ -163,9 +163,9 @@ func TestListIndex(t *testing.T) {
 }
 
 func TestListIndexReverse(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
 	defer os.RemoveAll(dir)
-	db := openStormDB(t, filepath.Join(dir, "storm.db"))
+	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
 	defer db.Close()
 
 	err := db.bdb.Update(func(tx *bolt.Tx) error {
@@ -208,9 +208,9 @@ func TestListIndexReverse(t *testing.T) {
 }
 
 func TestListIndexAddRemoveID(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
 	defer os.RemoveAll(dir)
-	db := openStormDB(t, filepath.Join(dir, "storm.db"))
+	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
 	defer db.Close()
 
 	db.bdb.Update(func(tx *bolt.Tx) error {
@@ -252,9 +252,9 @@ func TestListIndexAddRemoveID(t *testing.T) {
 }
 
 func TestListIndexAllRecords(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
 	defer os.RemoveAll(dir)
-	db := openStormDB(t, filepath.Join(dir, "storm.db"))
+	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
 	defer db.Close()
 
 	db.bdb.Update(func(tx *bolt.Tx) error {
@@ -331,9 +331,9 @@ func TestListIndexAllRecords(t *testing.T) {
 }
 
 func TestListIndexRange(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
 	defer os.RemoveAll(dir)
-	db := openStormDB(t, filepath.Join(dir, "storm.db"))
+	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
 	defer db.Close()
 
 	db.bdb.Update(func(tx *bolt.Tx) error {
@@ -427,9 +427,9 @@ func TestListIndexRange(t *testing.T) {
 }
 
 func TestListIndexPrefix(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
 	defer os.RemoveAll(dir)
-	db := openStormDB(t, filepath.Join(dir, "storm.db"))
+	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
 	defer db.Close()
 
 	db.bdb.Update(func(tx *bolt.Tx) error {
@@ -505,7 +505,7 @@ func countItems(t *testing.T, bucket *bolt.Bucket) int {
 	c := bucket.Cursor()
 	count := 0
 	for k, id := c.First(); k != nil; k, id = c.Next() {
-		if id == nil || bytes.Equal(k, []byte("storm__ids")) {
+		if id == nil || bytes.Equal(k, []byte("harbor__ids")) {
 			continue
 		}
 		count++

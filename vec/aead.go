@@ -3,7 +3,7 @@ package vec
 import (
 	"fmt"
 
-	"github.com/malivvan/storm/internal/crypto"
+	"github.com/malivvan/harbor/internal/crypto"
 	"go.etcd.io/bbolt"
 )
 
@@ -16,7 +16,7 @@ const KeySize = crypto.KeySize
 type Config struct {
 	// Root is the bucket path below which all collections live. Each element
 	// is one nested bucket name. A nil or empty Root means the database root;
-	// the storm root package passes [][]byte{[]byte("vec")} explicitly.
+	// the harbor root package passes [][]byte{[]byte("vec")} explicitly.
 	Root [][]byte
 
 	// UseQuant enables vector quantization. When true and Quantizer is nil,
@@ -57,7 +57,7 @@ const (
 )
 
 // sivInfoPrefix domain-separates the deterministic name ciphers.
-const sivInfoPrefix = "storm/vec/keys/"
+const sivInfoPrefix = "harbor/vec/keys/"
 
 // encState is the shared encryption configuration of a Store. A nil encState
 // means plaintext: every helper is then an exact passthrough to the point
@@ -151,7 +151,7 @@ func (e *encState) openName(cipherName []byte, domain string) (string, error) {
 const (
 	markerKey       = "\x00__vec_enc__"
 	markerMagic     = "VENC"
-	canaryPlaintext = "storm/vec/aead/v1"
+	canaryPlaintext = "harbor/vec/aead/v1"
 )
 
 const (

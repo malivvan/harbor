@@ -1,6 +1,6 @@
 package db
 
-import "github.com/malivvan/storm/db/index"
+import "github.com/malivvan/harbor/db/index"
 
 // FindOption customizes a finder query.
 type FindOption func(*index.Options)

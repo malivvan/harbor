@@ -6,7 +6,7 @@
 
 package argon2
 
-import "github.com/malivvan/storm/internal/cpu"
+import "github.com/malivvan/harbor/internal/cpu"
 
 func init() {
 	useSSE4 = cpu.X86.HasSSE41

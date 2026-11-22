@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/malivvan/storm/db/q"
+	"github.com/malivvan/harbor/db/q"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )

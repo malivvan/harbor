@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/malivvan/storm/internal/absfs"
+	"github.com/malivvan/harbor/internal/absfs"
 )
 
 // failingContentFS wraps a real filesystem and can be taken offline to make

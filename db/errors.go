@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/malivvan/storm/db/index"
-	"github.com/malivvan/storm/internal/crypto"
+	"github.com/malivvan/harbor/db/index"
+	"github.com/malivvan/harbor/internal/crypto"
 )
 
 // Errors
@@ -99,5 +99,5 @@ func wrapError(operation string, err error) error {
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("storm %s: %w", operation, err)
+	return fmt.Errorf("harbor %s: %w", operation, err)
 }

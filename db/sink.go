@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/malivvan/storm/db/index"
-	"github.com/malivvan/storm/db/q"
+	"github.com/malivvan/harbor/db/index"
+	"github.com/malivvan/harbor/db/q"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -446,10 +446,10 @@ func newListSink(node Node, to interface{}) (*listSink, error) {
 	name := ""
 	proto := reflect.New(elemType)
 	if bn, ok := proto.Interface().(BucketNamer); ok {
-		name = bn.StormBucketName()
+		name = bn.HarborBucketName()
 	} else if proto.Elem().CanInterface() {
 		if bn, ok := proto.Elem().Interface().(BucketNamer); ok {
-			name = bn.StormBucketName()
+			name = bn.HarborBucketName()
 		}
 	}
 	if name == "" {

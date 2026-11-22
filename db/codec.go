@@ -14,12 +14,12 @@ type Codec interface {
 	// Unmarshal decodes b into v.
 	Unmarshal(b []byte, v interface{}) error
 
-	// Name returns the stable codec identifier stored in Storm metadata.
+	// Name returns the stable codec identifier stored in Harbor metadata.
 	Name() string
 }
 
 // JSONCodec encodes and decodes entities with encoding/json. It is the codec
-// Storm uses when Config.Codec is nil.
+// Harbor uses when Config.Codec is nil.
 var JSONCodec Codec = jsonCodec{}
 
 // jsonCodec implements Codec on top of encoding/json.
@@ -35,7 +35,7 @@ func (jsonCodec) Unmarshal(b []byte, v interface{}) error {
 	return json.Unmarshal(b, v)
 }
 
-// Name returns the codec identifier stored in Storm metadata.
+// Name returns the codec identifier stored in Harbor metadata.
 func (jsonCodec) Name() string {
 	return jsonCodecName
 }

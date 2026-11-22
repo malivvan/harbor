@@ -161,7 +161,7 @@ type CustomBucketUser struct {
 	Name string `db:"index"`
 }
 
-func (c CustomBucketUser) StormBucketName() string {
+func (c CustomBucketUser) HarborBucketName() string {
 	return "my_custom_bucket"
 }
 
@@ -172,7 +172,7 @@ type NamerUser struct {
 	Email string `db:"unique"`
 }
 
-func (n NamerUser) StormBucketName() string {
+func (n NamerUser) HarborBucketName() string {
 	return "namer_users"
 }
 
@@ -182,7 +182,7 @@ type DropUser struct {
 	Name string `db:"index"`
 }
 
-func (d DropUser) StormBucketName() string {
+func (d DropUser) HarborBucketName() string {
 	return "drop_me"
 }
 
@@ -565,9 +565,9 @@ func TestDynamicStructInit(t *testing.T) {
 // ============================================================================
 
 func TestExplicitBucketFromSave(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
 	defer os.RemoveAll(dir)
-	file := filepath.Join(dir, "storm.db")
+	file := filepath.Join(dir, "harbor.db")
 	ctx := context.Background()
 	bDB, err := bolt.Open(file, 0600, nil)
 	require.NoError(t, err)
@@ -604,9 +604,9 @@ func TestExplicitBucketFromSave(t *testing.T) {
 // ============================================================================
 
 func TestBucketNamerInterface(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
 	defer os.RemoveAll(dir)
-	file := filepath.Join(dir, "storm.db")
+	file := filepath.Join(dir, "harbor.db")
 	ctx := context.Background()
 	bDB, err := bolt.Open(file, 0600, nil)
 	require.NoError(t, err)
@@ -635,9 +635,9 @@ func TestBucketNamerInterface(t *testing.T) {
 // ============================================================================
 
 func TestBucketNamerUpdate(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
 	defer os.RemoveAll(dir)
-	file := filepath.Join(dir, "storm.db")
+	file := filepath.Join(dir, "harbor.db")
 	ctx := context.Background()
 	bDB, err := bolt.Open(file, 0600, nil)
 	require.NoError(t, err)
@@ -670,9 +670,9 @@ func TestBucketNamerUpdate(t *testing.T) {
 // Tests: Drop with BucketNamer
 // ============================================================================
 func TestBucketNamerDrop(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
 	defer os.RemoveAll(dir)
-	file := filepath.Join(dir, "storm.db")
+	file := filepath.Join(dir, "harbor.db")
 	ctx := context.Background()
 	bDB, err := bolt.Open(file, 0600, nil)
 	require.NoError(t, err)
@@ -704,7 +704,7 @@ func TestBucketNamerDrop(t *testing.T) {
 // ============================================================================
 
 func TestBucketNamerListSinkResolution(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "storm.db")
+	file := filepath.Join(t.TempDir(), "harbor.db")
 	ctx := context.Background()
 	bDB, err := bolt.Open(file, 0600, nil)
 	require.NoError(t, err)
@@ -716,7 +716,7 @@ func TestBucketNamerListSinkResolution(t *testing.T) {
 		require.NoError(t, err)
 	}()
 
-	// Use NamerUser: Go type name is "NamerUser", StormBucketName is "namer_users".
+	// Use NamerUser: Go type name is "NamerUser", HarborBucketName is "namer_users".
 	users := []NamerUser{
 		{Name: "Alice", Email: "alice@test.com"},
 		{Name: "Bob", Email: "bob@test.com"},

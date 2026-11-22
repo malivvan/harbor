@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/fs"
+	"github.com/malivvan/harbor/fs"
 	bolt "go.etcd.io/bbolt"
 )
 

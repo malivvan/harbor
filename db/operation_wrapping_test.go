@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/index"
+	"github.com/malivvan/harbor/db/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
@@ -45,8 +45,8 @@ func TestWrapError_ContextErrorMatches(t *testing.T) {
 
 func TestWrapError_ExactPrefix(t *testing.T) {
 	err := wrapError("save", ErrNotFound)
-	require.True(t, strings.HasPrefix(err.Error(), "storm save:"),
-		"message must start with 'storm save:'")
+	require.True(t, strings.HasPrefix(err.Error(), "harbor save:"),
+		"message must start with 'harbor save:'")
 }
 
 func TestWrapError_NoFormattingArtifacts(t *testing.T) {
@@ -66,7 +66,7 @@ func TestWrap_OpenNilContext(t *testing.T) {
 	var nilCtx context.Context
 	db, err := Open(nilCtx, nil, Config{})
 	require.ErrorIs(t, err, ErrNilContext)
-	require.True(t, strings.HasPrefix(err.Error(), "storm open:"),
+	require.True(t, strings.HasPrefix(err.Error(), "harbor open:"),
 		"error must have open prefix")
 	require.Nil(t, db)
 }
@@ -75,7 +75,7 @@ func TestWrap_OpenNilDB(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(ctx, nil, Config{})
 	require.ErrorIs(t, err, ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "storm open:"))
+	require.True(t, strings.HasPrefix(err.Error(), "harbor open:"))
 	require.Nil(t, db)
 }
 
@@ -92,7 +92,7 @@ func TestWrap_OpenCanceledContext(t *testing.T) {
 
 	db, err := Open(ctx, bDB, Config{})
 	require.ErrorIs(t, err, context.Canceled)
-	require.True(t, strings.HasPrefix(err.Error(), "storm open:"))
+	require.True(t, strings.HasPrefix(err.Error(), "harbor open:"))
 	require.Nil(t, db)
 
 	// The database remains usable by its owner.
@@ -123,7 +123,7 @@ func TestWrap_OpenBorrowedInitFailure(t *testing.T) {
 
 	db, err := Open(context.Background(), bDB, Config{})
 	require.ErrorIs(t, err, ErrDifferentCodec)
-	require.True(t, strings.HasPrefix(err.Error(), "storm open:"))
+	require.True(t, strings.HasPrefix(err.Error(), "harbor open:"))
 	require.Nil(t, db)
 
 	// Borrowed Store must still be open.
@@ -140,14 +140,14 @@ func TestWrap_CloseNilReceiver(t *testing.T) {
 	var nilDB *Store
 	err := nilDB.Close()
 	require.ErrorIs(t, err, ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "storm close:"))
+	require.True(t, strings.HasPrefix(err.Error(), "harbor close:"))
 }
 
 func TestWrap_CloseNilBackend(t *testing.T) {
 	db := &Store{}
 	err := db.Close()
 	require.ErrorIs(t, err, ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "storm close:"))
+	require.True(t, strings.HasPrefix(err.Error(), "harbor close:"))
 }
 
 func TestWrap_CloseDoesNotCloseBackend(t *testing.T) {
@@ -190,7 +190,7 @@ func TestWrap_ReadTransactionNilContext(t *testing.T) {
 	var nilCtx context.Context
 	err := db.ReadTransaction(nilCtx, func(Node) error { return nil })
 	require.ErrorIs(t, err, ErrNilContext)
-	require.True(t, strings.HasPrefix(err.Error(), "storm read transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "harbor read transaction:"))
 }
 
 func TestWrap_ReadTransactionNilCallback(t *testing.T) {
@@ -199,7 +199,7 @@ func TestWrap_ReadTransactionNilCallback(t *testing.T) {
 
 	err := db.ReadTransaction(context.Background(), nil)
 	require.ErrorIs(t, err, ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "storm read transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "harbor read transaction:"))
 }
 
 func TestWrap_WriteTransactionNilContext(t *testing.T) {
@@ -209,7 +209,7 @@ func TestWrap_WriteTransactionNilContext(t *testing.T) {
 	var nilCtx context.Context
 	err := db.WriteTransaction(nilCtx, func(Node) error { return nil })
 	require.ErrorIs(t, err, ErrNilContext)
-	require.True(t, strings.HasPrefix(err.Error(), "storm write transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "harbor write transaction:"))
 }
 
 func TestWrap_WriteTransactionNilCallback(t *testing.T) {
@@ -218,7 +218,7 @@ func TestWrap_WriteTransactionNilCallback(t *testing.T) {
 
 	err := db.WriteTransaction(context.Background(), nil)
 	require.ErrorIs(t, err, ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "storm write transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "harbor write transaction:"))
 }
 
 func TestWrap_WriteTransactionCallbackErrorDiscoverable(t *testing.T) {
@@ -230,7 +230,7 @@ func TestWrap_WriteTransactionCallbackErrorDiscoverable(t *testing.T) {
 		return errCallback
 	})
 	require.ErrorIs(t, err, errCallback)
-	require.True(t, strings.HasPrefix(err.Error(), "storm write transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "harbor write transaction:"))
 }
 
 func TestWrap_WriteTransactionCallbackErrorBeatsCancel(t *testing.T) {
@@ -246,7 +246,7 @@ func TestWrap_WriteTransactionCallbackErrorBeatsCancel(t *testing.T) {
 	})
 	require.ErrorIs(t, err, errCallback)
 	require.NotErrorIs(t, err, context.Canceled, "callback error must take precedence")
-	require.True(t, strings.HasPrefix(err.Error(), "storm write transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "harbor write transaction:"))
 }
 
 func TestWrap_WriteTransactionPreCommitCancel(t *testing.T) {
@@ -263,7 +263,7 @@ func TestWrap_WriteTransactionPreCommitCancel(t *testing.T) {
 		return nil
 	})
 	require.ErrorIs(t, err, context.Canceled)
-	require.True(t, strings.HasPrefix(err.Error(), "storm write transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "harbor write transaction:"))
 
 	var user User
 	err = db.One(context.Background(), "ID", 1, &user)
@@ -319,37 +319,37 @@ func TestWrap_CRUD_OperationPrefixes(t *testing.T) {
 	}{
 		{
 			name:   "init",
-			prefix: "storm init:",
+			prefix: "harbor init:",
 			op:     func() error { return db.Init(ctx, 10) },
 		},
 		{
 			name:   "reindex",
-			prefix: "storm reindex:",
+			prefix: "harbor reindex:",
 			op:     func() error { return db.ReIndex(ctx, 10) },
 		},
 		{
 			name:   "save",
-			prefix: "storm save:",
+			prefix: "harbor save:",
 			op:     func() error { return db.Save(ctx, nil) },
 		},
 		{
 			name:   "update",
-			prefix: "storm update:",
+			prefix: "harbor update:",
 			op:     func() error { return db.Update(ctx, nil) },
 		},
 		{
 			name:   "update field",
-			prefix: "storm update field:",
+			prefix: "harbor update field:",
 			op:     func() error { return db.UpdateField(ctx, nil, "", nil) },
 		},
 		{
 			name:   "drop",
-			prefix: "storm drop:",
+			prefix: "harbor drop:",
 			op:     func() error { return db.Drop(ctx, "nonexistent-bucket-xyz") },
 		},
 		{
 			name:   "delete struct",
-			prefix: "storm delete struct:",
+			prefix: "harbor delete struct:",
 			op:     func() error { return db.DeleteStruct(ctx, nil) },
 		},
 	}
@@ -376,67 +376,67 @@ func TestWrap_CRUD_Classification(t *testing.T) {
 	t.Run("InitBadType", func(t *testing.T) {
 		err := db.Init(ctx, 10)
 		require.ErrorIs(t, err, ErrBadType)
-		require.True(t, strings.HasPrefix(err.Error(), "storm init:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor init:"))
 	})
 
 	t.Run("ReIndexBadType", func(t *testing.T) {
 		err := db.ReIndex(ctx, 10)
 		require.ErrorIs(t, err, ErrStructPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "storm reindex:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor reindex:"))
 	})
 
 	t.Run("SaveNilData", func(t *testing.T) {
 		err := db.Save(ctx, nil)
 		require.ErrorIs(t, err, ErrStructPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "storm save:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor save:"))
 	})
 
 	t.Run("SaveDuplicateUnique", func(t *testing.T) {
 		err := db.Save(ctx, &UniqueNameUser{ID: 2, Name: "unique", Age: 20})
 		require.ErrorIs(t, err, ErrAlreadyExists)
-		require.True(t, strings.HasPrefix(err.Error(), "storm save:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor save:"))
 	})
 
 	t.Run("UpdateNilData", func(t *testing.T) {
 		err := db.Update(ctx, nil)
 		require.ErrorIs(t, err, ErrStructPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "storm update:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor update:"))
 	})
 
 	t.Run("UpdateNotFound", func(t *testing.T) {
 		err := db.Update(ctx, &User{ID: 999, Name: "nope"})
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "storm update:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor update:"))
 	})
 
 	t.Run("UpdateFieldNilData", func(t *testing.T) {
 		err := db.UpdateField(ctx, nil, "", nil)
 		require.ErrorIs(t, err, ErrStructPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "storm update field:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor update field:"))
 	})
 
 	t.Run("UpdateFieldIncompatibleValue", func(t *testing.T) {
 		err := db.UpdateField(ctx, &User{ID: 1}, "Name", 42)
 		require.ErrorIs(t, err, ErrIncompatibleValue)
-		require.True(t, strings.HasPrefix(err.Error(), "storm update field:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor update field:"))
 	})
 
 	t.Run("DropNonexistentBucket", func(t *testing.T) {
 		// Drop a bucket that doesn't exist -> bbolt BucketNotFound.
 		err := db.Drop(ctx, "nonexistent-bucket-xyz")
-		require.True(t, strings.HasPrefix(err.Error(), "storm drop:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor drop:"))
 	})
 
 	t.Run("DeleteStructNilData", func(t *testing.T) {
 		err := db.DeleteStruct(ctx, nil)
 		require.ErrorIs(t, err, ErrStructPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "storm delete struct:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor delete struct:"))
 	})
 
 	t.Run("DeleteStructNotFound", func(t *testing.T) {
 		err := db.DeleteStruct(ctx, &User{ID: 999})
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "storm delete struct:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor delete struct:"))
 	})
 }
 
@@ -452,13 +452,13 @@ func TestWrap_CRUD_ContextErrors(t *testing.T) {
 		cancel()
 		err := db.Save(ctx, &User{ID: 2, Name: "x", Slug: "x"})
 		require.ErrorIs(t, err, context.Canceled)
-		require.True(t, strings.HasPrefix(err.Error(), "storm save:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor save:"))
 	})
 
 	t.Run("UpdateDeadlineExceeded", func(t *testing.T) {
 		err := db.Update(timedOutCtx(), &User{ID: 1, Name: "updated"})
 		require.ErrorIs(t, err, context.DeadlineExceeded)
-		require.True(t, strings.HasPrefix(err.Error(), "storm update:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor update:"))
 	})
 }
 
@@ -480,32 +480,32 @@ func TestWrap_KV_OperationPrefixes(t *testing.T) {
 	}{
 		{
 			name:   "kv get",
-			prefix: "storm kv get:",
+			prefix: "harbor kv get:",
 			op:     func() error { return db.Get(ctx, "bucket", "key", nil) },
 		},
 		{
 			name:   "kv set",
-			prefix: "storm kv set:",
+			prefix: "harbor kv set:",
 			op:     func() error { return db.Set(ctx, "bucket", nil, 100) },
 		},
 		{
 			name:   "kv delete",
-			prefix: "storm kv delete:",
+			prefix: "harbor kv delete:",
 			op:     func() error { return db.Delete(ctx, "nonexistent", "key") },
 		},
 		{
 			name:   "kv get bytes",
-			prefix: "storm kv get bytes:",
+			prefix: "harbor kv get bytes:",
 			op:     func() error { _, err := db.GetBytes(ctx, "bucket", 999); return err },
 		},
 		{
 			name:   "kv set bytes",
-			prefix: "storm kv set bytes:",
+			prefix: "harbor kv set bytes:",
 			op:     func() error { return db.SetBytes(ctx, "bucket", nil, []byte("x")) },
 		},
 		{
 			name:   "kv key exists",
-			prefix: "storm kv key exists:",
+			prefix: "harbor kv key exists:",
 			op:     func() error { _, err := db.KeyExists(deliberateNilCtx, "bucket", "key"); return err },
 		},
 	}
@@ -530,38 +530,38 @@ func TestWrap_KV_Classification(t *testing.T) {
 	t.Run("GetNilDest", func(t *testing.T) {
 		err := db.Get(ctx, "bucket", "key", nil)
 		require.ErrorIs(t, err, ErrPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "storm kv get:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor kv get:"))
 	})
 
 	t.Run("GetNotFound", func(t *testing.T) {
 		var s string
 		err := db.Get(ctx, "bucket", "missing", &s)
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "storm kv get:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor kv get:"))
 	})
 
 	t.Run("SetNilKey", func(t *testing.T) {
 		err := db.Set(ctx, "bucket", nil, 100)
 		require.ErrorIs(t, err, ErrNilParam)
-		require.True(t, strings.HasPrefix(err.Error(), "storm kv set:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor kv set:"))
 	})
 
 	t.Run("DeleteNotFound", func(t *testing.T) {
 		err := db.Delete(ctx, "nonexistent-b", "key")
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "storm kv delete:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor kv delete:"))
 	})
 
 	t.Run("GetBytesNotFound", func(t *testing.T) {
 		_, err := db.GetBytes(ctx, "bucket", 999)
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "storm kv get bytes:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor kv get bytes:"))
 	})
 
 	t.Run("SetBytesNilKey", func(t *testing.T) {
 		err := db.SetBytes(ctx, "bucket", nil, []byte("x"))
 		require.ErrorIs(t, err, ErrNilParam)
-		require.True(t, strings.HasPrefix(err.Error(), "storm kv set bytes:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor kv set bytes:"))
 	})
 
 	t.Run("KeyExistsMissingBucketIsFalse", func(t *testing.T) {
@@ -602,13 +602,13 @@ func TestWrap_KV_ContextErrors(t *testing.T) {
 		var s string
 		err := db.Get(canceledCtx(), "bucket", "key", &s)
 		require.ErrorIs(t, err, context.Canceled)
-		require.True(t, strings.HasPrefix(err.Error(), "storm kv get:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor kv get:"))
 	})
 
 	t.Run("SetBytesCanceled", func(t *testing.T) {
 		err := db.SetBytes(canceledCtx(), "bucket", "k", []byte("v"))
 		require.ErrorIs(t, err, context.Canceled)
-		require.True(t, strings.HasPrefix(err.Error(), "storm kv set bytes:"))
+		require.True(t, strings.HasPrefix(err.Error(), "harbor kv set bytes:"))
 	})
 }
 
@@ -702,7 +702,7 @@ func TestWrap_OpenNestedWrapping(t *testing.T) {
 	// triggering nested KV wrapping under the open prefix.
 	_, err = Open(context.Background(), bDB, Config{})
 	require.Error(t, err)
-	require.True(t, strings.HasPrefix(err.Error(), "storm open:"),
+	require.True(t, strings.HasPrefix(err.Error(), "harbor open:"),
 		"outermost error must start with requested operation label")
 	require.NoError(t, bDB.Close())
 }
@@ -745,23 +745,23 @@ func TestWrap_AllOperationLabelsCovered(t *testing.T) {
 		prefix string
 		op     func() error
 	}{
-		{"open", "storm open:", func() error { _, err := Open(nilCtx, nil, Config{}); return err }},
-		{"close", "storm close:", func() error { return (*Store)(nil).Close() }},
-		{"read transaction", "storm read transaction:", func() error { return db.ReadTransaction(nilCtx, nil) }},
-		{"write transaction", "storm write transaction:", func() error { return db.WriteTransaction(nilCtx, nil) }},
-		{"init", "storm init:", func() error { return db.Init(ctx, 10) }},
-		{"reindex", "storm reindex:", func() error { return db.ReIndex(ctx, 10) }},
-		{"save", "storm save:", func() error { return db.Save(ctx, nil) }},
-		{"update", "storm update:", func() error { return db.Update(ctx, nil) }},
-		{"update field", "storm update field:", func() error { return db.UpdateField(ctx, nil, "", nil) }},
-		{"drop", "storm drop:", func() error { return db.Drop(ctx, "nonexistent") }},
-		{"delete struct", "storm delete struct:", func() error { return db.DeleteStruct(ctx, nil) }},
-		{"kv get", "storm kv get:", func() error { return db.Get(ctx, "b", "k", nil) }},
-		{"kv set", "storm kv set:", func() error { return db.Set(ctx, "b", nil, 100) }},
-		{"kv delete", "storm kv delete:", func() error { return db.Delete(ctx, "nx", "k") }},
-		{"kv get bytes", "storm kv get bytes:", func() error { _, err := db.GetBytes(ctx, "b", 999); return err }},
-		{"kv set bytes", "storm kv set bytes:", func() error { return db.SetBytes(ctx, "b", nil, []byte{}) }},
-		{"kv key exists", "storm kv key exists:", func() error { _, err := db.KeyExists(nilCtx, "nx", "k"); return err }},
+		{"open", "harbor open:", func() error { _, err := Open(nilCtx, nil, Config{}); return err }},
+		{"close", "harbor close:", func() error { return (*Store)(nil).Close() }},
+		{"read transaction", "harbor read transaction:", func() error { return db.ReadTransaction(nilCtx, nil) }},
+		{"write transaction", "harbor write transaction:", func() error { return db.WriteTransaction(nilCtx, nil) }},
+		{"init", "harbor init:", func() error { return db.Init(ctx, 10) }},
+		{"reindex", "harbor reindex:", func() error { return db.ReIndex(ctx, 10) }},
+		{"save", "harbor save:", func() error { return db.Save(ctx, nil) }},
+		{"update", "harbor update:", func() error { return db.Update(ctx, nil) }},
+		{"update field", "harbor update field:", func() error { return db.UpdateField(ctx, nil, "", nil) }},
+		{"drop", "harbor drop:", func() error { return db.Drop(ctx, "nonexistent") }},
+		{"delete struct", "harbor delete struct:", func() error { return db.DeleteStruct(ctx, nil) }},
+		{"kv get", "harbor kv get:", func() error { return db.Get(ctx, "b", "k", nil) }},
+		{"kv set", "harbor kv set:", func() error { return db.Set(ctx, "b", nil, 100) }},
+		{"kv delete", "harbor kv delete:", func() error { return db.Delete(ctx, "nx", "k") }},
+		{"kv get bytes", "harbor kv get bytes:", func() error { _, err := db.GetBytes(ctx, "b", 999); return err }},
+		{"kv set bytes", "harbor kv set bytes:", func() error { return db.SetBytes(ctx, "b", nil, []byte{}) }},
+		{"kv key exists", "harbor kv key exists:", func() error { _, err := db.KeyExists(nilCtx, "nx", "k"); return err }},
 	}
 
 	for _, tc := range tests {
@@ -826,5 +826,5 @@ func TestWrap_BboltErrorClassification(t *testing.T) {
 	ctx := context.Background()
 	err = db.Save(ctx, &User{ID: 1, Name: "x", Slug: "x"})
 	require.ErrorIs(t, err, bolterrors.ErrDatabaseNotOpen)
-	require.True(t, strings.HasPrefix(err.Error(), "storm save:"))
+	require.True(t, strings.HasPrefix(err.Error(), "harbor save:"))
 }

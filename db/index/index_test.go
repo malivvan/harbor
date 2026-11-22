@@ -4,29 +4,29 @@ import (
 	"context"
 	"testing"
 
-	storm "github.com/malivvan/storm/db"
+	harbor "github.com/malivvan/harbor/db"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
 
-// stormTestDB bundles a Storm store with the bbolt handle the test opened, so
+// harborTestDB bundles a Harbor store with the bbolt handle the test opened, so
 // tests can manipulate raw buckets without a public escape hatch.
-type stormTestDB struct {
-	*storm.Store
+type harborTestDB struct {
+	*harbor.Store
 	bdb *bolt.DB
 }
 
-// openStormDB opens a bbolt database and wraps it with Storm for the test.
-func openStormDB(tb testing.TB, path string) *stormTestDB {
+// openHarborDB opens a bbolt database and wraps it with Harbor for the test.
+func openHarborDB(tb testing.TB, path string) *harborTestDB {
 	tb.Helper()
 
 	bdb, err := bolt.Open(path, 0600, nil)
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = bdb.Close() })
 
-	db, err := storm.Open(context.Background(), bdb, storm.Config{})
+	db, err := harbor.Open(context.Background(), bdb, harbor.Config{})
 	require.NoError(tb, err)
 	tb.Cleanup(func() { _ = db.Close() })
 
-	return &stormTestDB{Store: db, bdb: bdb}
+	return &harborTestDB{Store: db, bdb: bdb}
 }

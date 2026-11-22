@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/malivvan/storm/db/q"
-	"github.com/malivvan/storm/internal/crypto"
+	"github.com/malivvan/harbor/db/q"
+	"github.com/malivvan/harbor/internal/crypto"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )

@@ -4,8 +4,8 @@ import (
 	"context"
 	"reflect"
 
-	"github.com/malivvan/storm/db/q"
-	"github.com/malivvan/storm/internal"
+	"github.com/malivvan/harbor/db/q"
+	"github.com/malivvan/harbor/internal"
 	bolt "go.etcd.io/bbolt"
 )
 

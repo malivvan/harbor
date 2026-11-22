@@ -1,4 +1,4 @@
-package storm
+package harbor
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/malivvan/storm/internal/crypto"
+	"github.com/malivvan/harbor/internal/crypto"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )

@@ -1,8 +1,8 @@
 # BoltFS - A Complete Filesystem Implementation for BoltDB
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/storm/fs.svg)](https://pkg.go.dev/github.com/malivvan/storm/fs)
-[![Go Report Card](https://goreportcard.com/badge/github.com/malivvan/storm/fs)](https://goreportcard.com/report/github.com/malivvan/storm/fs)
-[![CI](https://github.com/malivvan/storm/fs/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/storm/fs/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/harbor/fs.svg)](https://pkg.go.dev/github.com/malivvan/harbor/fs)
+[![Go Report Card](https://goreportcard.com/badge/github.com/malivvan/harbor/fs)](https://goreportcard.com/report/github.com/malivvan/harbor/fs)
+[![CI](https://github.com/malivvan/harbor/fs/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/harbor/fs/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
 
 BoltFS provides a full featured filesystem on top of a boltdb database. This
@@ -98,7 +98,7 @@ Store file content in any `absfs.FileSystem` implementation while keeping metada
 
 ```go
 import (
-    "github.com/malivvan/storm/fs"
+    "github.com/malivvan/harbor/fs"
     "github.com/absfs/memfs"  // or any absfs implementation
 )
 

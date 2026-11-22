@@ -1,8 +1,8 @@
-# Storm — Release Readiness Review and Remediation Plan
+# Harbor — Release Readiness Review and Remediation Plan
 
 **Reviewed revision:** `c039d2e` (branch `master`, no tags)
 **Review date:** 2026-11-22
-**Scope:** `storm`, `db`, `db/index`, `db/q`, `fs`, `fs/s3fs`, `internal/absfs`, `ts`, `vec`, `vec/hnsw`, `internal/crypto`, `internal/slip21`, module/CI/release files.
+**Scope:** `harbor`, `db`, `db/index`, `db/q`, `fs`, `fs/s3fs`, `internal/absfs`, `ts`, `vec`, `vec/hnsw`, `internal/crypto`, `internal/slip21`, module/CI/release files.
 **Method:** full source read per area; baseline build/vet/gofmt/test/race; staticcheck and govulncheck; targeted reproductions in a throwaway module under `$TMPDIR` with a `replace` to this tree. No repository files were modified by the review.
 
 ---
@@ -238,27 +238,27 @@ A detailed remediation sequence is at the end of this document.
 
 ### P1-6 — Vector quantization settings are not persisted; reopening can make data inaccessible or silently misread
 - **Status:** verified for `UseQuant`; suspected for custom `Quantizer` identity.
-- **Location:** `storm.go:226-234` (uses per-open `options.UseQuant`), contract at `storm.go:156` (“Later Opens use the stored settings”); enforcement `vec/store.go:701-702`; `CollectionMeta` stores only a boolean.
+- **Location:** `harbor.go:226-234` (uses per-open `options.UseQuant`), contract at `harbor.go:156` (“Later Opens use the stored settings”); enforcement `vec/store.go:701-702`; `CollectionMeta` stores only a boolean.
 - **Problem:** A store created with `UseQuant:true` and reopened with default options (`false`) opens, but `NewCollection`/`LoadCollection` fail with “different quantization setting” and zero points. A custom quantizer is not identified at all; reopening with the default SQ8 can dequantize with the wrong algorithm and return silently wrong vectors.
   ```
   reopen default UseQuant -> LoadCollection err: ... different quantization setting; points 0
   ```
 - **Impact:** On-disk vector data appears lost on a normal reopen; custom-quantizer mismatch can yield wrong search results without an error.
-- **Fix:** Persist quantization/quantizer identity in `storm.Metadata` (as encryption flags are), or persist a quantizer schema/version and refuse mismatches; document that options are required until then.
+- **Fix:** Persist quantization/quantizer identity in `harbor.Metadata` (as encryption flags are), or persist a quantizer schema/version and refuse mismatches; document that options are required until then.
 
 ### P1-7 — Sub-store rotation through the root handle bricks the store
 - **Status:** verified with a probe.
-- **Location:** `storm.go:449-466` exposes `DB()/FS()/TS()/Vec()`; sub-stores expose `RotateAll`/`ReEncrypt`.
-- **Problem:** Root keys are re-derived from the password on every `storm.Open`. Rotating a sub-store’s key directly succeeds (`DB().RotateAll(...) -> nil`) but the next `storm.Open` derives the old key and fails authentication; the data is unreachable through the root API.
+- **Location:** `harbor.go:449-466` exposes `DB()/FS()/TS()/Vec()`; sub-stores expose `RotateAll`/`ReEncrypt`.
+- **Problem:** Root keys are re-derived from the password on every `harbor.Open`. Rotating a sub-store’s key directly succeeds (`DB().RotateAll(...) -> nil`) but the next `harbor.Open` derives the old key and fails authentication; the data is unreachable through the root API.
   ```
-  DB().RotateAll -> nil; Close -> nil; storm.Open(password) -> authentication failed
+  DB().RotateAll -> nil; Close -> nil; harbor.Open(password) -> authentication failed
   ```
 - **Impact:** A user following the README rotation section on a sub-store silently makes that component’s data unreachable. Root and sub-store rotation contracts are incompatible.
-- **Fix:** Do not expose raw rotation through root-owned sub-stores, or add root-level password re-derivation/re-sealing; at minimum document loudly that sub-store rotation is unsupported on a `storm` store and fail fast.
+- **Fix:** Do not expose raw rotation through root-owned sub-stores, or add root-level password re-derivation/re-sealing; at minimum document loudly that sub-store rotation is unsupported on a `harbor` store and fail fast.
 
 ### P1-8 — `Store.Vec().Close()` poisons `Store.Close()` and leaks the bbolt handle
 - **Status:** verified with a probe.
-- **Location:** `storm.go:691-715`; `vec/store.go:519-533` (vec `Close` sets `closed=true` even when `ownsDB=false`).
+- **Location:** `harbor.go:691-715`; `vec/store.go:519-533` (vec `Close` sets `closed=true` even when `ownsDB=false`).
 - **Problem:** After closing the vec sub-store, root `Close` calls `s.vec.Flush()`, which returns “storage is closed”; root `Close` returns before `s.bs.Close()`, so the handle/file lock is never released and every retry fails.
   ```
   Vec().Close() -> nil; Store.Close() -> "flush vec store: storage is closed"
@@ -311,7 +311,7 @@ A detailed remediation sequence is at the end of this document.
 - **Fix:** Lower the pre-auth ceiling or enforce a sane opening limit; consider an integrity tag over KDF parameters.
 
 ### P2-4 — Reserved vector payload keys can clobber user data
-- **Location:** `vec/store.go:84` (`payloadJSONKey = "\x00__storm_json_payload__"`), `:143-147`; `"__quantized_vector"` at `:649`.
+- **Location:** `vec/store.go:84` (`payloadJSONKey = "\x00__harbor_json_payload__"`), `:143-147`; `"__quantized_vector"` at `:649`.
 - **Problem:** A user payload containing the reserved keys is overwritten/consumed, and quantized collections consume `__quantized_vector`. Probability is low (NUL-prefixed key; reserved quantized name) but the API does not reject them.
 - **Fix:** Reject/namespace reserved keys at the API boundary, or store them out-of-band from the payload map.
 
@@ -333,8 +333,8 @@ A detailed remediation sequence is at the end of this document.
 ### P2-8 — README claims that do not match the code
 - **Verified claims to correct:**
   - `fs/s3fs/README.md:8` says “using the AWS SDK v2”; the package hand-rolls SigV4 (`go.mod` has no AWS SDK).
-  - `README.md:93` says `Options{Plaintext:true}` opts out of encryption entirely, but `storm.go:163-165` still requires a non-empty `Password` (canary is password-derived).
-  - `storm.go:156` promises “Later Opens use the stored settings”, but `UseQuant`/`Quantizer`/`Codec` are per-open options (P1-6).
+  - `README.md:93` says `Options{Plaintext:true}` opts out of encryption entirely, but `harbor.go:163-165` still requires a non-empty `Password` (canary is password-derived).
+  - `harbor.go:156` promises “Later Opens use the stored settings”, but `UseQuant`/`Quantizer`/`Codec` are per-open options (P1-6).
   - `README.md:717` mentions vec buffering without the crash-loss window (points below `DefaultFlushThreshold` are lost on crash until Flush/Close).
   - `fs/README.md:74,90-92` calls snapshots backups (P2-6).
   - Sub-package README license/badge links point at `absfs/s3fs` / missing files.
@@ -354,7 +354,7 @@ A detailed remediation sequence is at the end of this document.
 ## Low priority / polish (P3)
 
 - **Dead code:** `vec/hnsw/heap` is not imported by non-test code (the graph uses its own `candidateSet`/`resultSet`); `fs/walkChildren` has an unreachable fallback because `absfs.Filer` always provides `ReadDir`; `internal/absfs` has an unreachable `ExtendSymlinkFiler` branch (structural typing). Remove or gate to reduce public surface/confusion.
-- **Error-contract consistency:** only `db` implements the documented `storm <operation>: %w` wrapper; `fs`/`ts`/`vec` use ad-hoc prefixes. Scope the README guarantee or normalize.
+- **Error-contract consistency:** only `db` implements the documented `harbor <operation>: %w` wrapper; `fs`/`ts`/`vec` use ad-hoc prefixes. Scope the README guarantee or normalize.
 - **Public API surface:** `vec` exports generated codec handles (`StoredPointBinco`, `ValueBinco`, `ValueKindBinco`, schema fingerprints); `vec/hnsw` panics on dimension/empty-heap misuse. Document as unstable or move to `internal/`; replace reachable panics with errors where practical.
 - **Staticcheck test findings:** 46 warnings are in tests (nil contexts, unused values, deprecated `io/ioutil`, redundant code). CI needs a policy (clean or allowlist) or it will stay red.
 - **`vec/gen`:** `main` writes into the working directory and `run` failure branches are barely tested; add a temp-dir invocation in CI.
@@ -410,7 +410,7 @@ Run and attach results:
 
 ## Appendix A — Reproduction highlights
 
-All probes ran in a throwaway module under `$TMPDIR` with `replace github.com/malivvan/storm => /home/malivvan/projects/storm`; repository untouched.
+All probes ran in a throwaway module under `$TMPDIR` with `replace github.com/malivvan/harbor => /home/malivvan/projects/harbor`; repository untouched.
 
 ```
 REINDEX before=[{ID:1 Opt:AAA} {ID:2 Opt:}] after=[{ID:1 Opt:AAA} {ID:2 Opt:AAA}]
@@ -419,17 +419,17 @@ FILTER=[{ID:2 Ord:2 Tag:keep Opt:AAA}]
 INLINE_UPDATE={ID:1 Base:{A:aa2 B:}}
 FIND_a=[{ID:2 Tag:a__b} {ID:1 Tag:a}]
 ONE_a={ID:2 Tag:a__b}
-RANGE_a_a=[] err=storm range: not found
+RANGE_a_a=[] err=harbor range: not found
 ALLBYINDEX=[{ID:3 Tag:a!} {ID:4 Tag:a0} {ID:2 Tag:a__b} {ID:1 Tag:a}]
 UPDATE_DIVERGENCE find_a=[{ID:2 Tag:a__b} {ID:5 Tag:a} {ID:1 Tag:a}]
                    find_a__b=[{ID:2 Tag:a__b} {ID:5 Tag:a}] stored={ID:5 Tag:a}
-LIMIT0 err=storm query find: not found
+LIMIT0 err=harbor query find: not found
 TS_DELETERANGE count=1 actual=11
 TS_ENFORCE removed=8 count=1 actual=3
 VEC_TOPK_PANIC=runtime error: makeslice: cap out of range
 QUANT_LOAD err=invalid encryption config: collection "c" was created with a different quantization setting
-STORM_CLOSE_AFTER_VEC_CLOSE err=storm: flush vec store: storage is closed
-STORM_SUBSTORE_ROTATE rot=<nil> close=<nil> reopen=storm: open db store: ... authentication failed
+HARBOR_CLOSE_AFTER_VEC_CLOSE err=harbor: flush vec store: storage is closed
+HARBOR_SUBSTORE_ROTATE rot=<nil> close=<nil> reopen=harbor: open db store: ... authentication failed
 S3_MULTIPART n=0 werr=write obj: upload part failed cerr=<nil> rerr=<nil> stored=1048576
 FS_CHUNK_OFFSET n=0 err=database not open pos=4
 FS_CONTENT_WRITE n=2 err=failed to create directory: mkdir /: file does not exist statSize=5

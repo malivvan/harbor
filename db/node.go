@@ -6,13 +6,13 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// Node exposes Storm operations relative to a bbolt bucket path.
+// Node exposes Harbor operations relative to a bbolt bucket path.
 type Node interface {
 	TypeStore
 	KeyValueStore
 	BucketScanner
 
-	// From returns a new Storm node with a new bucket root below the current.
+	// From returns a new Harbor node with a new bucket root below the current.
 	// All Store operations on the new node are executed relative to this bucket.
 	From(addend ...string) Node
 
@@ -34,7 +34,7 @@ var _ Node = (*node)(nil)
 type node struct {
 	s *Store
 
-	// The root bucket path. An empty path is the database root; the storm root
+	// The root bucket path. An empty path is the database root; the harbor root
 	// package configures ["db"] explicitly.
 	root [][]byte
 
@@ -59,7 +59,7 @@ func cloneBucketPath(path [][]byte) [][]byte {
 	return cloned
 }
 
-// From returns a new Storm Node with a new bucket root below the current.
+// From returns a new Harbor Node with a new bucket root below the current.
 // All Store operations on the new node will be executed relative to this bucket.
 func (n node) From(addend ...string) Node {
 	path := make([][]byte, 0, len(n.root)+len(addend))
@@ -73,13 +73,13 @@ func (n node) From(addend ...string) Node {
 	return &n
 }
 
-// withTransaction returns a new Storm Node that will use the given transaction.
+// withTransaction returns a new Harbor Node that will use the given transaction.
 func (n node) withTransaction(tx *bolt.Tx) *node {
 	n.tx = tx
 	return &n
 }
 
-// WithCodec returns a new Storm Node that will use the given Codec.
+// WithCodec returns a new Harbor Node that will use the given Codec.
 func (n node) WithCodec(codec Codec) Node {
 	n.codec = codec
 	return &n
@@ -98,7 +98,7 @@ func (n *node) Bucket() []string {
 	return parts
 }
 
-// Codec returns the EncodeDecoder used by this instance of Storm
+// Codec returns the EncodeDecoder used by this instance of Harbor
 func (n *node) Codec() Codec {
 	return n.codec
 }

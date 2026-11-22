@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/malivvan/storm/internal/crypto"
+	"github.com/malivvan/harbor/internal/crypto"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -18,7 +18,7 @@ const KeySize = crypto.KeySize
 type Config struct {
 	// Root is the bucket path below which all series live. Each element is one
 	// nested bucket name. A nil or empty Root means the database root; the
-	// storm root package passes [][]byte{[]byte("ts")} explicitly.
+	// harbor root package passes [][]byte{[]byte("ts")} explicitly.
 	//
 	// Encryption requires a non-empty Root: at the database root the store
 	// cannot distinguish its own series buckets from unrelated top-level
@@ -117,7 +117,7 @@ const (
 	markerKey       = "\x00__ts_enc__"
 	versionKey      = "\x00__ts_version__"
 	markerMagic     = "TENC"
-	canaryPlaintext = "storm/ts/aead/v1"
+	canaryPlaintext = "harbor/ts/aead/v1"
 )
 
 const (

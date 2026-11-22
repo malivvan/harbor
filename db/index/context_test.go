@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	storm "github.com/malivvan/storm/db"
-	"github.com/malivvan/storm/db/index"
+	harbor "github.com/malivvan/harbor/db"
+	"github.com/malivvan/harbor/db/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -56,18 +56,18 @@ func (c *stepContext) Value(key any) any { return nil }
 // ---------------------------------------------------------------------------
 
 type testDB struct {
-	db  *storm.Store
+	db  *harbor.Store
 	bdb *bolt.DB
 	dir string
 }
 
 func openTestDB(t *testing.T) *testDB {
 	t.Helper()
-	dir, err := os.MkdirTemp(os.TempDir(), "storm-index")
+	dir, err := os.MkdirTemp(os.TempDir(), "harbor-index")
 	require.NoError(t, err)
-	bdb, err := bolt.Open(filepath.Join(dir, "storm.db"), 0600, nil)
+	bdb, err := bolt.Open(filepath.Join(dir, "harbor.db"), 0600, nil)
 	require.NoError(t, err)
-	db, err := storm.Open(context.Background(), bdb, storm.Config{})
+	db, err := harbor.Open(context.Background(), bdb, harbor.Config{})
 	require.NoError(t, err)
 	return &testDB{db: db, bdb: bdb, dir: dir}
 }

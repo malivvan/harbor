@@ -6,7 +6,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-const AppID = "com.github.malivvan.storm"
+const AppID = "com.github.malivvan.harbor"
 
 // Cursor that can be reversed
 type Cursor struct {

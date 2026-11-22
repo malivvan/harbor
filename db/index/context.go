@@ -21,5 +21,5 @@ func wrapError(operation string, err error) error {
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("storm %s: %w", operation, err)
+	return fmt.Errorf("harbor %s: %w", operation, err)
 }

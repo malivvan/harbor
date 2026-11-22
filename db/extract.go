@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/malivvan/storm/db/index"
+	"github.com/malivvan/harbor/db/index"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -18,7 +18,7 @@ const (
 	tagUniqueIdx = "unique"
 	tagInline    = "inline"
 	tagIncrement = "increment"
-	indexPrefix  = "__storm_index_"
+	indexPrefix  = "__harbor_index_"
 )
 
 type fieldConfig struct {
@@ -47,7 +47,7 @@ func bucketName(data interface{}) string {
 	v := reflect.ValueOf(data)
 	if v.IsValid() {
 		if bn, ok := data.(BucketNamer); ok {
-			return bn.StormBucketName()
+			return bn.HarborBucketName()
 		}
 		if v.Kind() == reflect.Ptr && !v.IsNil() {
 			return bucketNameFromValue(&v)
@@ -61,7 +61,7 @@ func bucketNameFromValue(v *reflect.Value) string {
 	if v.Kind() == reflect.Ptr {
 		if !v.IsNil() && v.CanInterface() {
 			if bn, ok := v.Interface().(BucketNamer); ok {
-				return bn.StormBucketName()
+				return bn.HarborBucketName()
 			}
 		}
 		e := v.Elem()
@@ -69,12 +69,12 @@ func bucketNameFromValue(v *reflect.Value) string {
 	}
 	if v.CanInterface() {
 		if bn, ok := v.Interface().(BucketNamer); ok {
-			return bn.StormBucketName()
+			return bn.HarborBucketName()
 		}
 	}
 	if v.CanAddr() {
 		if bn, ok := v.Addr().Interface().(BucketNamer); ok {
-			return bn.StormBucketName()
+			return bn.HarborBucketName()
 		}
 	}
 	return v.Type().Name()

@@ -3,7 +3,7 @@ package fs
 import (
 	"fmt"
 
-	"github.com/malivvan/storm/internal/crypto"
+	"github.com/malivvan/harbor/internal/crypto"
 )
 
 // KeySize is the required key length in bytes (256 bits).
@@ -15,7 +15,7 @@ const KeySize = crypto.KeySize
 type Config struct {
 	// Root is the bucket path below which all file systems live. Each element
 	// is one nested bucket name. A nil or empty Root means the database root;
-	// the storm root package passes [][]byte{[]byte("fs")} explicitly.
+	// the harbor root package passes [][]byte{[]byte("fs")} explicitly.
 	Root [][]byte
 
 	// Secret is a raw 32-byte master key. It must be set when encryption is
@@ -97,7 +97,7 @@ func (e *encState) openContent(raw []byte) ([]byte, error) {
 const (
 	markerKey       = "\x00__fs_enc__"
 	markerMagic     = "FENC"
-	canaryPlaintext = "storm/fs/aead/v1"
+	canaryPlaintext = "harbor/fs/aead/v1"
 )
 
 const (

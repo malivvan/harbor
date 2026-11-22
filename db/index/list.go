@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 
-	"github.com/malivvan/storm/internal"
+	"github.com/malivvan/harbor/internal"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -34,7 +34,7 @@ func NewListIndex(parent *bolt.Bucket, indexName []byte) (*ListIndex, error) {
 	// The ID bucket is only needed to mutate the index. In a read-only
 	// transaction skip the extra bucket open and resolve it lazily.
 	if parent.Writable() {
-		ids, err := NewUniqueIndex(b, []byte("storm__ids"))
+		ids, err := NewUniqueIndex(b, []byte("harbor__ids"))
 		if err != nil {
 			return nil, wrapError("index new list", err)
 		}
@@ -62,7 +62,7 @@ func (idx *ListIndex) ids() (*UniqueIndex, error) {
 	if idx.IDs != nil {
 		return idx.IDs, nil
 	}
-	ids, err := NewUniqueIndex(idx.IndexBucket, []byte("storm__ids"))
+	ids, err := NewUniqueIndex(idx.IndexBucket, []byte("harbor__ids"))
 	if err != nil {
 		return nil, err
 	}
@@ -172,8 +172,8 @@ func (idx *ListIndex) Remove(ctx context.Context, value []byte) error {
 		if err := checkContext(ctx); err != nil {
 			return wrapError("index remove", err)
 		}
-		// Skip nested buckets such as the storm__ids sentinel, which the
-		// prefix of the value "storm" also matches.
+		// Skip nested buckets such as the harbor__ids sentinel, which the
+		// prefix of the value "harbor" also matches.
 		if v == nil {
 			continue
 		}
@@ -284,7 +284,7 @@ func (idx *ListIndex) Get(ctx context.Context, value []byte) ([]byte, error) {
 		if err := checkContext(ctx); err != nil {
 			return nil, wrapError("index get", err)
 		}
-		// Skip nested buckets such as the storm__ids sentinel.
+		// Skip nested buckets such as the harbor__ids sentinel.
 		if id == nil {
 			continue
 		}
@@ -340,7 +340,7 @@ func (idx *ListIndex) All(ctx context.Context, value []byte, opts *Options) ([][
 			return nil, wrapError("index all", err)
 		}
 
-		// Skip the storm__ids sentinel and any other nested bucket.
+		// Skip the harbor__ids sentinel and any other nested bucket.
 		if id == nil {
 			continue
 		}
@@ -383,7 +383,7 @@ func (idx *ListIndex) AllRecords(ctx context.Context, opts *Options) ([][]byte, 
 			return nil, wrapError("index all records", err)
 		}
 
-		if id == nil || bytes.Equal(k, []byte("storm__ids")) {
+		if id == nil || bytes.Equal(k, []byte("harbor__ids")) {
 			continue
 		}
 
@@ -449,7 +449,7 @@ func (idx *ListIndex) Range(ctx context.Context, min []byte, max []byte, opts *O
 			return nil, wrapError("index range", err)
 		}
 
-		if id == nil || bytes.Equal(k, []byte("storm__ids")) {
+		if id == nil || bytes.Equal(k, []byte("harbor__ids")) {
 			continue
 		}
 
@@ -499,7 +499,7 @@ func (idx *ListIndex) Prefix(ctx context.Context, prefix []byte, opts *Options) 
 			return nil, wrapError("index prefix", err)
 		}
 
-		if id == nil || bytes.Equal(k, []byte("storm__ids")) {
+		if id == nil || bytes.Equal(k, []byte("harbor__ids")) {
 			continue
 		}
 		if value, ok := ListKeyValue(k); !ok || !bytes.HasPrefix(value, prefix) {

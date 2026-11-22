@@ -1,8 +1,8 @@
 # S3FS - S3 FileSystem
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/absfs/s3fs.svg)](https://pkg.go.dev/github.com/absfs/s3fs)
-[![Go Report Card](https://goreportcard.com/badge/github.com/malivvan/storm)](https://goreportcard.com/report/github.com/malivvan/storm)
-[![CI](https://github.com/malivvan/storm/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/storm/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/malivvan/harbor)](https://goreportcard.com/report/github.com/malivvan/harbor)
+[![CI](https://github.com/malivvan/harbor/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/harbor/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 
 The `s3fs` package implements an `absfs.Filer` for S3-compatible object storage. It provides file operations on S3 buckets using the AWS SDK v2.
@@ -30,7 +30,7 @@ import (
     "log"
     "os"
 
-    "github.com/malivvan/storm/fs/s3fs"
+    "github.com/malivvan/harbor/fs/s3fs"
 )
 
 func main() {
@@ -69,7 +69,7 @@ package main
 import (
     "log"
 
-    "github.com/malivvan/storm/fs/s3fs"
+    "github.com/malivvan/harbor/fs/s3fs"
 )
 
 func main() {
@@ -110,7 +110,7 @@ Requests are signed locally with AWS Signature Version 4, so the package has no 
 
 ## absfs
 
-Check out the [`absfs`](https://github.com/malivvan/storm/internal/absfs) repo for more information about the abstract filesystem interface and features like filesystem composition.
+Check out the [`absfs`](https://github.com/malivvan/harbor/internal/absfs) repo for more information about the abstract filesystem interface and features like filesystem composition.
 
 ## LICENSE
 

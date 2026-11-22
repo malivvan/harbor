@@ -1,4 +1,4 @@
-package storm
+package harbor
 
 import (
 	"crypto/rand"
@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/malivvan/storm/internal/argon2"
+	"github.com/malivvan/harbor/internal/argon2"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -105,7 +105,7 @@ func validateKDFParams(time, memory uint32, threads uint8, flags uint16, base er
 func newSalt() ([]byte, error) {
 	salt := make([]byte, SaltSize)
 	if _, err := rand.Read(salt); err != nil {
-		return nil, fmt.Errorf("storm: generate KDF salt: %w", err)
+		return nil, fmt.Errorf("harbor: generate KDF salt: %w", err)
 	}
 	return salt, nil
 }
@@ -119,7 +119,7 @@ func deriveSeed(password, salt []byte, time, memory uint32, threads uint8) []byt
 // under a single record makes the pre-decrypt configuration easy to find and
 // leaves no other header or KDF bookkeeping outside it.
 var (
-	metadataBucket    = []byte("storm.Metadata")
+	metadataBucket    = []byte("harbor.Metadata")
 	metadataRecordKey = []byte("Metadata")
 )
 
@@ -130,7 +130,7 @@ const (
 	//
 	// The sealed plaintext also binds the persisted encryption flags (see
 	// canaryPlaintextFor), so flipping a flag bit invalidates the canary.
-	canaryPlaintext = "storm/canary/v1"
+	canaryPlaintext = "harbor/canary/v1"
 
 	// metadataFixedSize is salt | time | flags | memory | threads | canary
 	// length. The canary bytes follow.
@@ -138,7 +138,7 @@ const (
 )
 
 // ErrCorruptStore reports missing or malformed store Metadata.
-var ErrCorruptStore = errors.New("storm: corrupt store Metadata")
+var ErrCorruptStore = errors.New("harbor: corrupt store Metadata")
 
 // Metadata is the unencrypted store configuration. It contains no secret: the
 // salt and cost parameters are public, and the canary is ciphertext.
@@ -222,7 +222,7 @@ func readMetadata(bdb *bolt.DB) (meta Metadata, init bool, err error) {
 		if b == nil {
 			// A missing Metadata bucket only means a brand-new store when the
 			// database holds no buckets at all. Otherwise the metadata was
-			// lost or the file is not a Storm store; initializing fresh
+			// lost or the file is not a Harbor store; initializing fresh
 			// metadata would silently mask that.
 			empty := true
 			if err := tx.ForEach(func([]byte, *bolt.Bucket) error {
@@ -282,7 +282,7 @@ func writeMetadata(bdb *bolt.DB, md Metadata) error {
 		return meta.Put(metadataRecordKey, raw)
 	})
 	if err != nil {
-		return fmt.Errorf("storm: write store Metadata: %w", err)
+		return fmt.Errorf("harbor: write store Metadata: %w", err)
 	}
 	return nil
 }

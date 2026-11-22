@@ -6,7 +6,7 @@
 
 package blake2b
 
-import "github.com/malivvan/storm/internal/cpu"
+import "github.com/malivvan/harbor/internal/cpu"
 
 //go:noescape
 func hashBlocksVX(h *[8]uint64, c *[2]uint64, flag uint64, blocks []byte)

@@ -32,7 +32,7 @@ func timedOutCtx() context.Context {
 // ============================================================================
 
 func TestOpen_CancelledContextDoesNotInitializeDatabase(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "storm.db")
+	path := filepath.Join(t.TempDir(), "harbor.db")
 
 	bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
@@ -77,7 +77,7 @@ func TestOpen_InitializationErrorDoesNotCloseBorrowedDatabase(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Step 2: hand the borrowed Store to Storm with the default (json) codec.
+	// Step 2: hand the borrowed Store to Harbor with the default (json) codec.
 	// checkVersion will call Set on __database, which builds the data
 	// bucket via setBytes -> newMeta, and newMeta will compare codec names and
 	// return ErrDifferentCodec. That is our deterministic initialization error.
@@ -86,8 +86,8 @@ func TestOpen_InitializationErrorDoesNotCloseBorrowedDatabase(t *testing.T) {
 	require.True(t, errors.Is(err, ErrDifferentCodec), "expected ErrDifferentCodec, got %v", err)
 	require.Nil(t, db)
 
-	// The borrowed bolt.Store must NOT have been closed by Storm. We confirm
-	// by performing a fresh close on bDB directly: if Storm had closed it,
+	// The borrowed bolt.Store must NOT have been closed by Harbor. We confirm
+	// by performing a fresh close on bDB directly: if Harbor had closed it,
 	// this would fail with "database not open".
 	require.NoError(t, bDB.Close())
 

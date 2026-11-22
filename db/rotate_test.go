@@ -222,7 +222,13 @@ func TestAEADVerifyAllDetectsTampering(t *testing.T) {
 		require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte("aeadUser")).Bucket([]byte(indexName))
 			c := b.Cursor()
-			k, v := c.First()
+			var k, v []byte
+			for key, val := c.First(); key != nil; key, val = c.Next() {
+				if val != nil { // skip the nested harbor__ids bucket
+					k, v = key, val
+					break
+				}
+			}
 			if v == nil {
 				t.Fatalf("index bucket %q has no plain entries", indexName)
 			}

@@ -9,7 +9,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// Name is the conventional root bucket the storm root package uses for the ts
+// Name is the conventional root bucket the harbor root package uses for the ts
 // sub-store. It is not applied implicitly: an empty Config.Root means the
 // database root.
 const Name = "ts"

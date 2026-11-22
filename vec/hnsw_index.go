@@ -6,7 +6,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/malivvan/storm/vec/hnsw"
+	"github.com/malivvan/harbor/vec/hnsw"
 )
 
 // HNSWParams contains configurable parameters for HNSW index

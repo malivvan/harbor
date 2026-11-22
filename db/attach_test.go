@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/q"
+	"github.com/malivvan/harbor/db/q"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
@@ -19,13 +19,13 @@ type attachUser struct {
 	Tag  string `db:"unique"`
 }
 
-// attachDB opens a Storm database in a temporary directory.
+// attachDB opens a Harbor database in a temporary directory.
 // Cleanup closes the database; register it before any transaction cleanup so
 // that cleanup LIFO order rolls transactions back before the database closes.
 func attachDB(t *testing.T) *Store {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), "storm.db")
+	path := filepath.Join(t.TempDir(), "harbor.db")
 	bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -55,7 +55,7 @@ func attachBegin(t *testing.T, db *Store, writable bool) *bolt.Tx {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Storm record write + raw bolt bucket write commit atomically
+// 1. Harbor record write + raw bolt bucket write commit atomically
 // ---------------------------------------------------------------------------
 
 func TestAttach_CommitIsAtomic(t *testing.T) {
@@ -66,7 +66,7 @@ func TestAttach_CommitIsAtomic(t *testing.T) {
 	txn, err := db.Attach(tx)
 	require.NoError(t, err)
 
-	// Storm record write (record + ID/index/unique/metadata buckets).
+	// Harbor record write (record + ID/index/unique/metadata buckets).
 	err = txn.Save(ctx, &attachUser{ID: 1, Name: "alice", Tag: "t1"})
 	require.NoError(t, err)
 
@@ -78,12 +78,12 @@ func TestAttach_CommitIsAtomic(t *testing.T) {
 	// Nothing is visible before the caller commits.
 	require.NoError(t, tx.Commit())
 
-	// The record is visible through normal Storm reads.
+	// The record is visible through normal Harbor reads.
 	var u attachUser
 	require.NoError(t, db.One(ctx, "ID", 1, &u))
 	require.Equal(t, "alice", u.Name)
 
-	// The raw bolt write committed atomically with the Storm write.
+	// The raw bolt write committed atomically with the Harbor write.
 	var raw []byte
 	require.NoError(t, db.bolt.View(func(vtx *bolt.Tx) error {
 		b := vtx.Bucket([]byte("audit"))
@@ -117,7 +117,7 @@ func TestAttach_RollbackDiscardsEverything(t *testing.T) {
 	txn, err := db.Attach(tx)
 	require.NoError(t, err)
 
-	// Storm record write plus a raw bolt write in the same transaction.
+	// Harbor record write plus a raw bolt write in the same transaction.
 	require.NoError(t, txn.Save(ctx, &attachUser{ID: 1, Name: "alice", Tag: "t1"}))
 
 	audit, err := tx.CreateBucketIfNotExists([]byte("audit"))
@@ -226,7 +226,7 @@ func TestAttach_IsolationFromOtherTransactions(t *testing.T) {
 		return nil
 	}))
 
-	// A managed Storm read does not see the uncommitted write.
+	// A managed Harbor read does not see the uncommitted write.
 	var u attachUser
 	require.ErrorIs(t, db.One(ctx, "ID", 1, &u), ErrNotFound)
 
@@ -248,7 +248,7 @@ func TestAttach_IsolationFromOtherTransactions(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Storm never commits, rolls back, or closes a caller-owned transaction
+// 5. Harbor never commits, rolls back, or closes a caller-owned transaction
 // ---------------------------------------------------------------------------
 
 func TestAttach_NeverCommitsOrRollsBackCallerTx(t *testing.T) {
@@ -262,7 +262,7 @@ func TestAttach_NeverCommitsOrRollsBackCallerTx(t *testing.T) {
 	require.NoError(t, txn.Save(ctx, &attachUser{ID: 1, Name: "alice", Tag: "t1"}))
 
 	// The transaction must still be open and writable: a raw bolt write
-	// succeeds only if Storm neither committed nor rolled it back.
+	// succeeds only if Harbor neither committed nor rolled it back.
 	audit, err := tx.CreateBucketIfNotExists([]byte("audit"))
 	require.NoError(t, err)
 	require.NoError(t, audit.Put([]byte("event"), []byte("created")))

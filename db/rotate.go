@@ -7,14 +7,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/malivvan/storm/db/index"
-	"github.com/malivvan/storm/internal/crypto"
+	"github.com/malivvan/harbor/db/index"
+	"github.com/malivvan/harbor/internal/crypto"
 	bolt "go.etcd.io/bbolt"
 )
 
 // listIndexIDsBucket is the nested bucket that list indexes use to map ids back
 // to their index entries.
-const listIndexIDsBucket = "storm__ids"
+const listIndexIDsBucket = "harbor__ids"
 
 // withKey returns an encryption state that writes with newKey while keeping the
 // current cipher and flags.
@@ -76,7 +76,7 @@ func (s *Store) ReEncrypt(ctx context.Context, newKey []byte) error {
 	return nil
 }
 
-// RotateAll is ReEncrypt under the name used by the ts and fs stores. A Storm
+// RotateAll is ReEncrypt under the name used by the ts and fs stores. A Harbor
 // database has a single key space, so both rotate everything.
 func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 	return s.ReEncrypt(ctx, newKey)

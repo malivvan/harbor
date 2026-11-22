@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/db/index"
+	"github.com/malivvan/harbor/db/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -57,8 +57,8 @@ func TestFind(t *testing.T) {
 
 	err = db.Find(ctx, "unexportedField", "John", &users)
 	require.Error(t, err)
-	require.True(t, strings.HasPrefix(err.Error(), "storm find:"),
-		"expected prefix 'storm find:', got %q", err.Error())
+	require.True(t, strings.HasPrefix(err.Error(), "harbor find:"),
+		"expected prefix 'harbor find:', got %q", err.Error())
 	require.True(t, strings.HasSuffix(err.Error(), "field unexportedField not found"))
 
 	err = db.Find(ctx, "DateOfBirth", "John", &users)
@@ -514,9 +514,9 @@ func TestOne(t *testing.T) {
 }
 
 func TestOneNotWritable(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "storm")
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
 	defer os.RemoveAll(dir)
-	path := filepath.Join(dir, "storm.db")
+	path := filepath.Join(dir, "harbor.db")
 	ctx := context.Background()
 
 	bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 10 * time.Second})

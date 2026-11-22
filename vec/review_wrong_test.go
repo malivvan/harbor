@@ -29,7 +29,7 @@ func TestQuantizedCollectionRequiresMatchingMode(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidConfig)
 }
 
-func TestListCollectionsSkipsForeignStormBuckets(t *testing.T) {
+func TestListCollectionsSkipsForeignHarborBuckets(t *testing.T) {
 	bdb, err := bbolt.Open(t.TempDir()+"/shared.db", 0600, nil)
 	require.NoError(t, err)
 	defer bdb.Close()

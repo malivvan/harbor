@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/internal/absfs"
+	"github.com/malivvan/harbor/internal/absfs"
 	"github.com/stretchr/testify/require"
 )
 

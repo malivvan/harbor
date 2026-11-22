@@ -1,13 +1,13 @@
 # Security Policy
 
-Storm stores user data and, optionally, protects it with a password-derived
+Harbor stores user data and, optionally, protects it with a password-derived
 key. Security reports are taken seriously.
 
 ## Reporting a vulnerability
 
 Please report suspected vulnerabilities privately to the maintainer
 (malivvan) through GitHub's private security advisory feature on
-<https://github.com/malivvan/storm/security/advisories/new>. Do not open a
+<https://github.com/malivvan/harbor/security/advisories/new>. Do not open a
 public issue for an unfixed vulnerability.
 
 Include the affected version or commit, a description, and a minimal

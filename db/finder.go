@@ -6,12 +6,12 @@ import (
 	"reflect"
 	"regexp"
 
-	"github.com/malivvan/storm/db/index"
-	"github.com/malivvan/storm/db/q"
+	"github.com/malivvan/harbor/db/index"
+	"github.com/malivvan/harbor/db/q"
 	bolt "go.etcd.io/bbolt"
 )
 
-// Finder retrieves records from Storm buckets.
+// Finder retrieves records from Harbor buckets.
 type Finder interface {
 	// One returns one record by the specified index. It returns ErrNotFound
 	// when no record matches.

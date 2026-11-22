@@ -242,7 +242,7 @@ func (c *Collection) Flush() error {
 
 // Close flushes the collection's buffered points. It deliberately does NOT
 // close the Store's bbolt handle: that handle is shared with every sibling
-// collection (and, in the storm root package, with the other sub-stores) and
+// collection (and, in the harbor root package, with the other sub-stores) and
 // is owned by whoever created it. Call Store.Flush/Store.Close to finish the
 // whole store.
 func (c *Collection) Close() error {

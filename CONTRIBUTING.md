@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve Storm.
+Thanks for helping improve Harbor.
 
 ## Development
 
