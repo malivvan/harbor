@@ -298,21 +298,22 @@ func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 		return err
 	}
 
-	var names []string
-	if err := s.b.View(func(tx *bolt.Tx) error {
-		var err error
-		names, err = s.allSeriesNames(tx)
-		return err
-	}); err != nil {
-		return err
-	}
-
 	// Rotate every series and publish the new marker in one transaction, so a
 	// crash or cancellation leaves the whole store under the old key. The key
 	// state is adopted inside the transaction for the same reason: a writer
 	// that acquires the bbolt write lock after the commit sees the new key.
+	//
+	// The series list is enumerated inside that same transaction. Collecting
+	// it in an earlier read transaction left a window in which a writer could
+	// create a series that the rewrite never visited; its points would stay
+	// sealed under the old key, which withKey then drops, making the series
+	// permanently undecryptable.
 	old := s.encState()
 	if err := s.b.Update(func(tx *bolt.Tx) error {
+		names, err := s.allSeriesNames(tx)
+		if err != nil {
+			return err
+		}
 		for _, name := range names {
 			if err := checkContext(ctx); err != nil {
 				return err
