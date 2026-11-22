@@ -110,6 +110,12 @@ type Store struct {
 	// transactions take RLock; ReEncrypt/RotateAll take Lock across the
 	// rewrite and the adoption of the new key state.
 	rotMu sync.RWMutex
+
+	// changeMu guards the change hooks. Hooks fire after a write transaction
+	// commits, outside the transaction, so a listener may safely read the store.
+	changeMu    sync.Mutex
+	changeHooks map[uint64]ChangeHook
+	nextHookID  uint64
 }
 
 // Close releases the Harbor wrapper. The underlying bbolt database is owned by

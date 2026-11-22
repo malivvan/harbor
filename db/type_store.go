@@ -236,9 +236,13 @@ func (n *node) Save(ctx context.Context, data any) error {
 		return wrapError("save", err)
 	}
 
-	return wrapError("save", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+	if err := n.readWriteTx(ctx, func(tx *bolt.Tx) error {
 		return n.save(ctx, tx, cfg, data, false)
-	}))
+	}); err != nil {
+		return wrapError("save", err)
+	}
+	n.emitUpsert(cfg, data)
+	return nil
 }
 
 func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data interface{}, update bool) error {
@@ -548,7 +552,7 @@ func (n *node) update(ctx context.Context, data interface{}, fn func(*reflect.Va
 
 	current := reflect.New(reflect.Indirect(ref).Type())
 
-	return n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+	if err := n.readWriteTx(ctx, func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -574,7 +578,11 @@ func (n *node) update(ctx context.Context, data interface{}, fn func(*reflect.Va
 		}
 
 		return n.save(ctx, tx, cfg, current.Interface(), true)
-	})
+	}); err != nil {
+		return err
+	}
+	n.emitUpsert(cfg, current.Interface())
+	return nil
 }
 
 // Drop a bucket
@@ -645,13 +653,17 @@ func (n *node) DeleteStruct(ctx context.Context, data any) error {
 		return wrapError("delete struct", err)
 	}
 
-	return wrapError("delete struct", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+	if err := n.readWriteTx(ctx, func(tx *bolt.Tx) error {
 		id, err := n.keyBytes(cfg.ID.Value.Interface(), keyDomainID)
 		if err != nil {
 			return err
 		}
 		return n.deleteStruct(ctx, tx, cfg, id)
-	}))
+	}); err != nil {
+		return wrapError("delete struct", err)
+	}
+	n.emitDelete(cfg)
+	return nil
 }
 
 func (n *node) deleteStruct(ctx context.Context, tx *bolt.Tx, cfg *structConfig, id []byte) error {
