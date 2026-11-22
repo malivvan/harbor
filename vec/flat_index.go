@@ -62,6 +62,13 @@ func (f *FlatIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
+	// topK is caller-controlled: clamp it to the number of stored points
+	// before allocating. Math.MaxInt used to panic with "makeslice: cap out of
+	// range" and a large value attempted a multi-gigabyte allocation.
+	if topK > len(f.points) {
+		topK = len(f.points)
+	}
+
 	// Keep only the best topK candidates in a max-heap whose root is the
 	// current worst, so the scan is O(n log topK) with O(topK) memory.
 	h := &flatTopK{euclid: f.metric == Euclid}
