@@ -16,7 +16,7 @@ revision and may shift; use the named symbols and files to locate the code.
     (`db.(*Store).adoptEnc` writes `Store.enc`, `db.encFromNode` reads it);
   - rotating a `vec` store while `Collection.Flush` runs reports a race
     (`vec.(*Store).adoptEnc` vs `vec.(*Store).bucketKey`).
-- The working tree has one uncommitted staged deletion: `vec/hnsw/LICENSE`.
+- Repository-health items R1–R3 are resolved in the first fix commit.
 
 ## Scope
 
@@ -753,27 +753,13 @@ mutation.
 
 # 7. Repository health
 
-## R1. [Medium] `vec/hnsw/LICENSE` is staged for deletion
-**Location:** index state (`git status` shows `deleted: vec/hnsw/LICENSE`).
-**Problem:** The `vec/hnsw` code is adapted from a CC0 project; removing its
-license file is a provenance/licensing regression and leaves an unexplained
-uncommitted deletion.
-**Fix:** Restore the file (or replace it with an explicit attribution covering
-the adapted code) and commit it with the change that removed it.
+## R1–R3. [Resolved] Repository health
 
-## R2. [Low] `go.mod` is not tidy
-**Location:** `go.mod:7`.
-**Problem:** `go mod tidy -diff` moves `golang.org/x/sys` to the indirect
-block; no package imports it directly.
-**Fix:** Run `go mod tidy`.
-
-## R3. [Low] CI/README coverage gaps
-**Location:** `.github/workflows/ci.yml`, `README.md`.
-**Problem:** CI runs tests and race tests but no `staticcheck`/`govulncheck`;
-the README's "Testing and CI" text is accurate. There is no documented policy
-for the concurrency constraints of rotation (H4/H6).
-**Fix:** Add a static analysis job and a short "Concurrency and rotation"
-section to the README.
+- **R1** — `vec/hnsw/LICENSE` (CC0 1.0) restored; the adapted HNSW code keeps
+  its upstream license.
+- **R2** — `go mod tidy` applied (`golang.org/x/sys` is now indirect).
+- **R3** — CI gained `staticcheck` and `govulncheck` jobs, and the README has a
+  "Concurrency and rotation" section documenting the rotation contract.
 
 ---
 

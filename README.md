@@ -758,6 +758,24 @@ type Codec interface {
 
 Storm records codec metadata for record/KV leaf buckets and an encoded database-version value used during `Open`. An incompatible root codec is classified with `ErrDifferentCodec`; metadata-validating initialization and write operations also classify a mismatched node codec this way. Read paths may instead return the underlying decode error, so nodes configured with `WithCodec` must continue using their matching codec.
 
+## Concurrency and rotation
+
+Store operations are safe for concurrent use. Rotation is different: it swaps
+the keys used for new writes and re-encrypts existing data, so it follows a
+stricter contract.
+
+- A full `RotateAll`/`ReEncrypt` is atomic and must be run with exclusive
+  access to the store. Do not issue writes from other goroutines while it is
+  running.
+- A per-entity rotation (`ReEncryptSeries`, `ReEncryptFS`,
+  `ReEncryptCollection`) is a partial migration. It keeps the old marker so the
+  entities that were not rewritten stay readable, but the store is only
+  self-consistent after `RotateAll` completes the migration. Do not close a
+  store between a per-entity rotation and `RotateAll`.
+- Rotation is not a plaintext migration path: the store must already be
+  encrypted. Export and re-import to change an unencrypted store into an
+  encrypted one.
+
 ## Testing and CI
 
 ```sh
