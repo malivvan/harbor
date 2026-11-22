@@ -451,8 +451,8 @@ func (r *rotation) uniqueIndex(b *bolt.Bucket) error {
 }
 
 // listIndex rotates a list index: entries are
-// value ++ "__" ++ id ++ uint64(len(value)) with the id as value, and the
-// nested id bucket mirrors them the other way around.
+// escape(value) ++ 0x00 0x00 ++ id ++ uint64(len(escape(value))) with the id
+// as value, and the nested id bucket mirrors them the other way around.
 func (r *rotation) listIndex(b *bolt.Bucket, ids *bolt.Bucket) error {
 	var (
 		changed []encryption.Pair
@@ -467,12 +467,10 @@ func (r *rotation) listIndex(b *bolt.Bucket, ids *bolt.Bucket) error {
 			return err
 		}
 
-		n, ok := index.ListKeyValueLen(k)
-		if !ok || len(k) < n+2 || k[n] != '_' || k[n+1] != '_' {
+		valueEnc, idEnc, ok := index.DecodeListKey(k)
+		if !ok {
 			return fmt.Errorf("%w: malformed list index entry", ErrWrongMode)
 		}
-		valueEnc := k[:n]
-		idEnc := k[n+2 : len(k)-8]
 
 		value, err := r.old.openKey(valueEnc, keyDomainIndex)
 		if err != nil {
@@ -521,12 +519,10 @@ func (r *rotation) listIndex(b *bolt.Bucket, ids *bolt.Bucket) error {
 			return err
 		}
 
-		n, ok := index.ListKeyValueLen(v)
-		if !ok || len(v) < n+2 || v[n] != '_' || v[n+1] != '_' {
+		valueEnc, idEnc, ok := index.DecodeListKey(v)
+		if !ok {
 			return fmt.Errorf("%w: malformed list index entry", ErrWrongMode)
 		}
-		valueEnc := v[:n]
-		idEnc := v[n+2 : len(v)-8]
 		if !bytes.Equal(idEnc, k) {
 			return fmt.Errorf("%w: malformed list index entry", ErrWrongMode)
 		}

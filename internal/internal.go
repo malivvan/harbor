@@ -39,6 +39,27 @@ type RangeCursor struct {
 	Min       []byte
 	Max       []byte
 	CompareFn func([]byte, []byte) int
+
+	// SeekMin and SeekMax, when non-nil, are the physical keys used to
+	// position the cursor. They let an index whose on-disk key encoding is not
+	// the logical value (for example the escaped list-index keys) seek to the
+	// right place while CompareFn still compares logical values.
+	SeekMin []byte
+	SeekMax []byte
+}
+
+func (c *RangeCursor) seekMin() []byte {
+	if c.SeekMin != nil {
+		return c.SeekMin
+	}
+	return c.Min
+}
+
+func (c *RangeCursor) seekMax() []byte {
+	if c.SeekMax != nil {
+		return c.SeekMax
+	}
+	return c.Max
 }
 
 // First element
@@ -47,7 +68,7 @@ func (c *RangeCursor) First() ([]byte, []byte) {
 		if len(c.Max) == 0 {
 			return c.C.Last()
 		}
-		k, v := c.C.Seek(c.Max)
+		k, v := c.C.Seek(c.seekMax())
 
 		// Seek returns nil when max sorts above every key: fall back to the
 		// last key so "everything up to max" still works in reverse.
@@ -65,7 +86,7 @@ func (c *RangeCursor) First() ([]byte, []byte) {
 		return k, v
 	}
 
-	return c.C.Seek(c.Min)
+	return c.C.Seek(c.seekMin())
 }
 
 // Next element

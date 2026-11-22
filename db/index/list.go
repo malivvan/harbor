@@ -284,11 +284,12 @@ func (idx *ListIndex) Get(ctx context.Context, value []byte) ([]byte, error) {
 		if err := checkContext(ctx); err != nil {
 			return nil, wrapError("index get", err)
 		}
-		// The storm__ids sentinel is a nested bucket (nil value) that shares
-		// the prefix of the value "storm".
+		// Skip nested buckets such as the storm__ids sentinel.
 		if id == nil {
 			continue
 		}
+		// The prefix includes the value terminator, so every hit is an exact
+		// value match; keys for "a__b" never match the value "a".
 		return id, nil
 	}
 
@@ -417,16 +418,29 @@ func (idx *ListIndex) Range(ctx context.Context, min []byte, max []byte, opts *O
 
 	list := resultSlice(resultCap(idx.IndexBucket, opts))
 
+	// Seek on the escaped form: the raw logical value is not a valid cursor
+	// position because NUL bytes are escaped on disk.
+	var seekMin, seekMax []byte
+	if len(min) > 0 {
+		seekMin = escapeListValue(min)
+	}
+	if len(max) > 0 {
+		seekMax = escapeListValue(max)
+	}
+
 	c := internal.RangeCursor{
 		C:       idx.IndexBucket.Cursor(),
 		Reverse: opts != nil && opts.Reverse,
 		Min:     min,
 		Max:     max,
+		SeekMin: seekMin,
+		SeekMax: seekMax,
 		CompareFn: func(val, limit []byte) int {
-			if n, ok := ListKeyValueLen(val); ok {
-				return bytes.Compare(val[:n], limit)
+			value, ok := ListKeyValue(val)
+			if !ok {
+				return bytes.Compare(val, limit)
 			}
-			return bytes.Compare(val, limit)
+			return bytes.Compare(value, limit)
 		},
 	}
 
@@ -470,10 +484,14 @@ func (idx *ListIndex) Prefix(ctx context.Context, prefix []byte, opts *Options) 
 
 	list := resultSlice(resultCap(idx.IndexBucket, opts))
 
+	// The terminator keeps a raw prefix scan close, but a NUL in the search
+	// prefix needs the escaped form to match encoded keys. Decode the value
+	// component and match on the logical bytes for exactness.
+	scanPrefix := escapeListValue(prefix)
 	c := internal.PrefixCursor{
 		C:       idx.IndexBucket.Cursor(),
 		Reverse: opts != nil && opts.Reverse,
-		Prefix:  prefix,
+		Prefix:  scanPrefix,
 	}
 
 	for k, id := c.First(); k != nil && c.Continue(k); k, id = c.Next() {
@@ -482,6 +500,9 @@ func (idx *ListIndex) Prefix(ctx context.Context, prefix []byte, opts *Options) 
 		}
 
 		if id == nil || bytes.Equal(k, []byte("storm__ids")) {
+			continue
+		}
+		if value, ok := ListKeyValue(k); !ok || !bytes.HasPrefix(value, prefix) {
 			continue
 		}
 
@@ -508,44 +529,113 @@ func (idx *ListIndex) Prefix(ctx context.Context, prefix []byte, opts *Options) 
 	return list, nil
 }
 
-// generatePrefix returns the "<value>__" search prefix. An empty value has no
-// valid prefix, because Add rejects empty values; returning nil lets callers
-// report "no match" instead of scanning every index key.
 // listValueLenSize is the trailing big-endian word that records the length of
-// the value component in a list-index key.
+// the escaped value component in a list-index key.
 const listValueLenSize = 8
 
-// EncodeListKey builds "value ++ __ ++ id ++ uint64(len(value))". The trailing
-// length makes the split unambiguous even when the value or the id contains
-// "__".
+// listValueTerminator ends the escaped value component of a list-index key. It
+// cannot occur inside an escaped value because NUL bytes are escaped as
+// 0x00 0xFF.
+var listValueTerminator = []byte{0x00, 0x00}
+
+// escapeListValue encodes a value so that the byte ordering of encoded values
+// matches the byte ordering of the original values and the terminator is
+// unambiguous. NUL is the only byte that needs escaping: 0x00 becomes
+// 0x00 0xFF, everything else is copied verbatim.
+func escapeListValue(value []byte) []byte {
+	escaped := make([]byte, 0, len(value))
+	for _, b := range value {
+		if b == 0x00 {
+			escaped = append(escaped, 0x00, 0xFF)
+			continue
+		}
+		escaped = append(escaped, b)
+	}
+	return escaped
+}
+
+// unescapeListValue reverses escapeListValue for the given encoded value.
+func unescapeListValue(encoded []byte) ([]byte, bool) {
+	value := make([]byte, 0, len(encoded))
+	for i := 0; i < len(encoded); i++ {
+		if encoded[i] != 0x00 {
+			value = append(value, encoded[i])
+			continue
+		}
+		if i+1 >= len(encoded) || encoded[i+1] != 0xFF {
+			return nil, false
+		}
+		value = append(value, 0x00)
+		i++
+	}
+	return value, true
+}
+
+// EncodeListKey builds "escape(value) ++ 0x00 0x00 ++ id ++
+// uint64(len(escape(value)))".
+//
+// The escaped, terminated value keeps the index sorted by value (rather than by
+// the raw concatenation), and makes exact-value lookups unambiguous even when
+// one value is a prefix of another or contains NUL or "__". The trailing length
+// locates the value component without scanning, which matters because IDs are
+// arbitrary bytes.
 func EncodeListKey(value, id []byte) []byte {
-	key := make([]byte, 0, len(value)+2+len(id)+listValueLenSize)
-	key = append(key, value...)
-	key = append(key, '_', '_')
+	escaped := escapeListValue(value)
+	key := make([]byte, 0, len(escaped)+2+len(id)+listValueLenSize)
+	key = append(key, escaped...)
+	key = append(key, listValueTerminator...)
 	key = append(key, id...)
 	var length [listValueLenSize]byte
-	binary.BigEndian.PutUint64(length[:], uint64(len(value)))
+	binary.BigEndian.PutUint64(length[:], uint64(len(escaped)))
 	return append(key, length[:]...)
 }
 
-// ListKeyValueLen returns the length of the value component of a list-index
-// key, reporting false for a malformed key.
+// ListKeyValueLen returns the length of the escaped value component of a
+// list-index key, reporting false for a malformed key.
 func ListKeyValueLen(key []byte) (int, bool) {
-	if len(key) < listValueLenSize+2 {
+	if len(key) < listValueLenSize+len(listValueTerminator) {
 		return 0, false
 	}
 	n := int(binary.BigEndian.Uint64(key[len(key)-listValueLenSize:]))
 	if n < 0 || n > len(key)-listValueLenSize-2 {
 		return 0, false
 	}
+	if key[n] != 0x00 || key[n+1] != 0x00 {
+		return 0, false
+	}
 	return n, true
 }
 
+// ListKeyValue returns the logical value encoded in a list-index key.
+func ListKeyValue(key []byte) ([]byte, bool) {
+	n, ok := ListKeyValueLen(key)
+	if !ok {
+		return nil, false
+	}
+	return unescapeListValue(key[:n])
+}
+
+// DecodeListKey splits a list-index key into its logical value and ID.
+func DecodeListKey(key []byte) (value, id []byte, ok bool) {
+	n, ok := ListKeyValueLen(key)
+	if !ok {
+		return nil, nil, false
+	}
+	value, ok = unescapeListValue(key[:n])
+	if !ok {
+		return nil, nil, false
+	}
+	return value, key[n+2 : len(key)-listValueLenSize], true
+}
+
+// generatePrefix returns the search prefix for an exact value: the escaped
+// value followed by its terminator. An empty value has no valid prefix, because
+// Add rejects empty values; returning nil lets callers report "no match"
+// instead of scanning every index key.
 func generatePrefix(value []byte) []byte {
 	if len(value) == 0 {
 		return nil
 	}
-	prefix := make([]byte, 0, len(value)+2)
-	prefix = append(prefix, value...)
-	return append(prefix, '_', '_')
+	prefix := escapeListValue(value)
+	return append(prefix, listValueTerminator...)
 }
