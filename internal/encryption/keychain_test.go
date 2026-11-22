@@ -2,6 +2,7 @@ package encryption
 
 import (
 	"bytes"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -157,4 +158,63 @@ func TestKeychainWithKeyKeepingFallbacks(t *testing.T) {
 	require.Equal(t, []byte("new payload"), plain)
 
 	require.False(t, bytes.Equal(oldSealed, newSealed))
+}
+
+// TestKeychainSealNoncesAreUnique checks that buffered nonces are still fresh
+// and that every sealed value round-trips.
+func TestKeychainSealNoncesAreUnique(t *testing.T) {
+	kc, err := NewKeychain([][]byte{testKey(21)})
+	require.NoError(t, err)
+
+	seen := make(map[string]struct{}, 2000)
+	for i := 0; i < 2000; i++ {
+		sealed, err := kc.Seal([]byte("same plaintext"))
+		require.NoError(t, err)
+
+		nonceSize := kc.engine.NonceSize()
+		nonce := string(sealed[:nonceSize])
+		_, dup := seen[nonce]
+		require.False(t, dup, "nonce reused at iteration %d", i)
+		seen[nonce] = struct{}{}
+
+		plain, err := kc.Open(sealed)
+		require.NoError(t, err)
+		require.Equal(t, []byte("same plaintext"), plain)
+	}
+}
+
+// TestNonceSourceConcurrent exercises the buffered source from several
+// goroutines; every served nonce must be distinct.
+func TestNonceSourceConcurrent(t *testing.T) {
+	const (
+		workers = 8
+		perWork = 2000
+		size    = 12
+	)
+
+	results := make(chan [size]byte, workers*perWork)
+
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			buf := make([]byte, size)
+			for i := 0; i < perWork; i++ {
+				require.NoError(t, gcmNonces.read(buf))
+				var nonce [size]byte
+				copy(nonce[:], buf)
+				results <- nonce
+			}
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	seen := make(map[[size]byte]struct{}, workers*perWork)
+	for nonce := range results {
+		_, dup := seen[nonce]
+		require.False(t, dup, "buffered nonce source reused a nonce")
+		seen[nonce] = struct{}{}
+	}
 }

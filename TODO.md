@@ -160,6 +160,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low (pure refactor; SIV test vectors pin correctness).
 
 ### 1.10 AES-GCM draws a fresh nonce via `crypto/rand` per value; `Open` trial-decrypts each key — MEDIUM
+
+> **Status:** ✅ FIXED — AES-GCM seals draw nonces from a mutex-protected, buffered `crypto/rand` stream (one syscall per 4 KiB instead of per value); randomness and per-value authentication are unchanged. Regression tests assert nonce uniqueness and round-trips under concurrency.
 - **Location:** `internal/encryption/keychain.go:62-80` (`Seal` → `rand.Read`), `:85-104`
   (`Open` loops engines).
 - **Problem:** Each encrypted value write performs a `getrandom`/urandom syscall for a 12-byte

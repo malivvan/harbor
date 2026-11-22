@@ -3,6 +3,7 @@ package encryption
 import (
 	"crypto/rand"
 	"fmt"
+	"sync"
 )
 
 // Keychain holds the AES-256-GCM engines for one or more master keys. The first
@@ -65,7 +66,7 @@ func (k *Keychain) Seal(plain []byte) ([]byte, error) {
 	}
 
 	nonce := make([]byte, k.engine.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
+	if err := gcmNonces.read(nonce); err != nil {
 		return nil, fmt.Errorf("generating nonce: %w", err)
 	}
 
@@ -124,3 +125,40 @@ func (k *Keychain) WithKeyKeepingFallbacks(key []byte) (*Keychain, error) {
 	keys = append(keys, k.keys...)
 	return NewKeychain(keys)
 }
+
+// nonceBatchSize is the number of CSPRNG bytes buffered per system call. The
+// bytes still come from crypto/rand, so nonce uniqueness is unchanged; only
+// the per-seal syscall is amortised.
+const nonceBatchSize = 4096
+
+// nonceSource serves nonces from a buffered CSPRNG stream. It is safe for
+// concurrent use.
+type nonceSource struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+func (s *nonceSource) read(p []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for len(p) > 0 {
+		if len(s.buf) == 0 {
+			if cap(s.buf) < nonceBatchSize {
+				s.buf = make([]byte, nonceBatchSize)
+			} else {
+				s.buf = s.buf[:nonceBatchSize]
+			}
+			if _, err := rand.Read(s.buf); err != nil {
+				return err
+			}
+		}
+		n := copy(p, s.buf)
+		s.buf = s.buf[n:]
+		p = p[n:]
+	}
+	return nil
+}
+
+// gcmNonces is the process-wide buffered nonce source.
+var gcmNonces = &nonceSource{}
