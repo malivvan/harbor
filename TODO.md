@@ -607,6 +607,8 @@ build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 - **Risk:** Low-Medium.
 
 ### 3.13 Filter evaluation uses `reflect.TypeOf`×2 + `DeepEqual` fallback; naive `containsString` — LOW-MEDIUM
+
+> **Status:** ✅ FIXED — same-type string equality is checked before any reflection, `matchContains` uses `strings.Contains` (preserving the empty-needle rule), and the manual substring loop is gone.
 - **Location:** `vec/models.go:129`, `vec/models.go:170-183`, `vec/models.go:360-366`
   (`containsString` char-by-char).
 - **Problem:** Opaque payload types hit reflection (allocation-prone) per point; `containsString`
@@ -617,6 +619,8 @@ build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 - **Risk:** Low.
 
 ### 3.14 Regex cache does an O(n) size scan per new pattern — LOW
+
+> **Status:** ✅ FIXED — the number of memoized patterns is tracked with an atomic counter, so inserting a new pattern no longer ranges up to 1024 entries.
 - **Location:** `vec/models.go:374-403` (`regexCacheSize()` ranges the map at `:397`).
 - **Problem:** Each distinct-pattern insert that misses ranges up to 1024 entries; every match
   does a `sync.Map.Load`.

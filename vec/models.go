@@ -3,7 +3,9 @@ package vec
 import (
 	"reflect"
 	"regexp"
+	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Payload mimics Qdrant's payload structure, storing metadata as a map of string keys to any values.
@@ -169,6 +171,12 @@ func matchExact(val, target any) bool {
 			}
 		}
 		return fv == ft
+	}
+
+	if vs, ok := val.(string); ok {
+		if ts, ok := target.(string); ok {
+			return vs == ts
+		}
 	}
 
 	valType := reflect.TypeOf(val)
@@ -349,32 +357,29 @@ func matchContains(val any, target any) bool {
 		}
 	case string:
 		if targetStr, ok := target.(string); ok {
-			return len(targetStr) > 0 && containsString(v, targetStr)
+			return len(targetStr) > 0 && strings.Contains(v, targetStr)
 		}
 	}
 
 	return false
 }
 
-// containsString checks if a string contains a substring
+// containsString is kept for compatibility with internal callers.
 func containsString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(s, substr)
 }
 
 // regexCache memoizes compiled patterns: MatchFilter is evaluated once per
 // point, so recompiling the same pattern would dominate a filtered scan.
 var regexCache sync.Map // map[string]*regexp.Regexp
 
-// regexCacheSize counts the memoized patterns.
+// regexCacheCount tracks the number of memoized patterns without ranging the
+// whole cache on every insert.
+var regexCacheCount atomic.Int64
+
+// regexCacheSize returns the tracked number of memoized patterns.
 func regexCacheSize() int {
-	n := 0
-	regexCache.Range(func(_, _ any) bool { n++; return true })
-	return n
+	return int(regexCacheCount.Load())
 }
 
 // compileRegex compiles pattern once, caching both success and failure. An
@@ -394,10 +399,12 @@ func compileRegex(pattern string) *regexp.Regexp {
 	if cached, ok := regexCache.Load(pattern); ok && cached != nil {
 		return cached.(*regexp.Regexp)
 	}
-	if regexCacheSize() > 1024 {
+	if regexCacheCount.Load() > 1024 {
 		regexCache.Clear()
+		regexCacheCount.Store(0)
 	}
 	regexCache.Store(pattern, re)
+	regexCacheCount.Add(1)
 	return re
 }
 
