@@ -53,6 +53,28 @@ func (se *Series) SetRetention(ctx context.Context, r Retention) error {
 			return err
 		}
 		meta.Retention = r
+
+		// A series that predates count tracking has Count == 0 even though it
+		// holds points. Seed it before enforcing a count-based policy,
+		// otherwise the next insert would under-count and skip pruning.
+		if meta.Count == 0 && (r.MaxPoints > 0 || r.MaxAge > 0) {
+			bucket, err := se.store.seriesBucket(tx, se.name)
+			if err != nil {
+				return err
+			}
+			if bucket != nil {
+				if se.store.blockDuration() > 0 {
+					count, err := se.store.countBlocks(ctx, bucket)
+					if err != nil {
+						return err
+					}
+					meta.Count = int64(count)
+				} else {
+					meta.Count = int64(bucket.Stats().KeyN)
+				}
+			}
+		}
+
 		if err := se.store.writeMeta(tx, se.name, meta); err != nil {
 			return err
 		}
