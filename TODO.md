@@ -468,6 +468,8 @@ build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 - **Risk:** Low (pure result-assembly refactor).
 
 ### 3.2 `FlatIndex.Search` materializes a size-n result slice and sorts all of it regardless of topK — HIGH
+
+> **Status:** ✅ FIXED — search keeps only the best `topK` candidates in a max-heap keyed by worst-first, making the scan O(n log topK) with O(topK) memory; only the survivors are sorted. Regression test compares scores against a brute-force sort for all metrics and topK values.
 - **Location:** `vec/flat_index.go:64-90` (`append` at `:71`, `sort.Slice` at `:79`).
 - **Problem:** Every query allocates/grows an n-element `[]ScoredPoint` and does O(n log n) sort
   to keep `topK`. Should be O(n log topK) with O(topK) memory. Measured: topK=1 and topK=10

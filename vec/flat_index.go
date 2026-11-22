@@ -1,6 +1,7 @@
 package vec
 
 import (
+	"container/heap"
 	"fmt"
 	"sort"
 	"sync"
@@ -61,42 +62,41 @@ func (f *FlatIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	type candidate struct {
-		id      string
-		version uint64
-		dist    float32
-		point   *PointStruct
-	}
+	// Keep only the best topK candidates in a max-heap whose root is the
+	// current worst, so the scan is O(n log topK) with O(topK) memory.
+	h := &flatTopK{euclid: f.metric == Euclid}
+	h.data = make([]flatCandidate, 0, topK)
 
-	candidates := make([]candidate, 0, len(f.points))
 	for id, point := range f.points {
 		if !MatchFilter(point.Payload, filter) {
 			continue
 		}
 
-		candidates = append(candidates, candidate{
+		c := flatCandidate{
 			id:      id,
 			version: point.Version,
 			dist:    CalculateDistance(f.metric, query, point.Vector),
 			point:   point,
-		})
+		}
+
+		if len(h.data) < topK {
+			heap.Push(h, c)
+			continue
+		}
+		if h.better(c, h.data[0]) {
+			heap.Pop(h)
+			heap.Push(h, c)
+		}
 	}
 
-	sort.Slice(candidates, func(i, j int) bool {
-		if f.metric == Euclid {
-			return candidates[i].dist < candidates[j].dist
-		}
-		return candidates[i].dist > candidates[j].dist
+	// Order the survivors for the caller.
+	sort.Slice(h.data, func(i, j int) bool {
+		return h.better(h.data[i], h.data[j])
 	})
 
-	if topK > len(candidates) {
-		topK = len(candidates)
-	}
-	candidates = candidates[:topK]
-
 	// Payloads are deep-copied only for the results that survive topK.
-	results := make([]ScoredPoint, len(candidates))
-	for i, c := range candidates {
+	results := make([]ScoredPoint, len(h.data))
+	for i, c := range h.data {
 		results[i] = ScoredPoint{
 			ID:      c.id,
 			Version: c.version,
@@ -105,6 +105,52 @@ func (f *FlatIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 		}
 	}
 	return results, nil
+}
+
+// flatCandidate is a lightweight search hit that keeps a reference to the
+// stored point so its payload can be cloned only if it survives.
+type flatCandidate struct {
+	id      string
+	version uint64
+	dist    float32
+	point   *PointStruct
+}
+
+// flatTopK is a max-heap of candidates ordered so that the root is the worst
+// candidate currently kept.
+type flatTopK struct {
+	data   []flatCandidate
+	euclid bool
+}
+
+func (h flatTopK) Len() int { return len(h.data) }
+
+func (h flatTopK) Less(i, j int) bool {
+	if h.euclid {
+		// Larger Euclidean distance is worse.
+		return h.data[i].dist > h.data[j].dist
+	}
+	// Smaller similarity is worse.
+	return h.data[i].dist < h.data[j].dist
+}
+
+func (h flatTopK) Swap(i, j int) { h.data[i], h.data[j] = h.data[j], h.data[i] }
+
+func (h *flatTopK) Push(x any) { h.data = append(h.data, x.(flatCandidate)) }
+
+func (h *flatTopK) Pop() any {
+	n := len(h.data)
+	item := h.data[n-1]
+	h.data = h.data[:n-1]
+	return item
+}
+
+// better reports whether a should rank before b.
+func (h *flatTopK) better(a, b flatCandidate) bool {
+	if h.euclid {
+		return a.dist < b.dist
+	}
+	return a.dist > b.dist
 }
 
 // Delete removes a point from the index by its ID.
