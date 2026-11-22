@@ -13,23 +13,24 @@ import (
 // previous key stays available for decryption, so the series that were not
 // rewritten keep working until RotateAll.
 func (s *Store) withRotationKey(newKey []byte) (*Store, error) {
-	if s.enc == nil {
+	cur := s.encState()
+	if cur == nil {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 
-	kc, err := s.enc.kc.WithKeyKeepingFallbacks(newKey)
+	kc, err := cur.kc.WithKeyKeepingFallbacks(newKey)
 	if err != nil {
 		return nil, err
 	}
 	next := &Store{
 		b:    s.b,
 		root: cloneRoot(s.root),
-		enc: &encState{
-			kc:        kc,
-			encValues: s.enc.encValues,
-			blockDur:  s.enc.blockDur,
-		},
 	}
+	next.enc.Store(&encState{
+		kc:        kc,
+		encValues: cur.encValues,
+		blockDur:  cur.blockDur,
+	})
 	next.now.Store(s.now.Load())
 	return next, nil
 }
@@ -38,14 +39,15 @@ func (s *Store) withRotationKey(newKey []byte) (*Store, error) {
 // database, dropping every current key. It is used internally to re-encrypt
 // data.
 func (s *Store) withKey(newKey []byte) (*Store, error) {
-	if s.enc == nil {
+	cur := s.encState()
+	if cur == nil {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 	if len(newKey) != KeySize {
 		return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, KeySize, len(newKey))
 	}
 
-	kc, err := s.enc.kc.WithKey(newKey)
+	kc, err := cur.kc.WithKey(newKey)
 	if err != nil {
 		return nil, err
 	}
@@ -53,27 +55,29 @@ func (s *Store) withKey(newKey []byte) (*Store, error) {
 	next := &Store{
 		b:    s.b,
 		root: cloneRoot(s.root),
-		enc: &encState{
-			kc:        kc,
-			encValues: s.enc.encValues,
-			encNames:  s.enc.encNames,
-			blockDur:  s.enc.blockDur,
-		},
 	}
-	next.now.Store(s.now.Load())
-	if s.enc.encNames {
-		next.enc.siv, err = encryption.NewSIVNameCipher(newKey, sivInfo)
+	nextEnc := &encState{
+		kc:        kc,
+		encValues: cur.encValues,
+		encNames:  cur.encNames,
+		blockDur:  cur.blockDur,
+	}
+	if cur.encNames {
+		nextEnc.siv, err = encryption.NewSIVNameCipher(newKey, sivInfo)
 		if err != nil {
 			return nil, err
 		}
 	}
+	next.enc.Store(nextEnc)
+	next.now.Store(s.now.Load())
 	return next, nil
 }
 
 // adopt switches the store's write and read keys to next after a successful
-// rotation.
+// rotation. Readers load the pointer atomically, so they never observe a
+// half-swapped key set.
 func (s *Store) adopt(next *Store) {
-	s.enc = next.enc
+	s.enc.Store(next.encState())
 }
 
 // readAllPoints returns every point stored in a series bucket.
@@ -132,100 +136,114 @@ func (s *Store) writeMarker(tx *bolt.Tx) error {
 	if err != nil {
 		return err
 	}
-	raw, err := s.enc.encodeMarker()
+	raw, err := s.encState().encodeMarker()
 	if err != nil {
 		return err
 	}
 	return bucket.Put([]byte(markerKey), raw)
 }
 
-// reEncryptSeries rewrites one series with next's key, using s for reads.
+// reEncryptSeries rewrites one series with next's key in its own transaction.
+// The marker intentionally stays under the current key: the other series still
+// hold old-key ciphertext, and a restart with the old key must be able to read
+// them. Run RotateAll to finish the migration.
 func (s *Store) reEncryptSeries(ctx context.Context, name string, next *Store) error {
 	return s.b.Update(func(tx *bolt.Tx) error {
-		if err := checkContext(ctx); err != nil {
+		if err := s.reEncryptSeriesTx(ctx, tx, name, next); err != nil {
 			return err
 		}
+		return s.writeMarker(tx)
+	})
+}
 
-		meta, err := s.readMeta(tx, name)
-		if err != nil {
-			return err
-		}
+// reEncryptSeriesTx rewrites one series with next's key inside tx, using s for
+// reads.
+func (s *Store) reEncryptSeriesTx(ctx context.Context, tx *bolt.Tx, name string, next *Store) error {
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
 
-		oldBucket, err := s.seriesBucket(tx, name)
-		if err != nil {
-			return err
-		}
-		points, err := s.readAllPoints(ctx, oldBucket)
-		if err != nil {
-			return err
-		}
+	meta, err := s.readMeta(tx, name)
+	if err != nil {
+		return err
+	}
 
-		metaBucket, err := s.metaBucket(tx, false)
-		if err != nil {
-			return err
-		}
-		oldMetaKey, err := s.bucketKey(name)
-		if err != nil {
-			return err
-		}
-		hasMeta := metaBucket != nil && metaBucket.Get(oldMetaKey) != nil
-		if oldBucket == nil && !hasMeta {
-			return ErrNotFound
-		}
+	oldBucket, err := s.seriesBucket(tx, name)
+	if err != nil {
+		return err
+	}
+	points, err := s.readAllPoints(ctx, oldBucket)
+	if err != nil {
+		return err
+	}
 
-		if oldBucket != nil {
-			if err := s.deleteBucket(tx, oldMetaKey); err != nil {
+	metaBucket, err := s.metaBucket(tx, false)
+	if err != nil {
+		return err
+	}
+	oldMetaKey, err := s.bucketKey(name)
+	if err != nil {
+		return err
+	}
+	hasMeta := metaBucket != nil && metaBucket.Get(oldMetaKey) != nil
+	if oldBucket == nil && !hasMeta {
+		return ErrNotFound
+	}
+
+	if oldBucket != nil {
+		if err := s.deleteBucket(tx, oldMetaKey); err != nil {
+			return err
+		}
+	}
+	if hasMeta {
+		if err := metaBucket.Delete(oldMetaKey); err != nil {
+			return err
+		}
+	}
+
+	if len(points) > 0 {
+		bucket, err := next.createSeriesBucket(tx, name)
+		if err != nil {
+			return err
+		}
+		if next.blockDuration() > 0 {
+			if err := next.insertBlocks(ctx, bucket, points); err != nil {
 				return err
 			}
-		}
-		if hasMeta {
-			if err := metaBucket.Delete(oldMetaKey); err != nil {
-				return err
-			}
-		}
-
-		if len(points) > 0 {
-			bucket, err := next.createSeriesBucket(tx, name)
-			if err != nil {
-				return err
-			}
-			if next.blockDuration() > 0 {
-				if err := next.insertBlocks(ctx, bucket, points); err != nil {
+		} else {
+			for _, point := range points {
+				if err := checkContext(ctx); err != nil {
 					return err
 				}
-			} else {
-				for _, point := range points {
-					if err := checkContext(ctx); err != nil {
-						return err
-					}
-					key := encodeKey(point.Timestamp)
-					value, err := next.sealValue(point.Value)
-					if err != nil {
-						return err
-					}
-					if err := bucket.Put(key[:], value); err != nil {
-						return err
-					}
+				key := encodeKey(point.Timestamp)
+				value, err := next.sealValue(point.Value)
+				if err != nil {
+					return err
+				}
+				if err := bucket.Put(key[:], value); err != nil {
+					return err
 				}
 			}
 		}
+	}
 
-		if hasMeta {
-			if err := next.writeMeta(tx, name, meta); err != nil {
-				return err
-			}
+	if hasMeta {
+		if err := next.writeMeta(tx, name, meta); err != nil {
+			return err
 		}
+	}
 
-		return next.writeMarker(tx)
-	})
+	return nil
 }
 
 // ReEncryptSeries rewrites every record and the metadata of one series under
 // newKey and installs newKey as the write key.
 //
-// The previous key stays available for decryption, so the series that were not
-// rewritten keep working; RotateAll rewrites all of them and drops the old key
-// once it is done.
+// The marker stays under the current key, and the previous key stays available
+// for decryption in this process, so the series that were not rewritten keep
+// working. This is a partial rotation: the store is NOT self-consistent for a
+// fresh process until RotateAll completes it. Closing a store after
+// ReEncryptSeries is unsupported; call RotateAll before Close.
 //
 // With EncryptSeriesNames it cannot run at all: the physical names are derived
 // from one master key, so once the new key is installed the remaining series can
@@ -242,7 +260,7 @@ func (s *Store) ReEncryptSeries(ctx context.Context, name string, newKey []byte)
 	if name == "" {
 		return ErrNilParam
 	}
-	if s.enc != nil && s.enc.encNames {
+	if enc := s.encState(); enc != nil && enc.encNames {
 		return fmt.Errorf("%w: a single series cannot be rotated when series names are encrypted; use RotateAll", ErrInvalidConfig)
 	}
 
@@ -281,13 +299,20 @@ func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 		return err
 	}
 
-	for _, name := range names {
-		if err := checkContext(ctx); err != nil {
-			return err
+	// Rotate every series and publish the new marker in one transaction, so a
+	// crash or cancellation leaves the whole store under the old key.
+	if err := s.b.Update(func(tx *bolt.Tx) error {
+		for _, name := range names {
+			if err := checkContext(ctx); err != nil {
+				return err
+			}
+			if err := s.reEncryptSeriesTx(ctx, tx, name, next); err != nil {
+				return err
+			}
 		}
-		if err := s.reEncryptSeries(ctx, name, next); err != nil {
-			return err
-		}
+		return next.writeMarker(tx)
+	}); err != nil {
+		return err
 	}
 
 	s.adopt(next)
@@ -306,7 +331,7 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 
 	var names []string
 	if err := s.b.View(func(tx *bolt.Tx) error {
-		if s.enc != nil {
+		if enc := s.encState(); enc != nil {
 			meta, err := s.metaBucket(tx, false)
 			if err != nil {
 				return err
@@ -317,7 +342,7 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 					if err != nil {
 						return err
 					}
-					if err := s.enc.verifyCanary(canary); err != nil {
+					if err := enc.verifyCanary(canary); err != nil {
 						return err
 					}
 				}

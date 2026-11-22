@@ -16,7 +16,13 @@ const KeySize = encryption.KeySize
 // format.
 type Config struct {
 	// Root is the bucket path below which all series live. Each element is one
-	// nested bucket name. A nil or empty Root uses the default "ts" bucket.
+	// nested bucket name. A nil or empty Root means the database root; the
+	// storm root package passes [][]byte{[]byte("ts")} explicitly.
+	//
+	// Encryption requires a non-empty Root: at the database root the store
+	// cannot distinguish its own series buckets from unrelated top-level
+	// buckets, so it cannot safely detect existing plaintext data or enumerate
+	// series for rotation.
 	Root [][]byte
 
 	// Secret is a raw 32-byte master key. It must be set when encryption is
@@ -201,7 +207,8 @@ func (e *encState) verifyCanary(canary []byte) error {
 // ensureMarker writes the encryption marker if the store does not have one yet.
 // It is called inside write transactions for encrypted stores.
 func (s *Store) ensureMarker(tx *bolt.Tx) error {
-	if s == nil || s.enc == nil {
+	enc := s.encState()
+	if enc == nil {
 		return nil
 	}
 	bucket, err := s.metaBucket(tx, true)
@@ -211,7 +218,7 @@ func (s *Store) ensureMarker(tx *bolt.Tx) error {
 	if bucket.Get([]byte(markerKey)) != nil {
 		return nil
 	}
-	raw, err := s.enc.encodeMarker()
+	raw, err := enc.encodeMarker()
 	if err != nil {
 		return err
 	}
@@ -270,19 +277,34 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		return nil, ErrNilParam
 	}
 
+	// Drop empty path elements: they would make rootBucket and createRootBucket
+	// disagree and could hand createSeriesBucket a nil root.
+	var root [][]byte
+	for _, part := range cfg.Root {
+		if len(part) == 0 {
+			continue
+		}
+		root = append(root, append([]byte(nil), part...))
+	}
+
 	settings, err := resolveConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
+	if settings != nil && len(root) == 0 {
+		// At the database root unrelated top-level buckets cannot be told
+		// apart from series, so encryption and rotation are refused.
+		return nil, fmt.Errorf("%w: encryption requires a non-empty Root", ErrInvalidConfig)
+	}
 
 	s := &Store{
 		b:      bdb,
-		root:   cloneRoot(cfg.Root),
+		root:   root,
 		series: make(map[string]*Series),
 	}
 	s.now.Store(&nowProvider{fn: defaultNow})
 
-	s.enc = settings
+	s.enc.Store(settings)
 
 	existing, canary, found, err := s.readMarker(bdb)
 	if err != nil {
@@ -295,7 +317,7 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		if !existing.matches(settings) {
 			return nil, fmt.Errorf("%w: encryption settings do not match the store", ErrWrongMode)
 		}
-		if err := s.enc.verifyCanary(canary); err != nil {
+		if err := s.encState().verifyCanary(canary); err != nil {
 			return nil, err
 		}
 		return s, nil

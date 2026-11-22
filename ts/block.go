@@ -271,13 +271,21 @@ func (s *Store) deleteBlocks(ctx context.Context, bucket *bolt.Bucket, start, en
 	return deleted, nil
 }
 
-// pruneBlocks applies a retention policy to encrypted blocks.
-func (s *Store) pruneBlocks(bucket *bolt.Bucket, r Retention, now int64) (int, error) {
+// pruneBlocks applies a retention policy to encrypted blocks. A zero policy
+// returns before any block is unsealed.
+func (s *Store) pruneBlocks(ctx context.Context, bucket *bolt.Bucket, r Retention, now int64) (int, error) {
+	if r.MaxAge <= 0 && r.MaxPoints <= 0 {
+		return 0, nil
+	}
+
 	var all []Point
 	var keys [][]byte
 
 	cursor := bucket.Cursor()
 	for key, raw := cursor.First(); key != nil; key, raw = cursor.Next() {
+		if err := checkContext(ctx); err != nil {
+			return 0, err
+		}
 		if len(key) != recordSize {
 			continue
 		}
@@ -290,7 +298,7 @@ func (s *Store) pruneBlocks(bucket *bolt.Bucket, r Retention, now int64) (int, e
 	}
 
 	total := len(all)
-	if total == 0 || (r.MaxAge <= 0 && r.MaxPoints <= 0) {
+	if total == 0 {
 		return 0, nil
 	}
 
@@ -318,6 +326,9 @@ func (s *Store) pruneBlocks(bucket *bolt.Bucket, r Retention, now int64) (int, e
 	}
 
 	for _, key := range keys {
+		if err := checkContext(ctx); err != nil {
+			return 0, err
+		}
 		if err := bucket.Delete(key); err != nil {
 			return 0, err
 		}

@@ -64,13 +64,15 @@ func TestReEncryptSeries(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, map[string]string{"host": "a"}, labels)
 
+			// Completing the rotation in the same process makes key2 the only
+			// key needed, after which the store is self-consistent again.
+			require.NoError(t, store.RotateAll(ctx, key2))
 			require.NoError(t, store.Close())
 			require.NoError(t, db.Close())
 
 			_, _, err = tryOpenStoreAtPath(t, path, root, cfg)
 			require.ErrorIs(t, err, ErrAuthFailed, "the old key must no longer open the store")
 
-			// New key opens and reads the rotated data.
 			store, db = openStoreAtPath(t, path, root, Config{Secret: key2, EncryptValues: true, BlockDuration: blockDur})
 			points, err = store.Series("cpu").Range(ctx, 0, 20)
 			require.NoError(t, err)
@@ -146,6 +148,8 @@ func TestReEncryptSeriesMetadataOnly(t *testing.T) {
 	store, db := openStoreAtPath(t, path, root, cfg)
 	require.NoError(t, store.Series("meta").SetLabels(ctx, map[string]string{"owner": "alice"}))
 	require.NoError(t, store.ReEncryptSeries(ctx, "meta", key2))
+	// A partial rotation must be completed with RotateAll before closing.
+	require.NoError(t, store.RotateAll(ctx, key2))
 	require.NoError(t, store.Close())
 	require.NoError(t, db.Close())
 
@@ -258,4 +262,38 @@ func TestReEncryptSeriesRejectedWithEncryptedNames(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, points, 1)
 	require.NoError(t, store.VerifyAll(ctx))
+}
+
+// TestReEncryptSeriesPartialRotation covers T2: the marker stays under the old
+// key until RotateAll, so a fresh process with the old key can still read the
+// series that were not rewritten. Completing the rotation is required before
+// Close; the new key cannot verify the old marker.
+func TestReEncryptSeriesPartialRotation(t *testing.T) {
+	ctx := context.Background()
+	root := []byte("ts")
+	key1, key2 := testKey(40), testKey(41)
+	path := filepath.Join(t.TempDir(), "partial.db")
+
+	cfg := Config{Secret: key1, EncryptValues: true}
+	store, db := openStoreAtPath(t, path, root, cfg)
+	require.NoError(t, store.Series("rotated").Insert(ctx, Point{Timestamp: 1, Value: 1}))
+	require.NoError(t, store.Series("pending").Insert(ctx, Point{Timestamp: 1, Value: 2}))
+	require.NoError(t, store.ReEncryptSeries(ctx, "rotated", key2))
+	require.NoError(t, store.Close())
+	require.NoError(t, db.Close())
+
+	// The old marker lets the old key open the store and read the un-rotated
+	// series. The rotated series is new-key ciphertext.
+	store, db = openStoreAtPath(t, path, root, cfg)
+	points, err := store.Series("pending").Range(ctx, 0, 10)
+	require.NoError(t, err)
+	require.Equal(t, []Point{{1, 2}}, points)
+	_, err = store.Series("rotated").Range(ctx, 0, 10)
+	require.ErrorIs(t, err, ErrAuthFailed)
+	require.NoError(t, store.Close())
+	require.NoError(t, db.Close())
+
+	// The new key cannot verify the old marker yet.
+	_, _, err = tryOpenStoreAtPath(t, path, root, Config{Secret: key2, EncryptValues: true})
+	require.ErrorIs(t, err, ErrAuthFailed)
 }

@@ -41,7 +41,7 @@ func (s *Store) sealBytes(plain []byte) ([]byte, error) {
 	if s == nil {
 		return nil, ErrAuthFailed
 	}
-	return s.enc.seal(plain)
+	return s.encState().seal(plain)
 }
 
 // openBytes opens a sealed record. Rotation fallback keys are tried in order.
@@ -49,35 +49,17 @@ func (s *Store) openBytes(raw []byte) ([]byte, error) {
 	if s == nil {
 		return nil, ErrAuthFailed
 	}
-	return s.enc.open(raw)
+	return s.encState().open(raw)
 }
 
-// sealValue encodes v and seals it when encryption is enabled.
+// sealValue encodes v and seals it only when EncryptValues is enabled. Block
+// mode seals whole blocks through sealBlock instead.
 func (s *Store) sealValue(v float64) ([]byte, error) {
 	raw := encodeValue(v)
-	if s.enc == nil {
+	if !s.encryptsValues() {
 		return raw[:], nil
 	}
 	return s.sealBytes(raw[:])
-}
-
-// openValue decodes a stored value, decrypting it when necessary.
-func (s *Store) openValue(raw []byte) (float64, error) {
-	if s.enc == nil {
-		if len(raw) != recordSize {
-			return 0, errCorruptPoint
-		}
-		return decodeValue(raw), nil
-	}
-
-	plain, err := s.openBytes(raw)
-	if err != nil {
-		return 0, err
-	}
-	if len(plain) != recordSize {
-		return 0, errCorruptPoint
-	}
-	return decodeValue(plain), nil
 }
 
 // decodePoint decodes a stored point. A false result means the record is not a
@@ -88,7 +70,7 @@ func (s *Store) decodePoint(key, value []byte) (Point, bool, error) {
 		return Point{}, false, nil
 	}
 
-	if s.enc == nil {
+	if !s.encryptsValues() {
 		if len(value) != recordSize {
 			return Point{}, false, nil
 		}

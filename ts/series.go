@@ -224,7 +224,7 @@ func (se *Series) InsertMany(ctx context.Context, points []Point) error {
 		if err != nil {
 			return err
 		}
-		if _, err := se.store.pruneSeriesBucket(bucket, meta.Retention, se.store.nowNanos()); err != nil {
+		if _, err := se.store.pruneSeriesBucket(ctx, bucket, meta.Retention, se.store.nowNanos()); err != nil {
 			return err
 		}
 

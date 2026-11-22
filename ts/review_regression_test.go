@@ -33,8 +33,9 @@ func TestPruneBucketDeletesOnlyOldestKeys(t *testing.T) {
 				return err
 			}
 		}
-		removed = pruneBucket(b, Retention{MaxPoints: keep}, 0)
-		return nil
+		var pruneErr error
+		removed, pruneErr = pruneBucket(context.Background(), b, Retention{MaxPoints: keep}, 0)
+		return pruneErr
 	})
 	require.NoError(t, err)
 	require.Equal(t, total-keep, removed)

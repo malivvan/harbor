@@ -108,7 +108,7 @@ func (se *Series) EnforceRetention(ctx context.Context, now int64) (int, error) 
 		if err != nil {
 			return err
 		}
-		removed, err = se.store.pruneSeriesBucket(bucket, meta.Retention, now)
+		removed, err = se.store.pruneSeriesBucket(ctx, bucket, meta.Retention, now)
 		if err != nil {
 			return err
 		}
@@ -167,7 +167,7 @@ func (s *Store) EnforceRetention(ctx context.Context, now int64) (int, error) {
 			if bucket == nil {
 				return nil
 			}
-			removed, err := s.pruneSeriesBucket(bucket, meta.Retention, now)
+			removed, err := s.pruneSeriesBucket(ctx, bucket, meta.Retention, now)
 			if err != nil {
 				return err
 			}
@@ -209,22 +209,34 @@ func defaultNow() int64 {
 }
 
 // pruneSeriesBucket applies a retention policy to a series. Plaintext and
-// value-encrypted stores prune by timestamp key; block mode overrides this.
-func (s *Store) pruneSeriesBucket(bucket *bolt.Bucket, r Retention, now int64) (int, error) {
-	if s.blockDuration() > 0 {
-		return s.pruneBlocks(bucket, r, now)
+// value-encrypted stores prune by timestamp key; block mode overrides this. A
+// zero policy returns before touching the bucket, so an insert never scans (or
+// decrypts) the existing points when no retention is configured.
+func (s *Store) pruneSeriesBucket(ctx context.Context, bucket *bolt.Bucket, r Retention, now int64) (int, error) {
+	if r.MaxAge <= 0 && r.MaxPoints <= 0 {
+		return 0, nil
 	}
-	return pruneBucket(bucket, r, now), nil
+	if s.blockDuration() > 0 {
+		return s.pruneBlocks(ctx, bucket, r, now)
+	}
+	return pruneBucket(ctx, bucket, r, now)
 }
 
-func pruneBucket(b *bolt.Bucket, r Retention, now int64) int {
+func pruneBucket(ctx context.Context, b *bolt.Bucket, r Retention, now int64) (int, error) {
+	if r.MaxAge <= 0 && r.MaxPoints <= 0 {
+		return 0, nil
+	}
+
 	cursor := b.Cursor()
 	total := 0
 	for key, _ := cursor.First(); key != nil; key, _ = cursor.Next() {
+		if err := checkContext(ctx); err != nil {
+			return 0, err
+		}
 		total++
 	}
-	if total == 0 || (r.MaxAge <= 0 && r.MaxPoints <= 0) {
-		return 0
+	if total == 0 {
+		return 0, nil
 	}
 
 	remove := 0
@@ -237,6 +249,9 @@ func pruneBucket(b *bolt.Bucket, r Retention, now int64) int {
 		cursor = b.Cursor()
 		age := 0
 		for key, _ := cursor.First(); key != nil && decodeKey(key) < cutoff; key, _ = cursor.Next() {
+			if err := checkContext(ctx); err != nil {
+				return 0, err
+			}
 			age++
 		}
 		if age > remove {
@@ -245,7 +260,7 @@ func pruneBucket(b *bolt.Bucket, r Retention, now int64) int {
 	}
 
 	if remove <= 0 {
-		return 0
+		return 0, nil
 	}
 
 	// Collect the keys to drop first, then delete them after the cursor loop so
@@ -253,17 +268,23 @@ func pruneBucket(b *bolt.Bucket, r Retention, now int64) int {
 	cursor = b.Cursor()
 	keys := make([][]byte, 0, remove)
 	for key, _ := cursor.First(); key != nil && len(keys) < remove; key, _ = cursor.Next() {
+		if err := checkContext(ctx); err != nil {
+			return 0, err
+		}
 		keys = append(keys, append([]byte(nil), key...))
 	}
 
 	deleted := 0
 	for _, key := range keys {
+		if err := checkContext(ctx); err != nil {
+			return deleted, err
+		}
 		if err := b.Delete(key); err != nil {
-			return deleted
+			return deleted, err
 		}
 		deleted++
 	}
-	return deleted
+	return deleted, nil
 }
 
 func retentionCutoff(now, maxAge int64) int64 {

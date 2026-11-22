@@ -2,12 +2,16 @@ package ts
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
 	bolt "go.etcd.io/bbolt"
 )
 
+// Name is the conventional root bucket the storm root package uses for the ts
+// sub-store. It is not applied implicitly: an empty Config.Root means the
+// database root.
 const Name = "ts"
 
 const metaBucketName = "__ts_meta__"
@@ -27,22 +31,39 @@ type Store struct {
 	series map[string]*Series
 	order  []string
 
-	// enc is the optional encryption state. nil means plaintext.
-	enc *encState
+	// enc is the optional encryption state. It is an atomic pointer so a
+	// rotation can swap the keys while readers are serving queries.
+	enc atomic.Pointer[encState]
+}
+
+// encState returns the current encryption state, or nil for a plaintext store.
+func (s *Store) encState() *encState {
+	if s == nil {
+		return nil
+	}
+	return s.enc.Load()
 }
 
 // encryptsValues reports whether values and series metadata are sealed.
 func (s *Store) encryptsValues() bool {
-	return s != nil && s.enc != nil && s.enc.encValues
+	if s == nil {
+		return false
+	}
+	enc := s.enc.Load()
+	return enc != nil && enc.encValues
 }
 
 // blockDuration returns the configured encryption time-block width, or zero
 // when block mode is off.
 func (s *Store) blockDuration() int64 {
-	if s == nil || s.enc == nil {
+	if s == nil {
 		return 0
 	}
-	return s.enc.blockDur
+	enc := s.enc.Load()
+	if enc == nil {
+		return 0
+	}
+	return enc.blockDur
 }
 
 // Root returns a copy of the store's root bucket path.
@@ -117,6 +138,12 @@ func (s *Store) DeleteSeries(ctx context.Context, name string) error {
 		var parent *bolt.Bucket
 		if len(s.root) > 0 {
 			parent = s.rootBucket(tx)
+			// A configured-but-missing root must never fall back to the
+			// database root: that could delete an unrelated top-level bucket
+			// that happens to share the series name.
+			if parent == nil {
+				return ErrNotFound
+			}
 		}
 
 		key, err := s.bucketKey(name)
@@ -177,18 +204,26 @@ func (s *Store) DeleteSeries(ctx context.Context, name string) error {
 // bucketKey returns the physical key for a series bucket and its metadata.
 // Names are encrypted with deterministic AES-SIV when EncryptSeriesNames is on.
 func (s *Store) bucketKey(name string) ([]byte, error) {
-	if s == nil || s.enc == nil || !s.enc.encNames || s.enc.siv == nil {
+	if s == nil {
 		return []byte(name), nil
 	}
-	return s.enc.siv.SealName([]byte(name))
+	enc := s.enc.Load()
+	if enc == nil || !enc.encNames || enc.siv == nil {
+		return []byte(name), nil
+	}
+	return enc.siv.SealName([]byte(name))
 }
 
 // logicalName maps a physical bucket/meta key back to the series name.
 func (s *Store) logicalName(physical []byte) (string, error) {
-	if s == nil || s.enc == nil || !s.enc.encNames || s.enc.siv == nil {
+	if s == nil {
 		return string(physical), nil
 	}
-	name, err := s.enc.siv.OpenName(physical)
+	enc := s.enc.Load()
+	if enc == nil || !enc.encNames || enc.siv == nil {
+		return string(physical), nil
+	}
+	name, err := enc.siv.OpenName(physical)
 	if err != nil {
 		return "", err
 	}
@@ -276,6 +311,9 @@ func (s *Store) createSeriesBucket(tx *bolt.Tx, name string) (*bolt.Bucket, erro
 	root, err := s.createRootBucket(tx)
 	if err != nil {
 		return nil, err
+	}
+	if root == nil {
+		return nil, fmt.Errorf("%w: root path is empty", ErrInvalidConfig)
 	}
 	return root.CreateBucketIfNotExists(key)
 }

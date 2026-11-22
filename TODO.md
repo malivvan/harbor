@@ -177,112 +177,42 @@ All items in this section are resolved:
 
 # 6. `ts` package
 
-## T1. [High] Data race on `Store.enc` during rotation
-**Location:** `ts/rotate.go` `adopt`; readers in `ts/store.go`
-`encryptsValues`/`blockDuration`/`bucketKey`/`logicalName`, `ts/encode.go`.
-**Problem:** `enc` is a plain field mutated by rotation without a lock while
-other goroutines read it. `go run -race` reports a race between `adopt` and
-`bucketKey`/`decodePoint`.
-**Fix:** Store `enc` in `atomic.Pointer[encState]` (or guard with `s.mu`) and
-load it once per operation.
-**Test:** Concurrent `Range`/`Insert` vs `ReEncryptSeries`/`RotateAll` under
-`-race`.
+All items in this section are resolved:
 
-## T2. [High] `ReEncryptSeries` leaves a store unreadable after restart
-**Location:** `ts/rotate.go` `ReEncryptSeries`, marker rewrite, keychain.
-**Problem:** The marker is re-sealed with the new key while other series remain
-under the old key. Within the process the fallback keychain can read them; after
-reopening with a single `Config.Secret`, the new key opens the marker but cannot
-decrypt old-key series, and the old key fails marker verification.
-**Fix:** Keep the marker under the old key until `RotateAll` finishes, carry
-multiple canaries/keys, or document/enforce that `ReEncryptSeries` must be
-followed by `RotateAll` before closing.
-**Test:** Reopen after a partial rotation and read an un-rotated series.
+- **T1** — `Store.enc` is now an `atomic.Pointer[encState]`; every read loads
+  it once and rotation swaps it atomically. Covered by
+  `TestConcurrentRotationAndAccess` (also run with `-race`).
+- **T2** — `ReEncryptSeries` keeps the marker under the current (old) key and
+  documents that a partial rotation must be completed with `RotateAll` before
+  `Close`. A fresh process with the old key can still open the store and read
+  the un-rotated series (`TestReEncryptSeriesPartialRotation`).
+- **T3** — `RotateAll` rewrites every series and publishes the new marker in a
+  single bbolt transaction, so a cancellation or failure rolls the whole
+  rotation back (`TestRotateAllRollsBackOnFailure`).
+- **T4** — a zero retention policy returns before scanning or decrypting;
+  block-mode pruning also checks the policy before unsealing
+  (`TestZeroRetentionDoesNotScan`).
+- **T5** — encryption requires a non-empty `Root`; at the database root
+  unrelated top-level buckets cannot be distinguished from series
+  (`TestEncryptionRequiresRoot`).
+- **T6** — `DeleteSeries` branches on `len(root)` and treats a configured but
+  missing root as `ErrNotFound` instead of deleting a same-named top-level
+  bucket (`TestDeleteSeriesNeverEscapesAMissingRoot`).
+- **T7** — empty `Config.Root` segments are filtered out in `Open`, and
+  `createSeriesBucket` guards a nil root (`TestEmptyRootSegmentsDoNotPanic`).
+- **T8** — `sealValue`/`decodePoint` gate point sealing on `encryptsValues()`,
+  so a names-only store keeps 8-byte plaintext values
+  (`TestEncryptValuesOffKeepsValuesPlaintext`).
+- **T9** — the dead `Store.openValue` was removed; `decodePoint` is the single
+  decode path.
+- **T10** — `Config.Root` documents the database-root default and why
+  encryption needs a root; `Name` documents that it is only a convention used
+  by the storm root package.
+- **T11** — `ctx` is threaded through `pruneSeriesBucket`, `pruneBucket` and
+  `pruneBlocks`, with checks inside the loops.
+- **T12** — regression tests added in `ts/todo_review_test.go` (plus the
+  updated rotation tests).
 
-## T3. [Medium] `RotateAll` is not atomic
-**Location:** `ts/rotate.go`.
-**Problem:** Each series rewrite commits the new-key marker in its own
-transaction; a crash/cancel after the first series leaves a mixed-key store that
-no single key can open. `withKey` drops old fallback keys for the running store.
-**Fix:** Write the marker only after all series succeed, or stage the whole
-rotation in one transaction.
-**Test:** Cancel mid-rotation; the old key must still open/read everything.
-
-## T4. [Medium] Retention prunes scan the whole series on every insert
-**Location:** `ts/retention.go` `pruneBucket`, `ts/block.go` `pruneBlocks`,
-called from `ts/series.go` `InsertMany`.
-**Problem:** The zero-policy fast path runs after a full cursor scan (and block
-decryption), so every insert is O(n); block mode re-unseals every block.
-**Fix:** Return immediately when `MaxAge<=0 && MaxPoints<=0` before scanning;
-compute totals lazily in block mode.
-**Test:** A scan-counter/benchmark asserting a no-policy insert does not read
-existing points.
-
-## T5. [Medium] Database-root stores cannot detect or enumerate existing series
-**Location:** `ts/aead.go` `hasData`, `ts/rotate.go` `allSeriesNames`.
-**Problem:** At `len(Root)==0`, `hasData` never inspects DB-root series buckets
-and `allSeriesNames` only looks at known buckets/cache. Enabling encryption over
-an existing plaintext DB-root store is not rejected, and `RotateAll`/`VerifyAll`
-miss uncached series.
-**Fix:** Enumerate DB-root series buckets (skipping known metadata) when
-`len(root)==0`, or require a non-empty Root for encrypted/rotating stores.
-**Test:** Nil-root encryption on existing plaintext data; nil-root RotateAll and
-reopen.
-
-## T6. [Medium] `DeleteSeries` can delete an unrelated top-level bucket
-**Location:** `ts/store.go` `DeleteSeries`.
-**Problem:** `parent == nil` is used both for “no root” and “configured root
-missing”, so a configured-but-missing root falls back to the database root and
-can delete a same-named top-level series bucket.
-**Fix:** Branch on `len(s.root)>0`; treat a missing configured root as not found
-and never fall back.
-**Test:** Configured missing root + colliding top-level bucket.
-
-## T7. [Medium] Empty `Config.Root` segments panic on first insert
-**Location:** `ts/store.go` `createRootBucket`/`rootBucket`/
-`createSeriesBucket`.
-**Problem:** `createRootBucket` skips empty segments and can return nil while
-`len(s.root)>0`; `createSeriesBucket` dereferences nil. `Open` does not validate
-Root.
-**Fix:** Normalize/filter empty segments in `Open` or reject them with an error.
-**Test:** `Root:[][]byte{{}}` must not panic (DB root or error).
-
-## T8. [Medium] `EncryptValues` does not control value sealing
-**Location:** `ts/encode.go` `sealValue`/`decodePoint` vs
-`encryptsValues()`/marker.
-**Problem:** Any enabled encryption feature (e.g. names-only or block-only) sets
-`enc != nil`, so point values are sealed even when `EncryptValues` is false and
-the marker says `encValues=false`.
-**Fix:** Gate non-block sealing on `encryptsValues()` (block sealing follows
-`blockDur>0`), or update the Config contract and tests.
-**Test:** Names-only config: values should be 8 bytes if the documented contract
-is plaintext.
-
-## T9. [Low] Dead code: `Store.openValue`
-**Location:** `ts/encode.go`.
-**Problem:** No callers; `decodePoint` reimplements its decrypt/length logic, so
-the two can drift.
-**Fix:** Delete it or make `decodePoint` delegate to it.
-
-## T10. [Low] `Config.Root` doc and `Name` mismatch
-**Location:** `ts/aead.go`, `ts/store.go` `Name`.
-**Problem:** Doc says empty Root uses a `"ts"` bucket; actual empty Root is the
-DB root. `Name` is only used by the root `storm` package.
-**Fix:** Correct the doc or default to `"ts"` consistently; update the tests.
-
-## T11. [Low] Block-mode retention/prune paths ignore context
-**Location:** `ts/retention.go` `pruneSeriesBucket`/`pruneBucket`, `ts/block.go`
-`pruneBlocks`.
-**Problem:** A cancelled context cannot stop a large block unseal/rewrite.
-**Fix:** Thread `ctx` through the prune functions and check it in loops.
-
-## T12. [Low] Missing tests
-Add tests for: concurrent rotation vs read/insert (T1), reopen mid-rotation (T2),
-aborted RotateAll (T3), no-policy insert does not scan (T4), nil-root hasData/
-RotateAll (T5), missing-root DeleteSeries collision (T6), empty Root segments
-(T7), and the EncryptValues-off layout (T8).
-
----
 
 # 7. `vec` core
 
