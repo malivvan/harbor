@@ -181,12 +181,18 @@ func (s *Snapshot) ReadFile(name string) ([]byte, error) {
 		return nil, &os.PathError{Op: "read", Path: name, Err: syscall.EISDIR}
 	}
 
-	data, err := s.readContent(node)
+	data, fresh, err := s.readContent(node)
 	if err != nil {
 		return nil, &os.PathError{Op: "read", Path: name, Err: err}
 	}
 
-	// Return a copy to prevent modifications
+	if fresh {
+		// The content was decoded or read into a private buffer.
+		return data, nil
+	}
+
+	// Plaintext bbolt content aliases the snapshot's mmap; return a private
+	// copy so callers cannot modify database pages.
 	result := make([]byte, len(data))
 	copy(result, data)
 	return result, nil
@@ -194,25 +200,31 @@ func (s *Snapshot) ReadFile(name string) ([]byte, error) {
 
 // readContent returns the content of node, consulting the external content
 // filesystem and chunked storage before falling back to the bbolt data bucket.
-func (s *Snapshot) readContent(node *iNode) ([]byte, error) {
+// readContent returns the whole content of node and whether the returned
+// buffer is private to the caller (and therefore safe to mutate).
+func (s *Snapshot) readContent(node *iNode) ([]byte, bool, error) {
 	if s.fs.contentFS != nil {
 		// Content lives outside bbolt in the external content filesystem.
-		return s.fs.loadData(node.Ino)
+		data, err := s.fs.loadData(node.Ino)
+		return data, true, err
 	}
 	if s.fs.chunked() {
-		return s.bucket.readDataRange(node.Ino, 0, node.Size, s.fs.chunkSize())
+		data, err := s.bucket.readDataRange(node.Ino, 0, node.Size, s.fs.chunkSize())
+		return data, true, err
 	}
 
 	data := s.bucket.data.Get(i2b(node.Ino))
 	if data == nil {
 		// File exists but has no data (empty file)
-		return []byte{}, nil
+		return []byte{}, true, nil
 	}
-	plain, err := s.bucket.enc.openContent(data)
+	enc := s.bucket.enc
+	plain, err := enc.openContent(data)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return plain, nil
+	fresh := enc != nil && enc.encContent
+	return plain, fresh, nil
 }
 
 // Readlink reads the target of a symbolic link in the snapshot.
@@ -394,25 +406,35 @@ func (s *Snapshot) Open(name string) (absfs.File, error) {
 		}, nil
 	}
 
-	// Load file data
-	data, err := s.readContent(node)
-	if err != nil {
-		// A single unreadable file must not invalidate the snapshot's shared
-		// read transaction; only Release ends it.
-		return nil, err
-	}
-
-	// Make a copy to prevent external modifications
-	dataCopy := make([]byte, len(data))
-	copy(dataCopy, data)
-
 	return &snapshotFile{
 		snapshot: s,
 		name:     name,
 		node:     node,
 		offset:   0,
-		data:     dataCopy,
 	}, nil
+}
+
+// ensureData loads the whole file content lazily for non-chunked snapshots.
+func (f *snapshotFile) ensureData() error {
+	if f.loaded {
+		return nil
+	}
+	data, _, err := f.snapshot.readContent(f.node)
+	if err != nil {
+		return err
+	}
+	f.data = data
+	f.loaded = true
+	return nil
+}
+
+// readRange reads part of a chunked snapshot file without materializing it.
+func (f *snapshotFile) readRange(off, n int64) ([]byte, error) {
+	fs := f.snapshot.fs
+	if n <= 0 {
+		return nil, nil
+	}
+	return f.snapshot.bucket.readDataRange(f.node.Ino, off, n, fs.chunkSize())
 }
 func (s *Snapshot) Create(name string) (absfs.File, error) { return nil, os.ErrPermission }
 func (s *Snapshot) OpenFile(name string, flag int, perm os.FileMode) (absfs.File, error) {
@@ -524,6 +546,7 @@ type snapshotFile struct {
 	node      *iNode
 	offset    int64
 	data      []byte
+	loaded    bool
 	diroffset int
 }
 
@@ -543,6 +566,30 @@ func (f *snapshotFile) Read(p []byte) (int, error) {
 		return 0, &os.PathError{Op: "read", Path: f.name, Err: syscall.EISDIR}
 	}
 
+	if f.offset >= f.node.Size {
+		return 0, io.EOF
+	}
+
+	if f.snapshot.fs.chunked() && f.snapshot.fs.contentFS == nil {
+		want := int64(len(p))
+		if f.offset+want > f.node.Size {
+			want = f.node.Size - f.offset
+		}
+		data, err := f.readRange(f.offset, want)
+		if err != nil {
+			return 0, err
+		}
+		n := copy(p, data)
+		f.offset += int64(n)
+		if n < len(p) {
+			return n, io.EOF
+		}
+		return n, nil
+	}
+
+	if err := f.ensureData(); err != nil {
+		return 0, err
+	}
 	if f.offset >= int64(len(f.data)) {
 		return 0, io.EOF
 	}
@@ -565,6 +612,29 @@ func (f *snapshotFile) ReadAt(b []byte, off int64) (n int, err error) {
 		return 0, &os.PathError{Op: "readat", Path: f.name, Err: os.ErrInvalid}
 	}
 
+	if off >= f.node.Size {
+		return 0, io.EOF
+	}
+
+	if f.snapshot.fs.chunked() && f.snapshot.fs.contentFS == nil {
+		want := int64(len(b))
+		if off+want > f.node.Size {
+			want = f.node.Size - off
+		}
+		data, rerr := f.readRange(off, want)
+		if rerr != nil {
+			return 0, rerr
+		}
+		n = copy(b, data)
+		if n < len(b) {
+			err = io.EOF
+		}
+		return n, err
+	}
+
+	if err := f.ensureData(); err != nil {
+		return 0, err
+	}
 	if off >= int64(len(f.data)) {
 		return 0, io.EOF
 	}
@@ -599,7 +669,7 @@ func (f *snapshotFile) Seek(offset int64, whence int) (ret int64, err error) {
 	case io.SeekCurrent:
 		f.offset += offset
 	case io.SeekEnd:
-		f.offset = int64(len(f.data)) + offset
+		f.offset = f.node.Size + offset
 	default:
 		return 0, &os.PathError{Op: "seek", Path: f.name, Err: os.ErrInvalid}
 	}

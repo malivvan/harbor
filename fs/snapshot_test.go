@@ -1,8 +1,11 @@
 package fs
 
 import (
+	"io"
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // tempFile helper is defined in cache_test.go
@@ -640,4 +643,62 @@ func readFileContents(fs *FS, path string) ([]byte, error) {
 	data := make([]byte, info.Size())
 	_, err = file.Read(data)
 	return data, err
+}
+
+// TestSnapshotReadResultsArePrivate verifies that whole-file reads from a
+// snapshot can be mutated by the caller without corrupting later reads, for
+// both plaintext (mmap-backed) and encrypted content.
+func TestSnapshotReadResultsArePrivate(t *testing.T) {
+	for _, encrypted := range []bool{false, true} {
+		cfg := Config{}
+		if encrypted {
+			cfg = Config{Secret: testEncKey(41)}
+		}
+		store, _ := openEncStore(t, []byte("ts"), cfg)
+		fsys, err := store.Open("fs")
+		require.NoError(t, err)
+		writeTestFile(t, fsys, "/f.txt", "snapshot payload")
+
+		snap, err := fsys.CreateSnapshot("s")
+		require.NoError(t, err)
+
+		first, err := snap.ReadFile("/f.txt")
+		require.NoError(t, err)
+		first[0] = 'X'
+
+		second, err := snap.ReadFile("/f.txt")
+		require.NoError(t, err)
+		require.Equal(t, "snapshot payload", string(second))
+		require.NoError(t, snap.Release())
+	}
+}
+
+// TestSnapshotLazyOpenSeeks verifies that an opened snapshot file reports its
+// size before any data has been materialized.
+func TestSnapshotLazyOpenSeeks(t *testing.T) {
+	store, _ := openEncStore(t, []byte("ts"), Config{})
+	fsys, err := store.Open("fs")
+	require.NoError(t, err)
+	writeTestFile(t, fsys, "/f.txt", "0123456789")
+
+	snap, err := fsys.CreateSnapshot("s")
+	require.NoError(t, err)
+	defer snap.Release()
+
+	f, err := snap.Open("/f.txt")
+	require.NoError(t, err)
+
+	end, err := f.Seek(0, io.SeekEnd)
+	require.NoError(t, err)
+	require.Equal(t, int64(10), end)
+
+	start, err := f.Seek(-4, io.SeekEnd)
+	require.NoError(t, err)
+	require.Equal(t, int64(6), start)
+
+	buf := make([]byte, 4)
+	n, err := f.Read(buf)
+	require.NoError(t, err)
+	require.Equal(t, 4, n)
+	require.Equal(t, "6789", string(buf))
 }

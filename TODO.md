@@ -365,6 +365,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Medium — audit that no caller mutates a returned inode in place.
 
 ### 2.9 Snapshot `Open`/`ReadFile` eagerly load the whole file and copy it twice — MEDIUM
+
+> **Status:** ✅ FIXED — snapshot `Open` no longer materializes file content; chunked snapshots read ranges directly from the shared read transaction, non-chunked files load lazily on first read, and `readContent` reports whether the buffer is private so `ReadFile` only copies mmap-backed plaintext.
 - **Location:** `fs/snapshot.go:397-415` (`Open`), `fs/snapshot.go:184-193` (`ReadFile`),
   `fs/snapshot.go:197-216` (`readContent`).
 - **Problem:** Opening a snapshot file reads/decrypts the entire file into memory and copies it
