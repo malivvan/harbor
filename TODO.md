@@ -95,6 +95,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low — indexes are stateless handles over a bucket.
 
 ### 1.5 Ordered queries materialize everything, then sort with per-swap `reflect.Swapper` and per-compare `FieldByName` — HIGH
+
+> **Status:** ✅ FIXED — OrderBy names are resolved to cached reflect index paths once per sort (`FieldByIndex` instead of per-compare `FieldByName`), the slice swapper is built once per flush, and bool comparisons no longer fall back to `keyBytes`/JSON. Regression test covers promoted fields, reverse and unknown fields.
 - **Location:** `db/query.go:310-349`, `db/sink.go:220-249` (`less` → `FieldByName`),
   `db/sink.go:251-263` (`sort.Sort`), `db/sink.go:361-367` (`Swap` builds `reflect.Swapper`
   per call), `db/sink.go:143-218` (`compareValue`, may JSON-encode via `keyBytes`).

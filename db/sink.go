@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/malivvan/storm/db/index"
@@ -36,9 +37,54 @@ type sorter struct {
 	skip       int
 	limit      int
 	orderBy    []string
+	orderPaths [][]int
 	reverse    bool
 	ctx        context.Context
 	compareErr error
+	swapper    func(i, j int)
+}
+
+// fieldPathKey identifies a cached struct-field path.
+type fieldPathKey struct {
+	typ  reflect.Type
+	name string
+}
+
+// fieldPathCache maps (type, field name) to the reflect field index path.
+var fieldPathCache sync.Map
+
+// fieldPathFor resolves name on typ once and caches the result.
+func fieldPathFor(typ reflect.Type, name string) ([]int, bool) {
+	key := fieldPathKey{typ: typ, name: name}
+	if cached, ok := fieldPathCache.Load(key); ok {
+		path, _ := cached.([]int)
+		return path, path != nil
+	}
+	f, ok := typ.FieldByName(name)
+	if !ok || f.PkgPath != "" {
+		return nil, false
+	}
+	fieldPathCache.Store(key, f.Index)
+	return f.Index, true
+}
+
+// ensureOrderPaths resolves every OrderBy name against the record type once
+// per sort instead of calling FieldByName on every comparison.
+func (s *sorter) ensureOrderPaths(rec reflect.Value) bool {
+	if s.orderPaths != nil {
+		return true
+	}
+	paths := make([][]int, len(s.orderBy))
+	for i, name := range s.orderBy {
+		path, ok := fieldPathFor(rec.Type(), name)
+		if !ok {
+			s.compareErr = ErrNotFound
+			return false
+		}
+		paths[i] = path
+	}
+	s.orderPaths = paths
+	return true
 }
 
 func (s *sorter) filter(ctx context.Context, tree q.Matcher, bucket *bolt.Bucket, k, v []byte) (bool, error) {
@@ -187,6 +233,15 @@ func (s *sorter) compareValue(left reflect.Value, right reflect.Value) int {
 		if l > r {
 			return 1
 		}
+	case reflect.Bool:
+		l, r := left.Bool(), right.Bool()
+		if l == r {
+			return 0
+		}
+		if !l {
+			return -1
+		}
+		return 1
 	case reflect.Struct:
 		if lt, lok := left.Interface().(time.Time); lok {
 			if rt, rok := right.Interface().(time.Time); rok {
@@ -224,17 +279,15 @@ func (s *sorter) compareValue(left reflect.Value, right reflect.Value) int {
 }
 
 func (s *sorter) less(leftElem reflect.Value, rightElem reflect.Value) bool {
-	for _, orderBy := range s.orderBy {
-		leftField := reflect.Indirect(leftElem).FieldByName(orderBy)
-		if !leftField.IsValid() {
-			s.compareErr = ErrNotFound
-			return false
-		}
-		rightField := reflect.Indirect(rightElem).FieldByName(orderBy)
-		if !rightField.IsValid() {
-			s.compareErr = ErrNotFound
-			return false
-		}
+	left := reflect.Indirect(leftElem)
+	right := reflect.Indirect(rightElem)
+	if !s.ensureOrderPaths(left) {
+		return false
+	}
+
+	for _, path := range s.orderPaths {
+		leftField := left.FieldByIndex(path)
+		rightField := right.FieldByIndex(path)
 
 		direction := 1
 		if s.reverse {
@@ -266,6 +319,10 @@ func (s *sorter) flush(ctx context.Context) error {
 	// Synchronous sort — no goroutine.
 	// Store ctx so Less can observe cancellation.
 	s.ctx = ctx
+	if ssink, ok := s.sink.(sliceSink); ok {
+		// Build the swapper once; reflect.Swapper allocates a closure.
+		s.swapper = reflect.Swapper(ssink.slice().Interface())
+	}
 	sort.Sort(s)
 
 	if s.compareErr != nil {
@@ -365,8 +422,8 @@ func (s *sorter) Less(i, j int) bool {
 }
 
 func (s *sorter) Swap(i, j int) {
-	if ssink, ok := s.sink.(sliceSink); ok {
-		reflect.Swapper(ssink.slice().Interface())(i, j)
+	if s.swapper != nil {
+		s.swapper(i, j)
 		return
 	}
 	s.list[i], s.list[j] = s.list[j], s.list[i]

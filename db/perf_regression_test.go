@@ -172,3 +172,29 @@ func TestStructMetaCacheSkipsPointerInline(t *testing.T) {
 	_, cached := structMetaCache.Load(reflect.TypeOf(ClassicInline{}))
 	require.False(t, cached, "types with inline pointers are value-dependent and must not be cached")
 }
+
+func TestOrderByPromotedField(t *testing.T) {
+	ctx := context.Background()
+	db, cleanup := createDB(t)
+	defer cleanup()
+
+	for _, id := range []int{3, 1, 2} {
+		rec := UserWithEmbeddedIDField{UserWithIDField: UserWithIDField{ID: id, Name: "n"}}
+		require.NoError(t, db.Save(ctx, &rec))
+	}
+
+	var asc []UserWithEmbeddedIDField
+	require.NoError(t, db.Select().OrderBy("ID").Find(ctx, &asc))
+	require.Len(t, asc, 3)
+	require.Equal(t, []int{1, 2, 3}, []int{asc[0].ID, asc[1].ID, asc[2].ID})
+
+	var desc []UserWithEmbeddedIDField
+	require.NoError(t, db.Select().OrderBy("ID").Reverse().Find(ctx, &desc))
+	require.Len(t, desc, 3)
+	require.Equal(t, []int{3, 2, 1}, []int{desc[0].ID, desc[1].ID, desc[2].ID})
+
+	// Unknown order fields still surface ErrNotFound.
+	var bad []UserWithEmbeddedIDField
+	err := db.Select().OrderBy("NoSuchField").Find(ctx, &bad)
+	require.ErrorIs(t, err, ErrNotFound)
+}
