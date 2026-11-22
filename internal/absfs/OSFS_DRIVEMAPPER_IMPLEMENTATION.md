@@ -25,7 +25,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/malivvan/storm/fs/absfs"
+	"github.com/malivvan/storm/internal/absfs"
 )
 
 // WindowsDriveMapper wraps an absfs.FileSystem and translates virtual-absolute
@@ -170,7 +170,7 @@ Create a no-op Unix implementation:
 
 package osfs
 
-import "github.com/malivvan/storm/fs/absfs"
+import "github.com/malivvan/storm/internal/absfs"
 
 // NewWindowsDriveMapper on non-Windows platforms simply returns the base FileSystem
 // unchanged, since virtual-absolute paths already work correctly on Unix-like systems.
@@ -204,7 +204,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/fs/absfs"
+	"github.com/malivvan/storm/internal/absfs"
 )
 
 func TestWindowsDriveMapperTranslatePath(t *testing.T) {
@@ -445,7 +445,7 @@ fs.Create("/config/app.json")      // → /config/app.json
 - When you need full control over Windows drive letters in your code
 - Testing with mock filesystems
 
-See [absfs PATH_HANDLING.md](https://github.com/malivvan/storm/fs/absfs/blob/main/PATH_HANDLING.md) for more details on cross-platform path handling.
+See [absfs PATH_HANDLING.md](https://github.com/malivvan/storm/internal/absfs/blob/main/PATH_HANDLING.md) for more details on cross-platform path handling.
 ```
 
 ## Example Usage

@@ -102,7 +102,7 @@ package myfs
 import (
     "os"
     "time"
-    "github.com/malivvan/storm/fs/absfs"
+    "github.com/malivvan/storm/internal/absfs"
 )
 
 type MyFiler struct {
@@ -1049,7 +1049,7 @@ import (
     "path/filepath"
     "sync"
     "time"
-    "github.com/malivvan/storm/fs/absfs"
+    "github.com/malivvan/storm/internal/absfs"
 )
 
 type MemFiler struct {
@@ -1213,13 +1213,13 @@ func NewFS() absfs.FileSystem {
 - [Architecture Guide](ARCHITECTURE.md) - Design decisions and patterns
 - [Path Handling Guide](PATH_HANDLING.md) - Cross-platform path semantics
 - [Security Policy](SECURITY.md) - Security considerations
-- [GoDoc](https://pkg.go.dev/github.com/malivvan/storm/fs/absfs) - API reference
+- [GoDoc](https://pkg.go.dev/github.com/malivvan/storm/internal/absfs) - API reference
 
 ---
 
 ## Getting Help
 
-- Open an issue: https://github.com/malivvan/storm/fs/absfs/issues
+- Open an issue: https://github.com/malivvan/storm/internal/absfs/issues
 - Review existing implementations:
   - [osfs](https://github.com/absfs/osfs) - OS filesystem wrapper
   - [memfs](https://github.com/absfs/memfs) - In-memory filesystem
