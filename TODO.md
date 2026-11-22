@@ -61,141 +61,32 @@ revision and may shift; use the named symbols and files to locate the code.
   `vec/rotate_concurrency_test.go`, `fs/rotate_concurrency_test.go`,
   `ts/rotate_concurrency_test.go`; all pass under `-race`.
 
-# 2. Silent wrong results
+# 2. Silent wrong results — RESOLVED
 
-## C1. [High] `db` index keys are not order-preserving for negative integers
-**Location:** `db/store.go:200-227` (`toBytes`/`numbertob`), used by all index
-lookups and `db/index/*`.
-**Problem:** Signed integers are encoded as big-endian two's complement, so
-negative values sort *after* positive values. `Range`, `Prefix`, and
-`AllByIndex` therefore return wrong rows/order. Reproduced with `Age int
-`db:"index"` values `-5, 1, 10`:
-```
-Range(Age,-10,0) -> 0 rows (expected -5)
-AllByIndex(Age)  -> order 1, 10, -5 (expected -5, 1, 10)
-```
-**Fix:** Encode signed integers with the sign bit flipped (`uint64(v) ^
-1<<63`, like `ts/encode.go:encodeKey`) and keep a fixed width per type. Add
-regression tests for negative ranges and ordering.
-
-## C2. [High] `db` float index keys are JSON text, so ranges are lexicographic
-**Location:** `db/store.go:200-218` (`toBytes` default branch →
-`codec.Marshal`).
-**Problem:** `float32`/`float64` fields fall through to JSON encoding
-(`"2"`, `"10"`, `"3"`), and index cursors compare bytes. Reproduced with
-`Dist float64 `db:"index"` values `2, 10, 3`:
-```
-Range(Dist,1,4) -> 3 rows including 10 (expected 2 and 3 only)
-```
-**Fix:** Add order-preserving float encoding (IEEE-754 bits with sign handling)
-or disallow non-integer indexed fields with a clear error. Add tests.
-
-## C3. [High] List-index composite keys are ambiguous when the value or ID contains `__`
-**Location:** `db/index/list.go:348-367` (`Range` CompareFn uses
-`bytes.LastIndex(val, "__")`), key construction in `Add`
-(`db/index/list.go:95-99`).
-**Problem:** Keys are `value ++ "__" ++ id` with no escaping. `Range` strips
-the ID with `LastIndex("__")`, so an ID containing `__` makes it compare the
-wrong prefix and `val[:pos]` can even panic when no separator exists.
-Reproduced with IDs `plain1, plain2, a__b, a__c` all having `Tag="x"`:
-```
-Range(Tag,x,x) -> ErrNotFound (0 rows; One finds a__b)
-```
-**Fix:** Length-prefix or escape one of the components (or use a separate
-mapping bucket), and make the CompareFn refuse malformed keys instead of
-slicing at `-1`. Add tests for `__` in values and IDs.
-
-## C4. [High] `UpdateField` on the primary key duplicates the record
-**Location:** `db/type_store.go:422-452`, `update` at
-`db/type_store.go:455-500`, `save` ID use at `db/type_store.go:270-285`.
-**Problem:** `UpdateField(ctx, data, "ID", newID)` mutates `current.ID`, which
-also updates `cfg.ID.Value` (both point at the same struct), so `save` writes a
-new record under `newID` while the old record remains under the old key.
-Reproduced:
-```
-UpdateField ID=2 -> nil
-All -> [{1 alice} {2 alice}]
-```
-**Fix:** Reject updates to the primary key (return `ErrIncompatibleValue` or a
-dedicated error), or implement a real move: delete the old record and its index
-entries and write the new one in the same transaction. Document the chosen
-contract and add tests.
-
-## C5. [Medium] Quantization mode is not persisted; loading with the wrong mode yields nil vectors
-**Location:** `vec/store.go:519-575` (`UpsertPoints` quantizes only when
-`useQuant`), `vec/store.go:581-632` (`LoadCollection` dequantizes only when
-`useQuant`), `vec/models.go:76-90` (`CollectionMeta` has no quant field).
-**Problem:** A collection written with `UseQuant=true` contains `Vector=nil` and
-a `__quantized_vector` payload entry. Reopening the store without `UseQuant`
-makes `LoadCollection` return points with nil vectors and the reserved key
-leaked, and `NewCollection` then fails with a misleading dimension error.
-Reproduced:
-```
-LoadCollection without UseQuant: err=nil, vector=[], payload has __quantized_vector
-NewCollection existing quantized -> loaded point has invalid dimension 0
-```
-**Fix:** Persist the quantization mode (and quantizer identity) in
-`CollectionMeta`, validate it when opening a store/collection, and reject a
-mismatch with `ErrInvalidConfig`.
-
-## C6. [Medium] `ts.Store.RotateAll`/`VerifyAll` fail on cached-but-never-written series
-**Location:** `ts/store.go:87-105` (`Series` caches), `ts/rotate.go:381-430`
-(`allSeriesNames` includes `s.order`), `ts/rotate.go:140-150`
-(`reEncryptSeries` returns `ErrNotFound` when the bucket/meta is absent).
-**Problem:** Merely calling `store.Series("x")` (without inserting) puts "x" in
-the cache. `RotateAll` then includes it and fails:
-```
-RotateAll with cached-only series: ts: not found
-```
-**Fix:** Filter cached names through an on-disk existence check, or have
-`reEncryptSeries` skip a series with neither a bucket nor metadata.
-
-## C7. [Medium] `vec` stores opened at the database root treat unrelated buckets as collections
-**Location:** `vec/store.go:634-680` (`ListCollections` uses `tx.ForEach` at the
-DB root), `vec/aead.go:269-309` (`hasData` treats every top-level bucket as
-data), `vec/rotate.go:231-272` (`collectionNames`).
-**Problem:** At `len(root)==0`, every top-level bucket except
-`__collections_meta__` is considered a collection. On a shared Storm database
-(`db`, `fs`, `ts`, `0x00`, `storm.Metadata`), `ListCollections`, `RotateAll`
-and `VerifyAll` will enumerate and try to rewrite foreign buckets. `ts`
-already refuses encryption without a non-empty `Root` (`ts/aead.go:265-270`);
-`vec` does not.
-**Fix:** Require a non-empty `Root` for encrypted/rotating `vec` stores (like
-`ts`), or maintain a dedicated collections registry and skip unknown buckets.
-Add a regression test on a shared database.
-
-## C8. [Medium] `db` lookups encode the dynamic value type, not the field type
-**Location:** `db/aead.go:438-444` (`keyBytes`), `db/store.go:200-218`
-(`toBytes`).
-**Problem:** An `int32` field saved as a 4-byte key cannot be found with an
-`int64` value (8 bytes); different integer widths and float JSON formatting
-produce different keys. On 64-bit, `int`/`int64` happen to align, masking the
-bug.
-**Fix:** Encode the lookup value using the field's declared type (and reject
-incompatible types), or normalise all integer index keys to one width and add
-tests for cross-type lookups.
-
-## C9. [Low] `Query.Raw`/`RawEach` with a nil sample silently ignore matchers/ordering
-**Location:** `db/query.go:160-200`, `db/sink.go:897-915` (`newRawSink`),
-`db/sink.go:40-100` (`sorter.filter`).
-**Problem:** With `kind == nil` the sink is a `rawSink`, which has no `elem()`;
-`sorter.filter` therefore skips `tree.Match` and never populates `s.list`, so a
-matcher is ignored and an `OrderBy` yields nothing. Reproduced: with a node
-root the query returns the root bucket's raw values rather than the record
-bucket's rows. The doc only warns; it does not reject.
-**Fix:** Reject `Raw`/`RawEach` with a nil `kind` when the query has matchers
-or `orderBy` (return a sentinel error), or decode into a provided type.
-
-## C10. [Low] Empty result sets have inconsistent error semantics
-**Location:** `db/finder.go` `find`/`rnge`/`prefix` vs `db/finder.go:472-490`
-(`All`).
-**Problem:** `All` turns `ErrNotFound` into an empty slice, while `Find`,
-`Range` and `Prefix` return `ErrNotFound` when nothing matches. Callers must
-special-case which finder they use.
-**Fix:** Document the contract explicitly, or make all finders return an empty
-result with a nil error.
-
----
+- **C1/C2/C8** — index keys now use order-preserving encodings: signed integers
+  are sign-bit-flipped big-endian, unsigned integers are big-endian, floats are
+  order-preserving IEEE-754 words. Lookup values are coerced to the field's
+  declared type before encoding, so `int`/`uint`/`int32`/`float` lookups agree.
+  `numbertob` remains the metadata-counter encoding.
+- **C3** — list-index keys are `value ++ "__" ++ id ++ uint64(len(value))`;
+  `ListIndex.Range`/`Remove` parse the trailing length, so `__` in a value or
+  ID is unambiguous. Rotation rebuilds the same format.
+- **C4** — `UpdateField` rejects a primary-key change with `ErrImmutableID`
+  instead of duplicating the record.
+- **C5** — `CollectionMeta.UseQuant` records the quantization mode and
+  `LoadCollection`/`NewCollection` reject a mode mismatch with
+  `ErrInvalidConfig`.
+- **C6** — `allSeriesNames` only includes cached names that exist on disk, so
+  `RotateAll` skips a series that was merely returned by `Store.Series`.
+- **C7** — `vec` enumeration and rotation skip Storm-internal and sibling-store
+  top-level buckets (`db`, `fs`, `ts`, `vec`, `storm.Metadata`, the metadata
+  bucket) at the database root; a dedicated root is unaffected.
+- **C9** — `Query.Raw`/`RawEach` return `ErrSampleRequired` when a nil sample is
+  combined with matchers or ordering.
+- **C10** — the `Finder` interface documents the `ErrNotFound` contract for
+  `One`/`Find`/`Range`/`Prefix` and the empty-slice contract for `All`.
+- Regression tests: `db/review_wrong_test.go`, `vec/review_wrong_test.go`,
+  `ts/review_wrong_test.go`, plus the updated `TestToBytes`.
 
 # 3. Data-loss / integrity
 

@@ -13,10 +13,12 @@ import (
 
 // Finder retrieves records from Storm buckets.
 type Finder interface {
-	// One returns one record by the specified index
+	// One returns one record by the specified index. It returns ErrNotFound
+	// when no record matches.
 	One(ctx context.Context, fieldName string, value any, to any) error
 
-	// Find returns one or more records by the specified index
+	// Find returns one or more records by the specified index. It returns
+	// ErrNotFound when no record matches; use All for an empty-slice contract.
 	Find(ctx context.Context, fieldName string, value any, to any, options ...FindOption) error
 
 	// AllByIndex gets all the records of a bucket that are indexed in the specified index
@@ -29,10 +31,12 @@ type Finder interface {
 	// Select a list of records that match a list of matchers. Doesn't use indexes.
 	Select(matchers ...q.Matcher) Query
 
-	// Range returns one or more records by the specified index within the specified range
+	// Range returns one or more records by the specified index within the
+	// specified range. It returns ErrNotFound when nothing matches.
 	Range(ctx context.Context, fieldName string, min any, max any, to any, options ...FindOption) error
 
-	// Prefix returns one or more records whose given field starts with the specified prefix.
+	// Prefix returns one or more records whose given field starts with the
+	// specified prefix. It returns ErrNotFound when nothing matches.
 	Prefix(ctx context.Context, fieldName string, prefix string, to any, options ...FindOption) error
 
 	// Count counts all the records of a bucket
@@ -103,7 +107,7 @@ func (n *node) One(ctx context.Context, fieldName string, value any, to any) err
 	}
 
 	return wrapError("one", n.readTx(ctx, func(tx *bolt.Tx) error {
-		val, err := n.keyBytes(value, fieldKeyDomain(field))
+		val, err := n.keyBytes(coerceKeyValue(value, field), fieldKeyDomain(field))
 		if err != nil {
 			return err
 		}
@@ -236,7 +240,7 @@ func (n *node) Find(ctx context.Context, fieldName string, value any, to any, op
 	}
 
 	return wrapError("find", n.readTx(ctx, func(tx *bolt.Tx) error {
-		val, err := n.keyBytes(value, fieldKeyDomain(field))
+		val, err := n.keyBytes(coerceKeyValue(value, field), fieldKeyDomain(field))
 		if err != nil {
 			return err
 		}
@@ -534,11 +538,11 @@ func (n *node) Range(ctx context.Context, fieldName string, min any, max any, to
 	}
 
 	return wrapError("range", n.readTx(ctx, func(tx *bolt.Tx) error {
-		mn, err := n.keyBytes(min, keyDomainIndex)
+		mn, err := n.keyBytes(coerceKeyValue(min, field), keyDomainIndex)
 		if err != nil {
 			return err
 		}
-		mx, err := n.keyBytes(max, keyDomainIndex)
+		mx, err := n.keyBytes(coerceKeyValue(max, field), keyDomainIndex)
 		if err != nil {
 			return err
 		}
@@ -671,7 +675,7 @@ func (n *node) Prefix(ctx context.Context, fieldName string, prefix string, to a
 	}
 
 	return wrapError("prefix", n.readTx(ctx, func(tx *bolt.Tx) error {
-		prfx, err := n.keyBytes(prefix, keyDomainIndex)
+		prfx, err := n.keyBytes(coerceKeyValue(prefix, field), keyDomainIndex)
 		if err != nil {
 			return err
 		}

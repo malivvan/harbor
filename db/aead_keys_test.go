@@ -84,7 +84,7 @@ func TestAEADKeyEncryptionHidesKeys(t *testing.T) {
 	require.Len(t, records, 1)
 	require.NotContains(t, records, string(rawID), "the primary key must be encrypted")
 	for key := range records {
-		require.NotContains(t, key, "7")
+		require.NotContains(t, []byte(key), rawID, "the encoded primary key must not appear in the stored key")
 	}
 
 	kv := aeadRawEntries(t, bdb, "aeadkv")

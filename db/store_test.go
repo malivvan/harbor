@@ -1,9 +1,7 @@
 package db
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"math"
 	"math/bits"
@@ -127,31 +125,37 @@ func TestToBytes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, `{"ID":10,"Name":"John"}`, string(b))
 
-	tests := map[interface{}]interface{}{
-		int(-maxInt):           int64(-maxInt),
-		int(maxInt):            int64(maxInt),
-		int8(-math.MaxInt8):    int8(-math.MaxInt8),
-		int8(math.MaxInt8):     int8(math.MaxInt8),
-		int16(-math.MaxInt16):  int16(-math.MaxInt16),
-		int16(math.MaxInt16):   int16(math.MaxInt16),
-		int32(-math.MaxInt32):  int32(-math.MaxInt32),
-		int32(math.MaxInt32):   int32(math.MaxInt32),
-		int64(-math.MaxInt64):  int64(-math.MaxInt64),
-		int64(math.MaxInt64):   int64(math.MaxInt64),
-		uint(maxInt):           uint64(maxInt),
-		uint64(math.MaxUint64): uint64(math.MaxUint64),
+	prev := []byte(nil)
+	for i, v := range []int64{-math.MaxInt64, -1, 0, 1, math.MaxInt64} {
+		b, err := toBytes(v, nil)
+		require.NoError(t, err)
+		require.Len(t, b, 8)
+		if i > 0 {
+			require.Less(t, string(prev), string(b), "int keys must be order-preserving")
+		}
+		prev = b
 	}
 
-	for v, expected := range tests {
-		b, err = toBytes(v, nil)
+	prev = nil
+	for i, v := range []uint64{0, 1, math.MaxUint64} {
+		b, err := toBytes(v, nil)
 		require.NoError(t, err)
-		require.NotNil(t, b)
-		buf := bytes.NewReader(b)
-		typ := reflect.TypeOf(expected)
-		actual := reflect.New(typ)
-		err = binary.Read(buf, binary.BigEndian, actual.Interface())
+		require.Len(t, b, 8)
+		if i > 0 {
+			require.Less(t, string(prev), string(b), "uint keys must be order-preserving")
+		}
+		prev = b
+	}
+
+	prev = nil
+	for i, v := range []float64{-math.MaxFloat64, -1, 0, 1, math.MaxFloat64} {
+		b, err := toBytes(v, nil)
 		require.NoError(t, err)
-		require.Equal(t, expected, actual.Elem().Interface())
+		require.Len(t, b, 8)
+		if i > 0 {
+			require.Less(t, string(prev), string(b), "float keys must be order-preserving")
+		}
+		prev = b
 	}
 }
 

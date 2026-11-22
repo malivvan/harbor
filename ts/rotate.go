@@ -442,10 +442,29 @@ func (s *Store) allSeriesNames(tx *bolt.Tx) ([]string, error) {
 	}
 
 	s.mu.RLock()
-	for _, name := range s.order {
-		add(name)
-	}
+	cached := append([]string(nil), s.order...)
 	s.mu.RUnlock()
+	for _, name := range cached {
+		// A series that was only handed out by Store.Series and never written
+		// has no bucket or metadata; including it would make RotateAll fail.
+		bucket, err := s.seriesBucket(tx, name)
+		if err != nil {
+			return nil, err
+		}
+		if bucket != nil {
+			add(name)
+			continue
+		}
+		if meta != nil {
+			key, err := s.bucketKey(name)
+			if err != nil {
+				return nil, err
+			}
+			if meta.Get(key) != nil {
+				add(name)
+			}
+		}
+	}
 
 	sort.Strings(names)
 	return names, nil

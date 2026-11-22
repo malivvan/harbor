@@ -11,7 +11,9 @@ import (
 // Select builds a query that scans for records matching all supplied matchers.
 func (n *node) Select(matchers ...q.Matcher) Query {
 	tree := q.And(matchers...)
-	return newQuery(n, tree)
+	query := newQuery(n, tree)
+	query.hasMatchers = len(matchers) > 0
+	return query
 }
 
 // Query configures and executes scans over records in a bucket.
@@ -71,13 +73,14 @@ func newQuery(n *node, tree q.Matcher) *query {
 }
 
 type query struct {
-	limit   int
-	skip    int
-	reverse bool
-	tree    q.Matcher
-	node    *node
-	bucket  string
-	orderBy []string
+	limit       int
+	skip        int
+	reverse     bool
+	tree        q.Matcher
+	node        *node
+	bucket      string
+	orderBy     []string
+	hasMatchers bool
 }
 
 func (q *query) Skip(nb int) Query {
@@ -167,6 +170,9 @@ func (q *query) Raw(ctx context.Context, kind any) ([][]byte, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, wrapError("query raw", err)
 	}
+	if kind == nil && (q.hasMatchers || len(q.orderBy) > 0) {
+		return nil, wrapError("query raw", ErrSampleRequired)
+	}
 
 	raw, sink, err := newRawSink(kind)
 	if err != nil {
@@ -187,6 +193,9 @@ func (q *query) RawEach(ctx context.Context, kind any, fn func(key, value []byte
 
 	if fn == nil {
 		return wrapError("query raw each", ErrNilParam)
+	}
+	if kind == nil && (q.hasMatchers || len(q.orderBy) > 0) {
+		return wrapError("query raw each", ErrSampleRequired)
 	}
 
 	raw, sink, err := newRawSink(kind)

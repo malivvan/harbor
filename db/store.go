@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 
@@ -214,14 +215,62 @@ func toBytes(key interface{}, c Codec) ([]byte, error) {
 	case string:
 		return []byte(t), nil
 	case int:
-		return numbertob(int64(t))
+		return encodeIntKey(int64(t)), nil
+	case int8:
+		return encodeIntKey(int64(t)), nil
+	case int16:
+		return encodeIntKey(int64(t)), nil
+	case int32:
+		return encodeIntKey(int64(t)), nil
+	case int64:
+		return encodeIntKey(t), nil
 	case uint:
-		return numbertob(uint64(t))
-	case int8, int16, int32, int64, uint8, uint16, uint32, uint64:
-		return numbertob(t)
+		return encodeUintKey(uint64(t)), nil
+	case uint8:
+		return encodeUintKey(uint64(t)), nil
+	case uint16:
+		return encodeUintKey(uint64(t)), nil
+	case uint32:
+		return encodeUintKey(uint64(t)), nil
+	case uint64:
+		return encodeUintKey(t), nil
+	case float32:
+		return encodeFloatKey(float64(t)), nil
+	case float64:
+		return encodeFloatKey(t), nil
 	default:
 		return c.Marshal(key)
 	}
+}
+
+// encodeIntKey maps a signed integer to 8 bytes whose byte order matches the
+// numeric order (the sign bit is flipped, so negatives sort first).
+func encodeIntKey(v int64) []byte {
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], uint64(v)^(1<<63))
+	return b[:]
+}
+
+// encodeUintKey maps an unsigned integer to 8 big-endian bytes.
+func encodeUintKey(v uint64) []byte {
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], v)
+	return b[:]
+}
+
+// encodeFloatKey maps a float64 to 8 bytes whose byte order matches the
+// numeric order (negative values have all bits inverted, non-negative values
+// have the sign bit set).
+func encodeFloatKey(v float64) []byte {
+	bits := math.Float64bits(v)
+	if bits&(1<<63) != 0 {
+		bits = ^bits
+	} else {
+		bits |= 1 << 63
+	}
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], bits)
+	return b[:]
 }
 
 func numbertob(v interface{}) ([]byte, error) {

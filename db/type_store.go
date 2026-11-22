@@ -421,6 +421,9 @@ func (n *node) Update(ctx context.Context, data any) error {
 // UpdateField updates a single field
 func (n *node) UpdateField(ctx context.Context, data any, fieldName string, value any) error {
 	return wrapError("update field", n.update(ctx, data, func(ref *reflect.Value, current *reflect.Value, cfg *structConfig) error {
+		if cfg.ID != nil && fieldName == cfg.ID.Name {
+			return ErrImmutableID
+		}
 		f := current.FieldByName(fieldName)
 		if !f.IsValid() {
 			return ErrNotFound

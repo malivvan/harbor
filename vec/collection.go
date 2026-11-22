@@ -75,7 +75,7 @@ func (s *Store) NewCollectionWithParams(name string, vectorLen int, metric Dista
 		existing, metaErr := s.LoadCollectionMeta(name)
 		switch {
 		case metaErr == nil:
-			if existing.VectorLen != vectorLen || existing.Metric != metric || existing.UseHNSW != useHNSW {
+			if existing.VectorLen != vectorLen || existing.Metric != metric || existing.UseHNSW != useHNSW || existing.UseQuant != s.useQuant {
 				return nil, fmt.Errorf("%w: collection %q already exists with a different configuration", ErrInvalidConfig, name)
 			}
 			if useHNSW && existing.HNSWParams != hnswParams {
@@ -121,6 +121,7 @@ func (s *Store) NewCollectionWithParams(name string, vectorLen int, metric Dista
 			Metric:            metric,
 			UseHNSW:           useHNSW,
 			HNSWParams:        hnswParams,
+			UseQuant:          s.useQuant,
 			FormatVersion:     collectionFormatVersion,
 			SchemaFingerprint: StoredPointSchemaFingerprint,
 		}

@@ -52,6 +52,16 @@ var (
 	// ErrIncompatibleValue is returned when trying to set a value with a different type than the chosen field
 	ErrIncompatibleValue = errors.New("incompatible value")
 
+	// ErrImmutableID is returned when UpdateField targets the primary key.
+	// Changing a primary key would leave the old record and its index entries
+	// behind; delete and re-save instead.
+	ErrImmutableID = errors.New("the primary key cannot be updated")
+
+	// ErrSampleRequired is returned by Raw/RawEach when a nil sample is used
+	// together with matchers or ordering, because the query cannot decode the
+	// records needed to evaluate them.
+	ErrSampleRequired = errors.New("a sample record is required for matchers or ordering")
+
 	// ErrDifferentCodec is returned when using a codec different than the first codec used with the bucket.
 	ErrDifferentCodec = errors.New("the selected codec is incompatible with this bucket")
 

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	"github.com/malivvan/storm/internal/encryption"
 	bolt "go.etcd.io/bbolt"
@@ -459,4 +460,37 @@ func (n *node) errEncryptedOrdering() error {
 		return ErrEncryptedOrdering
 	}
 	return nil
+}
+
+// coerceKeyValue converts a lookup value to the declared type of the indexed
+// field when both sides are in the same kind class (numeric or identical).
+// Without this an int lookup on a uint field would produce a different key
+// than the stored uint field.
+func coerceKeyValue(v any, field *fieldConfig) any {
+	if v == nil || field == nil || field.Value == nil {
+		return v
+	}
+	rv := reflect.ValueOf(v)
+	ft := field.Value.Type()
+	if !rv.IsValid() || !rv.Type().ConvertibleTo(ft) {
+		return v
+	}
+	if !sameKindClass(rv.Kind(), ft.Kind()) {
+		return v
+	}
+	return rv.Convert(ft).Interface()
+}
+
+// sameKindClass reports whether two kinds may be treated as the same value
+// class for index-key coercion.
+func sameKindClass(a, b reflect.Kind) bool {
+	numeric := func(k reflect.Kind) bool {
+		return (k >= reflect.Int && k <= reflect.Int64) ||
+			(k >= reflect.Uint && k <= reflect.Uint64) ||
+			k == reflect.Float32 || k == reflect.Float64
+	}
+	if numeric(a) || numeric(b) {
+		return numeric(a) && numeric(b)
+	}
+	return a == b
 }

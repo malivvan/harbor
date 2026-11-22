@@ -245,8 +245,6 @@ func (r *rotation) collectionNames(tx *bbolt.Tx) ([]string, error) {
 	var names []string
 
 	add := func(name []byte) error {
-		// The metadata bucket keeps its plain name: it is Storm-internal, not a
-		// collection name.
 		if string(name) == collectionsMetaBucket {
 			return nil
 		}
@@ -277,6 +275,9 @@ func (r *rotation) collectionNames(tx *bbolt.Tx) ([]string, error) {
 	}
 
 	if err := tx.ForEach(func(name []byte, _ *bbolt.Bucket) error {
+		if reservedTopLevelBuckets[string(name)] {
+			return nil
+		}
 		return add(name)
 	}); err != nil {
 		return nil, err

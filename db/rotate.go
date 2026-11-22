@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/malivvan/storm/db/index"
 	"github.com/malivvan/storm/internal/encryption"
 	bolt "go.etcd.io/bbolt"
 )
@@ -449,8 +450,9 @@ func (r *rotation) uniqueIndex(b *bolt.Bucket) error {
 	return encryption.ApplyEntries(b, drop, changed)
 }
 
-// listIndex rotates a list index: entries are value ++ "__" ++ id with the id
-// as value, and the nested id bucket mirrors them the other way around.
+// listIndex rotates a list index: entries are
+// value ++ "__" ++ id ++ uint64(len(value)) with the id as value, and the
+// nested id bucket mirrors them the other way around.
 func (r *rotation) listIndex(b *bolt.Bucket, ids *bolt.Bucket) error {
 	var (
 		changed []encryption.Pair
@@ -465,16 +467,18 @@ func (r *rotation) listIndex(b *bolt.Bucket, ids *bolt.Bucket) error {
 			return err
 		}
 
-		suffix := append([]byte("__"), v...)
-		if !bytes.HasSuffix(k, suffix) {
+		n, ok := index.ListKeyValueLen(k)
+		if !ok || len(k) < n+2 || k[n] != '_' || k[n+1] != '_' {
 			return fmt.Errorf("%w: malformed list index entry", ErrWrongMode)
 		}
+		valueEnc := k[:n]
+		idEnc := k[n+2 : len(k)-8]
 
-		value, err := r.old.openKey(k[:len(k)-len(suffix)], keyDomainIndex)
+		value, err := r.old.openKey(valueEnc, keyDomainIndex)
 		if err != nil {
 			return err
 		}
-		id, err := r.old.openKey(v, keyDomainID)
+		id, err := r.old.openKey(idEnc, keyDomainID)
 		if err != nil {
 			return err
 		}
@@ -482,7 +486,7 @@ func (r *rotation) listIndex(b *bolt.Bucket, ids *bolt.Bucket) error {
 			return nil
 		}
 
-		newValue, err := r.next.sealKey(id, keyDomainID)
+		newID, err := r.next.sealKey(id, keyDomainID)
 		if err != nil {
 			return err
 		}
@@ -490,13 +494,9 @@ func (r *rotation) listIndex(b *bolt.Bucket, ids *bolt.Bucket) error {
 		if err != nil {
 			return err
 		}
-		// key = value ++ "__" ++ id, both under the new key.
-		newKey := make([]byte, 0, len(encValue)+len(newValue)+2)
-		newKey = append(newKey, encValue...)
-		newKey = append(newKey, '_', '_')
-		newKey = append(newKey, newValue...)
+		newKey := index.EncodeListKey(encValue, newID)
 
-		changed = append(changed, encryption.Pair{Key: newKey, Value: newValue})
+		changed = append(changed, encryption.Pair{Key: newKey, Value: newID})
 		drop = append(drop, append([]byte(nil), k...))
 		return nil
 	})
@@ -521,8 +521,13 @@ func (r *rotation) listIndex(b *bolt.Bucket, ids *bolt.Bucket) error {
 			return err
 		}
 
-		suffix := append([]byte("__"), k...)
-		if !bytes.HasSuffix(v, suffix) {
+		n, ok := index.ListKeyValueLen(v)
+		if !ok || len(v) < n+2 || v[n] != '_' || v[n+1] != '_' {
+			return fmt.Errorf("%w: malformed list index entry", ErrWrongMode)
+		}
+		valueEnc := v[:n]
+		idEnc := v[n+2 : len(v)-8]
+		if !bytes.Equal(idEnc, k) {
 			return fmt.Errorf("%w: malformed list index entry", ErrWrongMode)
 		}
 
@@ -530,7 +535,7 @@ func (r *rotation) listIndex(b *bolt.Bucket, ids *bolt.Bucket) error {
 		if err != nil {
 			return err
 		}
-		value, err := r.old.openKey(v[:len(v)-len(suffix)], keyDomainIndex)
+		value, err := r.old.openKey(valueEnc, keyDomainIndex)
 		if err != nil {
 			return err
 		}
@@ -546,11 +551,7 @@ func (r *rotation) listIndex(b *bolt.Bucket, ids *bolt.Bucket) error {
 		if err != nil {
 			return err
 		}
-		// value = index value ++ "__" ++ id, both under the new key.
-		newValue := make([]byte, 0, len(encValue)+len(newKey)+2)
-		newValue = append(newValue, encValue...)
-		newValue = append(newValue, '_', '_')
-		newValue = append(newValue, newKey...)
+		newValue := index.EncodeListKey(encValue, newKey)
 
 		idChanged = append(idChanged, encryption.Pair{Key: newKey, Value: newValue})
 		idDrop = append(idDrop, append([]byte(nil), k...))

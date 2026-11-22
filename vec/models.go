@@ -81,6 +81,11 @@ type CollectionMeta struct {
 	UseHNSW    bool       `json:"hnsw"`
 	HNSWParams HNSWParams `json:"parameters"`
 
+	// UseQuant records whether the points are stored quantized. Reopening a
+	// quantized collection without the quantizer would return nil vectors, so
+	// the mode is validated on load.
+	UseQuant bool `json:"quantized,omitempty"`
+
 	// FormatVersion is the persisted-format revision, and SchemaFingerprint is
 	// the generated StoredPoint wire-layout hash. Both are checked on reopen so
 	// a reordered or otherwise incompatible generated codec is detected instead

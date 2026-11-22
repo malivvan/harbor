@@ -3,6 +3,7 @@ package index
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 
 	"github.com/malivvan/storm/internal"
 	bolt "go.etcd.io/bbolt"
@@ -92,11 +93,7 @@ func (idx *ListIndex) Add(ctx context.Context, newValue []byte, targetID []byte)
 		key = nil
 	}
 
-	key = make([]byte, 0, len(newValue)+2+len(targetID))
-	key = append(key, newValue...)
-	key = append(key, '_')
-	key = append(key, '_')
-	key = append(key, targetID...)
+	key = EncodeListKey(newValue, targetID)
 
 	err = idx.IDs.Add(ctx, targetID, key)
 	if err != nil {
@@ -156,9 +153,9 @@ func (idx *ListIndex) Remove(ctx context.Context, value []byte) error {
 			return wrapError("index remove", err)
 		}
 
-		// The IDs bucket is keyed by the target ID, which is the suffix after
-		// the "<value>__" prefix, not the bare field value.
-		id := k[len(prefix):]
+		// The IDs bucket is keyed by the target ID, which sits between the
+		// "<value>__" prefix and the trailing value-length word.
+		id := k[len(prefix) : len(k)-listValueLenSize]
 		err = idx.IDs.RemoveID(ctx, id)
 		if err != nil {
 			return wrapError("index remove", err)
@@ -358,8 +355,10 @@ func (idx *ListIndex) Range(ctx context.Context, min []byte, max []byte, opts *O
 		Min:     min,
 		Max:     max,
 		CompareFn: func(val, limit []byte) int {
-			pos := bytes.LastIndex(val, []byte("__"))
-			return bytes.Compare(val[:pos], limit)
+			if n, ok := ListKeyValueLen(val); ok {
+				return bytes.Compare(val[:n], limit)
+			}
+			return bytes.Compare(val, limit)
 		},
 	}
 
@@ -444,6 +443,36 @@ func (idx *ListIndex) Prefix(ctx context.Context, prefix []byte, opts *Options) 
 // generatePrefix returns the "<value>__" search prefix. An empty value has no
 // valid prefix, because Add rejects empty values; returning nil lets callers
 // report "no match" instead of scanning every index key.
+// listValueLenSize is the trailing big-endian word that records the length of
+// the value component in a list-index key.
+const listValueLenSize = 8
+
+// EncodeListKey builds "value ++ __ ++ id ++ uint64(len(value))". The trailing
+// length makes the split unambiguous even when the value or the id contains
+// "__".
+func EncodeListKey(value, id []byte) []byte {
+	key := make([]byte, 0, len(value)+2+len(id)+listValueLenSize)
+	key = append(key, value...)
+	key = append(key, '_', '_')
+	key = append(key, id...)
+	var length [listValueLenSize]byte
+	binary.BigEndian.PutUint64(length[:], uint64(len(value)))
+	return append(key, length[:]...)
+}
+
+// ListKeyValueLen returns the length of the value component of a list-index
+// key, reporting false for a malformed key.
+func ListKeyValueLen(key []byte) (int, bool) {
+	if len(key) < listValueLenSize+2 {
+		return 0, false
+	}
+	n := int(binary.BigEndian.Uint64(key[len(key)-listValueLenSize:]))
+	if n < 0 || n > len(key)-listValueLenSize-2 {
+		return 0, false
+	}
+	return n, true
+}
+
 func generatePrefix(value []byte) []byte {
 	if len(value) == 0 {
 		return nil

@@ -18,6 +18,18 @@ const Name = "vec"
 
 const collectionsMetaBucket = "__collections_meta__"
 
+// reservedTopLevelBuckets are the top-level buckets Storm itself creates in a
+// shared database. They are never vector collections, even when a vec Store is
+// opened at the database root.
+var reservedTopLevelBuckets = map[string]bool{
+	collectionsMetaBucket: true,
+	"db":                  true,
+	"fs":                  true,
+	"ts":                  true,
+	"vec":                 true,
+	"storm.Metadata":      true,
+}
+
 // Store handles local persistence using BoltDB (bbolt).
 // It provides durable storage for vector collections and their points.
 type Store struct {
@@ -235,11 +247,18 @@ func Open(ctx context.Context, bdb *bbolt.DB, cfg Config) (*Store, error) {
 		quantizer = NewSQ8Quantizer()
 	}
 
+	var root [][]byte
+	for _, part := range cfg.Root {
+		if len(part) == 0 {
+			continue
+		}
+		root = append(root, append([]byte(nil), part...))
+	}
+
 	enc, err := resolveConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
-
 	if bdb == nil {
 		// A nil database cannot store anything: every method would panic. Fail
 		// fast instead of handing out a handle that explodes on first use.
@@ -250,7 +269,7 @@ func Open(ctx context.Context, bdb *bbolt.DB, cfg Config) (*Store, error) {
 		db:          bdb,
 		quantizer:   quantizer,
 		useQuant:    useQuant,
-		root:        cloneRoot(cfg.Root),
+		root:        root,
 		collections: make(map[string]*Collection),
 	}
 	store.enc.Store(enc)
@@ -416,6 +435,9 @@ func (s *Store) createCollectionBucket(tx *bbolt.Tx, name string) (*bbolt.Bucket
 	if err != nil {
 		return nil, err
 	}
+	if root == nil {
+		return nil, fmt.Errorf("%w: root path is empty", ErrInvalidConfig)
+	}
 	return root.CreateBucketIfNotExists(key)
 }
 
@@ -435,6 +457,9 @@ func (s *Store) metaBucket(tx *bbolt.Tx, create bool) (*bbolt.Bucket, error) {
 			return nil, err
 		}
 		if parent == nil {
+			if create {
+				return nil, fmt.Errorf("%w: root path is empty", ErrInvalidConfig)
+			}
 			return nil, nil
 		}
 		if create {
@@ -604,6 +629,17 @@ func (s *Store) LoadCollection(colName string) (map[string]*PointStruct, error) 
 		return nil, err
 	}
 
+	// The quantization mode is persisted in the collection metadata; loading a
+	// quantized collection without its quantizer would silently return nil
+	// vectors.
+	meta, metaErr := s.LoadCollectionMeta(colName)
+	if metaErr != nil && !errors.Is(metaErr, ErrMetadataNotFound) {
+		return nil, metaErr
+	}
+	if metaErr == nil && meta.UseQuant != s.useQuant {
+		return nil, fmt.Errorf("%w: collection %q was created with a different quantization setting", ErrInvalidConfig, colName)
+	}
+
 	points := make(map[string]*PointStruct)
 
 	err := s.view(func(tx *bbolt.Tx) error {
@@ -686,6 +722,9 @@ func (s *Store) ListCollections() ([]string, error) {
 			})
 		}
 		return tx.ForEach(func(name []byte, _ *bbolt.Bucket) error {
+			if reservedTopLevelBuckets[string(name)] {
+				return nil
+			}
 			return addCollection(name)
 		})
 	})
