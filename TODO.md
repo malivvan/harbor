@@ -45,6 +45,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low — matcher/ordering paths unchanged.
 
 ### 1.2 No-index scans allocate a `reflect.New` + grow the result slice per record — HIGH
+
+> **Status:** ✅ FIXED — scan sinks are pre-sized from `bucket.Stats().KeyN` (bounded by `Limit`) and decode straight into their final slot; `listSink` reuses one scratch value otherwise; same-kind string compares bypass `go/constant`. Regression tests in `db/perf_regression_test.go` and `db/q/compare_regression_test.go`.
 - **Location:** `db/sink.go:448-453` (`listSink.elem`), `db/sink.go:459-483` (`add`), and the
   string compare in `db/q/compare.go:85-88` (`constant.MakeString`).
 - **Problem:** `listSink.results` starts at len 0, so `elem()` always returns a new

@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/malivvan/storm/db/q"
 	"github.com/stretchr/testify/require"
 )
 
@@ -74,4 +75,49 @@ func TestCountWithMatcherStillDecodes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 5, n)
 	require.NotZero(t, cc.unmarshals.Load(), "ordering forces decoding")
+}
+
+func TestUnindexedScanPresizedResults(t *testing.T) {
+	ctx := context.Background()
+	db, cleanup := createDB(t)
+	defer cleanup()
+
+	for i := 0; i < 25; i++ {
+		u := User{Name: "John", Group: "Staff"}
+		require.NoError(t, db.Save(ctx, &u))
+	}
+
+	// All: the sink is pre-sized from the bucket key count, then truncated.
+	var all []User
+	require.NoError(t, db.All(ctx, &all))
+	require.Len(t, all, 25)
+
+	// Limit smaller than the bucket: pre-size must be bounded by the limit.
+	var limited []User
+	require.NoError(t, db.Select().Limit(3).Find(ctx, &limited))
+	require.Len(t, limited, 3)
+
+	// Skip: pre-sized slots before the first published record are reused.
+	var skipped []User
+	require.NoError(t, db.Select().Skip(23).Find(ctx, &skipped))
+	require.Len(t, skipped, 2)
+
+	// Pointer slices decode into the pre-sized slots as well.
+	var ptrs []*User
+	require.NoError(t, db.All(ctx, &ptrs))
+	require.Len(t, ptrs, 25)
+	for _, p := range ptrs {
+		require.NotNil(t, p)
+	}
+
+	// No match: an over-sized slice must be truncated to empty, not published.
+	var none []User
+	err := db.Select(q.Eq("Group", "NoSuchGroup")).Find(ctx, &none)
+	require.ErrorIs(t, err, ErrNotFound)
+	require.Empty(t, none)
+
+	// Reverse reads the same number of records.
+	var reversed []User
+	require.NoError(t, db.All(ctx, &reversed, Reverse()))
+	require.Len(t, reversed, 25)
 }

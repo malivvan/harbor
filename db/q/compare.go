@@ -84,7 +84,22 @@ func compare(a, b interface{}, tok token.Token) bool {
 		}
 	case ak == reflect.String:
 		if bk == reflect.String {
-			return constant.Compare(constant.MakeString(vala.String()), tok, constant.MakeString(valb.String()))
+			a, b := vala.String(), valb.String()
+			switch tok {
+			case token.EQL:
+				return a == b
+			case token.NEQ:
+				return a != b
+			case token.LSS:
+				return a < b
+			case token.LEQ:
+				return a <= b
+			case token.GTR:
+				return a > b
+			case token.GEQ:
+				return a >= b
+			}
+			return constant.Compare(constant.MakeString(a), tok, constant.MakeString(b))
 		}
 	}
 

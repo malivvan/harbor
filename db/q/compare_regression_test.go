@@ -44,3 +44,26 @@ func TestCompareNilTimes(t *testing.T) {
 	require.False(t, compare(nilTime, nilTime, token.LSS))
 	require.True(t, compare(nilTime, now, token.NEQ))
 }
+
+// TestCompareStringFastPath covers every comparison token for same-kind
+// strings, which bypasses go/constant on the hot matcher path.
+func TestCompareStringFastPath(t *testing.T) {
+	cases := []struct {
+		a, b string
+		tok  token.Token
+		want bool
+	}{
+		{"a", "a", token.EQL, true},
+		{"a", "b", token.EQL, false},
+		{"a", "b", token.NEQ, true},
+		{"a", "b", token.LSS, true},
+		{"b", "a", token.LSS, false},
+		{"a", "a", token.LEQ, true},
+		{"b", "a", token.GTR, true},
+		{"a", "b", token.GTR, false},
+		{"a", "a", token.GEQ, true},
+	}
+	for _, c := range cases {
+		require.Equal(t, c.want, compare(c.a, c.b, c.tok), "%q %s %q", c.a, c.tok, c.b)
+	}
+}

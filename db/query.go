@@ -320,6 +320,18 @@ func (q *query) query(ctx context.Context, tx *bolt.Tx, sink sink) error {
 			return err
 		}
 
+		// Pre-size unordered result slices so every record is decoded straight
+		// into its final slot instead of into a fresh reflect.New per record.
+		if len(q.orderBy) == 0 {
+			if ls, ok := sink.(*listSink); ok {
+				n := bucket.Stats().KeyN
+				if q.limit >= 0 && q.limit < n {
+					n = q.limit
+				}
+				ls.prealloc(n)
+			}
+		}
+
 		c := internal.Cursor{C: bucket.Cursor(), Reverse: q.reverse}
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			if err := checkContext(ctx); err != nil {

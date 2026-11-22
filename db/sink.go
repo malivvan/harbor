@@ -442,6 +442,7 @@ type listSink struct {
 	name     string
 	isPtr    bool
 	idx      int
+	scratch  reflect.Value
 }
 
 func (l *listSink) slice() reflect.Value {
@@ -457,10 +458,24 @@ func (l *listSink) reset() {
 }
 
 func (l *listSink) elem() reflect.Value {
-	if l.results.IsValid() && l.idx < l.results.Len() {
+	if l.idx < l.results.Len() {
 		return l.results.Index(l.idx).Addr()
 	}
-	return reflect.New(l.elemType)
+	// Reuse a scratch value: add copies it into the result slice, so the
+	// decoded record never escapes between iterations.
+	if !l.scratch.IsValid() {
+		l.scratch = reflect.New(l.elemType)
+	}
+	return l.scratch
+}
+
+// prealloc sizes the result slice so records can be decoded directly into it.
+// It is a no-op when the slice already has elements or already has capacity.
+func (l *listSink) prealloc(n int) {
+	if n <= 0 || l.results.Len() != 0 || l.results.Cap() >= n {
+		return
+	}
+	l.results = reflect.MakeSlice(l.results.Type(), n, n)
 }
 
 func (l *listSink) bucketName() string {
@@ -472,12 +487,16 @@ func (l *listSink) add(ctx context.Context, i *item) error {
 		return err
 	}
 
-	if l.idx == l.results.Len() {
-		if l.isPtr {
-			l.results = reflect.Append(l.results, *i.value)
-		} else {
-			l.results = reflect.Append(l.results, reflect.Indirect(*i.value))
-		}
+	if l.idx < l.results.Len() {
+		// The record was decoded straight into the pre-sized result slice.
+		l.idx++
+		return nil
+	}
+
+	if l.isPtr {
+		l.results = reflect.Append(l.results, *i.value)
+	} else {
+		l.results = reflect.Append(l.results, reflect.Indirect(*i.value))
 	}
 
 	if err := checkContext(ctx); err != nil {
@@ -496,6 +515,11 @@ func (l *listSink) add(ctx context.Context, i *item) error {
 func (l *listSink) flush(ctx context.Context) error {
 	if err := checkContext(ctx); err != nil {
 		return err
+	}
+
+	// Drop unused pre-allocated slots (and any slots skipped by Skip/Limit).
+	if l.results.Len() > l.idx {
+		l.results = l.results.Slice(0, l.idx)
 	}
 
 	if l.results.IsValid() && l.results.Len() > 0 {
