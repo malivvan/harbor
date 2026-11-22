@@ -17,7 +17,7 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/malivvan/storm/fs/absfs"
+	"github.com/malivvan/storm/internal/absfs"
 )
 
 var errNilIno = errors.New("ino is nil")

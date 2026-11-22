@@ -1,6 +1,10 @@
 package vec
 
-import "github.com/malivvan/storm/internal/encryption"
+import (
+	"errors"
+
+	"github.com/malivvan/storm/internal/encryption"
+)
 
 var (
 	// ErrAuthFailed is returned when encrypted data fails authentication.
@@ -15,4 +19,10 @@ var (
 	// ErrWrongMode is returned when a store is opened with an encryption mode
 	// that does not match what is stored on disk.
 	ErrWrongMode = encryption.ErrWrongMode
+
+	// ErrCollectionNotFound is returned when a collection bucket is missing.
+	ErrCollectionNotFound = errors.New("vec: collection not found")
+
+	// ErrMetadataNotFound is returned when a collection has no stored metadata.
+	ErrMetadataNotFound = errors.New("vec: collection metadata not found")
 )

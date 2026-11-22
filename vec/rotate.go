@@ -50,12 +50,14 @@ func (s *Store) adoptEnc(next *encState) {
 	s.enc = next
 }
 
-// ReEncryptCollection rewrites one collection and its metadata under newKey,
-// rewrites the marker canary and installs newKey as the write key.
+// ReEncryptCollection rewrites one collection and its metadata under newKey and
+// installs newKey as the write key.
 //
-// The previous key stays available for decryption, so the collections that were
-// not rotated yet keep working; RotateAll rewrites all of them and drops the old
-// key once it is done.
+// The marker intentionally stays under the current key, and the previous key
+// remains available for decryption in this process, so the collections that
+// were not rotated yet keep working. This is a partial rotation: a fresh
+// process cannot read the whole store until RotateAll completes it. Do not
+// close a store after ReEncryptCollection; call RotateAll first.
 //
 // With EncryptPointIDs or EncryptCollectionNames it cannot run at all: those
 // deterministic keys are derived from one master key, so once the new key is
@@ -99,7 +101,10 @@ func (s *Store) ReEncryptCollection(ctx context.Context, name string, newKey []b
 		if err := r.metadataEntry(tx, name); err != nil {
 			return err
 		}
-		return r.writeMarker(tx)
+		// Keep the old marker: the other collections still hold old-key
+		// ciphertext. RotateAll publishes the new marker once everything is
+		// rewritten.
+		return nil
 	})
 	if err != nil {
 		return err

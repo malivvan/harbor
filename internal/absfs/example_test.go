@@ -3,7 +3,7 @@ package absfs_test
 import (
 	"fmt"
 
-	"github.com/malivvan/storm/fs/absfs"
+	"github.com/malivvan/storm/internal/absfs"
 )
 
 // Example demonstrates basic usage of creating a filesystem

@@ -17,9 +17,10 @@ type Quantizer interface {
 	GetCompressedSize(dim int) int
 }
 
-// SQ8Quantizer implements scalar quantization to 8-bit integers
-// It scales each vector element to the range [0, 255] based on the
-// min and max values of the vector
+// SQ8Quantizer implements scalar quantization to unsigned 8-bit integers.
+// Each vector element is scaled to [0, 255] based on the min and max values of
+// the vector (the earlier comment claimed [-128, 127], which the code never
+// produced).
 
 type SQ8Quantizer struct{}
 

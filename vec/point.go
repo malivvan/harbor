@@ -90,8 +90,8 @@ type StoredPoint struct {
 }
 
 // clonePoint returns a copy of p that shares nothing mutable with it: the
-// vector slice and the payload map are duplicated so that callers mutating a
-// returned point cannot corrupt the index.
+// vector slice and the payload (including nested maps and slices) are deep
+// duplicated so callers mutating a returned point cannot corrupt the index.
 func clonePoint(p *PointStruct) PointStruct {
 	cp := *p
 
@@ -100,12 +100,51 @@ func clonePoint(p *PointStruct) PointStruct {
 		copy(cp.Vector, p.Vector)
 	}
 
-	if p.Payload != nil {
-		cp.Payload = make(Payload, len(p.Payload))
-		for k, v := range p.Payload {
-			cp.Payload[k] = v
-		}
-	}
-
+	cp.Payload = clonePayload(p.Payload)
 	return cp
+}
+
+// clonePayload deep-copies a payload map.
+func clonePayload(p Payload) Payload {
+	if p == nil {
+		return nil
+	}
+	out := make(Payload, len(p))
+	for k, v := range p {
+		out[k] = deepCopyValue(v)
+	}
+	return out
+}
+
+// deepCopyValue copies the mutable container types a payload can hold. Scalar
+// values are returned as-is.
+func deepCopyValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, item := range t {
+			out[k] = deepCopyValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, item := range t {
+			out[i] = deepCopyValue(item)
+		}
+		return out
+	case []string:
+		return append([]string(nil), t...)
+	case []int:
+		return append([]int(nil), t...)
+	case []int64:
+		return append([]int64(nil), t...)
+	case []float32:
+		return append([]float32(nil), t...)
+	case []float64:
+		return append([]float64(nil), t...)
+	case []byte:
+		return append([]byte(nil), t...)
+	default:
+		return v
+	}
 }

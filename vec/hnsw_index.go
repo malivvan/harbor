@@ -141,28 +141,37 @@ func (h *HNSWIndex) Upsert(points []PointStruct) error {
 		return fmt.Errorf("HNSW graph is nil, cannot upsert points")
 	}
 
-	// Validate the dimensions up front: Graph.Add panics on a mismatch, which
-	// would leave the points map holding IDs the graph does not know about.
-	if dims := h.graph.Dims(); dims > 0 {
-		for i := range points {
-			if got := len(points[i].Vector); got != dims {
-				return fmt.Errorf("point %s has invalid vector dimension %d (expected %d)", points[i].ID, got, dims)
-			}
+	if len(points) == 0 {
+		return nil
+	}
+
+	// Validate every point against one dimension up front, even for an empty
+	// graph: Graph.Add panics when a later node in the same batch disagrees
+	// with the first, which would leave the points map inconsistent.
+	dims := h.graph.Dims()
+	if dims == 0 {
+		dims = len(points[0].Vector)
+	}
+	for i := range points {
+		if got := len(points[i].Vector); got != dims {
+			return fmt.Errorf("point %s has invalid vector dimension %d (expected %d)", points[i].ID, got, dims)
 		}
 	}
 
+	// Own deep copies: callers may reuse their vectors/payloads after Upsert.
+	stored := make([]PointStruct, len(points))
 	nodes := make([]hnsw.Node[string], 0, len(points))
 	for i := range points {
-		p := &points[i]
-		nodes = append(nodes, hnsw.MakeNode(p.ID, p.Vector))
+		stored[i] = clonePoint(&points[i])
+		nodes = append(nodes, hnsw.MakeNode(stored[i].ID, stored[i].Vector))
 	}
 
 	// Batch add to graph first: only mirror the points that really made it into
 	// the graph, so that Count and Search cannot disagree with the graph.
 	h.graph.Add(nodes...)
 
-	for i := range points {
-		h.points[points[i].ID] = &points[i]
+	for i := range stored {
+		h.points[stored[i].ID] = &stored[i]
 	}
 	return nil
 }
@@ -181,60 +190,94 @@ func (h *HNSWIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 	if h.graph == nil {
 		return nil, fmt.Errorf("HNSW graph is nil, cannot search")
 	}
-
-	// If filtering is needed, we must over-fetch from HNSW (Post-Filtering Strategy for MVP)
-	// In a heavily filtered scenario, this would ideally be pushed into the graph traversal.
-	fetchK := topK
-	if filter != nil {
-		fetchK = topK * 10 // Heuristic: fetch more to account for dropped points
-		// Cap it to the total graph size just in case
-		if fetchK > len(h.points) {
-			fetchK = len(h.points)
-		}
+	if dims := h.graph.Dims(); dims > 0 && len(query) != dims {
+		return nil, fmt.Errorf("query vector dimension %d does not match the index dimension %d", len(query), dims)
+	}
+	if len(h.points) == 0 {
+		return nil, nil
 	}
 
-	// 1. Search the HNSW Graph
-	neighbors := h.graph.Search(query, fetchK)
+	// Without a filter the graph result is already the answer.
+	if filter == nil {
+		return h.collect(query, nil, topK), nil
+	}
 
-	// 2. Filter & Format Results
-	var results []ScoredPoint
-	for _, neighbor := range neighbors {
-		point, exists := h.points[neighbor.Key]
-		if !exists {
-			continue // Should not happen if graph and map are in sync
-		}
+	// Post-filtering over-fetches. Graph search only visits candidates that
+	// are close to the query, so a rare match can sit outside every visited
+	// neighbourhood; when the over-fetch does not yield topK matches, fall back
+	// to an exact scan so filtered results match the Flat index semantics.
+	total := len(h.points)
+	fetchK := topK * 10
+	if fetchK < topK {
+		fetchK = topK
+	}
+	if fetchK > total {
+		fetchK = total
+	}
+	results := h.collect(query, filter, fetchK)
+	if len(results) < topK {
+		results = h.scan(query, filter)
+	}
+	if len(results) > topK {
+		results = results[:topK]
+	}
+	return results, nil
+}
 
-		// Apply Payload Filter
+// scan evaluates the filter against every indexed point and returns the
+// matching points ranked by the configured metric. It is the exact fallback
+// used when a filtered graph search cannot fill the requested result set.
+func (h *HNSWIndex) scan(query []float32, filter *Filter) []ScoredPoint {
+	results := make([]ScoredPoint, 0, len(h.points))
+	for _, point := range h.points {
 		if !MatchFilter(point.Payload, filter) {
 			continue
 		}
-
-		// Calculate precise Score based on our metric definition
-		// (hnsw returns nodes, we recalculate original score format)
-		score := CalculateDistance(h.metric, query, point.Vector)
-
 		results = append(results, ScoredPoint{
 			ID:      point.ID,
 			Version: point.Version,
-			Score:   score,
-			Payload: point.Payload,
+			Score:   CalculateDistance(h.metric, query, point.Vector),
+			Payload: clonePayload(point.Payload),
 		})
-
-		if len(results) == topK {
-			break
-		}
 	}
-
-	// Rank the results with the collection's metric so callers can rely on the
-	// order regardless of how the graph ranked the over-fetched candidates.
 	sort.SliceStable(results, func(i, j int) bool {
 		if h.metric == Euclid {
 			return results[i].Score < results[j].Score
 		}
 		return results[i].Score > results[j].Score
 	})
+	return results
+}
 
-	return results, nil
+// collect fetches fetchK graph candidates, applies filter and returns the
+// matching points ranked by the configured metric.
+func (h *HNSWIndex) collect(query []float32, filter *Filter, fetchK int) []ScoredPoint {
+	neighbors := h.graph.Search(query, fetchK)
+
+	results := make([]ScoredPoint, 0, len(neighbors))
+	for _, neighbor := range neighbors {
+		point, exists := h.points[neighbor.Key]
+		if !exists {
+			continue
+		}
+		if !MatchFilter(point.Payload, filter) {
+			continue
+		}
+		results = append(results, ScoredPoint{
+			ID:      point.ID,
+			Version: point.Version,
+			Score:   CalculateDistance(h.metric, query, point.Vector),
+			Payload: clonePayload(point.Payload),
+		})
+	}
+
+	sort.SliceStable(results, func(i, j int) bool {
+		if h.metric == Euclid {
+			return results[i].Score < results[j].Score
+		}
+		return results[i].Score > results[j].Score
+	})
+	return results
 }
 
 // Delete removes a point from both the HNSW graph and the local points map.

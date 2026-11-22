@@ -32,10 +32,15 @@ func TestCollection(t *testing.T) {
 			t.Errorf("Expected count 3, got %d", col.Count())
 		}
 
-		// Verify Version is set
-		for _, p := range points {
-			if p.Version == 0 {
-				t.Errorf("Expected version to be set for point %s", p.ID)
+		// Version is store-managed and assigned to the stored copies; the
+		// caller's slice is left untouched.
+		storedPoints, err := col.GetPointsByFilter(nil)
+		if err != nil {
+			t.Fatalf("GetPointsByFilter: %v", err)
+		}
+		for _, stored := range storedPoints {
+			if stored.Version == 0 {
+				t.Errorf("Expected version to be set for point %s", stored.ID)
 			}
 		}
 

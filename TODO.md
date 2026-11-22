@@ -216,160 +216,47 @@ All items in this section are resolved:
 
 # 7. `vec` core
 
-## V1. [High] `Store.Close` drops buffered collection writes
-**Location:** `vec/store.go` `Store.Close`, `vec/collection.go`
-`Upsert`/`flushUnsafe`.
-**Problem:** `Upsert` buffers points until `flushThreshold` (64), but `Store`
-does not track collections, so `Store.Close` never flushes them despite its doc.
-The root `storm.Store.Close` also never flushes vec buffers. Up to 63 points per
-collection are silently lost.
-**Fix:** Track created collections and flush in `Store.Close`, or make `Upsert`
-persist synchronously, or correct the documented shutdown path.
-**Test:** Upsert one point, close the store, reopen, assert it persisted.
+All items in this section are resolved:
 
-## V2. [High] `Collection.Close`/`Store.Close` close the shared bbolt handle
-**Location:** `vec/collection.go` `Collection.Close`, `vec/store.go`
-`Store.Close`.
-**Problem:** `Collection.Close` calls `c.storage.Close()` → `Store.Close` →
-`s.db.Close()`. The root package passes one shared bbolt handle to db/fs/ts/vec;
-closing one collection makes every sibling collection/sub-store unusable.
-**Fix:** Separate “flush” from “own/close the database”. Collections must not
-close a handle they do not own; only the top-level owner closes it.
-**Test:** Two collections on one store; close one; the other and `ListCollections`
-must still work.
+- **V1** — `Store` tracks every collection it creates. `Store.Close` flushes
+  their buffers before closing the handle, and the new `Store.Flush` lets an
+  embedding owner drain them; the storm root package calls it in `Close`.
+- **V2** — `Collection.Close` only flushes. It never closes the shared bbolt
+  handle, so sibling collections and sub-stores stay usable.
+- **V3/V17** — search results and `GetPointsByFilter` return deep copies of
+  the payload (including nested maps/slices).
+- **V4** — reopening an existing collection validates vector length, metric,
+  `UseHNSW` and HNSW parameters before saving metadata, and rejects a mismatch
+  with `ErrInvalidConfig`.
+- **V5** — filtered HNSW search over-fetches, then falls back to an exact scan
+  when the graph cannot fill the requested result set, matching Flat semantics
+  for distant matches.
+- **V6** — `MatchTypeContains` uses the exact-match comparison for reloaded
+  `[]any`/numeric slices, so numbers coerce and nested values cannot panic.
+- **V7** — `ReEncryptCollection` keeps the marker under the old key and
+  documents that RotateAll must complete a partial rotation before Close.
+- **V8** — `Upsert` deep-copies the batch before indexing/buffering; the
+  caller's vectors and payloads are never aliased or mutated.
+- **V9** — quantization clones the payload before adding
+  `__quantized_vector`, so the reserved key stays out of public data.
+- **V10** — collection metadata records `FormatVersion` and
+  `SchemaFingerprint`; reopen rejects an incompatible fingerprint.
+- **V11** — removed the dead `encState.enabled`.
+- **V12** — `Config.Root` documents that an empty root is the database root.
+- **V13** — `HNSWIndex.Search` validates the query dimension and returns an
+  error instead of panicking.
+- **V14** — regex filters cache compiled patterns (including invalid ones).
+- **V15** — versions are store-managed and strictly increasing per collection.
+- **V16** — `toStoredPoint` returns an error for an unencodable payload value
+  instead of silently dropping it.
+- **V18** — added `ErrCollectionNotFound`/`ErrMetadataNotFound`, removed the
+  library `log.Printf`, `Collection.Delete` uses `DeleteByFilter`,
+  `GetPointsByFilter(nil)` matches all, and the comment/typo fixes are applied.
+- The concurrent workspace refactor that moved `fs/absfs` to `internal/absfs`
+  was adopted (with its one stale import repaired) since it matches C1/F16.
 
-## V3. [High] Search returns payload maps shared with the in-memory index
-**Location:** `vec/flat_index.go`, `vec/hnsw_index.go` `Search`
-(`Payload: point.Payload`).
-**Problem:** Callers can mutate the index’s payload via a search result;
-concurrent mutation races with filtering. `GetPointsByFilter` returns copies,
-`Search` does not.
-**Fix:** Return cloned payloads (use `clonePoint`/deep copy) from both indexes.
-**Test:** Mutate `r[0].Payload` and assert a subsequent exact filter still
-matches.
+Regression tests live in `vec/todo_review_test.go`.
 
-## V4. [Medium] Reopening an existing collection can silently overwrite its config
-**Location:** `vec/collection.go` `NewCollectionWithParams`.
-**Problem:** Only vector length is validated; a same-dimension metric,
-`UseHNSW` or HNSWParams change passes and `SaveCollectionMeta` overwrites the
-stored metadata. An empty existing collection accepts any dimension.
-**Fix:** Load existing metadata first and reject any configuration mismatch
-before saving.
-**Test:** Reopen with a different metric/UseHNSW; expect an error and unchanged
-metadata.
-
-## V5. [Medium] HNSW filtered search misses deep matches
-**Location:** `vec/hnsw_index.go` (`fetchK = topK*10`, cap) and break at
-`topK`.
-**Problem:** Post-filtering only examines the first `topK*10` graph candidates;
-matching points farther away produce zero/short results, diverging from Flat.
-**Fix:** Grow `fetchK` adaptively, use filter-aware graph search, or document the
-limitation.
-**Test:** Flat vs HNSW filtered search for a rare far match.
-
-## V6. [Medium] `MatchTypeContains` breaks after reload and can panic
-**Location:** `vec/models.go` `matchContains` (`[]any` branch uses `==`).
-**Problem:** Reloaded JSON arrays contain `int64`/nested maps/slices; comparing
-them with `==` fails for numeric cross-types and panics on uncomparable values.
-`matchExact` already handles numeric coercion and DeepEqual.
-**Fix:** Use the `matchExact` comparison logic in the `[]any` branch.
-**Test:** Contains with `[]int` after reload; contains on nested arrays/objects.
-
-## V7. [Medium] Partial `ReEncryptCollection` leaves the store unreadable after restart
-**Location:** `vec/rotate.go` `withRotationKey`, marker rewrite, `adoptEnc`.
-**Problem:** The marker is re-sealed with the new key while un-rotated
-collections stay under the old key; a restart with a single `Config.Secret`
-cannot read the old-key collections.
-**Fix:** Keep the marker under the old key until RotateAll completes, support
-multiple secrets/fallback keys, or document/enforce the operational constraint.
-**Test:** Reopen after a partial collection rotation.
-
-## V8. [Medium] `Upsert` aliases caller-owned vectors/payloads
-**Location:** `vec/flat_index.go`, `vec/hnsw_index.go` (store `&points[i]`),
-`vec/collection.go` (`writeBuf` appends structs sharing slices/maps).
-**Problem:** Mutating/reusing the caller’s batch changes index results and
-persisted data. It also mutates caller `Version` in place.
-**Fix:** Copy vectors/payloads (clonePoint) before indexing/buffering, or
-document ownership transfer.
-**Test:** Mutate the input slice after Upsert; search results must not change.
-
-## V9. [Medium] Quantization mutates the payload map
-**Location:** `vec/store.go` quantized point path.
-**Problem:** It shares `p.Payload`, then inserts `__quantized_vector` into the
-caller/index map when the map is non-nil. The reserved key leaks into public
-results and the caller’s data.
-**Fix:** Clone the payload before adding the reserved key, or store the quantized
-vector in a dedicated field.
-**Test:** After Upsert+Flush with quantization, the caller/index payload has no
-`__quantized_vector`.
-
-## V10. [Low] Schema fingerprints are never checked
-**Location:** `vec/binco.gen.go` (`ValueSchemaFingerprint`,
-`StoredPointSchemaFingerprint`).
-**Problem:** Fingerprints/format versions are generated but never stored or
-compared; reordering fields silently reinterprets old blobs.
-**Fix:** Persist a format version/fingerprint in collection metadata and verify
-on load; add a migration/detection test.
-
-## V11. [Low] `encState.enabled()` is dead
-**Location:** `vec/aead.go`.
-**Fix:** Remove it or use it consistently.
-
-## V12. [Low] `Config.Root` docs are wrong
-**Location:** `vec/store.go`, `vec/aead.go`.
-**Problem:** Docs say empty Root uses `"vec"`, but empty Root means the database
-root; only the root `storm` package passes `"vec"`.
-**Fix:** Correct the docs and test the default location.
-
-## V13. [Low] `HNSWIndex.Search` panics on wrong query dimension
-**Location:** `vec/hnsw_index.go` → `vec/hnsw/graph.go` `assertDims`.
-**Problem:** `Collection.Search` validates dimensions, but the exported index
-does not; HNSW panics where Flat degrades. Inconsistent public API.
-**Fix:** Validate in `HNSWIndex.Search` and return an error.
-**Test:** Mismatched query dimension returns an error.
-
-## V14. [Low] `matchRegex` recompiles per point and hides errors
-**Location:** `vec/models.go`.
-**Problem:** O(N) regexp compilations per filtered scan; invalid patterns are
-silently treated as non-matches.
-**Fix:** Precompile/cache per condition and propagate/validate invalid patterns.
-
-## V15. [Low] `Version` is a coarse per-batch wall clock
-**Location:** `vec/collection.go` `Upsert`.
-**Problem:** One `time.Now().UnixNano()` is assigned to the whole batch,
-overwriting caller versions; rapid batches can collide and clock rollback
-breaks monotonicity. Direct index Upsert honors caller versions.
-**Fix:** Use a per-collection monotonic counter or max(stored, now), and
-document that Version is store-managed.
-
-## V16. [Low] `toStoredPoint` silently drops unencodable payload values
-**Location:** `vec/store.go`.
-**Problem:** Values whose `json.Marshal` fails (map with non-string keys,
-channels, funcs, cycles) are silently omitted from the persisted payload.
-**Fix:** Return an error from the write path instead of dropping values.
-**Test:** `map[int]string` payload returns an error.
-
-## V17. [Low] `clonePoint` is shallow for nested payload values
-**Location:** `vec/point.go`.
-**Problem:** It copies the top-level map only; nested maps/slices remain shared
-with the index in `GetPointsByFilter`.
-**Fix:** Deep-copy nested JSON values, or document payload immutability.
-**Test:** Mutate a nested value in a returned point and assert the index is
-unchanged.
-
-## V18. [Low] API/consistency polish
-- `vec/store.go` returns a non-sentinel “collection bucket not found” error.
-- `vec/store.go` uses `log.Printf` inside a library load path.
-- `VectorIndex.DeleteByFilter` is implemented but unused by `Collection.Delete`.
-- `Collection.GetPointsByFilter(nil)` errors while `Search(..., nil, ...)`
-  matches all; inconsistent nil semantics.
-- `vec/quant.go` comment says “shift to [-128, 127]” but the code clamps to
-  `[0,255]`.
-- `vec/models.go` doc typo “Copy Must conditions.”
-**Fix:** Introduce a sentinel error, remove library logging, reconcile/filter
-nil semantics, fix comments/typos, and either use or remove `DeleteByFilter`.
-
----
 
 # 8. `vec/hnsw`, `vec/vek`, and remaining internal packages
 

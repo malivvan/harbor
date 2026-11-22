@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"sync"
 	"sync/atomic"
 	"unicode/utf8"
 
@@ -33,11 +33,16 @@ type Store struct {
 	quantizer Quantizer
 	useQuant  bool
 
+	// mu guards collections. closeMu serializes Close.
+	mu          sync.Mutex
+	closeMu     sync.Mutex
+	collections map[string]*Collection
+
 	// enc is the optional encryption state. nil means a plaintext store.
 	enc *encState
 }
 
-func toStoredPoint(p *PointStruct) *StoredPoint {
+func toStoredPoint(p *PointStruct) (*StoredPoint, error) {
 	stored := &StoredPoint{
 		ID:      p.ID,
 		Vector:  p.Vector,
@@ -76,18 +81,20 @@ func toStoredPoint(p *PointStruct) *StoredPoint {
 			default:
 				// For complex types (map, slice, etc.), JSON-serialize and keep
 				// the document in a dedicated kind so that raw byte payloads are
-				// not mistaken for JSON on the way back.
-				if jsonBytes, err := json.Marshal(val); err == nil {
-					value.Kind = KindJSON
-					value.BytesValue = jsonBytes
+				// not mistaken for JSON on the way back. A value that cannot be
+				// encoded fails the write instead of being silently dropped.
+				jsonBytes, err := json.Marshal(val)
+				if err != nil {
+					return nil, fmt.Errorf("payload key %q: %w", k, err)
 				}
-				// If JSON marshal fails, skip the value
+				value.Kind = KindJSON
+				value.BytesValue = jsonBytes
 			}
 			stored.Payload[k] = value
 		}
 	}
 
-	return stored
+	return stored, nil
 }
 
 func fromStoredPoint(stored *StoredPoint) *PointStruct {
@@ -220,11 +227,12 @@ func Open(ctx context.Context, bdb *bbolt.DB, cfg Config) (*Store, error) {
 	}
 
 	store := &Store{
-		db:        bdb,
-		quantizer: quantizer,
-		useQuant:  useQuant,
-		root:      cloneRoot(cfg.Root),
-		enc:       enc,
+		db:          bdb,
+		quantizer:   quantizer,
+		useQuant:    useQuant,
+		root:        cloneRoot(cfg.Root),
+		collections: make(map[string]*Collection),
+		enc:         enc,
 	}
 
 	if err := store.checkMode(ctx); err != nil {
@@ -420,13 +428,24 @@ func (s *Store) metaBucket(tx *bbolt.Tx, create bool) (*bbolt.Bucket, error) {
 	return tx.Bucket([]byte(collectionsMetaBucket)), nil
 }
 
-// Close gracefully closes the database connection.
-// It is important to call this when done to ensure all data is flushed to disk.
-// This method is idempotent and can be called multiple times.
+// Close flushes the buffered writes of every collection this Store created and
+// then closes the database handle.
+//
+// The caller owns the bbolt handle passed to Open; Store.Close closes it as a
+// convenience for standalone use. An embedding store that shares one handle
+// (the storm root package) must call Flush instead of Close and close the
+// handle itself. Close is idempotent.
 func (s *Store) Close() error {
-	if !s.closed.CompareAndSwap(false, true) {
-		return nil // already closed
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+
+	if s.closed.Load() {
+		return nil
 	}
+	if err := s.flushCollections(); err != nil {
+		return err
+	}
+	s.closed.Store(true)
 
 	if s.db == nil {
 		return nil
@@ -436,6 +455,46 @@ func (s *Store) Close() error {
 		// The database may still be usable: allow a retry.
 		s.closed.Store(false)
 		return err
+	}
+	return nil
+}
+
+// Flush writes the buffered points of every collection created by this Store
+// without closing the database. Embedders that own the bbolt handle use it
+// before closing the handle.
+func (s *Store) Flush() error {
+	if err := s.checkOpen(); err != nil {
+		return err
+	}
+	return s.flushCollections()
+}
+
+// trackCollection remembers a collection so Close/Flush can drain its buffer.
+func (s *Store) trackCollection(c *Collection) {
+	if s == nil || c == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.collections == nil {
+		s.collections = make(map[string]*Collection)
+	}
+	s.collections[c.Name] = c
+	s.mu.Unlock()
+}
+
+// flushCollections drains the write buffer of every tracked collection.
+func (s *Store) flushCollections() error {
+	s.mu.Lock()
+	collections := make([]*Collection, 0, len(s.collections))
+	for _, c := range s.collections {
+		collections = append(collections, c)
+	}
+	s.mu.Unlock()
+
+	for _, c := range collections {
+		if err := c.Flush(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -468,7 +527,7 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 			return err
 		}
 		if b == nil {
-			return fmt.Errorf("collection bucket %s not found", colName)
+			return fmt.Errorf("%w: %s", ErrCollectionNotFound, colName)
 		}
 
 		for i := range points {
@@ -480,7 +539,10 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 				quantizedPoint := *p
 				quantizedPoint.Vector = nil // Clear vector for storage
 
-				// Store quantized vector in payload
+				// Store the quantized vector in a private copy of the payload:
+				// mutating the caller's map (or the in-memory index's map)
+				// would expose the reserved key in public results.
+				quantizedPoint.Payload = clonePayload(p.Payload)
 				if quantizedPoint.Payload == nil {
 					quantizedPoint.Payload = make(Payload)
 				}
@@ -489,7 +551,11 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 				p = &quantizedPoint
 			}
 
-			data := binco.Encode(StoredPointBinco, *toStoredPoint(p))
+			stored, err := toStoredPoint(p)
+			if err != nil {
+				return fmt.Errorf("failed to encode point %s: %w", p.ID, err)
+			}
+			data := binco.Encode(StoredPointBinco, *stored)
 			sealed, err := s.sealBytes(data)
 			if err != nil {
 				return fmt.Errorf("failed to encrypt point %s: %w", p.ID, err)
@@ -525,7 +591,6 @@ func (s *Store) LoadCollection(colName string) (map[string]*PointStruct, error) 
 			return err
 		}
 		if b == nil {
-			log.Printf("Bucket %s doesn't exist yet, starting empty", colName)
 			return nil
 		}
 
@@ -654,7 +719,7 @@ func (s *Store) LoadCollectionMeta(name string) (*CollectionMeta, error) {
 			return err
 		}
 		if b == nil {
-			return fmt.Errorf("metadata bucket not found")
+			return ErrMetadataNotFound
 		}
 
 		key, err := s.bucketKey(name)
@@ -664,7 +729,7 @@ func (s *Store) LoadCollectionMeta(name string) (*CollectionMeta, error) {
 
 		data := b.Get(key)
 		if data == nil {
-			return fmt.Errorf("metadata for collection %s not found", name)
+			return fmt.Errorf("%w: %s", ErrMetadataNotFound, name)
 		}
 
 		plain, err := s.openBytes(data)

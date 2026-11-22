@@ -373,10 +373,9 @@ func TestCollectionDeleteKeepsBufferOnStorageFailure(t *testing.T) {
 		t.Fatalf("upsert: %v", err)
 	}
 
-	// Make the storage delete fail while leaving the collection usable.
-	if err := store.Close(); err != nil {
-		t.Fatalf("close store: %v", err)
-	}
+	// Make the storage delete fail while leaving the write buffer intact.
+	// Store.Close now flushes buffers, so simulate a failing storage directly.
+	store.closed.Store(true)
 
 	if _, err := col.Delete([]string{"1"}, nil); err == nil {
 		t.Fatal("expected Delete to fail when storage is closed")

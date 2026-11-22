@@ -110,7 +110,7 @@ Requests are signed locally with AWS Signature Version 4, so the package has no 
 
 ## absfs
 
-Check out the [`absfs`](https://github.com/malivvan/storm/fs/absfs) repo for more information about the abstract filesystem interface and features like filesystem composition.
+Check out the [`absfs`](https://github.com/malivvan/storm/internal/absfs) repo for more information about the abstract filesystem interface and features like filesystem composition.
 
 ## LICENSE
 

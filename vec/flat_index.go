@@ -31,8 +31,10 @@ func (f *FlatIndex) Upsert(points []PointStruct) error {
 	defer f.mu.Unlock()
 
 	for i := range points {
-		p := &points[i]
-		f.points[p.ID] = p
+		// Own a deep copy: callers may reuse their vectors/payloads after
+		// Upsert, and that must not change the index.
+		stored := clonePoint(&points[i])
+		f.points[stored.ID] = &stored
 	}
 	return nil
 }
@@ -60,7 +62,7 @@ func (f *FlatIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 			ID:      id,
 			Version: point.Version,
 			Score:   dist,
-			Payload: point.Payload,
+			Payload: clonePayload(point.Payload),
 		})
 	}
 

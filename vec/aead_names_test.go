@@ -136,7 +136,7 @@ func TestAEADEncryptedNamesRoundTrip(t *testing.T) {
 	require.Equal(t, []string{"p1", "p3"}, aeadPointIDs(loaded))
 
 	// A search built on stored points still works.
-	col, err := store.NewCollection("invoices", 3, Cosine, false)
+	col, err := store.NewCollection("invoices", 3, Euclid, false)
 	require.NoError(t, err)
 	scored, err := col.Search([]float32{1, 0, 0}, nil, 2)
 	require.NoError(t, err)

@@ -15,8 +15,8 @@ const KeySize = encryption.KeySize
 // encryption feature enabled, keeps the plaintext on-disk format.
 type Config struct {
 	// Root is the bucket path below which all collections live. Each element
-	// is one nested bucket name. A nil or empty Root uses the default "vec"
-	// bucket.
+	// is one nested bucket name. A nil or empty Root means the database root;
+	// the storm root package passes [][]byte{[]byte("vec")} explicitly.
 	Root [][]byte
 
 	// UseQuant enables vector quantization. When true and Quantizer is nil,
@@ -73,11 +73,6 @@ type encState struct {
 	// sivs holds the per-domain deterministic name ciphers derived from the
 	// primary key. Read-only after construction.
 	sivs map[string]*encryption.SIVNameCipher
-}
-
-// enabled reports whether the state encrypts anything.
-func (e *encState) enabled() bool {
-	return e != nil
 }
 
 // seal encrypts plain with the primary engine, prefixing a fresh random nonce.

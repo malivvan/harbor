@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/fs/absfs"
+	"github.com/malivvan/storm/internal/absfs"
 )
 
 // fsTestInfo is a minimal os.FileInfo for the follow-symlink walker test.

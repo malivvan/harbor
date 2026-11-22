@@ -3,6 +3,7 @@ package vec
 import (
 	"reflect"
 	"regexp"
+	"sync"
 )
 
 // Payload mimics Qdrant's payload structure, storing metadata as a map of string keys to any values.
@@ -79,12 +80,22 @@ type CollectionMeta struct {
 	Metric     Distance   `json:"distance"`
 	UseHNSW    bool       `json:"hnsw"`
 	HNSWParams HNSWParams `json:"parameters"`
+
+	// FormatVersion is the persisted-format revision, and SchemaFingerprint is
+	// the generated StoredPoint wire-layout hash. Both are checked on reopen so
+	// a reordered or otherwise incompatible generated codec is detected instead
+	// of silently reinterpreting old blobs.
+	FormatVersion     uint32 `json:"format_version,omitempty"`
+	SchemaFingerprint string `json:"schema_fingerprint,omitempty"`
 }
+
+// collectionFormatVersion is the current collection metadata revision.
+const collectionFormatVersion = 1
 
 // MatchFilter evaluates whether a given payload matches the filter criteria.
 // It returns true if:
 //   - The filter is nil (no filtering)
-//   - Copy Must conditions are satisfied
+//   - All Must conditions are satisfied
 //   - No MustNot conditions are satisfied
 func MatchFilter(payload Payload, filter *Filter) bool {
 	if filter == nil {
@@ -298,8 +309,10 @@ func matchPrefix(val any, prefix any) bool {
 func matchContains(val any, target any) bool {
 	switch v := val.(type) {
 	case []any:
+		// Reloaded JSON arrays hold int64/float64/nested maps. Compare with the
+		// same numeric-coercing, panic-free logic as an exact match.
 		for _, item := range v {
-			if item == target {
+			if matchExact(item, target) {
 				return true
 			}
 		}
@@ -312,11 +325,21 @@ func matchContains(val any, target any) bool {
 			}
 		}
 	case []int:
-		if targetInt, ok := target.(int); ok {
-			for _, item := range v {
-				if item == targetInt {
-					return true
-				}
+		for _, item := range v {
+			if matchExact(item, target) {
+				return true
+			}
+		}
+	case []int64:
+		for _, item := range v {
+			if matchExact(item, target) {
+				return true
+			}
+		}
+	case []float64:
+		for _, item := range v {
+			if matchExact(item, target) {
+				return true
 			}
 		}
 	case string:
@@ -338,6 +361,28 @@ func containsString(s, substr string) bool {
 	return false
 }
 
+// regexCache memoizes compiled patterns: MatchFilter is evaluated once per
+// point, so recompiling the same pattern would dominate a filtered scan.
+var regexCache sync.Map // map[string]*regexp.Regexp
+
+// compileRegex compiles pattern once, caching both success and failure. An
+// invalid pattern is stored as nil and never matches.
+func compileRegex(pattern string) *regexp.Regexp {
+	if cached, ok := regexCache.Load(pattern); ok {
+		if cached == nil {
+			return nil
+		}
+		return cached.(*regexp.Regexp)
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		regexCache.Store(pattern, nil)
+		return nil
+	}
+	regexCache.Store(pattern, re)
+	return re
+}
+
 // matchRegex evaluates a regex condition
 func matchRegex(val any, pattern any) bool {
 	strVal, ok := val.(string)
@@ -350,11 +395,9 @@ func matchRegex(val any, pattern any) bool {
 		return false
 	}
 
-	// Compile and match the regex pattern
-	re, err := regexp.Compile(strPattern)
-	if err != nil {
+	re := compileRegex(strPattern)
+	if re == nil {
 		return false
 	}
-
 	return re.MatchString(strVal)
 }

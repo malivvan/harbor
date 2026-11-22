@@ -311,9 +311,9 @@ func TestToProtoPointInvalidUTF8(t *testing.T) {
 			},
 		}
 
-		converted := toStoredPoint(p)
-		if converted == nil {
-			t.Fatal("toStoredPoint returned nil")
+		converted, err := toStoredPoint(p)
+		if err != nil || converted == nil {
+			t.Fatalf("toStoredPoint returned nil, err=%v", err)
 		}
 
 		// Verify all string values are valid UTF-8
@@ -336,9 +336,9 @@ func TestToProtoPointInvalidUTF8(t *testing.T) {
 			},
 		}
 
-		converted := toStoredPoint(p)
-		if converted == nil {
-			t.Fatal("toStoredPoint returned nil")
+		converted, err := toStoredPoint(p)
+		if err != nil || converted == nil {
+			t.Fatalf("toStoredPoint returned nil, err=%v", err)
 		}
 
 		if got := converted.Payload["text"].GetStringValue(); got != "hello 世界 🌍" {
@@ -357,7 +357,10 @@ func TestToProtoPointInvalidUTF8(t *testing.T) {
 			},
 		}
 
-		converted := toStoredPoint(p)
+		converted, err := toStoredPoint(p)
+		if err != nil {
+			t.Fatalf("toStoredPoint: %v", err)
+		}
 		data := binco.Encode(StoredPointBinco, *converted)
 		if len(data) == 0 {
 			t.Fatal("encoded data is empty")

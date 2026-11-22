@@ -100,7 +100,9 @@ func TestAEADOptionalityKeepsPlaintextFormat(t *testing.T) {
 		// A plaintext store must hold bare binco blobs, so they decode directly.
 		stored, err := binco.DecodeExact(StoredPointBinco, raw)
 		require.NoError(t, err, "stored blobs must be raw binco, not ciphertext")
-		require.Equal(t, fromStoredPoint(toStoredPoint(&point)), fromStoredPoint(&stored))
+		converted, err := toStoredPoint(&point)
+		require.NoError(t, err)
+		require.Equal(t, fromStoredPoint(converted), fromStoredPoint(&stored))
 	}
 
 	meta := CollectionMeta{Name: "docs", VectorLen: 3, Metric: Cosine}
@@ -159,7 +161,7 @@ func aeadExercise(t *testing.T, store *Store) map[string]any {
 
 	// A collection built on top of stored points exercises the sealed load path
 	// together with the in-memory index.
-	col, err := store.NewCollection("docs", 3, Cosine, false)
+	col, err := store.NewCollection("docs", 3, Euclid, false)
 	require.NoError(t, err)
 	scored, err := col.Search([]float32{1, 0, 0}, nil, 2)
 	require.NoError(t, err)

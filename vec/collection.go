@@ -1,6 +1,7 @@
 package vec
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ type Collection struct {
 
 	writeBuf       []PointStruct // 缓冲写入的点，攒批后批量刷盘减少 fsync
 	flushThreshold int           // writeBuf 达到此大小时触发刷盘
+	lastVersion    uint64        // last store-managed Version handed out
 }
 
 // DefaultFlushThreshold 默认写入缓冲阈值（点数量）。
@@ -67,6 +69,27 @@ func (s *Store) NewCollectionWithParams(name string, vectorLen int, metric Dista
 			return nil, fmt.Errorf("failed to ensure storage collection %s: %w", name, err)
 		}
 
+		// An existing collection must keep the configuration it was created
+		// with. Silently overwriting it would reinterpret old vectors with a
+		// different metric or index type.
+		existing, metaErr := s.LoadCollectionMeta(name)
+		switch {
+		case metaErr == nil:
+			if existing.VectorLen != vectorLen || existing.Metric != metric || existing.UseHNSW != useHNSW {
+				return nil, fmt.Errorf("%w: collection %q already exists with a different configuration", ErrInvalidConfig, name)
+			}
+			if useHNSW && existing.HNSWParams != hnswParams {
+				return nil, fmt.Errorf("%w: collection %q already exists with different HNSW parameters", ErrInvalidConfig, name)
+			}
+			if existing.SchemaFingerprint != "" && existing.SchemaFingerprint != StoredPointSchemaFingerprint {
+				return nil, fmt.Errorf("%w: collection %q uses an incompatible point schema", ErrInvalidConfig, name)
+			}
+		case errors.Is(metaErr, ErrMetadataNotFound):
+			// New collection.
+		default:
+			return nil, fmt.Errorf("failed to read metadata for %s: %w", name, metaErr)
+		}
+
 		// Load and validate existing points before persisting the metadata:
 		// opening an existing collection with the wrong configuration must not
 		// overwrite the configuration already stored on disk.
@@ -93,15 +116,18 @@ func (s *Store) NewCollectionWithParams(name string, vectorLen int, metric Dista
 		// Save collection metadata last, once the configuration is known to be
 		// consistent with what is stored.
 		meta := CollectionMeta{
-			Name:       name,
-			VectorLen:  vectorLen,
-			Metric:     metric,
-			UseHNSW:    useHNSW,
-			HNSWParams: hnswParams,
+			Name:              name,
+			VectorLen:         vectorLen,
+			Metric:            metric,
+			UseHNSW:           useHNSW,
+			HNSWParams:        hnswParams,
+			FormatVersion:     collectionFormatVersion,
+			SchemaFingerprint: StoredPointSchemaFingerprint,
 		}
 		if err := s.SaveCollectionMeta(name, meta); err != nil {
 			return nil, fmt.Errorf("failed to save metadata for %s: %w", name, err)
 		}
+		s.trackCollection(col)
 	}
 
 	return col, nil
@@ -120,23 +146,31 @@ func (c *Collection) Upsert(points []PointStruct) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// 1. Validate
+	// 1. Validate and deep-copy: the caller may reuse its vectors/payloads
+	// after Upsert, and Version is store-managed.
 	version := uint64(time.Now().UnixNano())
+	if version <= c.lastVersion {
+		version = c.lastVersion + 1
+	}
+	c.lastVersion = version
+
+	batch := make([]PointStruct, len(points))
 	for i := range points {
 		p := &points[i]
 		if len(p.Vector) != c.VectorLen {
 			return fmt.Errorf("point %s has invalid vector length %d, expected %d", p.ID, len(p.Vector), c.VectorLen)
 		}
-		p.Version = version
+		batch[i] = clonePoint(p)
+		batch[i].Version = version
 	}
 
 	// 2. Update Memory Index Immediately（查询需要最新数据）
-	if err := c.index.Upsert(points); err != nil {
+	if err := c.index.Upsert(batch); err != nil {
 		return fmt.Errorf("failed to update memory index: %w", err)
 	}
 
 	// 3. Buffer for bbolt persistence（攒批减少 fsync）
-	c.writeBuf = append(c.writeBuf, points...)
+	c.writeBuf = append(c.writeBuf, batch...)
 	if len(c.writeBuf) >= c.flushThreshold {
 		return c.flushUnsafe()
 	}
@@ -164,19 +198,15 @@ func (c *Collection) flushUnsafe() error {
 	return nil
 }
 
-// Close 刷完缓冲区并关闭底层存储引擎。
-// 调用后 Collection 不可再用。
+// Close flushes the collection's buffered points. It deliberately does NOT
+// close the Store's bbolt handle: that handle is shared with every sibling
+// collection (and, in the storm root package, with the other sub-stores) and
+// is owned by whoever created it. Call Store.Flush/Store.Close to finish the
+// whole store.
 func (c *Collection) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	if err := c.flushUnsafe(); err != nil {
-		return err
-	}
-	if c.storage != nil {
-		return c.storage.Close()
-	}
-	return nil
+	return c.flushUnsafe()
 }
 
 // Search performs a similarity search using the underlying VectorIndex.
@@ -210,10 +240,7 @@ func (c *Collection) GetPointsByFilter(filter *Filter) ([]PointStruct, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if filter == nil {
-		return nil, fmt.Errorf("filter cannot be nil")
-	}
-
+	// A nil filter matches every point, consistent with Search.
 	return c.index.GetPointsByFilter(filter), nil
 }
 
@@ -230,10 +257,12 @@ func (c *Collection) Delete(points []string, filter *Filter) (int, error) {
 	// First, determine which IDs to delete
 	var targetIDs []string
 
+	useFilter := false
 	if len(points) > 0 {
 		targetIDs = points
 	} else if filter != nil {
 		targetIDs = c.index.GetIDsByFilter(filter)
+		useFilter = true
 	} else {
 		return 0, fmt.Errorf("must provide points or filter")
 	}
@@ -257,9 +286,17 @@ func (c *Collection) Delete(points []string, filter *Filter) (int, error) {
 
 	// 2. Delete from memory index
 	successCount := 0
-	for _, id := range targetIDs {
-		if err := c.index.Delete(id); err == nil {
-			successCount++
+	if useFilter {
+		deleted, err := c.index.DeleteByFilter(filter)
+		if err != nil {
+			return 0, fmt.Errorf("failed to delete from memory index: %w", err)
+		}
+		successCount = len(deleted)
+	} else {
+		for _, id := range targetIDs {
+			if err := c.index.Delete(id); err == nil {
+				successCount++
+			}
 		}
 	}
 

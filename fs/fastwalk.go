@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/malivvan/storm/fs/absfs"
+	"github.com/malivvan/storm/internal/absfs"
 )
 
 // FastWalkFunc is the callback function type for FastWalk.
