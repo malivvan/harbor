@@ -25,6 +25,7 @@ type MockS3Client struct {
 	CopyObjectErr   error
 	HeadObjectErr   error
 	ListObjectsErr  error
+	UploadPartErr   error
 
 	// Per-key error injection for DeleteObject (checked before global DeleteObjectErr)
 	DeleteObjectKeyErrs map[string]error
@@ -81,6 +82,7 @@ func (m *MockS3Client) Reset() {
 	m.CopyObjectErr = nil
 	m.HeadObjectErr = nil
 	m.ListObjectsErr = nil
+	m.UploadPartErr = nil
 	m.GetObjectCalls = nil
 	m.PutObjectCalls = nil
 	m.DeleteObjectCalls = nil
@@ -371,6 +373,10 @@ func (m *MockS3Client) CreateMultipartUpload(ctx context.Context, input *CreateM
 func (m *MockS3Client) UploadPart(ctx context.Context, input *UploadPartInput) (*UploadPartOutput, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.UploadPartErr != nil {
+		return nil, m.UploadPartErr
+	}
 
 	upload, ok := m.uploads[input.UploadID]
 	if !ok {

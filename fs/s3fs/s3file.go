@@ -29,6 +29,10 @@ type File struct {
 	multipartID string
 	parts       []CompletedPart
 	partNum     int32
+	// writeErr poisons the file after a failed part upload. Uploaded parts are
+	// no longer in the buffer, so closing with a simple PutObject would store
+	// only the tail of the file. Close must report the failure instead.
+	writeErr error
 
 	// ReadAt cache (issue #17) - full object cached on first ReadAt
 	readCache []byte
@@ -132,6 +136,9 @@ func (f *File) Write(b []byte) (int, error) {
 	if !f.writing {
 		return 0, os.ErrInvalid
 	}
+	if f.writeErr != nil {
+		return 0, wrapError("write", f.name, f.writeErr)
+	}
 	if f.offset < 0 {
 		return 0, os.ErrInvalid
 	}
@@ -154,6 +161,7 @@ func (f *File) Write(b []byte) (int, error) {
 
 	// Flush parts if buffer exceeds part size
 	if err := f.flushPartsLocked(); err != nil {
+		f.writeErr = err
 		return 0, wrapError("write", f.name, err)
 	}
 
@@ -180,26 +188,27 @@ func (f *File) flushPartsLocked() error {
 		f.multipartID = output.UploadID
 	}
 
-	// Upload complete parts
+	// Upload complete parts. Only drop the bytes from the buffer after the
+	// upload succeeds: advancing first would forget the part on failure.
 	for int64(len(f.buffer)) >= partSize {
-		f.partNum++
 		part := f.buffer[:partSize]
-		f.buffer = f.buffer[partSize:]
-		f.flushed += partSize
-
 		output, err := f.fs.client.UploadPart(f.fs.ctx, &UploadPartInput{
 			Bucket:     f.fs.bucket,
 			Key:        f.key,
 			UploadID:   f.multipartID,
-			PartNumber: f.partNum,
+			PartNumber: f.partNum + 1,
 			Body:       bytes.NewReader(part),
 		})
 		if err != nil {
-			// Abort on failure
+			// Abort on failure. The caller gets the error from Write and
+			// Close refuses to upload a partial object.
 			f.abortMultipartLocked()
 			return err
 		}
 
+		f.partNum++
+		f.buffer = f.buffer[partSize:]
+		f.flushed += partSize
 		f.parts = append(f.parts, CompletedPart{
 			ETag:       output.ETag,
 			PartNumber: f.partNum,
@@ -277,6 +286,14 @@ func (f *File) Close() error {
 	if !f.writing {
 		f.closed = true
 		return nil
+	}
+
+	if f.writeErr != nil {
+		// An earlier part upload failed and the buffer no longer holds the
+		// whole object. Never silently upload the remainder.
+		f.abortMultipartLocked()
+		f.closed = true
+		return wrapError("close", f.name, f.writeErr)
 	}
 
 	// Multipart path: upload final part and complete
