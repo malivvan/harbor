@@ -56,6 +56,12 @@ func (s *sorter) filter(ctx context.Context, tree q.Matcher, bucket *bolt.Bucket
 		return s.add(ctx, itm)
 	}
 
+	// Sinks that only need the key (count, delete, raw) can skip decoding the
+	// record entirely unless a matcher or an ordering has to inspect it.
+	if tree == nil && len(s.orderBy) == 0 && !s.sink.needsValue() {
+		return s.add(ctx, itm)
+	}
+
 	if err := checkContext(ctx); err != nil {
 		return false, err
 	}
@@ -371,6 +377,11 @@ type sink interface {
 	flush(ctx context.Context) error
 	add(ctx context.Context, i *item) error
 	readOnly() bool
+
+	// needsValue reports whether the sink needs the decoded record value.
+	// Sinks that only inspect keys can skip unmarshalling entirely when the
+	// query has no matchers or ordering.
+	needsValue() bool
 }
 
 type reflectSink interface {
@@ -499,6 +510,10 @@ func (l *listSink) readOnly() bool {
 	return true
 }
 
+func (l *listSink) needsValue() bool {
+	return true
+}
+
 func newFirstSink(node Node, to interface{}) (*firstSink, error) {
 	ref := reflect.ValueOf(to)
 
@@ -559,6 +574,10 @@ func (f *firstSink) flush(ctx context.Context) error {
 }
 
 func (f *firstSink) readOnly() bool {
+	return true
+}
+
+func (f *firstSink) needsValue() bool {
 	return true
 }
 
@@ -664,6 +683,10 @@ func (d *deleteSink) readOnly() bool {
 	return false
 }
 
+func (d *deleteSink) needsValue() bool {
+	return false
+}
+
 func newCountSink(node Node, kind interface{}) (*countSink, error) {
 	ref := reflect.ValueOf(kind)
 
@@ -717,6 +740,10 @@ func (c *countSink) readOnly() bool {
 	return true
 }
 
+func (c *countSink) needsValue() bool {
+	return false
+}
+
 // newRawSink builds a raw sink. A non-nil kind makes the sink decode values
 // into a copy of that record type so matchers and ordering can be evaluated.
 func newRawSink(kind any) (*rawSink, sink, error) {
@@ -754,6 +781,10 @@ func (m *matchedRawSink) elem() reflect.Value {
 
 func (m *matchedRawSink) bucketName() string {
 	return m.name
+}
+
+func (m *matchedRawSink) needsValue() bool {
+	return true
 }
 
 func (r *rawSink) add(ctx context.Context, i *item) error {
@@ -810,6 +841,10 @@ func (r *rawSink) readOnly() bool {
 	return true
 }
 
+func (r *rawSink) needsValue() bool {
+	return false
+}
+
 func newEachSink(to interface{}) (*eachSink, error) {
 	ref := reflect.ValueOf(to)
 
@@ -861,5 +896,9 @@ func (e *eachSink) flush(ctx context.Context) error {
 }
 
 func (e *eachSink) readOnly() bool {
+	return true
+}
+
+func (e *eachSink) needsValue() bool {
 	return true
 }

@@ -10,7 +10,10 @@ import (
 
 // Select builds a query that scans for records matching all supplied matchers.
 func (n *node) Select(matchers ...q.Matcher) Query {
-	tree := q.And(matchers...)
+	var tree q.Matcher
+	if len(matchers) > 0 {
+		tree = q.And(matchers...)
+	}
 	query := newQuery(n, tree)
 	query.hasMatchers = len(matchers) > 0
 	return query

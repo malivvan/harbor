@@ -27,6 +27,10 @@ so "defeating SIMD" is not a concern here.
 ## 1. `db` (highest-impact first)
 
 ### 1.1 `Count()` and `Select().Delete()` JSON-decode every record just to count/delete keys — HIGH
+> **Status:** ✅ FIXED — sinks declare `needsValue()`; `countSink`, `deleteSink` and bare
+> `rawSink` skip unmarshalling when there is no matcher or ordering. Regression tests in
+> `db/perf_regression_test.go`.
+
 - **Location:** `db/sink.go:686` (`countSink.elem`), `db/sink.go:587` (`deleteSink.elem`),
   `db/sink.go:54-67` (`sorter.filter`), `db/query.go:310-343`, `db/finder.go:759-764`.
 - **Problem:** `countSink`/`deleteSink` implement `elem()`, so `sorter.filter` treats them as

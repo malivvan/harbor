@@ -856,7 +856,9 @@ func TestQueryCount_CancellationReturnsZero(t *testing.T) {
 		}
 	})
 
-	cnt, err := db.WithCodec(cc).Select().Count(cancelCtx, &Score{})
+	// Count without matchers no longer decodes, so use a matcher to keep a
+	// decode in the loop and cancel from the codec mid-scan.
+	cnt, err := db.WithCodec(cc).Select(q.True()).Count(cancelCtx, &Score{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.Canceled))
 	require.Equal(t, 0, cnt)
