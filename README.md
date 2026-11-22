@@ -33,7 +33,7 @@ Storm is a simple and powerful toolkit for [BoltDB](https://github.com/etcd-io/b
 
 ## Installation
 
-Storm requires **Go 1.24** or later.
+Storm requires **Go 1.27.3** or later.
 
 ```sh
 go get github.com/malivvan/storm
@@ -723,13 +723,16 @@ go build ./...
 go test -count=1 -timeout 180s ./...
 go test -race -count=1 -timeout 300s ./...
 
-# Staticcheck
-go run honnef.co/go/tools/cmd/staticcheck@2026.1 ./...
+# Staticcheck (optional)
+go run honnef.co/go/tools/cmd/staticcheck@latest ./...
 
 # Coverage
 go test -count=1 -timeout 180s -covermode=atomic -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out > coverage.txt
 ```
+
+The same commands run in CI (`.github/workflows/ci.yml`) on every push to
+`master` and on every pull request.
 
 ## License
 

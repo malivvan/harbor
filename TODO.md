@@ -40,55 +40,16 @@ Scope reviewed:
 
 # 1. Repository health
 
-## H1. [High] `go test ./...` is red: `TestKeyValueStore` expects the wrong key order
-**Location:** `storm_test.go:193`, `storm_test.go:208` (key list/expected slice);
-`Store.Keys`/`scanKeys` in `storm.go`.
-**Problem:** The test writes `"0", "1", "version", "Metadata", "kdf", "plain"`
-and expects `{"0","1","kdf","Metadata","plain","version"}`. `Keys()` returns
-bbolt cursor order (byte order), so `"Metadata"` (`M` = 0x4D) sorts before
-`"kdf"` (`k` = 0x6B). Actual result:
-`[0 1 Metadata kdf plain version]`.
-**Why it matters:** CI and `make test` are red; this is a test expectation bug,
-not an implementation bug.
-**Fix:** Update the expected slice to
-`{"0","1","Metadata","kdf","plain","version"}`, or sort the returned keys before
-comparing. Add an explicit test documenting that `Keys()` is byte-ordered.
+All items in this section are resolved:
 
-## H2. [High] Working tree is uncommitted and includes generated-code churn
-**Location:** repository root; `meta.go`, `meta_test.go`, `storm.go`,
-`storm_test.go`, `main.go` and `meta.gen.go` deletions, plus many db/fs/ts/vec
-changes.
-**Problem:** The tree contains a large in-progress refactor. The former root
-binco generator (`main.go`, `meta.gen.go`) has been deleted in favor of a
-hand-written metadata encoding, but the work is not committed and the full suite
-is red.
-**Why it matters:** Future work has no clean baseline; CI cannot verify the
-current state.
-**Fix:** Fix H1, run `go test ./...`, `go vet ./...`, `gofmt -l .`, and commit
-the coherent refactor as a baseline.
+- **H1** — `TestKeyValueStore` now asserts byte order (`Metadata` before `kdf`).
+- **H2** — the refactor is committed; `go build`, `go vet`, `gofmt` and
+  `go test ./...` are green.
+- **H3** — `go mod tidy` removed the unused `github.com/google/uuid`.
+- **H4** — README now states Go 1.27.3, staticcheck is optional (`@latest`), and
+  a real CI workflow lives in `.github/workflows/ci.yml`.
+- **H5** — no `storm.db` artifact remains; `.gitignore` covers `*.db`.
 
-## H3. [Medium] `go.mod` is not tidy; `github.com/google/uuid` is unused
-**Location:** `go.mod:6`, `go.sum`.
-**Problem:** No Go file imports `github.com/google/uuid`; it is a leftover from
-the deleted root generator. `go mod tidy -diff` reports removals.
-**Fix:** Run `go mod tidy` and verify build/tests; keep genuinely transitive
-dependencies (`golang.org/x/sync`, `go.yaml.in/yaml/v3`).
-
-## H4. [Medium] README version/CI claims do not match the repo
-**Location:** `README.md:36` (Go version), README "Testing and CI" section.
-**Problem:** README says Go 1.24 while `go.mod` pins `go 1.27.3`. README claims a
-CI workflow (`go test -race`, coverage, `staticcheck@2026.1`) but there is no
-`.github` workflow, and the pinned staticcheck version is not resolvable.
-**Fix:** Align the README with the actual minimum Go version, and either add the
-promised CI workflow or trim the README to reality.
-
-## H5. [Low] `storm.db` is a stale test artifact in the repository root
-**Location:** `/storm.db`.
-**Problem:** A 64 KiB bbolt file remains from an old test run. It is ignored by
-`.gitignore` but is still a stale artifact in the working directory.
-**Fix:** Remove it, and ensure tests always use `t.TempDir()`.
-
----
 
 # 2. Root package (`storm`)
 
