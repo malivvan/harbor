@@ -16,6 +16,9 @@ const Name = "ts"
 
 const metaBucketName = "__ts_meta__"
 
+// tsFormatVersion is the current time-series on-disk format revision.
+const tsFormatVersion uint64 = 1
+
 // nowProvider wraps the pluggable clock so it can be stored in an atomic
 // pointer.
 type nowProvider struct {

@@ -36,6 +36,10 @@ var (
 	// ErrInvalidConfig is returned for an inconsistent encryption config.
 	ErrInvalidConfig = encryption.ErrInvalidConfig
 
+	// ErrIncompatibleVersion is returned when the on-disk format revision is
+	// not the one this build understands.
+	ErrIncompatibleVersion = errors.New("ts: incompatible on-disk format version")
+
 	// ErrWrongMode is returned when a store is opened with an encryption mode
 	// that does not match what is stored on disk.
 	ErrWrongMode = encryption.ErrWrongMode

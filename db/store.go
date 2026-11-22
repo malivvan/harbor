@@ -154,6 +154,9 @@ func (s *Store) checkVersion(ctx context.Context) error {
 	if v == "" {
 		return s.Set(ctx, databaseInfo, versionKey, Version)
 	}
+	if v != Version {
+		return fmt.Errorf("%w: on-disk version %q, this build supports %q", ErrIncompatibleVersion, v, Version)
+	}
 
 	return nil
 }

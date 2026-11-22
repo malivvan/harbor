@@ -65,6 +65,11 @@ var (
 	// ErrDifferentCodec is returned when using a codec different than the first codec used with the bucket.
 	ErrDifferentCodec = errors.New("the selected codec is incompatible with this bucket")
 
+	// ErrIncompatibleVersion is returned when the on-disk format version is
+	// not the one this build understands. A first release refuses unknown
+	// (including newer) versions instead of misinterpreting their data.
+	ErrIncompatibleVersion = errors.New("incompatible on-disk format version")
+
 	// ErrTxFromDifferentDB is returned when Attach receives a bbolt transaction
 	// that belongs to a different database.
 	ErrTxFromDifferentDB = errors.New("transaction belongs to a different database")

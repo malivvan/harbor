@@ -344,7 +344,15 @@ func TestRetentionZeroDoesNotWriteOnInsert(t *testing.T) {
 	err := db.View(func(tx *bolt.Tx) error {
 		meta := tx.Bucket([]byte(metaBucketName))
 		if meta != nil {
-			keys = meta.Stats().KeyN
+			// Internal markers are not series metadata.
+			if err := meta.ForEach(func(key, _ []byte) error {
+				if string(key) != markerKey && string(key) != versionKey {
+					keys++
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
 		}
 		return nil
 	})

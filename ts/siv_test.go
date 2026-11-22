@@ -82,7 +82,8 @@ func physicalKeys(t *testing.T, db *bolt.DB, root []byte) (buckets, metaKeys [][
 		}))
 		if meta := parent.Bucket([]byte(metaBucketName)); meta != nil {
 			require.NoError(t, meta.ForEach(func(key, _ []byte) error {
-				if string(key) != markerKey {
+				// Internal markers are not series metadata.
+				if string(key) != markerKey && string(key) != versionKey {
 					metaKeys = append(metaKeys, append([]byte(nil), key...))
 				}
 				return nil

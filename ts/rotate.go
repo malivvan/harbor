@@ -428,7 +428,7 @@ func (s *Store) allSeriesNames(tx *bolt.Tx) ([]string, error) {
 	}
 	if meta != nil {
 		if err := meta.ForEach(func(key, _ []byte) error {
-			if string(key) == markerKey {
+			if string(key) == markerKey || string(key) == versionKey {
 				return nil
 			}
 			name, err := s.logicalName(key)

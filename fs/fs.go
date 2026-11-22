@@ -22,6 +22,16 @@ import (
 
 var errNilIno = errors.New("ino is nil")
 
+// ErrIncompatibleVersion is returned when the on-disk filesystem format is not
+// the one this build understands.
+var ErrIncompatibleVersion = errors.New("fs: incompatible on-disk format version")
+
+// formatVersionKey records the on-disk format revision in the state bucket.
+const formatVersionKey = "formatVersion"
+
+// fsFormatVersion is the current filesystem format revision.
+const fsFormatVersion uint64 = 1
+
 // FS implements absfs.FileSystem for the boltdb packages `github.com/coreos/bbolt`.
 type FS struct {
 	db          *bolt.DB
@@ -87,6 +97,9 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FS, error) {
 		}
 		b := newFsBucket(bb)
 		b.enc = enc
+		if err := checkFormatVersion(b); err != nil {
+			return err
+		}
 		if enc != nil && b.state.Get([]byte(markerKey)) == nil {
 			raw, err := enc.encodeMarker()
 			if err != nil {
@@ -181,6 +194,24 @@ func (fs *FS) Close() error {
 // any file operations.
 func (fs *FS) SetContentFS(contentFS absfs.FileSystem) {
 	fs.contentFS = contentFS
+}
+
+// checkFormatVersion validates the persisted format revision, writing the
+// current one for a filesystem created before the marker existed.
+func checkFormatVersion(b *fsBucket) error {
+	raw := b.state.Get([]byte(formatVersionKey))
+	if raw == nil {
+		var buf [8]byte
+		binary.BigEndian.PutUint64(buf[:], fsFormatVersion)
+		return b.state.Put([]byte(formatVersionKey), buf[:])
+	}
+	if len(raw) != 8 {
+		return fmt.Errorf("%w: malformed version marker", ErrIncompatibleVersion)
+	}
+	if v := binary.BigEndian.Uint64(raw); v != fsFormatVersion {
+		return fmt.Errorf("%w: filesystem format %d, this build supports %d", ErrIncompatibleVersion, v, fsFormatVersion)
+	}
+	return nil
 }
 
 // openFsBucket opens the filesystem buckets at the configured bucket path.

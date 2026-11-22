@@ -182,7 +182,7 @@ func (s *Store) EnforceRetention(ctx context.Context, now int64) (int, error) {
 			if err := checkContext(ctx); err != nil {
 				return err
 			}
-			if string(physical) == markerKey {
+			if string(physical) == markerKey || string(physical) == versionKey {
 				return nil
 			}
 

@@ -860,7 +860,13 @@ func (s *Store) LoadCollectionMeta(name string) (*CollectionMeta, error) {
 			return fmt.Errorf("failed to decrypt metadata for %s: %w", name, err)
 		}
 
-		return json.Unmarshal(plain, &meta)
+		if err := json.Unmarshal(plain, &meta); err != nil {
+			return err
+		}
+		if meta.FormatVersion > collectionFormatVersion {
+			return fmt.Errorf("%w: collection %q has format version %d, this build supports %d", ErrInvalidConfig, name, meta.FormatVersion, collectionFormatVersion)
+		}
+		return nil
 	})
 
 	if err != nil {

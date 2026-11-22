@@ -691,10 +691,14 @@ func TestCoverageMetaBucketConflict(t *testing.T) {
 	ctx := context.Background()
 
 	// Occupy the metadata bucket name with a plain value so creating the
-	// metadata bucket fails.
+	// metadata bucket fails. Opening the store created the bucket for the
+	// format marker, so remove it first.
 	require.NoError(t, db.Update(func(tx *bolt.Tx) error {
 		root, err := tx.CreateBucketIfNotExists([]byte("tenant"))
 		if err != nil {
+			return err
+		}
+		if err := root.DeleteBucket([]byte(metaBucketName)); err != nil {
 			return err
 		}
 		return root.Put([]byte(metaBucketName), []byte("blocked"))

@@ -2,6 +2,7 @@ package ts
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 
 	"github.com/malivvan/storm/internal/encryption"
@@ -114,6 +115,7 @@ func resolveConfig(cfg Config) (*encState, error) {
 // a plaintext open can detect an encrypted store without a key.
 const (
 	markerKey       = "\x00__ts_enc__"
+	versionKey      = "\x00__ts_version__"
 	markerMagic     = "TENC"
 	canaryPlaintext = "storm/ts/aead/v1"
 )
@@ -242,6 +244,34 @@ func (s *Store) ensureMarker(tx *bolt.Tx) error {
 	return bucket.Put([]byte(markerKey), raw)
 }
 
+// ensureFormatVersion validates the persisted format revision in the metadata
+// bucket, writing the current one for a store created before the marker
+// existed.
+func (s *Store) ensureFormatVersion() error {
+	return s.b.Update(func(tx *bolt.Tx) error {
+		if err := s.ensureMarker(tx); err != nil {
+			return err
+		}
+		bucket, err := s.metaBucket(tx, true)
+		if err != nil {
+			return err
+		}
+		raw := bucket.Get([]byte(versionKey))
+		if raw == nil {
+			var buf [8]byte
+			binary.BigEndian.PutUint64(buf[:], tsFormatVersion)
+			return bucket.Put([]byte(versionKey), buf[:])
+		}
+		if len(raw) != 8 {
+			return fmt.Errorf("%w: malformed version marker", ErrIncompatibleVersion)
+		}
+		if v := binary.BigEndian.Uint64(raw); v != tsFormatVersion {
+			return fmt.Errorf("%w: timeseries format %d, this build supports %d", ErrIncompatibleVersion, v, tsFormatVersion)
+		}
+		return nil
+	})
+}
+
 // hasData reports whether the store already contains plaintext series data.
 // A store with a non-empty root can inspect its series buckets; at the database
 // root only the metadata bucket is distinguishable from unrelated buckets.
@@ -254,7 +284,7 @@ func (s *Store) hasData(db *bolt.DB) (bool, error) {
 		}
 		if meta != nil {
 			if err := meta.ForEach(func(key, _ []byte) error {
-				if string(key) != markerKey {
+				if string(key) != markerKey && string(key) != versionKey {
 					found = true
 				}
 				return nil
@@ -337,6 +367,9 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		if err := s.encState().verifyCanary(canary, existing); err != nil {
 			return nil, err
 		}
+		if err := s.ensureFormatVersion(); err != nil {
+			return nil, err
+		}
 		return s, nil
 	}
 
@@ -350,5 +383,8 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		}
 	}
 
+	if err := s.ensureFormatVersion(); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
