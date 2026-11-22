@@ -10,6 +10,12 @@ var useSSE4 bool
 // used. It is set from cpu.Loong64.HasLSX in blamka_loong64.go's init().
 var useLSX bool
 
+// processBlockGeneric is the portable implementation of processBlock. It is
+// unused on amd64, which always has an assembly implementation, but is still
+// needed by the reference implementation on other architectures and by the
+// loong64 fallback.
+//
+//lint:ignore U1000 used by the reference and loong64 implementations
 func processBlockGeneric(out, in1, in2 *block, xor bool) {
 	var t block
 	for i := range t {
