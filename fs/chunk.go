@@ -49,10 +49,12 @@ func (fsys *FS) openFsBucketForWrite(tx *bolt.Tx) (*fsBucket, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := bb.CreateBucketIfNotExists([]byte(chunksBucketName)); err != nil {
-		return nil, err
+	if fsys.chunked() {
+		if _, err := bb.CreateBucketIfNotExists([]byte(chunksBucketName)); err != nil {
+			return nil, err
+		}
 	}
-	b := newFsBucketWithCache(bb, fsys.cache)
+	b := newFsBucketWithCacheOpts(bb, fsys.cache, fsys.chunked())
 	if b == nil {
 		return nil, os.ErrNotExist
 	}

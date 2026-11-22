@@ -436,6 +436,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low.
 
 ### 2.15 Repeated bucket-path parsing and `chunks` lookup per transaction — LOW
+
+> **Status:** ✅ FIXED — FS transaction helpers use the pre-split bucket path (2.11) and open the `chunks` bucket only when the store is chunked (`newFsBucketWithCacheOpts`); non-chunked stores no longer pay a sixth bucket lookup per transaction.
 - **Location:** `fs/tx.go:140-156`, `fs/tx.go:40-62`, `fs/fs.go:173-193`.
 - **Problem:** Every `View`/`Update` re-runs `strings.Split(path.Clean(...))` and up to 6
   `Bucket()` lookups — including the `chunks` bucket even for non-chunked stores.

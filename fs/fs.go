@@ -177,7 +177,7 @@ func (fs *FS) openFsBucket(tx *bolt.Tx) (*fsBucket, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := newFsBucket(bb)
+	b := newFsBucketWithCacheOpts(bb, nil, fs.chunked())
 	b.enc = fs.enc.Load()
 	return b, nil
 }
@@ -189,7 +189,7 @@ func (fs *FS) openFsBucketWithCache(tx *bolt.Tx) (*fsBucket, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := newFsBucketWithCache(bb, fs.cache)
+	b := newFsBucketWithCacheOpts(bb, fs.cache, fs.chunked())
 	b.enc = fs.enc.Load()
 	return b, nil
 }

@@ -38,8 +38,15 @@ func newFsBucket(b bucketer) *fsBucket {
 	return newFsBucketWithCache(b, nil)
 }
 
-// newFsBucketWithCache creates a new fsBucket with optional cache support.
+// newFsBucketWithCache creates a new fsBucket with optional cache support. It
+// keeps opening the chunks bucket, which generic callers may inspect.
 func newFsBucketWithCache(b bucketer, cache *inodeCache) *fsBucket {
+	return newFsBucketWithCacheOpts(b, cache, true)
+}
+
+// newFsBucketWithCacheOpts creates a new fsBucket, opening the chunks bucket
+// only when the store actually uses chunked content.
+func newFsBucketWithCacheOpts(b bucketer, cache *inodeCache, withChunks bool) *fsBucket {
 	state := b.Bucket([]byte("state"))
 	if state == nil {
 		return nil
@@ -56,12 +63,17 @@ func newFsBucketWithCache(b bucketer, cache *inodeCache) *fsBucket {
 	if symlinks == nil {
 		return nil
 	}
+	var chunks *bolt.Bucket
+	if withChunks {
+		chunks = b.Bucket([]byte("chunks"))
+	}
+
 	return &fsBucket{
 		state:    state,
 		inodes:   inodes,
 		data:     data,
 		symlinks: symlinks,
-		chunks:   b.Bucket([]byte("chunks")),
+		chunks:   chunks,
 		dirents:  b.Bucket([]byte(direntsBucketName)),
 		cache:    cache,
 		parent:   b,
