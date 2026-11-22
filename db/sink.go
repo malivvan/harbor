@@ -92,7 +92,7 @@ func (s *sorter) filter(ctx context.Context, tree q.Matcher, bucket *bolt.Bucket
 		return false, err
 	}
 
-	itm := &item{
+	itm := item{
 		bucket: bucket,
 		k:      k,
 		v:      v,
@@ -149,7 +149,7 @@ func (s *sorter) filter(ctx context.Context, tree q.Matcher, bucket *bolt.Bucket
 		return false, s.sink.add(ctx, itm)
 	}
 
-	s.list = append(s.list, itm)
+	s.list = append(s.list, &itm)
 
 	if err := checkContext(ctx); err != nil {
 		return false, err
@@ -158,7 +158,7 @@ func (s *sorter) filter(ctx context.Context, tree q.Matcher, bucket *bolt.Bucket
 	return false, nil
 }
 
-func (s *sorter) add(ctx context.Context, itm *item) (bool, error) {
+func (s *sorter) add(ctx context.Context, itm item) (bool, error) {
 	if err := checkContext(ctx); err != nil {
 		return false, err
 	}
@@ -368,7 +368,7 @@ func (s *sorter) flush(ctx context.Context) error {
 		if itm == nil {
 			break
 		}
-		stop, err := s.add(ctx, itm)
+		stop, err := s.add(ctx, *itm)
 		if err != nil {
 			return err
 		}
@@ -432,7 +432,7 @@ func (s *sorter) Swap(i, j int) {
 type sink interface {
 	bucketName() string
 	flush(ctx context.Context) error
-	add(ctx context.Context, i *item) error
+	add(ctx context.Context, i item) error
 	readOnly() bool
 
 	// needsValue reports whether the sink needs the decoded record value.
@@ -539,7 +539,7 @@ func (l *listSink) bucketName() string {
 	return l.name
 }
 
-func (l *listSink) add(ctx context.Context, i *item) error {
+func (l *listSink) add(ctx context.Context, i item) error {
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
@@ -623,7 +623,7 @@ func (f *firstSink) bucketName() string {
 	return bucketName(f.ref.Interface())
 }
 
-func (f *firstSink) add(ctx context.Context, i *item) error {
+func (f *firstSink) add(ctx context.Context, i item) error {
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
@@ -681,7 +681,7 @@ type deleteSink struct {
 
 	// pending holds the matched records. Deletions are applied in flush so the
 	// bbolt cursor that produced them is never mutated while being walked.
-	pending []*item
+	pending []item
 }
 
 func (d *deleteSink) elem() reflect.Value {
@@ -692,7 +692,7 @@ func (d *deleteSink) bucketName() string {
 	return bucketName(d.ref.Interface())
 }
 
-func (d *deleteSink) add(ctx context.Context, i *item) error {
+func (d *deleteSink) add(ctx context.Context, i item) error {
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
@@ -804,7 +804,7 @@ func (c *countSink) bucketName() string {
 	return bucketName(c.ref.Interface())
 }
 
-func (c *countSink) add(ctx context.Context, i *item) error {
+func (c *countSink) add(ctx context.Context, i item) error {
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
@@ -877,7 +877,7 @@ func (m *matchedRawSink) needsValue() bool {
 	return true
 }
 
-func (r *rawSink) add(ctx context.Context, i *item) error {
+func (r *rawSink) add(ctx context.Context, i item) error {
 	if r.execFn != nil {
 		if err := checkContext(ctx); err != nil {
 			return err
@@ -960,7 +960,7 @@ func (e *eachSink) bucketName() string {
 	return bucketName(e.ref.Interface())
 }
 
-func (e *eachSink) add(ctx context.Context, i *item) error {
+func (e *eachSink) add(ctx context.Context, i item) error {
 	if err := checkContext(ctx); err != nil {
 		return err
 	}

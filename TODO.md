@@ -138,6 +138,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low — retain the constant path for cross-kind correctness.
 
 ### 1.8 `sorter.filter` heap-allocates an `*item` per record — MEDIUM
+
+> **Status:** ✅ FIXED — `sink.add` now takes the item by value; only the ordering path keeps `*item` in the sort list. Delete sinks store pending items in a `[]item`.
 - **Location:** `db/sink.go:44-107` (`itm := &item{…}`).
 - **Problem:** Even on the pre-sized indexed path, one `&item` heap allocation per record just
   to ferry `bucket/k/v/value` into `add` (`sorter.filter` ≈ 23% of alloc in `FindWithIndex`).
