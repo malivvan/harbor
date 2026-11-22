@@ -436,3 +436,37 @@ func TestChunkedFreshNonce(t *testing.T) {
 	require.True(t, entries[0].ino != entries[1].ino)
 	require.False(t, bytes.Equal(entries[0].raw, entries[1].raw), "fresh nonces must differ")
 }
+
+// TestChunkedWriteDoesNotPadTail verifies that a partial tail chunk is stored
+// at its logical length instead of being zero-padded to a full chunk.
+func TestChunkedWriteDoesNotPadTail(t *testing.T) {
+	root := []byte("ts")
+	store, db := chunkedStore(t, root, 33, 1024)
+	fsys, err := store.Open("fs")
+	require.NoError(t, err)
+
+	writeTestFile(t, fsys, "/small.txt", "0123456789")
+
+	entries := chunkEntries(t, db, root, "fs")
+	require.Len(t, entries, 1)
+	require.Less(t, len(entries[0].raw), 1024,
+		"the sealed tail chunk should be shorter than a full chunk")
+
+	data, err := fsys.ReadFile("/small.txt")
+	require.NoError(t, err)
+	require.Equal(t, "0123456789", string(data))
+
+	// Growing inside the same chunk must still zero-fill the gap.
+	f, err := fsys.OpenFile("/small.txt", os.O_RDWR, 0)
+	require.NoError(t, err)
+	_, err = f.WriteAt([]byte("X"), 20)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	data, err = fsys.ReadFile("/small.txt")
+	require.NoError(t, err)
+	require.Len(t, data, 21)
+	require.Equal(t, "0123456789", string(data[:10]))
+	require.Equal(t, make([]byte, 10), data[10:20])
+	require.Equal(t, byte('X'), data[20])
+}

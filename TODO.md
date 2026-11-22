@@ -339,6 +339,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low.
 
 ### 2.7 Chunk writes read-modify-write full 64 KiB chunks and pad the tail — MEDIUM
+
+> **Status:** ✅ FIXED — `writeDataRange` grows a chunk only to the end of the written range instead of a full `chunkSize`, so partial tail chunks are stored (and sealed) at their logical length. Interior gaps are still zero-filled. Regression test checks the on-disk tail length and gap semantics.
 - **Location:** `fs/chunk.go:134-160` (`writeDataRange`, grow at 139-143), `fs/chunk.go:256-265`
   (`writeAllChunks`), `fs/chunk.go:75` (`writeChunk`).
 - **Problem:** Appending 1 byte re-reads/decrypts the affected chunk, allocates a full 64 KiB

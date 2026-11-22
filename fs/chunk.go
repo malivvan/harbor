@@ -131,15 +131,11 @@ func (b *fsBucket) writeDataRange(ino uint64, off int64, data []byte, chunkSize 
 
 	first := off / chunkSize
 	last := (off + int64(len(data)) - 1) / chunkSize
+	end := off + int64(len(data))
 	for idx := first; idx <= last; idx++ {
 		chunk, err := b.readChunk(ino, idx)
 		if err != nil {
 			return err
-		}
-		if int64(len(chunk)) < chunkSize {
-			grown := make([]byte, chunkSize)
-			copy(grown, chunk)
-			chunk = grown
 		}
 
 		start := idx * chunkSize
@@ -147,13 +143,25 @@ func (b *fsBucket) writeDataRange(ino uint64, off int64, data []byte, chunkSize 
 		if from < start {
 			from = start
 		}
-		to := off + int64(len(data))
+		to := end
 		if to > start+chunkSize {
 			to = start + chunkSize
 		}
-		if to > from {
-			copy(chunk[from-start:to-start], data[from-off:to-off])
+		if to <= from {
+			continue
 		}
+
+		// Grow only to the end of the written range, not to a full chunk: a
+		// partial tail chunk stays short, saving storage and crypto. Gaps
+		// inside the range are zero-filled by make.
+		need := to - start
+		if int64(len(chunk)) < need {
+			grown := make([]byte, need)
+			copy(grown, chunk)
+			chunk = grown
+		}
+
+		copy(chunk[from-start:to-start], data[from-off:to-off])
 		if err := b.writeChunk(ino, idx, chunk); err != nil {
 			return err
 		}
