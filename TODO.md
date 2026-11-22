@@ -633,6 +633,8 @@ build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 - **Risk:** Low.
 
 ### 3.15 Quantization clones the payload and double-scans the vector per flush — LOW-MEDIUM
+
+> **Status:** ✅ FIXED — flush builds a shallow payload copy instead of deep-cloning it with `clonePayload`, since only the reserved quantized-vector key is added and payload values are immutable. (Quantization still takes two passes over the vector to find min/max before encoding.)
 - **Location:** `vec/store.go:597-612` (`clonePayload` `:606`, `Quantize` `:610`),
   `vec/quant.go:38-107` (two passes: min/max then encode).
 - **Problem:** With `UseQuant`, every flush deep-copies the payload and rescans the vector; a
@@ -643,6 +645,8 @@ build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 - **Risk:** Low.
 
 ### 3.16 Bulk filter reads/deletes lack preallocation; HNSW bulk delete re-searches per id — LOW
+
+> **Status:** ✅ FIXED — `GetIDsByFilter`, `GetPointsByFilter` and `DeleteByFilter` pre-size their result slices from `len(points)` for both the flat and HNSW indexes.
 - **Location:** `vec/flat_index.go:114-158`, `vec/hnsw_index.go:335-393`.
 - **Problem:** Result slices grow by doubling; `DeleteByFilter`/`Delete` call `graph.Delete(id)`
   per point (each doing layer scans + `isolate`+`replenish`).

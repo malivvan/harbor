@@ -609,9 +609,11 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 				// Store the quantized vector in a private copy of the payload:
 				// mutating the caller's map (or the in-memory index's map)
 				// would expose the reserved key in public results.
-				quantizedPoint.Payload = clonePayload(p.Payload)
-				if quantizedPoint.Payload == nil {
-					quantizedPoint.Payload = make(Payload)
+				// A shallow copy is enough: only the reserved key is added,
+				// and payload values are treated as immutable.
+				quantizedPoint.Payload = make(Payload, len(p.Payload)+1)
+				for k, v := range p.Payload {
+					quantizedPoint.Payload[k] = v
 				}
 				quantizedPoint.Payload["__quantized_vector"] = s.quantizer.Quantize(p.Vector)
 

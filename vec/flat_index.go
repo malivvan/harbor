@@ -178,7 +178,7 @@ func (f *FlatIndex) GetIDsByFilter(filter *Filter) []string {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	var ids []string
+	ids := make([]string, 0, len(f.points))
 	for id, point := range f.points {
 		if MatchFilter(point.Payload, filter) {
 			ids = append(ids, id)
@@ -192,7 +192,7 @@ func (f *FlatIndex) GetPointsByFilter(filter *Filter) []PointStruct {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	var results []PointStruct
+	results := make([]PointStruct, 0, len(f.points))
 	for _, point := range f.points {
 		if MatchFilter(point.Payload, filter) {
 			results = append(results, clonePoint(point))
@@ -211,7 +211,7 @@ func (f *FlatIndex) DeleteByFilter(filter *Filter) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	var deleted []string
+	deleted := make([]string, 0, len(f.points))
 	for id, point := range f.points {
 		if MatchFilter(point.Payload, filter) {
 			delete(f.points, id)

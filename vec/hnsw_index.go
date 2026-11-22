@@ -378,7 +378,7 @@ func (h *HNSWIndex) GetIDsByFilter(filter *Filter) []string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	var ids []string
+	ids := make([]string, 0, len(h.points))
 	for id, point := range h.points {
 		if MatchFilter(point.Payload, filter) {
 			ids = append(ids, id)
@@ -392,7 +392,7 @@ func (h *HNSWIndex) GetPointsByFilter(filter *Filter) []PointStruct {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	var results []PointStruct
+	results := make([]PointStruct, 0, len(h.points))
 	for _, point := range h.points {
 		if MatchFilter(point.Payload, filter) {
 			results = append(results, clonePoint(point))
@@ -416,7 +416,7 @@ func (h *HNSWIndex) DeleteByFilter(filter *Filter) ([]string, error) {
 		return nil, fmt.Errorf("HNSW graph is nil, cannot delete by filter")
 	}
 
-	var deleted []string
+	deleted := make([]string, 0, len(h.points))
 	for id, point := range h.points {
 		if MatchFilter(point.Payload, filter) {
 			if h.graph.Delete(id) {
