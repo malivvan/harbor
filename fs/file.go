@@ -356,15 +356,19 @@ func (f *File) Readdir(n int) ([]os.FileInfo, error) {
 		}
 	}
 
-	infos := make([]os.FileInfo, n)
 	endOffset := f.diroffset + n
+	inos := make([]uint64, n)
 	for i, entry := range children[f.diroffset:endOffset] {
-		node, err := f.fs.loadInode(entry.Ino)
-		if err != nil {
-			return nil, err
-		}
+		inos[i] = entry.Ino
+	}
+	nodes, err := f.fs.loadInodes(inos)
+	if err != nil {
+		return nil, err
+	}
 
-		infos[i] = &fileinfo{entry.Name, node}
+	infos := make([]os.FileInfo, n)
+	for i, node := range nodes {
+		infos[i] = &fileinfo{children[f.diroffset+i].Name, node}
 	}
 	f.diroffset = endOffset
 	return infos, nil
@@ -486,16 +490,20 @@ func (f *File) ReadDir(n int) ([]fs.DirEntry, error) {
 		}
 	}
 
-	entries := make([]fs.DirEntry, n)
 	endOffset := f.diroffset + n
+	inos := make([]uint64, n)
 	for i, entry := range children[f.diroffset:endOffset] {
-		node, err := f.fs.loadInode(entry.Ino)
-		if err != nil {
-			return nil, err
-		}
+		inos[i] = entry.Ino
+	}
+	nodes, err := f.fs.loadInodes(inos)
+	if err != nil {
+		return nil, err
+	}
 
+	entries := make([]fs.DirEntry, n)
+	for i, node := range nodes {
 		entries[i] = &dirEntry{
-			name: entry.Name,
+			name: children[f.diroffset+i].Name,
 			node: node,
 		}
 	}

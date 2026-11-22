@@ -328,16 +328,21 @@ func (filesystem *FS) readDir(name string) ([]fs.DirEntry, error) {
 		return nil, &os.PathError{Op: "readdir", Path: name, Err: syscall.ENOTDIR}
 	}
 
-	var entries []fs.DirEntry
-	for _, child := range node.Children {
-		childNode, err := filesystem.loadInode(child.Ino)
-		if err != nil {
-			return nil, &os.PathError{Op: "readdir", Path: name, Err: err}
-		}
-		entries = append(entries, &dirEntry{
-			name: child.Name,
+	inos := make([]uint64, len(node.Children))
+	for i, child := range node.Children {
+		inos[i] = child.Ino
+	}
+	childNodes, err := filesystem.loadInodes(inos)
+	if err != nil {
+		return nil, &os.PathError{Op: "readdir", Path: name, Err: err}
+	}
+
+	entries := make([]fs.DirEntry, len(childNodes))
+	for i, childNode := range childNodes {
+		entries[i] = &dirEntry{
+			name: node.Children[i].Name,
 			node: childNode,
-		})
+		}
 	}
 
 	return entries, nil
@@ -499,6 +504,34 @@ func (fs *FS) loadInode(ino uint64) (*iNode, error) {
 	})
 
 	return node, err
+}
+
+// loadInodes loads several inodes inside a single read transaction, so a
+// directory listing does not pay one db.View per child.
+func (fs *FS) loadInodes(inos []uint64) ([]*iNode, error) {
+	if len(inos) == 0 {
+		return nil, nil
+	}
+
+	nodes := make([]*iNode, len(inos))
+	err := fs.db.View(func(tx *bolt.Tx) error {
+		b, err := fs.openFsBucketWithCache(tx)
+		if err != nil {
+			return err
+		}
+		for i, ino := range inos {
+			node, err := b.GetInode(ino)
+			if err != nil {
+				return err
+			}
+			nodes[i] = node
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return nodes, nil
 }
 
 // saveData - saves file data for a given `ino` or returns an error

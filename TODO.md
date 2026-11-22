@@ -287,6 +287,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Medium — memory and staleness; chunking is the structural fix.
 
 ### 2.3 Directory listing opens one bbolt read transaction per child inode — HIGH
+
+> **Status:** ✅ FIXED — `readDir`, `Readdir` and `ReadDir` collect child inodes up front and load them in one `db.View` via the new `loadInodes` helper, instead of one read transaction per child.
 - **Location:** `fs/file.go:333-340` (`Readdir`), `fs/file.go:462-472` (`ReadDir`),
   `fs/fs.go:331-341` (`readDir`) → `fs/fs.go:487-502` (`loadInode`, a fresh `db.View`).
 - **Problem:** Listing N entries performs N `db.View` calls (each splitting the bucket path and
