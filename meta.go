@@ -1,9 +1,8 @@
-//go:generate go run main.go
-
 package storm
 
 import (
 	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -102,28 +101,30 @@ func deriveSeed(password, salt []byte, time, memory uint32, threads uint8) []byt
 	return argon2.IDKey(password, salt, time, memory, threads, KeySize)
 }
 
-// Metadata is stored as one unencrypted binco record in its own bucket. Keeping
-// it under a single name makes the pre-decrypt configuration easy to find and
-// leaves no other header or KDF bookkeeping outside it.
+// Metadata is stored as one unencrypted binary record in its own bucket.
+// Keeping it under a single name makes the pre-decrypt configuration easy to
+// find and leaves no other header or KDF bookkeeping outside it.
 var (
-	metadataBucket    = []byte("storm.metadata")
-	metadataRecordKey = []byte("metadata")
+	metadataBucket    = []byte("storm.Metadata")
+	metadataRecordKey = []byte("Metadata")
 )
 
 const (
 	// canaryPlaintext is sealed with a key derived from the password and
-	// stored in the metadata record. Opening the store verifies it, so a wrong
+	// stored in the Metadata record. Opening the store verifies it, so a wrong
 	// password is rejected even when the sub-stores are not encrypted.
 	canaryPlaintext = "storm/canary/v1"
+
+	// metadataFixedSize is salt | time | flags | memory | threads | canary
+	// length. The canary bytes follow.
+	metadataFixedSize = SaltSize + 4 + 2 + 4 + 1 + 4
 )
 
-// ErrCorruptStore reports missing or malformed store metadata.
-var ErrCorruptStore = errors.New("storm: corrupt store metadata")
+// ErrCorruptStore reports missing or malformed store Metadata.
+var ErrCorruptStore = errors.New("storm: corrupt store Metadata")
 
 // Metadata is the unencrypted store configuration. It contains no secret: the
-// salt and cost parameters are public, and the canary is ciphertext. Its binco
-// serializer is generated into meta.gen.go; keep the mirror type in main.go in
-// sync with this field order.
+// salt and cost parameters are public, and the canary is ciphertext.
 type Metadata struct {
 	Salt    []byte
 	Time    uint32
@@ -133,39 +134,93 @@ type Metadata struct {
 	Canary  []byte
 }
 
+// encode serializes md as:
+//
+//	salt[16] | time[4] | flags[2] | memory[4] | threads[1] | canaryLen[4] | canary
+//
+// All integers are big-endian.
+func (md Metadata) encode() []byte {
+	buf := make([]byte, metadataFixedSize+len(md.Canary))
+	copy(buf, md.Salt)
+	off := SaltSize
+	binary.BigEndian.PutUint32(buf[off:], md.Time)
+	off += 4
+	binary.BigEndian.PutUint16(buf[off:], md.Flags)
+	off += 2
+	binary.BigEndian.PutUint32(buf[off:], md.Memory)
+	off += 4
+	buf[off] = md.Threads
+	off++
+	binary.BigEndian.PutUint32(buf[off:], uint32(len(md.Canary)))
+	off += 4
+	copy(buf[off:], md.Canary)
+	return buf
+}
+
+// decodeMetadata parses a record produced by Metadata.encode.
+func decodeMetadata(raw []byte) (Metadata, error) {
+	if len(raw) < metadataFixedSize {
+		return Metadata{}, fmt.Errorf("%w: truncated Metadata", ErrCorruptStore)
+	}
+
+	off := 0
+	salt := append([]byte(nil), raw[:SaltSize]...)
+	off += SaltSize
+	timeValue := binary.BigEndian.Uint32(raw[off:])
+	off += 4
+	flags := binary.BigEndian.Uint16(raw[off:])
+	off += 2
+	memory := binary.BigEndian.Uint32(raw[off:])
+	off += 4
+	threads := raw[off]
+	off++
+	canaryLen := binary.BigEndian.Uint32(raw[off:])
+	off += 4
+
+	if uint64(canaryLen) != uint64(len(raw)-off) {
+		return Metadata{}, fmt.Errorf("%w: Metadata canary length mismatch", ErrCorruptStore)
+	}
+	canary := append([]byte(nil), raw[off:]...)
+
+	md := Metadata{
+		Salt:    salt,
+		Time:    timeValue,
+		Flags:   flags,
+		Memory:  memory,
+		Threads: threads,
+		Canary:  canary,
+	}
+	if err := validateMetadata(md); err != nil {
+		return Metadata{}, err
+	}
+	return md, nil
+}
+
 // readMetadata loads and validates the unencrypted store configuration. It
-// reports creating when the metadata bucket has not been written yet.
-func readMetadata(bdb *bolt.DB) (md Metadata, creating bool, err error) {
+// reports creating when the Metadata bucket has not been written yet.
+func readMetadata(bdb *bolt.DB) (meta Metadata, init bool, err error) {
 	var raw []byte
 	err = bdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(metadataBucket)
 		if b == nil {
-			creating = true
+			init = true
 			return nil
 		}
 		value := b.Get(metadataRecordKey)
 		if value == nil {
-			return fmt.Errorf("%w: missing metadata", ErrCorruptStore)
+			return fmt.Errorf("%w: missing Metadata", ErrCorruptStore)
 		}
 		raw = append([]byte(nil), value...)
 		return nil
 	})
-	if err != nil || creating {
-		return md, creating, err
+	if err != nil || init {
+		return meta, init, err
 	}
-
-	decoded, n, err := MetadataBinco.Unmarshal(raw)
+	meta, err = decodeMetadata(raw)
 	if err != nil {
-		return md, false, fmt.Errorf("%w: decode metadata: %v", ErrCorruptStore, err)
+		return meta, false, err
 	}
-	if n != len(raw) {
-		return md, false, fmt.Errorf("%w: trailing metadata bytes", ErrCorruptStore)
-	}
-	md = decoded
-	if err := validateMetadata(md); err != nil {
-		return md, false, err
-	}
-	return md, false, nil
+	return meta, false, nil
 }
 
 func validateMetadata(md Metadata) error {
@@ -178,13 +233,13 @@ func validateMetadata(md Metadata) error {
 	return validateKDFParams(md.Time, md.Memory, md.Threads, md.Flags, ErrCorruptStore)
 }
 
-// writeMetadata persists the metadata and creates the key/value bucket in one
+// writeMetadata persists the Metadata and creates the key/value bucket in one
 // transaction.
 func writeMetadata(bdb *bolt.DB, md Metadata) error {
-	raw := make([]byte, MetadataBinco.Size(md))
-	if n := MetadataBinco.Marshal(md, raw); n != len(raw) {
-		return fmt.Errorf("storm: encoded metadata is %d bytes, want %d", n, len(raw))
+	if err := validateMetadata(md); err != nil {
+		return err
 	}
+	raw := md.encode()
 	err := bdb.Update(func(tx *bolt.Tx) error {
 		meta, err := tx.CreateBucketIfNotExists(metadataBucket)
 		if err != nil {
@@ -196,23 +251,23 @@ func writeMetadata(bdb *bolt.DB, md Metadata) error {
 		return meta.Put(metadataRecordKey, raw)
 	})
 	if err != nil {
-		return fmt.Errorf("storm: write store metadata: %w", err)
+		return fmt.Errorf("storm: write store Metadata: %w", err)
 	}
 	return nil
 }
 
-// KDFParams returns the persisted salt and Argon2id cost parameters. A closed
+// Metadata returns the persisted salt and Argon2id cost parameters. A closed
 // store returns ErrClosed.
-func (s *Store) KDFParams() (salt []byte, time, memory uint32, threads uint8, flags uint16, err error) {
+func (s *Store) Metadata() (salt []byte, time, memory uint32, threads uint8, flags uint16, err error) {
 	err = s.withDB(func(bdb *bolt.DB) error {
-		md, creating, err := readMetadata(bdb)
+		meta, init, err := readMetadata(bdb)
 		if err != nil {
 			return err
 		}
-		if creating {
-			return fmt.Errorf("%w: missing metadata", ErrCorruptStore)
+		if init {
+			return fmt.Errorf("%w: missing Metadata", ErrCorruptStore)
 		}
-		salt, time, memory, threads, flags = md.Salt, md.Time, md.Memory, md.Threads, md.Flags
+		salt, time, memory, threads, flags = meta.Salt, meta.Time, meta.Memory, meta.Threads, meta.Flags
 		return nil
 	})
 	return

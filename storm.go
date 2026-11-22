@@ -2,13 +2,13 @@
 // ts and vec sub-stores behind one password.
 //
 // The password is stretched with Argon2id using the salt and cost parameters
-// kept in an unencrypted "storm.metadata" record, then one key is derived per
+// kept in an unencrypted "storm.Metadata" record, then one key is derived per
 // sub-store. The password itself is never stored. A sealed canary in the
-// metadata detects a wrong password even for stores created with encryption
+// Metadata detects a wrong password even for stores created with encryption
 // disabled.
 //
 // The key/value API (Get, Set, Delete, Has, Keys, Len) uses its own bucket, so
-// user keys never collide with store metadata.
+// user keys never collide with store Metadata.
 package storm
 
 import (
@@ -28,8 +28,8 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// The key/value API uses bucket 0. Store metadata lives in its own
-// "storm.metadata" bucket (see meta.go), so user keys can never collide with it.
+// The key/value API uses bucket 0. Store Metadata lives in its own
+// "storm.Metadata" bucket (see meta.go), so user keys can never collide with it.
 var kvBucket = []byte{0}
 
 // namedRoot returns the default one-element bucket path for a sub-store.
@@ -137,7 +137,7 @@ func (k *storeKeys) wipe() {
 
 // Open opens (or creates) a Store at path.
 //
-// The first Open creates unencrypted metadata (salt, Argon2id parameters,
+// The first Open creates unencrypted Metadata (salt, Argon2id parameters,
 // encryption flags and a sealed canary) and initializes the key/value bucket.
 // Later Opens use the stored settings; the KDF and encryption fields in options
 // only apply to a new store. A wrong or empty password fails with
@@ -167,12 +167,47 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		}
 	}()
 
-	md, keys, err := loadOrCreateState(bdb, options)
+	md, init, err := readMetadata(bdb)
 	if err != nil {
 		return nil, err
 	}
-	defer keys.wipe()
+	if !init {
+		keys, err := deriveKeys(options.Password, md.Salt, md.Time, md.Memory, md.Threads)
+		if err != nil {
+			return nil, err
+		}
+		if err := verifyCanary(keys.canary, md.Canary); err != nil {
+			keys.wipe()
+			return nil, fmt.Errorf("%w: %w", ErrInvalidPassword, err)
+		}
+		return md, keys, nil
+	}
 
+	salt, kdfTime, kdfMemory, kdfThreads, flags, err := newKDFParams(options)
+	if err != nil {
+		return Metadata{}, nil, err
+	}
+	keys, err := deriveKeys(options.Password, salt, kdfTime, kdfMemory, kdfThreads)
+	if err != nil {
+		return Metadata{}, nil, err
+	}
+	canary, err := sealCanary(keys.canary)
+	if err != nil {
+		keys.wipe()
+		return Metadata{}, nil, err
+	}
+	md = Metadata{
+		Salt:    salt,
+		Time:    kdfTime,
+		Flags:   flags,
+		Memory:  kdfMemory,
+		Threads: kdfThreads,
+		Canary:  canary,
+	}
+	if err := writeMetadata(bdb, md); err != nil {
+		keys.wipe()
+		return Metadata{}, nil, err
+	}
 	s := &Store{bs: bdb}
 
 	// Bind each sub-store to its own derived key and explicit bucket root.
@@ -220,8 +255,8 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	return s, nil
 }
 
-// loadOrCreateState reads the metadata and derives the component keys. A new
-// store resolves options into metadata, seals the canary and persists it; an
+// loadOrCreateState reads the Metadata and derives the component keys. A new
+// store resolves options into Metadata, seals the canary and persists it; an
 // existing store derives keys from the stored parameters and verifies the
 // canary. The returned keys must be wiped by the caller.
 func loadOrCreateState(bdb *bolt.DB, options *Options) (Metadata, *storeKeys, error) {
@@ -435,7 +470,7 @@ func (s *Store) Vec() *vec.Store {
 // EncryptFlags returns the encryption flags persisted by the store. A closed
 // store returns EncryptNone.
 func (s *Store) EncryptFlags() uint16 {
-	_, _, _, _, flags, err := s.KDFParams()
+	_, _, _, _, flags, err := s.Metadata()
 	if err != nil {
 		return EncryptNone
 	}

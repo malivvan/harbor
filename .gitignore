@@ -34,3 +34,5 @@ _testmain.go
 # Test artifacts
 coverage.out
 *.db
+.reasonix
+.idea

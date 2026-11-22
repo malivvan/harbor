@@ -169,9 +169,9 @@ func TestKDFParamsAndFlags(t *testing.T) {
 	s := mustOpen(t, filepath.Join(t.TempDir(), "kdf.db"), "pw")
 	t.Cleanup(func() { _ = s.Close() })
 
-	salt, kdfTime, kdfMemory, kdfThreads, flags, err := s.KDFParams()
+	salt, kdfTime, kdfMemory, kdfThreads, flags, err := s.Metadata()
 	if err != nil {
-		t.Fatalf("KDFParams: %v", err)
+		t.Fatalf("Metadata: %v", err)
 	}
 	if len(salt) != SaltSize {
 		t.Fatalf("salt length = %d, want %d", len(salt), SaltSize)
@@ -190,7 +190,7 @@ func TestKDFParamsAndFlags(t *testing.T) {
 func TestKeyValueStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kv.db")
 	password := "pw"
-	keys := []string{"0", "1", "version", "metadata", "kdf", "plain"}
+	keys := []string{"0", "1", "version", "Metadata", "kdf", "plain"}
 
 	s := mustOpen(t, path, password)
 	for _, key := range keys {
@@ -205,7 +205,7 @@ func TestKeyValueStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Keys: %v", err)
 	}
-	if !reflect.DeepEqual(allKeys, []string{"0", "1", "kdf", "metadata", "plain", "version"}) {
+	if !reflect.DeepEqual(allKeys, []string{"0", "1", "kdf", "Metadata", "plain", "version"}) {
 		t.Fatalf("Keys() = %v", allKeys)
 	}
 	mustClose(t, s)
@@ -404,9 +404,9 @@ func TestStoredSettingsWin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	wantSalt, wantTime, wantMemory, wantThreads, wantFlags, err := s.KDFParams()
+	wantSalt, wantTime, wantMemory, wantThreads, wantFlags, err := s.Metadata()
 	if err != nil {
-		t.Fatalf("KDFParams: %v", err)
+		t.Fatalf("Metadata: %v", err)
 	}
 	mustClose(t, s)
 
@@ -425,9 +425,9 @@ func TestStoredSettingsWin(t *testing.T) {
 	if got := s.EncryptFlags(); got != EncryptDB|EncryptTS {
 		t.Fatalf("EncryptFlags() = %#x, want stored flags", got)
 	}
-	salt, kdfTime, kdfMemory, kdfThreads, flags, err := s.KDFParams()
+	salt, kdfTime, kdfMemory, kdfThreads, flags, err := s.Metadata()
 	if err != nil {
-		t.Fatalf("KDFParams: %v", err)
+		t.Fatalf("Metadata: %v", err)
 	}
 	if kdfTime != wantTime || kdfMemory != wantMemory || kdfThreads != wantThreads || flags != wantFlags {
 		t.Fatalf("KDF params changed on reopen")
@@ -436,10 +436,10 @@ func TestStoredSettingsWin(t *testing.T) {
 		t.Fatal("KDF salt changed on reopen")
 	}
 
-	// KDFParams returns a fresh copy of the salt.
+	// Metadata returns a fresh copy of the salt.
 	salt[0] ^= 0xFF
-	if again, _, _, _, _, err := s.KDFParams(); err != nil || again[0] == salt[0] {
-		t.Fatalf("mutating KDFParams salt changed the store (err=%v)", err)
+	if again, _, _, _, _, err := s.Metadata(); err != nil || again[0] == salt[0] {
+		t.Fatalf("mutating Metadata salt changed the store (err=%v)", err)
 	}
 }
 
@@ -463,8 +463,8 @@ func TestCloseIsIdempotent(t *testing.T) {
 	if err := s.Delete("k"); !errors.Is(err, ErrClosed) {
 		t.Fatalf("Delete after Close = %v, want ErrClosed", err)
 	}
-	if _, _, _, _, _, err := s.KDFParams(); !errors.Is(err, ErrClosed) {
-		t.Fatalf("KDFParams after Close = %v, want ErrClosed", err)
+	if _, _, _, _, _, err := s.Metadata(); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Metadata after Close = %v, want ErrClosed", err)
 	}
 
 	var nilStore *Store
@@ -480,7 +480,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 }
 
 func TestOpenRejectsBadMetadata(t *testing.T) {
-	t.Run("missing metadata", func(t *testing.T) {
+	t.Run("missing Metadata", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "missing.db")
 		bdb, err := bolt.Open(path, 0600, nil)
 		if err != nil {
@@ -495,11 +495,11 @@ func TestOpenRejectsBadMetadata(t *testing.T) {
 		_ = bdb.Close()
 
 		if _, err := Open(context.Background(), path, 0600, testOptions("pw")); !errors.Is(err, ErrCorruptStore) {
-			t.Fatalf("Open missing metadata = %v, want ErrCorruptStore", err)
+			t.Fatalf("Open missing Metadata = %v, want ErrCorruptStore", err)
 		}
 	})
 
-	t.Run("malformed metadata", func(t *testing.T) {
+	t.Run("malformed Metadata", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "malformed.db")
 		bdb, err := bolt.Open(path, 0600, nil)
 		if err != nil {
@@ -512,12 +512,12 @@ func TestOpenRejectsBadMetadata(t *testing.T) {
 			}
 			return meta.Put(metadataRecordKey, []byte("not json"))
 		}); err != nil {
-			t.Fatalf("write metadata: %v", err)
+			t.Fatalf("write Metadata: %v", err)
 		}
 		_ = bdb.Close()
 
 		if _, err := Open(context.Background(), path, 0600, testOptions("pw")); !errors.Is(err, ErrCorruptStore) {
-			t.Fatalf("Open malformed metadata = %v, want ErrCorruptStore", err)
+			t.Fatalf("Open malformed Metadata = %v, want ErrCorruptStore", err)
 		}
 	})
 }

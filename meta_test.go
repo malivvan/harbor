@@ -109,7 +109,7 @@ func TestHasFlag(t *testing.T) {
 	}
 }
 
-func TestMetadataBincoRoundTrip(t *testing.T) {
+func TestMetadataEncodingRoundTrip(t *testing.T) {
 	md := Metadata{
 		Salt:    []byte("0123456789abcdef"),
 		Time:    DefaultKDFTime,
@@ -118,16 +118,13 @@ func TestMetadataBincoRoundTrip(t *testing.T) {
 		Threads: DefaultKDFThreads,
 		Canary:  []byte("canary-ciphertext"),
 	}
-	raw := make([]byte, MetadataBinco.Size(md))
-	if n := MetadataBinco.Marshal(md, raw); n != len(raw) {
-		t.Fatalf("Marshal wrote %d bytes, want %d", n, len(raw))
+	raw := md.encode()
+	if len(raw) != metadataFixedSize+len(md.Canary) {
+		t.Fatalf("encoded size = %d, want %d", len(raw), metadataFixedSize+len(md.Canary))
 	}
-	got, n, err := MetadataBinco.Unmarshal(raw)
+	got, err := decodeMetadata(raw)
 	if err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-	if n != len(raw) {
-		t.Fatalf("Unmarshal consumed %d bytes, want %d", n, len(raw))
+		t.Fatalf("decodeMetadata: %v", err)
 	}
 	if !bytes.Equal(got.Salt, md.Salt) || !bytes.Equal(got.Canary, md.Canary) ||
 		got.Time != md.Time || got.Flags != md.Flags || got.Memory != md.Memory || got.Threads != md.Threads {
@@ -184,8 +181,7 @@ func TestReadMetadataRejectsMalformedPayloads(t *testing.T) {
 		Threads: FastKDFThreads,
 		Canary:  []byte("canary"),
 	}
-	raw := make([]byte, MetadataBinco.Size(md))
-	MetadataBinco.Marshal(md, raw)
+	raw := md.encode()
 
 	for name, data := range map[string][]byte{
 		"truncated": raw[:len(raw)-1],
@@ -199,7 +195,7 @@ func TestReadMetadataRejectsMalformedPayloads(t *testing.T) {
 				}
 				return b.Put(metadataRecordKey, data)
 			}); err != nil {
-				t.Fatalf("write metadata: %v", err)
+				t.Fatalf("write Metadata: %v", err)
 			}
 			if _, _, err := readMetadata(bdb); !errors.Is(err, ErrCorruptStore) {
 				t.Fatalf("readMetadata(%s) = %v, want ErrCorruptStore", name, err)
