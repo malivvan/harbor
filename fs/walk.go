@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"io/fs"
 	"os"
 	slashpath "path"
 	"path/filepath"
@@ -62,9 +63,39 @@ func (e *walkEntry) path() string {
 	return slashpath.Join(e.parent, e.info.Name())
 }
 
+// dirReader is implemented by filesystems that can enumerate directories
+// without opening a file handle.
+type dirReader interface {
+	ReadDir(name string) ([]fs.DirEntry, error)
+}
+
 // walkChildren returns the entries of e's directory in reverse lexical order.
 func walkChildren(filer absfs.Filer, e *walkEntry) ([]*walkEntry, error) {
-	f, err := filer.OpenFile(e.path(), os.O_RDONLY, 0700)
+	dir := e.path()
+
+	// Prefer ReadDir: it avoids a file handle per directory and, for storm's
+	// FS, reuses the inodes already loaded by the batched ReadDir.
+	if rd, ok := filer.(dirReader); ok {
+		list, err := rd.ReadDir(dir)
+		if err == nil {
+			children := make([]*walkEntry, 0, len(list))
+			for _, entry := range list {
+				name := entry.Name()
+				if name == "." || name == ".." {
+					continue
+				}
+				info, err := entry.Info()
+				if err != nil {
+					return nil, err
+				}
+				children = append(children, &walkEntry{parent: dir, info: info})
+			}
+			reverseWalkEntries(children)
+			return children, nil
+		}
+	}
+
+	f, err := filer.OpenFile(dir, os.O_RDONLY, 0700)
 	if err != nil {
 		return nil, err
 	}
@@ -81,9 +112,16 @@ func walkChildren(filer absfs.Filer, e *walkEntry) ([]*walkEntry, error) {
 		if info.Name() == "." || info.Name() == ".." {
 			continue
 		}
-		children = append(children, &walkEntry{parent: e.path(), info: info})
+		children = append(children, &walkEntry{parent: dir, info: info})
 	}
 	return children, nil
+}
+
+// reverseWalkEntries reverses a slice in place.
+func reverseWalkEntries(children []*walkEntry) {
+	for i, j := 0, len(children)-1; i < j; i, j = i+1, j-1 {
+		children[i], children[j] = children[j], children[i]
+	}
 }
 
 // nameSorter sorts file infos by name.

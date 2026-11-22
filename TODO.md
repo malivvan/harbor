@@ -403,6 +403,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low.
 
 ### 2.12 `Walk` allocates heavily — LOW-MEDIUM
+
+> **Status:** ✅ FIXED — `walkChildren` prefers `ReadDir` (no per-directory open, and storm FS reuses the batched inode load) and only reverses the already-sorted entries for the stack; the Open/Readdir/sort fallback remains for filers without `ReadDir`.
 - **Location:** `fs/walk.go:73-85`.
 - **Problem:** Per directory it materializes all `FileInfo` (triggering 2.3), wraps them in a
   reverse-sortable slice, and re-`path.Join`s per entry. `BenchmarkWalk_NoCache` ≈ 2.7 ms,
