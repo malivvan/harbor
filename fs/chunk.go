@@ -314,6 +314,20 @@ func (fsys *FS) truncateRange(ino uint64, size int64) error {
 	})
 }
 
+// truncateRangeAndInode trims chunks and persists the inode in one transaction.
+func (fsys *FS) truncateRangeAndInode(ino uint64, size int64, node *iNode) error {
+	return fsys.db.Update(func(tx *bolt.Tx) error {
+		b, err := fsys.openFsBucketForWrite(tx)
+		if err != nil {
+			return err
+		}
+		if err := b.truncateData(ino, size, fsys.chunkSize()); err != nil {
+			return err
+		}
+		return b.PutInode(ino, node)
+	})
+}
+
 func (fsys *FS) loadChunkedData(ino uint64) ([]byte, error) {
 	var out []byte
 	err := fsys.db.View(func(tx *bolt.Tx) error {

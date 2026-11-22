@@ -702,37 +702,64 @@ func (fs *FS) resizeContent(node *iNode, size int64) error {
 		return syscall.EFBIG
 	}
 	ino := node.Ino
+	oldSize := node.Size
+	node.Size = size
 
-	switch {
-	case fs.contentFS != nil:
-		data, err := fs.loadData(ino)
+	err := func() error {
+		switch {
+		case fs.contentFS != nil:
+			if size == 0 {
+				// Truncate-to-0 is a delete: no need to read and re-encrypt
+				// the whole file just to discard it.
+				if err := fs.contentFS.Remove(inoToPath(ino)); err != nil && !os.IsNotExist(err) {
+					return err
+				}
+				_, err := fs.saveInode(node)
+				return err
+			}
+			data, err := fs.loadData(ino)
+			if err != nil {
+				return err
+			}
+			if err := fs.saveData(ino, resizeBytes(data, size)); err != nil {
+				return err
+			}
+			_, err = fs.saveInode(node)
+			return err
+		case fs.chunked():
+			return fs.truncateRangeAndInode(ino, size, node)
+		default:
+			if size == 0 {
+				return fs.deleteDataAndSaveInode(node)
+			}
+			data, err := fs.loadData(ino)
+			if err != nil {
+				return err
+			}
+			_, err = fs.saveInodeAndData(node, resizeBytes(data, size))
+			return err
+		}
+	}()
+	if err != nil {
+		node.Size = oldSize
+	}
+	return err
+}
+
+// deleteDataAndSaveInode drops whole-file content and persists the inode in one
+// write transaction.
+func (fs *FS) deleteDataAndSaveInode(node *iNode) error {
+	ino := node.Ino
+	return fs.db.Update(func(tx *bolt.Tx) error {
+		b, err := fs.openFsBucketWithCache(tx)
 		if err != nil {
 			return err
 		}
-		if err := fs.saveData(ino, resizeBytes(data, size)); err != nil {
+		if err := b.PutInode(ino, node); err != nil {
 			return err
 		}
-	case fs.chunked():
-		if err := fs.truncateRange(ino, size); err != nil {
-			return err
-		}
-	default:
-		data, err := fs.loadData(ino)
-		if err != nil {
-			return err
-		}
-		if err := fs.saveData(ino, resizeBytes(data, size)); err != nil {
-			return err
-		}
-	}
-
-	if node.Size != size {
-		node.Size = size
-		if _, err := fs.saveInode(node); err != nil {
-			return err
-		}
-	}
-	return nil
+		return b.data.Delete(i2b(ino))
+	})
 }
 
 // isDescendantPath reports whether child is parent itself or lives inside it.

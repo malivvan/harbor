@@ -313,6 +313,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low (behavior-preserving; slightly wider critical section).
 
 ### 2.5 `truncate` / `O_TRUNC` loads the whole file just to discard it — HIGH
+
+> **Status:** ✅ FIXED — truncate-to-0 now deletes the content (bbolt data key or external contentFS object) and saves the inode in one transaction instead of loading/decrypting and re-encrypting the whole file. Non-zero truncation also reuses the merged inode+content transaction; chunked truncation commits chunks and inode once.
 - **Location:** `fs/fs.go:658-665` (`resizeContent` default branch), `fs/fs.go:647-652`
   (contentFS branch), reached from `fs/fs.go:1178-1183` (`openFile` `O_TRUNC`) and
   `fs/file.go:414`.
