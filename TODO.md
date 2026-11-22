@@ -260,6 +260,8 @@ so "defeating SIMD" is not a concern here.
 > decrypts/encrypts the whole file. The chunked path (`chunks` bucket) already does range I/O.
 
 ### 2.1 Non-chunked `Write` reloads, re-grows, re-encrypts and re-saves the whole file — HIGH
+
+> **Status:** ✅ FIXED — non-chunked writes keep the decrypted whole-file buffer on the open `File` and reuse it across successive writes, removing the per-write decrypt plus grow-copy; each write is still persisted synchronously (inode + content).
 - **Location:** `fs/file.go:178-204` (+ `fs/fs.go:560-618` `loadData`,
   `fs/fs.go:504-557` `saveData`).
 - **Problem:** Each `Write` calls `loadData` (decrypt entire file), possibly allocates a larger

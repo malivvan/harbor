@@ -31,6 +31,12 @@ type File struct {
 	offset    int64
 	diroffset int
 	closed    bool
+
+	// data caches the decrypted whole-file content for non-chunked storage so
+	// repeated writes do not reload and decrypt the file on every call. It is
+	// invalidated by Truncate and by chunked I/O.
+	data       []byte
+	dataLoaded bool
 }
 
 // Name returns the name of the file as presented to Open.
@@ -90,6 +96,27 @@ func (f *File) Read(p []byte) (int, error) {
 	}
 
 	return n, nil
+}
+
+// loadCachedData returns the decrypted content of a non-chunked file,
+// loading it once per open handle.
+func (f *File) loadCachedData() ([]byte, error) {
+	if f.dataLoaded {
+		return f.data, nil
+	}
+	data, err := f.fs.loadData(f.node.Ino)
+	if err != nil {
+		return nil, err
+	}
+	f.data = data
+	f.dataLoaded = true
+	return data, nil
+}
+
+// invalidateData drops the cached whole-file content.
+func (f *File) invalidateData() {
+	f.data = nil
+	f.dataLoaded = false
 }
 
 // readChunked reads from encrypted chunks without loading the whole file.
@@ -176,7 +203,7 @@ func (f *File) Write(p []byte) (int, error) {
 	}
 
 	size := len(p) + int(f.offset)
-	data, err := f.fs.loadData(f.node.Ino)
+	data, err := f.loadCachedData()
 	if err != nil {
 		return 0, err
 	}
@@ -188,6 +215,7 @@ func (f *File) Write(p []byte) (int, error) {
 	}
 
 	n := copy(data[int(f.offset):], p)
+	f.data = data
 	f.offset += int64(n)
 	f.node.Size = int64(len(data))
 
@@ -411,6 +439,7 @@ func (f *File) Truncate(size int64) error {
 		return &os.PathError{Op: "truncate", Path: f.name, Err: syscall.EINVAL}
 	}
 
+	f.invalidateData()
 	return f.fs.resizeContent(f.node, size)
 }
 
