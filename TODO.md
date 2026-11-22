@@ -185,6 +185,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low.
 
 ### 1.12 `meta.increment` uses `bytes.Buffer` + `binary.Write` — LOW-MEDIUM
+
+> **Status:** ✅ FIXED — auto-increment counters are encoded with `binary.BigEndian.PutUint64`/`Uint64` on a fixed 8-byte array (no `bytes.Buffer`, no reflection); the byte layout is unchanged and `numberfromb` validates the length. Regression test covers round-trips and malformed input.
 - **Location:** `db/metadata.go:51-86`, `db/store.go:276-293` (`numbertob`/`numberfromb`).
 - **Problem:** Every auto-increment save allocates a `bytes.Buffer` and uses reflection-based
   `binary.Write`/`Read` for an int64.

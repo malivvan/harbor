@@ -4,7 +4,6 @@
 package db
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -273,21 +272,32 @@ func encodeFloatKey(v float64) []byte {
 	return b[:]
 }
 
+// numbertob encodes an integer counter as 8 big-endian bytes. The layout is
+// identical to the previous binary.Write encoding, so existing databases need
+// no migration.
 func numbertob(v interface{}) ([]byte, error) {
-	var buf bytes.Buffer
-	err := binary.Write(&buf, binary.BigEndian, v)
-	if err != nil {
-		return nil, err
+	var n int64
+	switch value := v.(type) {
+	case int64:
+		n = value
+	case int:
+		n = int64(value)
+	case uint64:
+		n = int64(value)
+	case uint:
+		n = int64(value)
+	default:
+		return nil, fmt.Errorf("numbertob: unsupported counter type %T", v)
 	}
-	return buf.Bytes(), nil
+
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], uint64(n))
+	return b[:], nil
 }
 
 func numberfromb(raw []byte) (int64, error) {
-	r := bytes.NewReader(raw)
-	var to int64
-	err := binary.Read(r, binary.BigEndian, &to)
-	if err != nil {
-		return 0, err
+	if len(raw) != 8 {
+		return 0, fmt.Errorf("numberfromb: expected 8 bytes, got %d", len(raw))
 	}
-	return to, nil
+	return int64(binary.BigEndian.Uint64(raw)), nil
 }

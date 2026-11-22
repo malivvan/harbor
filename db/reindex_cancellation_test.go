@@ -217,10 +217,11 @@ func TestReIndex_CancellationDuringRecordLoop(t *testing.T) {
 		require.NoError(t, db.Save(ctx, &u))
 	}
 
-	// Cancel at Update's entry. ReIndex only calls Update after First has read
-	// a record, so this deterministically proves the record loop was reached.
+	// Cancel at the per-record save entry. ReIndex only reaches save after
+	// decoding a record, so this deterministically proves the record loop was
+	// reached.
 	sctx := &cancelAtCallerContext{
-		callerSuffix: ".(*node).update",
+		callerSuffix: ".(*node).save",
 		cancelAt:     1,
 	}
 	err := db.ReIndex(sctx, &reindexUser{})

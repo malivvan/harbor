@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"math"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -260,4 +261,19 @@ func TestReIndexDecodesEachRecordOnce(t *testing.T) {
 	var found []User
 	require.NoError(t, db.Find(ctx, "Name", "John", &found))
 	require.Len(t, found, 5)
+}
+
+func TestCounterEncoding(t *testing.T) {
+	for _, n := range []int64{0, 1, -1, 1 << 40, math.MaxInt64, math.MinInt64} {
+		raw, err := numbertob(n)
+		require.NoError(t, err)
+		require.Len(t, raw, 8)
+
+		got, err := numberfromb(raw)
+		require.NoError(t, err)
+		require.Equal(t, n, got)
+	}
+
+	_, err := numberfromb([]byte{1, 2, 3})
+	require.Error(t, err)
 }
