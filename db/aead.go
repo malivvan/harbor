@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/malivvan/storm/internal/encryption"
+	"github.com/malivvan/storm/internal/crypto"
 	bolt "go.etcd.io/bbolt"
 )
 
 // KeySize is the required key length in bytes (256 bits).
-const KeySize = encryption.KeySize
+const KeySize = crypto.KeySize
 
 // Config configures a Store: it selects the codec and enables optional
-// encryption. A zero Config, or one with no encryption feature enabled, keeps
+// crypto. A zero Config, or one with no encryption feature enabled, keeps
 // the plaintext on-disk format and uses the default JSON codec.
 type Config struct {
 	// Root is the bucket path below which all Storm data lives. Each element
@@ -65,7 +65,7 @@ const sivInfoPrefix = "storm/db/keys/"
 type encState struct {
 	// kc holds the cipher engines: the primary key first, then rotation
 	// fallbacks. A nil keychain means plaintext.
-	kc *encryption.Keychain
+	kc *crypto.Keychain
 
 	encValues   bool
 	encMetadata bool
@@ -73,7 +73,7 @@ type encState struct {
 
 	// sivs holds the per-domain deterministic name ciphers, derived from the
 	// primary key. Read-only after construction.
-	sivs map[string]*encryption.SIVNameCipher
+	sivs map[string]*crypto.SIVNameCipher
 }
 
 // seal encrypts plain with the primary engine, prefixing a fresh random nonce.
@@ -166,7 +166,7 @@ const (
 )
 
 // markerSpec describes the on-disk marker framing shared by every store.
-var markerSpec = encryption.MarkerSpec{Magic: markerMagic}
+var markerSpec = crypto.MarkerSpec{Magic: markerMagic}
 
 // marker describes the encryption mode recorded in a store.
 type marker struct {
@@ -210,12 +210,12 @@ func encodeMarker(e *encState) ([]byte, error) {
 		flags |= markerFlagKeys
 	}
 
-	canary, err := e.seal([]byte(encryption.CanaryPlaintext(canaryPlaintext, flags, 0)))
+	canary, err := e.seal([]byte(crypto.CanaryPlaintext(canaryPlaintext, flags, 0)))
 	if err != nil {
 		return nil, err
 	}
 
-	return encryption.EncodeMarker(markerSpec, encryption.Marker{
+	return crypto.EncodeMarker(markerSpec, crypto.Marker{
 		Flags:  flags,
 		Canary: canary,
 	})
@@ -223,7 +223,7 @@ func encodeMarker(e *encState) ([]byte, error) {
 
 // decodeMarker parses a marker and returns its sealed canary.
 func decodeMarker(raw []byte) (marker, []byte, error) {
-	decoded, err := encryption.DecodeMarker(markerSpec, raw)
+	decoded, err := crypto.DecodeMarker(markerSpec, raw)
 	if err != nil {
 		return marker{}, nil, err
 	}
@@ -237,7 +237,7 @@ func decodeMarker(raw []byte) (marker, []byte, error) {
 
 // verifyCanary confirms the configured keys decrypt the stored canary.
 func (e *encState) verifyCanary(canary []byte, m marker) error {
-	return encryption.VerifyCanary(e.kc, canary, encryption.CanaryPlaintext(canaryPlaintext, m.flagsByte(), 0))
+	return crypto.VerifyCanary(e.kc, canary, crypto.CanaryPlaintext(canaryPlaintext, m.flagsByte(), 0))
 }
 
 // loadMarker reads the store marker, if present, in its own read transaction.
@@ -360,12 +360,12 @@ func resolveConfig(cfg Config) (*encState, error) {
 		return nil, nil
 	}
 
-	key, err := encryption.ResolveKey(cfg.Secret)
+	key, err := crypto.ResolveKey(cfg.Secret)
 	if err != nil {
 		return nil, err
 	}
 
-	kc, err := encryption.NewKeychain([][]byte{key})
+	kc, err := crypto.NewKeychain([][]byte{key})
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +378,7 @@ func resolveConfig(cfg Config) (*encState, error) {
 	}
 
 	if state.encKeys {
-		state.sivs = make(map[string]*encryption.SIVNameCipher, 3)
+		state.sivs = make(map[string]*crypto.SIVNameCipher, 3)
 		for _, domain := range []string{keyDomainID, keyDomainIndex, keyDomainKV} {
 			cipher, err := newNameCipher(key, domain)
 			if err != nil {
@@ -392,8 +392,8 @@ func resolveConfig(cfg Config) (*encState, error) {
 }
 
 // newNameCipher derives the deterministic key cipher for one domain.
-func newNameCipher(masterKey []byte, domain string) (*encryption.SIVNameCipher, error) {
-	return encryption.NewSIVNameCipher(masterKey, sivInfoPrefix+domain+"/v1")
+func newNameCipher(masterKey []byte, domain string) (*crypto.SIVNameCipher, error) {
+	return crypto.NewSIVNameCipher(masterKey, sivInfoPrefix+domain+"/v1")
 }
 
 // encFromNode returns the encryption state of the Store that owns n, or nil

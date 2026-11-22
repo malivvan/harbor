@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/malivvan/storm/internal/encryption"
+	"github.com/malivvan/storm/internal/crypto"
 	"go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
 )
@@ -295,7 +295,7 @@ func (r *rotation) collection(tx *bbolt.Tx, physicalName string) error {
 	}
 
 	var (
-		changed []encryption.Pair
+		changed []crypto.Pair
 		drop    [][]byte
 	)
 
@@ -339,7 +339,7 @@ func (r *rotation) collection(tx *bbolt.Tx, physicalName string) error {
 			return nil
 		}
 
-		changed = append(changed, encryption.Pair{Key: append([]byte(nil), newKey...), Value: append([]byte(nil), newValue...)})
+		changed = append(changed, crypto.Pair{Key: append([]byte(nil), newKey...), Value: append([]byte(nil), newValue...)})
 		drop = append(drop, append([]byte(nil), k...))
 		return nil
 	}); err != nil {
@@ -364,14 +364,14 @@ func (r *rotation) collection(tx *bbolt.Tx, physicalName string) error {
 	}
 
 	if bytes.Equal(newPhysical, []byte(physicalName)) {
-		return encryption.ApplyEntries(b, drop, changed)
+		return crypto.ApplyEntries(b, drop, changed)
 	}
 
 	target, err := r.createBucket(tx, newPhysical)
 	if err != nil {
 		return err
 	}
-	if err := encryption.ApplyEntries(target, drop, changed); err != nil {
+	if err := crypto.ApplyEntries(target, drop, changed); err != nil {
 		return err
 	}
 	return r.deleteBucket(tx, []byte(physicalName))
@@ -385,7 +385,7 @@ func (r *rotation) metadata(tx *bbolt.Tx) error {
 	}
 
 	var (
-		changed []encryption.Pair
+		changed []crypto.Pair
 		drop    [][]byte
 	)
 
@@ -429,7 +429,7 @@ func (r *rotation) metadata(tx *bbolt.Tx) error {
 			return nil
 		}
 
-		changed = append(changed, encryption.Pair{Key: append([]byte(nil), newKey...), Value: append([]byte(nil), newValue...)})
+		changed = append(changed, crypto.Pair{Key: append([]byte(nil), newKey...), Value: append([]byte(nil), newValue...)})
 		drop = append(drop, append([]byte(nil), k...))
 		return nil
 	}); err != nil {
@@ -440,7 +440,7 @@ func (r *rotation) metadata(tx *bbolt.Tx) error {
 		return nil
 	}
 
-	return encryption.ApplyEntries(b, drop, changed)
+	return crypto.ApplyEntries(b, drop, changed)
 }
 
 // metadataEntry rotates one collection metadata entry by its logical name.

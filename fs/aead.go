@@ -3,11 +3,11 @@ package fs
 import (
 	"fmt"
 
-	"github.com/malivvan/storm/internal/encryption"
+	"github.com/malivvan/storm/internal/crypto"
 )
 
 // KeySize is the required key length in bytes (256 bits).
-const KeySize = encryption.KeySize
+const KeySize = crypto.KeySize
 
 // Config enables optional encryption for a Store and its file systems. A zero
 // Config, or one with no encryption feature enabled, keeps the plaintext
@@ -40,7 +40,7 @@ func (c Config) encryptionEnabled() bool {
 // encState is the shared encryption configuration of a Store. A nil encState
 // means plaintext.
 type encState struct {
-	kc          *encryption.Keychain
+	kc          *crypto.Keychain
 	encContent  bool
 	encMetadata bool
 	chunkSize   int
@@ -107,7 +107,7 @@ const (
 )
 
 // markerSpec describes the on-disk marker framing shared by every store.
-var markerSpec = encryption.MarkerSpec{Magic: markerMagic, ExtraFieldSize: 8}
+var markerSpec = crypto.MarkerSpec{Magic: markerMagic, ExtraFieldSize: 8}
 
 // marker describes the encryption mode recorded in a filesystem.
 type marker struct {
@@ -151,12 +151,12 @@ func (e *encState) encodeMarker() ([]byte, error) {
 		flags |= markerFlagChunked
 	}
 
-	canary, err := e.seal([]byte(encryption.CanaryPlaintext(canaryPlaintext, flags, uint64(e.chunkSize))))
+	canary, err := e.seal([]byte(crypto.CanaryPlaintext(canaryPlaintext, flags, uint64(e.chunkSize))))
 	if err != nil {
 		return nil, err
 	}
 
-	return encryption.EncodeMarker(markerSpec, encryption.Marker{
+	return crypto.EncodeMarker(markerSpec, crypto.Marker{
 		Flags:  flags,
 		Extra:  uint64(e.chunkSize),
 		Canary: canary,
@@ -165,7 +165,7 @@ func (e *encState) encodeMarker() ([]byte, error) {
 
 // decodeMarker parses a marker and returns its sealed canary.
 func decodeMarker(raw []byte) (marker, []byte, error) {
-	decoded, err := encryption.DecodeMarker(markerSpec, raw)
+	decoded, err := crypto.DecodeMarker(markerSpec, raw)
 	if err != nil {
 		return marker{}, nil, err
 	}
@@ -179,7 +179,7 @@ func decodeMarker(raw []byte) (marker, []byte, error) {
 
 // verifyCanary confirms the configured keys decrypt the stored canary.
 func (e *encState) verifyCanary(canary []byte, m marker) error {
-	return encryption.VerifyCanary(e.kc, canary, encryption.CanaryPlaintext(canaryPlaintext, m.flagsByte(), uint64(m.chunkSize)))
+	return crypto.VerifyCanary(e.kc, canary, crypto.CanaryPlaintext(canaryPlaintext, m.flagsByte(), uint64(m.chunkSize)))
 }
 
 // DefaultChunkSize is the chunk width used for encrypted content when the
@@ -196,12 +196,12 @@ func resolveConfig(cfg Config) (*encState, error) {
 	}
 	chunkSize := cfg.ChunkSize
 
-	key, err := encryption.ResolveKey(cfg.Secret)
+	key, err := crypto.ResolveKey(cfg.Secret)
 	if err != nil {
 		return nil, err
 	}
 
-	kc, err := encryption.NewKeychain([][]byte{key})
+	kc, err := crypto.NewKeychain([][]byte{key})
 	if err != nil {
 		return nil, err
 	}

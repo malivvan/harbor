@@ -2,7 +2,7 @@
 
 **Reviewed revision:** `c039d2e` (branch `master`, no tags)
 **Review date:** 2026-11-22
-**Scope:** `storm`, `db`, `db/index`, `db/q`, `fs`, `fs/s3fs`, `internal/absfs`, `ts`, `vec`, `vec/hnsw`, `internal/encryption`, `internal/slip21`, module/CI/release files.
+**Scope:** `storm`, `db`, `db/index`, `db/q`, `fs`, `fs/s3fs`, `internal/absfs`, `ts`, `vec`, `vec/hnsw`, `internal/crypto`, `internal/slip21`, module/CI/release files.
 **Method:** full source read per area; baseline build/vet/gofmt/test/race; staticcheck and govulncheck; targeted reproductions in a throwaway module under `$TMPDIR` with a `replace` to this tree. No repository files were modified by the review.
 
 ---
@@ -166,7 +166,7 @@ A detailed remediation sequence is at the end of this document.
 
 ### P0-10 — `ts.RotateAll` can strand series created concurrently
 - **Status:** verified (code + concurrent probe reported by the review reviewer).
-- **Location:** `ts/rotate.go:288-334`; names are collected in a separate `View` (`:302-308`), then rewritten in a later `Update` (`:315-333`); `withKey` (`:46-58`) uses `Keychain.WithKey` (`internal/encryption/keychain.go:108-113`), which **drops every old key**.
+- **Location:** `ts/rotate.go:288-334`; names are collected in a separate `View` (`:302-308`), then rewritten in a later `Update` (`:315-333`); `withKey` (`:46-58`) uses `Keychain.WithKey` (`internal/crypto/keychain.go:108-113`), which **drops every old key**.
 - **Problem:** A writer that creates a series between the name snapshot and the rewrite is not in `names`; its points stay sealed under the old key, then the new keychain has no fallback. The series becomes permanently undecryptable.
   ```
   4 concurrent inserters + RotateAll -> VerifyAll fails with authentication failed
@@ -345,7 +345,7 @@ A detailed remediation sequence is at the end of this document.
 - **Fix:** Add a security policy with private reporting, contributor guide, changelog, and tag `v0.1.0`/`v1.0.0` after blockers are fixed.
 
 ### P2-10 — No fuzz/property coverage for on-disk and network parsers
-- **Location:** `internal/encryption/marker.go`, `meta.go`, `fs/inode.go` GobDecode/decodeNode, `ts/series.go` decodeMeta, `ts/encode.go`, `vec/binary.go`, `fs/s3fs/http_client.go` XML/SigV4.
+- **Location:** `internal/crypto/marker.go`, `meta.go`, `fs/inode.go` GobDecode/decodeNode, `ts/series.go` decodeMeta, `ts/encode.go`, `vec/binary.go`, `fs/s3fs/http_client.go` XML/SigV4.
 - **Problem:** Only `internal/absfs` has fuzz tests. Corrupt/tampered bytes are exactly what the AEAD markers are meant to detect; panics (P1-3) and silent empty results (P2-7) are untested.
 - **Fix:** Add `FuzzDecodeMarker`, `FuzzDecodeMetadata`, `FuzzGobInode`, `FuzzTSBlock/Point`, `FuzzStoredPoint`, and S3 response/SigV4 fuzz targets with seeds from real records.
 

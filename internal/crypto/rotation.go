@@ -1,4 +1,4 @@
-package encryption
+package crypto
 
 // Pair is one key/value entry staged by a rotation.
 type Pair struct {

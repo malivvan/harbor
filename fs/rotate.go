@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/malivvan/storm/internal/encryption"
+	"github.com/malivvan/storm/internal/crypto"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -33,7 +33,7 @@ func (s *Store) newKeyState(newKey []byte, keepFallbacks bool) (*encState, error
 	}
 
 	var (
-		kc  *encryption.Keychain
+		kc  *crypto.Keychain
 		err error
 	)
 	if keepFallbacks {
@@ -74,7 +74,7 @@ func (s *Store) reEncryptFSTx(ctx context.Context, tx *bolt.Tx, name string, old
 	newB := newFsBucket(bb)
 	newB.enc = next
 
-	inodeKeys, err := encryption.KeysOf(oldB.inodes)
+	inodeKeys, err := crypto.KeysOf(oldB.inodes)
 	if err != nil {
 		return err
 	}
@@ -91,7 +91,7 @@ func (s *Store) reEncryptFSTx(ctx context.Context, tx *bolt.Tx, name string, old
 		}
 	}
 
-	dataKeys, err := encryption.KeysOf(oldB.data)
+	dataKeys, err := crypto.KeysOf(oldB.data)
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func (s *Store) reEncryptFSTx(ctx context.Context, tx *bolt.Tx, name string, old
 		}
 	}
 
-	symlinkKeys, err := encryption.KeysOf(oldB.symlinks)
+	symlinkKeys, err := crypto.KeysOf(oldB.symlinks)
 	if err != nil {
 		return err
 	}
@@ -128,7 +128,7 @@ func (s *Store) reEncryptFSTx(ctx context.Context, tx *bolt.Tx, name string, old
 	}
 
 	if oldB.chunks != nil {
-		chunkKeys, err := encryption.KeysOf(oldB.chunks)
+		chunkKeys, err := crypto.KeysOf(oldB.chunks)
 		if err != nil {
 			return err
 		}
@@ -305,7 +305,7 @@ func (s *Store) verifyFS(name string) error {
 			}
 		}
 
-		verifyInodeKeys, err := encryption.KeysOf(b.inodes)
+		verifyInodeKeys, err := crypto.KeysOf(b.inodes)
 		if err != nil {
 			return err
 		}
@@ -323,7 +323,7 @@ func (s *Store) verifyFS(name string) error {
 			if bucket == nil {
 				continue
 			}
-			bucketKeys, err := encryption.KeysOf(bucket)
+			bucketKeys, err := crypto.KeysOf(bucket)
 			if err != nil {
 				return err
 			}

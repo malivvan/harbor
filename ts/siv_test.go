@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/storm/internal/encryption"
+	"github.com/malivvan/storm/internal/crypto"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
 
 func TestSIVNameEncryption(t *testing.T) {
-	engine, err := encryption.NewSIVNameCipher(testKey(1), sivInfo)
+	engine, err := crypto.NewSIVNameCipher(testKey(1), sivInfo)
 	require.NoError(t, err)
 
 	first, err := engine.SealName([]byte("cpu"))
@@ -32,7 +32,7 @@ func TestSIVNameEncryption(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "cpu", string(name))
 
-	_, err = encryption.NewSIVNameCipher(make([]byte, 16), sivInfo)
+	_, err = crypto.NewSIVNameCipher(make([]byte, 16), sivInfo)
 	require.ErrorIs(t, err, ErrInvalidKey)
 
 	bad := append([]byte(nil), first...)

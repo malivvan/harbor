@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/malivvan/storm/internal/encryption"
+	"github.com/malivvan/storm/internal/crypto"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -29,7 +29,7 @@ func TestCanaryHelpers(t *testing.T) {
 	require.Error(t, verifyCanary(keys.canary, sealed, md.Flags^1))
 	// Corrupt ciphertext and a wrong-size key fail cleanly.
 	require.Error(t, verifyCanary(keys.canary, []byte("garbage"), md.Flags))
-	require.Error(t, verifyCanary(make([]byte, encryption.KeySize), sealed, md.Flags))
+	require.Error(t, verifyCanary(make([]byte, crypto.KeySize), sealed, md.Flags))
 	require.Error(t, verifyCanary([]byte("short"), sealed, md.Flags))
 
 	_, err = sealCanary([]byte("short"), md.Flags)

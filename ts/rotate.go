@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/malivvan/storm/internal/encryption"
+	"github.com/malivvan/storm/internal/crypto"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -63,7 +63,7 @@ func (s *Store) withKey(newKey []byte) (*Store, error) {
 		blockDur:  cur.blockDur,
 	}
 	if cur.encNames {
-		nextEnc.siv, err = encryption.NewSIVNameCipher(newKey, sivInfo)
+		nextEnc.siv, err = crypto.NewSIVNameCipher(newKey, sivInfo)
 		if err != nil {
 			return nil, err
 		}

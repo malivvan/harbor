@@ -245,7 +245,7 @@ func normalizeJSONValue(v any) any {
 }
 
 // Open initializes a new BoltDB storage engine with optional vector quantization
-// and native AEAD encryption.
+// and native AEAD crypto.
 //
 // A nil database is rejected with ErrInvalidConfig: the returned Store would
 // have no way to persist anything and every method would otherwise panic.
@@ -256,7 +256,7 @@ func normalizeJSONValue(v any) any {
 // A zero cfg creates a plaintext store with no quantization and its on-disk
 // format is unchanged. cfg.UseQuant enables quantization; when cfg.Quantizer is
 // nil the default SQ8 quantizer is used. cfg.Secret and the Encrypt fields
-// enable optional encryption.
+// enable optional crypto.
 //
 // When encryption is enabled the store writes an unencrypted marker into the
 // collections metadata bucket and verifies it with a sealed canary, so:

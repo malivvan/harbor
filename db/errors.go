@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/malivvan/storm/db/index"
-	"github.com/malivvan/storm/internal/encryption"
+	"github.com/malivvan/storm/internal/crypto"
 )
 
 // Errors
@@ -75,22 +75,22 @@ var (
 	ErrTxFromDifferentDB = errors.New("transaction belongs to a different database")
 
 	// ErrAuthFailed is returned when encrypted data fails authentication.
-	ErrAuthFailed = encryption.ErrAuthFailed
+	ErrAuthFailed = crypto.ErrAuthFailed
 
 	// ErrInvalidKey is returned for a missing or malformed encryption key.
-	ErrInvalidKey = encryption.ErrInvalidKey
+	ErrInvalidKey = crypto.ErrInvalidKey
 
 	// ErrInvalidConfig is returned for an inconsistent encryption config.
-	ErrInvalidConfig = encryption.ErrInvalidConfig
+	ErrInvalidConfig = crypto.ErrInvalidConfig
 
 	// ErrWrongMode is returned when a store is opened with an encryption mode
 	// that does not match what is stored on disk.
-	ErrWrongMode = encryption.ErrWrongMode
+	ErrWrongMode = crypto.ErrWrongMode
 
 	// ErrEncryptedOrdering is returned by ordered or prefix lookups on a store
 	// that encrypts keys: ciphertext ordering is meaningless, so these queries
 	// fail loud instead of silently returning wrong results.
-	ErrEncryptedOrdering = encryption.ErrEncryptedOrdering
+	ErrEncryptedOrdering = crypto.ErrEncryptedOrdering
 )
 
 // wrapError adds operation context to an error while preserving classification.

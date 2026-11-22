@@ -5,12 +5,12 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/malivvan/storm/internal/encryption"
+	"github.com/malivvan/storm/internal/crypto"
 	bolt "go.etcd.io/bbolt"
 )
 
 // KeySize is the required key length in bytes (256 bits).
-const KeySize = encryption.KeySize
+const KeySize = crypto.KeySize
 
 // Config enables optional encryption for a time series Store. A zero Config,
 // or one with no encryption feature enabled, leaves the store in its plaintext
@@ -55,11 +55,11 @@ func (c Config) encryptionEnabled() bool {
 // (through a Keychain) plus the enabled features. A nil keychain means
 // plaintext, and every helper below is then a passthrough.
 type encState struct {
-	kc        *encryption.Keychain
+	kc        *crypto.Keychain
 	encValues bool
 	encNames  bool
 	blockDur  int64
-	siv       *encryption.SIVNameCipher
+	siv       *crypto.SIVNameCipher
 }
 
 // seal encrypts plain with the primary key, prepending a fresh nonce.
@@ -86,12 +86,12 @@ func resolveConfig(cfg Config) (*encState, error) {
 		return nil, fmt.Errorf("%w: block duration cannot be negative", ErrInvalidConfig)
 	}
 
-	key, err := encryption.ResolveKey(cfg.Secret)
+	key, err := crypto.ResolveKey(cfg.Secret)
 	if err != nil {
 		return nil, err
 	}
 
-	kc, err := encryption.NewKeychain([][]byte{key})
+	kc, err := crypto.NewKeychain([][]byte{key})
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func resolveConfig(cfg Config) (*encState, error) {
 		blockDur:  cfg.BlockDuration,
 	}
 	if state.encNames {
-		state.siv, err = encryption.NewSIVNameCipher(key, sivInfo)
+		state.siv, err = crypto.NewSIVNameCipher(key, sivInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -126,7 +126,7 @@ const (
 )
 
 // markerSpec describes the on-disk marker framing shared by every store.
-var markerSpec = encryption.MarkerSpec{Magic: markerMagic, ExtraFieldSize: 8}
+var markerSpec = crypto.MarkerSpec{Magic: markerMagic, ExtraFieldSize: 8}
 
 // marker describes the encryption mode recorded in a store.
 type marker struct {
@@ -163,12 +163,12 @@ func (e *encState) encodeMarker() ([]byte, error) {
 		flags |= markerFlagNames
 	}
 
-	canary, err := e.seal([]byte(encryption.CanaryPlaintext(canaryPlaintext, flags, uint64(e.blockDur))))
+	canary, err := e.seal([]byte(crypto.CanaryPlaintext(canaryPlaintext, flags, uint64(e.blockDur))))
 	if err != nil {
 		return nil, err
 	}
 
-	return encryption.EncodeMarker(markerSpec, encryption.Marker{
+	return crypto.EncodeMarker(markerSpec, crypto.Marker{
 		Flags:  flags,
 		Extra:  uint64(e.blockDur),
 		Canary: canary,
@@ -177,7 +177,7 @@ func (e *encState) encodeMarker() ([]byte, error) {
 
 // decodeMarker parses a marker and returns its sealed canary.
 func decodeMarker(raw []byte) (marker, []byte, error) {
-	decoded, err := encryption.DecodeMarker(markerSpec, raw)
+	decoded, err := crypto.DecodeMarker(markerSpec, raw)
 	if err != nil {
 		return marker{}, nil, err
 	}
@@ -220,7 +220,7 @@ func (s *Store) readMarker(db *bolt.DB) (marker, []byte, bool, error) {
 
 // verifyCanary checks that at least one configured key can decrypt the canary.
 func (e *encState) verifyCanary(canary []byte, m marker) error {
-	return encryption.VerifyCanary(e.kc, canary, encryption.CanaryPlaintext(canaryPlaintext, m.flagsByte(), uint64(m.blockDur)))
+	return crypto.VerifyCanary(e.kc, canary, crypto.CanaryPlaintext(canaryPlaintext, m.flagsByte(), uint64(m.blockDur)))
 }
 
 // ensureMarker writes the encryption marker if the store does not have one yet.

@@ -24,7 +24,7 @@ import (
 
 	"github.com/malivvan/storm/db"
 	"github.com/malivvan/storm/fs"
-	"github.com/malivvan/storm/internal/encryption"
+	"github.com/malivvan/storm/internal/crypto"
 	"github.com/malivvan/storm/internal/slip21"
 	"github.com/malivvan/storm/ts"
 	"github.com/malivvan/storm/vec"
@@ -102,7 +102,7 @@ type Options struct {
 	// ignored when opening an existing store.
 	Encrypt uint16
 
-	// Plaintext creates a new store without encryption. It conflicts with a
+	// Plaintext creates a new store without crypto. It conflicts with a
 	// non-zero Encrypt. It is ignored when opening an existing store.
 	Plaintext bool
 
@@ -126,7 +126,7 @@ type Store struct {
 
 	// kvc seals key/value payloads when EncryptKVValues is set. A nil keychain
 	// leaves the bucket in plaintext.
-	kvc *encryption.Keychain
+	kvc *crypto.Keychain
 }
 
 // storeKeys holds the per-component keys derived for one Open call. They are
@@ -219,7 +219,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		return nil, fmt.Errorf("storm: open ts store: %w", err)
 	}
 	if hasFlag(md.Flags, EncryptKVValues) {
-		if s.kvc, err = encryption.NewKeychain([][]byte{keys.kv}); err != nil {
+		if s.kvc, err = crypto.NewKeychain([][]byte{keys.kv}); err != nil {
 			return nil, fmt.Errorf("storm: open key/value store: %w", err)
 		}
 	}
@@ -332,8 +332,8 @@ func encryptionFlags(options *Options) (uint16, error) {
 }
 
 // canaryKeychain builds the one-key keychain used for the canary checks.
-func canaryKeychain(key []byte) (*encryption.Keychain, error) {
-	return encryption.NewKeychain([][]byte{key})
+func canaryKeychain(key []byte) (*crypto.Keychain, error) {
+	return crypto.NewKeychain([][]byte{key})
 }
 
 // canaryPlaintextFor returns the canary plaintext bound to flags. The write
@@ -365,7 +365,7 @@ func verifyCanary(key, sealed []byte, flags uint16) error {
 	if err != nil {
 		return err
 	}
-	return encryption.VerifyCanary(keychain, sealed, canaryPlaintextFor(flags))
+	return crypto.VerifyCanary(keychain, sealed, canaryPlaintextFor(flags))
 }
 
 // deriveKeys stretches the password and derives one key per component.

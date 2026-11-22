@@ -43,7 +43,7 @@ type Store struct {
 // The caller owns db and must keep it open for the lifetime of the Store. The
 // Store never closes db.
 //
-// cfg enables optional encryption. cfg.Root is an optional bucket path for all
+// cfg enables optional crypto. cfg.Root is an optional bucket path for all
 // file systems; an empty path means the database root. A zero Config, or one
 // with no encryption enabled, creates a plaintext store.
 func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {

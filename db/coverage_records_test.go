@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/malivvan/storm/db/q"
-	"github.com/malivvan/storm/internal/encryption"
+	"github.com/malivvan/storm/internal/crypto"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -187,7 +187,7 @@ func TestAEADHelperFallbacks(t *testing.T) {
 	require.Equal(t, plain, opened)
 
 	// Unknown key domains are rejected only when key encryption is on.
-	enc := &encState{encKeys: true, sivs: map[string]*encryption.SIVNameCipher{}}
+	enc := &encState{encKeys: true, sivs: map[string]*crypto.SIVNameCipher{}}
 	_, err = enc.sealKey(plain, "bogus")
 	require.ErrorIs(t, err, ErrInvalidConfig)
 	_, err = enc.openKey(plain, "bogus")

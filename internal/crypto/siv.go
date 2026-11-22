@@ -1,4 +1,4 @@
-package encryption
+package crypto
 
 import (
 	"crypto/aes"
@@ -14,7 +14,7 @@ import (
 )
 
 // SIVEngine implements AES-SIV (Synthetic Initialization Vector) mode
-// for deterministic authenticated encryption. This is particularly useful
+// for deterministic authenticated crypto. This is particularly useful
 // for filename encryption where we need deterministic output.
 //
 // SIV provides:

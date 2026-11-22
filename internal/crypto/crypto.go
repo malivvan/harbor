@@ -1,4 +1,4 @@
-// Package encryption provides the authenticated-encryption primitives shared
+// Package crypto provides the authenticated-encryption primitives shared
 // by the ts time-series store, the fs filesystem package and the db and vec
 // stores.
 //
@@ -15,7 +15,7 @@
 // Callers may add operation context around them with fmt.Errorf("...: %w", err),
 // which keeps errors.Is and errors.As working; the stores in this repository do
 // exactly that.
-package encryption
+package crypto
 
 import (
 	"crypto/aes"

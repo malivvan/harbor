@@ -12,7 +12,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/malivvan/storm/db"
-	"github.com/malivvan/storm/internal/encryption"
+	"github.com/malivvan/storm/internal/crypto"
 	"github.com/malivvan/storm/ts"
 	"github.com/malivvan/storm/vec"
 )
@@ -374,7 +374,7 @@ func TestWrongPasswordClosesHandle(t *testing.T) {
 	if !errors.Is(err, ErrInvalidPassword) {
 		t.Fatalf("wrong password = %v, want ErrInvalidPassword", err)
 	}
-	if !errors.Is(err, encryption.ErrAuthFailed) {
+	if !errors.Is(err, crypto.ErrAuthFailed) {
 		t.Fatalf("wrong password = %v, want it to wrap ErrAuthFailed", err)
 	}
 
@@ -655,7 +655,7 @@ func TestCanaryBindsEncryptionFlags(t *testing.T) {
 	if !errors.Is(err, ErrInvalidPassword) {
 		t.Fatalf("Open after flag tampering = %v, want ErrInvalidPassword", err)
 	}
-	if !errors.Is(err, encryption.ErrAuthFailed) {
+	if !errors.Is(err, crypto.ErrAuthFailed) {
 		t.Fatalf("Open after flag tampering = %v, want it to wrap ErrAuthFailed", err)
 	}
 }

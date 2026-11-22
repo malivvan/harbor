@@ -324,7 +324,7 @@ func TestAEADFreshNoncePerWrite(t *testing.T) {
 	require.NotContains(t, string(first), `"name"`)
 }
 
-// TestAEADQuantizationRoundTrip proves quantized vectors survive encryption.
+// TestAEADQuantizationRoundTrip proves quantized vectors survive crypto.
 func TestAEADQuantizationRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
