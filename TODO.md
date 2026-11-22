@@ -126,174 +126,54 @@ Regression tests: `TestFindEmptyIndexedValue`, `TestReverseRangeAboveMax`,
 
 # 5. `fs` package
 
-## F1. [High] Renaming/copying a directory into its own subtree destroys data
-**Location:** `fs/fs.go` `Rename` (link step), `Copy`.
-**Problem:** `Rename("/a", "/a/c")` links the directory into itself and unlinks
-it from the root, returning success. The whole subtree becomes unreachable and
-`RemoveAll` can loop on the cycle. `Copy("/a","/a/c")` creates a self-referential
-duplicate.
-**Fix:** Reject when the destination is the source or one of its descendants
-(ancestry/inode comparison; `EINVAL`/`EBUSY`).
-**Test:** `/a`→`/a/c`, `/a`→`/a/c/d`, self-rename; assert an error and intact
-source.
+All items in this section are resolved:
 
-## F2. [High] `EncryptContent` is ignored with an external `contentFS`
-**Location:** `fs/fs.go` `saveData`, `loadData`.
-**Problem:** When `contentFS != nil`, content is written/read verbatim; no
-`sealContent`/`openContent`. The marker advertises encryption, so users believe
-file bytes are encrypted while they are plaintext in the external store.
-**Fix:** Seal before writing to `contentFS` and open after reading, or reject
-`EncryptContent` with an external contentFS.
-**Test:** Write a file with encryption + external contentFS; assert the external
-object is not plaintext and can only be read with the key.
+- **F1** — `Rename`/`Copy` reject the source itself and any descendant with
+  `EINVAL` before mutating anything (`isDescendantPath` plus an inode
+  comparison).
+- **F2** — content written to an external `contentFS` is sealed and opened
+  through the store's encryption state; `EncryptContent` is no longer silently
+  ignored.
+- **F3** — s3fs `OpenFile` only treats `ErrNotFound` as "new object"; other
+  `GetObject`/`ReadAll`/`Close` errors abort the open, so `Close` cannot
+  overwrite an existing object with a partial buffer.
+- **F4** — the default umask is now `0022` and it is applied to file and
+  directory creation (`Create` produces `0755`, not `0777`).
+- **F5** — `RemoveAll` propagates parent-save errors instead of dropping them.
+- **F6** — `extendedFS.MkdirAll` returns the first real error and rejects a
+  path component that is an existing file (`ENOTDIR`).
+- **F7** — `fileadapter.Truncate` rejects shrinking (no silent tail), and grows
+  by appending instead of overwriting from offset 0.
+- **F8** — s3fs `Remove` returns `ENOTEMPTY` for a non-empty directory and
+  `Rename` copies/deletes every object under a directory prefix.
+- **F9** — `Rename` replaces an existing non-directory target; directory
+  replacement returns `EEXIST`/`EISDIR`.
+- **F10** — cross-directory renames persist both parents and the replaced
+  inode in a single bbolt transaction.
+- **F11** — the `fs/inode` package was unreferenced (see F16), so it was
+  removed together with its `..` resolution defect.
+- **F12** — `Snapshot.Open` no longer rolls back the shared read transaction
+  when one file cannot be read; only `Release` ends it.
+- **F13** — `fs/README.md` examples use the 3-argument `fs.Open`,
+  `Config{Root: ...}`, `filesystem.CreateSnapshot`, `fs.Walk(snapshot, ...)`
+  and `filesystem.NewSnapshotManager`.
+- **F14** — `fs.Config.Root` documents that an empty root is the database root.
+- **F15** — `Remove("/")` returns `EBUSY`.
+- **F16** — removed the dead `fs/inode` package and `createRootBucket`.
+  `dirWriteFlags` is actually used, and the remaining `absfs` exports are the
+  public compatibility surface, so they are kept.
+- **F17** — the HTTP client closes the response body when `GetObject` gets an
+  unexpected status.
+- **F18** — s3fs `ReadDir` sorts its entries by name.
+- **F19** — Store roots and file-system names reject `/`, `.` and `..` so the
+  literal-bucket and slash-joined views cannot diverge.
+- **F20** — regression tests added in `fs/todo_review_test.go`,
+  `fs/absfs/todo_review_test.go` and `fs/s3fs/todo_review_test.go`
+  (rename/copy into subtree, encrypted external content, umask, root removal,
+  replacement rename, cross-directory rename, snapshot read errors, root
+  validation, MkdirAll over a file, truncate shrink, s3fs non-empty
+  remove/rename, s3fs read errors, sorted ReadDir and body closing).
 
-## F3. [High] s3fs `OpenFile` for writing ignores `GetObject`/`ReadAll` errors
-**Location:** `fs/s3fs/s3fs.go` `OpenFile`.
-**Problem:** A non-`ErrNotFound` error from `GetObject` leaves the buffer empty;
-`Close` then overwrites the existing object with only the new bytes. `ReadAll`
-errors are ignored.
-**Fix:** Only treat `ErrNotFound` as empty; propagate all other errors and the
-`ReadAll` error.
-**Test:** Mock `GetObject` returning access-denied/5xx; assert open fails and no
-`PutObject` occurs.
-
-## F4. [Medium] Umask is never applied to created files/directories
-**Location:** `fs/fs.go` `openFile`, `mkdir`; `Umask()`/`SetUmask`.
-**Problem:** `perm` is used verbatim; docs say “before umask”; `Create` yields
-mode `0777` under the default umask. This also makes world-writable files by
-default.
-**Fix:** Apply `fs.Umask()` at creation, or correct the docs and remove the
-misleading contract.
-**Test:** `SetUmask(0077)`, create file/dir, assert modes.
-
-## F5. [Medium] `RemoveAll` is non-atomic and drops the parent save error
-**Location:** `fs/fs.go` `RemoveAll`.
-**Problem:** Content deletion, inode deletion and parent update run in separate
-transactions; `saveInode(parent)` errors are ignored. A failure leaves the parent
-listing removed inodes.
-**Fix:** Delete inodes and update the parent in one bbolt transaction (or at
-least propagate the save error).
-**Test:** Inject a save failure mid-removal and assert a consistent tree.
-
-## F6. [Medium] `absfs.extendedFS.MkdirAll` swallows all errors
-**Location:** `fs/absfs/filesystem.go` `MkdirAll`.
-**Problem:** The result of `Mkdir` is ignored; if a component exists as a file,
-`MkdirAll` returns nil with nothing created. This is reachable through
-`fs.saveData` with an extended s3fs contentFS.
-**Fix:** Return the first non-`os.ErrExist` error.
-**Test:** `MkdirAll` over an existing file path returns an error.
-
-## F7. [Medium] `absfs.fileadapter.Truncate` cannot shrink
-**Location:** `fs/absfs/fileadapter.go`.
-**Problem:** The fallback seeks to 0 and writes `size` zero bytes, leaving any
-tail intact when shrinking.
-**Fix:** Return an error when shrinking is unsupported, or rewrite the file.
-**Test:** Wrap a Seekable without native Truncate; truncate 10→4; assert length.
-
-## F8. [Medium] s3fs `Remove`/`Rename` on a non-empty “directory” orphan children
-**Location:** `fs/s3fs/s3fs.go`.
-**Problem:** They delete/copy only the marker object, not keys under the prefix,
-so children remain (or stay under the old prefix) while the call reports
-success.
-**Fix:** List and delete/copy the prefix; reject non-empty removal with
-`ENOTEMPTY` if that is the intended contract.
-**Test:** Remove/rename a directory containing an object.
-
-## F9. [Medium] `fs.Rename` rejects replacing an existing target
-**Location:** `fs/fs.go` `Rename`.
-**Problem:** POSIX/absfs contract allows replacing a non-directory target;
-this implementation always returns `EEXIST`, breaking the temp-file-and-rename
-idiom.
-**Fix:** If both source and destination are non-directories, unlink the
-destination and proceed atomically.
-**Test:** Rename over an existing file replaces it.
-
-## F10. [Medium] `Rename` is not atomic across directories
-**Location:** `fs/fs.go` cross-directory branch.
-**Problem:** Destination parent save, source unlink, and source parent save are
-separate transactions. A failure after the first save leaves two names for one
-inode without an incremented link count, leading to dangling references/data
-loss.
-**Fix:** Link, unlink, and save both parents in one `db.Update`.
-**Test:** Inject failure between saves and assert no double entry/dangling link.
-
-## F11. [Medium] `inode.Resolve` mishandles `..` because `NewDir` points `..` to itself
-**Location:** `fs/inode/inode.go` `NewDir`, `Resolve`.
-**Problem:** `Resolve` does not normalize paths and relies on literal `..`
-entries; with default `NewDir`, `/a/..` resolves to `a`, not the root. Tests
-manually relink `..`.
-**Fix:** Normalize `.`/`..` in `Resolve` or track a real parent.
-**Test:** `NewDir` + link `a`; `Resolve("a/../x")` addresses the root child.
-
-## F12. [Medium] Snapshot `Open` rolls back the shared transaction on one read error
-**Location:** `fs/snapshot.go` `Open`.
-**Problem:** `readContent` failure calls `s.tx.Rollback()` but leaves
-`s.released=false`; the snapshot then uses a closed tx and `Release` double-rolls
-back. One bad file invalidates the whole snapshot.
-**Fix:** Do not roll back on a per-file read error; only `Release` ends the tx.
-**Test:** Force a read error and assert other files remain readable.
-
-## F13. [Medium] `fs/README.md` examples are stale and uncompilable
-**Location:** `fs/README.md`.
-**Problem:** Examples use the old 4-argument `fs.Open(ctx, bdb, root, cfg)`
-signature, `fs.CreateSnapshot` on the package, and `snapshot.Walk` (no such
-method).
-**Fix:** Update to 3-argument `Open` with `Config{Root: [][]byte{...}}`, use
-`FS.CreateSnapshot`, and `fs.Walk(snapshot, ...)`.
-
-## F14. [Medium] `Config.Root` doc contradicts the implementation
-**Location:** `fs/aead.go` `Config.Root`.
-**Problem:** Doc says empty Root uses an `"fs"` bucket; actual empty Root is the
-database root (top-level `state`/`inodes`/...).
-**Fix:** Correct the doc and test the default location.
-
-## F15. [Low] `Remove("/")` reports success without doing anything
-**Location:** `fs/fs.go` `Remove`.
-**Problem:** `os.Remove("/")` returns `EBUSY`; here it is a silent no-op.
-**Fix:** Return `EINVAL`/`EBUSY`, or document the no-op.
-**Test:** `Remove("/")` errors.
-
-## F16. [Low] Dead code/unused APIs
-**Location:** `fs/store.go` `createRootBucket`; entire `fs/inode` package;
-`fs/absfs` exports such as `ExtendFiler`, `ExtendSeekable`, `ParseFileMode`,
-`ParseFlags`, `BlockSymlinks`, `ExtendSymlinkFiler`, `SymlinkOverlay`;
-`inode/store.go` `min`/`max`; `fs/file.go` `dirWriteFlags`; unreachable branches
-in `fs/fs.go`.
-**Problem:** Several APIs are unreferenced or unreachable; `min`/`max` shadow
-builtins.
-**Fix:** Remove or wire them up, and delete unreachable branches.
-
-## F17. [Low] s3fs `http_client.GetObject` leaks the body on unexpected status
-**Location:** `fs/s3fs/http_client.go`.
-**Problem:** Non-2xx/non-404 returns `responseError(resp)` without closing the
-body; every other method closes it.
-**Fix:** Close the body before/inside the error path.
-**Test:** Drive a 500 and assert the body is closed.
-
-## F18. [Low] s3fs `ReadDir` claims sorted output but does not sort
-**Location:** `fs/s3fs/s3fs.go`, `fs/s3fs/s3file.go`.
-**Problem:** Display names derived by trimming at `/` can be out of order
-(`a.txt` before `a`, because `.` < `/`), contradicting the doc.
-**Fix:** Explicitly sort entries by name.
-**Test:** Objects `a.txt` and `a/b` yield `["a","a.txt"]`.
-
-## F19. [Low] Root-path handling is inconsistent for unusual segment names
-**Location:** `fs/store.go` `bucketPath` vs `rootBucket`/`FileSystems`/`DeleteFS`.
-**Problem:** `bucketPath` uses `path.Join` (treats root elements as
-slash-delimited paths), while the other functions treat each element as a
-literal bucket name. Elements containing `/`, `.` or `..` diverge; `name` may
-contain `/`.
-**Fix:** Validate and reject `/`, `.`, `..` in root/FS names, or make all paths
-split consistently.
-**Test:** Round-trip a nested root with unusual elements through
-`Open`/`FileSystems`/`DeleteFS`.
-
-## F20. [Low] Missing tests
-No coverage for encryption × external contentFS, directory-into-subtree
-rename/copy, umask, non-atomic RemoveAll/Rename failure, s3fs non-empty directory
-Remove/Rename, s3fs write-open read errors, or `extendedFS.MkdirAll` errors.
-
----
 
 # 6. `ts` package
 

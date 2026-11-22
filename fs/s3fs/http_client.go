@@ -183,7 +183,9 @@ func (c *httpS3Client) GetObject(ctx context.Context, input *GetObjectInput) (*G
 		return nil, notFound(input.Bucket, input.Key)
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		return nil, responseError(resp)
+		err := responseError(resp)
+		closeBody(resp)
+		return nil, err
 	}
 	lastModified, _ := http.ParseTime(resp.Header.Get("Last-Modified"))
 	return &GetObjectOutput{

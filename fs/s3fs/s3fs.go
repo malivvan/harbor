@@ -19,7 +19,9 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/malivvan/storm/fs/absfs"
@@ -201,17 +203,29 @@ func (fs *FileSystem) OpenFile(name string, flag int, perm os.FileMode) (absfs.F
 
 		var buf []byte
 
-		// Load existing content unless O_TRUNC is set
+		// Load existing content unless O_TRUNC is set. Only a genuinely
+		// missing object starts empty; any other error must abort the open so
+		// Close cannot overwrite the existing object with a truncated buffer.
 		if flag&os.O_TRUNC == 0 {
 			getOutput, getErr := fs.client.GetObject(fs.ctx, &GetObjectInput{
 				Bucket: fs.bucket,
 				Key:    name,
 			})
-			if getErr == nil {
-				buf, _ = io.ReadAll(getOutput.Body)
-				getOutput.Body.Close()
+			switch {
+			case getErr == nil:
+				buf, getErr = io.ReadAll(getOutput.Body)
+				closeErr := getOutput.Body.Close()
+				if getErr != nil {
+					return nil, wrapError("open", name, getErr)
+				}
+				if closeErr != nil {
+					return nil, wrapError("open", name, closeErr)
+				}
+			case errors.Is(getErr, ErrNotFound):
+				// New object: start with an empty buffer.
+			default:
+				return nil, wrapError("open", name, getErr)
 			}
-			// If file doesn't exist, start with empty buffer
 		}
 
 		if buf == nil {
@@ -308,6 +322,28 @@ func (fs *FileSystem) Mkdir(name string, perm os.FileMode) error {
 	return wrapError("mkdir", name, err)
 }
 
+// listObjects returns every object whose key starts with prefix, following
+// pagination.
+func (fs *FileSystem) listObjects(prefix string) ([]Object, error) {
+	var objects []Object
+	var token string
+	for {
+		output, err := fs.client.ListObjectsV2(fs.ctx, &ListObjectsV2Input{
+			Bucket:            fs.bucket,
+			Prefix:            prefix,
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return nil, err
+		}
+		objects = append(objects, output.Contents...)
+		if !output.IsTruncated {
+			return objects, nil
+		}
+		token = output.NextContinuationToken
+	}
+}
+
 // Remove removes a file or directory from S3.
 // Returns os.ErrNotExist if neither the file nor a directory marker exists.
 // For directories, it removes the directory marker (key with trailing slash).
@@ -343,6 +379,19 @@ func (fs *FileSystem) Remove(name string) error {
 	}
 
 	if isDirMarker {
+		// Removing a directory only succeeds when nothing lives below its
+		// prefix; otherwise the children would be orphaned while the call
+		// reported success.
+		objects, listErr := fs.listObjects(dirKey)
+		if listErr != nil {
+			return wrapError("remove", name, listErr)
+		}
+		for _, obj := range objects {
+			if obj.Key == dirKey {
+				continue
+			}
+			return &os.PathError{Op: "remove", Path: name, Err: syscall.ENOTEMPTY}
+		}
 		_, err = fs.client.DeleteObject(fs.ctx, &DeleteObjectInput{
 			Bucket: fs.bucket,
 			Key:    dirKey,
@@ -384,8 +433,58 @@ func (fs *FileSystem) Rename(oldpath, newpath string) error {
 		return err
 	}
 
-	// Copy object to new location
-	// Issue #13 fix: CopySource must be in format /bucket/key (with leading slash)
+	if oldpath == newpath {
+		return nil
+	}
+
+	// A directory is either a trailing-slash marker or has children below its
+	// prefix. Move all of them, not just the marker.
+	oldPrefix := oldpath + "/"
+	objects, listErr := fs.listObjects(oldPrefix)
+	if listErr != nil {
+		return wrapError("rename", oldpath, listErr)
+	}
+	if len(objects) == 0 {
+		_, headErr := fs.client.HeadObject(fs.ctx, &HeadObjectInput{
+			Bucket: fs.bucket,
+			Key:    oldPrefix,
+		})
+		switch {
+		case headErr == nil:
+			objects = []Object{{Key: oldPrefix}}
+		case errors.Is(headErr, ErrNotFound):
+			// Not a directory; fall through to the single-object path.
+		default:
+			return wrapError("rename", oldpath, headErr)
+		}
+	}
+	if len(objects) > 0 {
+		newPrefix := newpath + "/"
+		// Copy first so a failure never leaves the tree half-deleted.
+		for _, obj := range objects {
+			target := newPrefix + strings.TrimPrefix(obj.Key, oldPrefix)
+			_, err := fs.client.CopyObject(fs.ctx, &CopyObjectInput{
+				Bucket:     fs.bucket,
+				CopySource: "/" + fs.bucket + "/" + obj.Key,
+				Key:        target,
+			})
+			if err != nil {
+				return wrapError("rename", obj.Key, err)
+			}
+		}
+		for _, obj := range objects {
+			if _, err := fs.client.DeleteObject(fs.ctx, &DeleteObjectInput{
+				Bucket: fs.bucket,
+				Key:    obj.Key,
+			}); err != nil {
+				return wrapError("rename", obj.Key, err)
+			}
+		}
+		return nil
+	}
+
+	// Copy object to new location.
+	// CopySource must be in /bucket/key form (with leading slash).
 	copySource := "/" + fs.bucket + "/" + oldpath
 	_, err = fs.client.CopyObject(fs.ctx, &CopyObjectInput{
 		Bucket:     fs.bucket,
@@ -617,6 +716,12 @@ func (fs *FileSystem) ReadDir(name string) ([]iosfs.DirEntry, error) {
 		}
 		continuationToken = output.NextContinuationToken
 	}
+
+	// Display names are derived by trimming at "/", so listing order is not
+	// necessarily lexical (for example "a.txt" before "a"). Sort explicitly.
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name() < entries[j].Name()
+	})
 
 	return entries, nil
 }

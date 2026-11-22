@@ -305,22 +305,22 @@ func TestFile(t *testing.T) {
 			Name string
 		}{
 			{
-				Mode: 0777,
+				Mode: 0755,
 				Size: 0,
 				Name: "fileTestOpenClose.txt",
 			},
 			{
-				Mode: 0777,
+				Mode: 0755,
 				Size: int64(len(message)),
 				Name: "fileTestReadWrite.0001.txt",
 			},
 			{
-				Mode: 0777,
+				Mode: 0755,
 				Size: int64(len(message)),
 				Name: "fileTestReadWrite.0002.txt",
 			},
 			{
-				Mode: 0777,
+				Mode: 0755,
 				Size: size,
 				Name: "fileTestSeekReadWriteAt.txt",
 			},

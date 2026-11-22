@@ -1414,7 +1414,7 @@ func TestFileSystem(t *testing.T) {
 	}
 	t.Run("state", func(t *testing.T) {
 		mode := bfs.Umask()
-		if mode != 0755 {
+		if mode != 0022 {
 			t.Errorf("incorrect default umask %o", mode)
 		}
 
@@ -1659,7 +1659,7 @@ func TestFileSystem(t *testing.T) {
 			t.Error("wrong size")
 		}
 
-		if info.Mode() != 0777 {
+		if info.Mode() != 0755 {
 			t.Errorf("wrong mode %s", info.Mode())
 		}
 

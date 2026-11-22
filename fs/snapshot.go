@@ -391,7 +391,8 @@ func (s *Snapshot) Open(name string) (absfs.File, error) {
 	// Load file data
 	data, err := s.readContent(node)
 	if err != nil {
-		s.tx.Rollback()
+		// A single unreadable file must not invalidate the snapshot's shared
+		// read transaction; only Release ends it.
 		return nil, err
 	}
 

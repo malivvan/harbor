@@ -14,8 +14,8 @@ const KeySize = encryption.KeySize
 // on-disk format.
 type Config struct {
 	// Root is the bucket path below which all file systems live. Each element
-	// is one nested bucket name. A nil or empty Root uses the default "fs"
-	// bucket.
+	// is one nested bucket name. A nil or empty Root means the database root;
+	// the storm root package passes [][]byte{[]byte("fs")} explicitly.
 	Root [][]byte
 
 	// Secret is a raw 32-byte master key. It must be set when encryption is

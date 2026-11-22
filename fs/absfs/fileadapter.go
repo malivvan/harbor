@@ -1,6 +1,7 @@
 package absfs
 
 import (
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -90,22 +91,36 @@ func (f *fileadapter) Truncate(size int64) error {
 		return file.Truncate(size)
 	}
 
-	_, err := f.sf.Seek(0, io.SeekStart)
+	// Without a native Truncate the file can only be grown. Shrinking would
+	// leave the tail intact, so reject it instead of silently corrupting the
+	// file.
+	cur, err := f.sf.Seek(0, io.SeekEnd)
 	if err != nil {
 		return err
 	}
+	if size < cur {
+		return fmt.Errorf("absfs: cannot truncate %d to %d bytes: underlying file has no Truncate", cur, size)
+	}
+	if size == cur {
+		return nil
+	}
 
-	bufsize := 4096
-	buf := make([]byte, bufsize)
-	for i := 0; int64(i) < int64(size); i += bufsize {
-		if size-int64(i) < int64(bufsize) {
-			bufsize = int(size - int64(i))
+	// Grow by appending zeros; seeking to 0 first would overwrite existing
+	// content.
+	if _, err := f.sf.Seek(cur, io.SeekStart); err != nil {
+		return err
+	}
+	remaining := size - cur
+	buf := make([]byte, 4096)
+	for remaining > 0 {
+		n := int64(len(buf))
+		if remaining < n {
+			n = remaining
 		}
-
-		_, err = f.sf.Write(buf[:bufsize])
-		if err != nil {
+		if _, err := f.sf.Write(buf[:n]); err != nil {
 			return err
 		}
+		remaining -= n
 	}
 	return nil
 }

@@ -113,7 +113,7 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FS, error) {
 
 		// load the
 		data := make([]byte, 4)
-		binary.BigEndian.PutUint32(data, uint32(0755))
+		binary.BigEndian.PutUint32(data, uint32(0022))
 		_, err = b.LoadOrSet("umask", data)
 		if err != nil {
 			return err
@@ -211,8 +211,9 @@ func (fs *FS) SetCacheSize(size int) {
 	}
 }
 
-// Umask returns the current `umask` value. A non zero `umask` will be masked
-// with file and directory creation permissions. Returns 0755 if an error occurs.
+// Umask returns the current `umask` value. The mask is applied to the
+// permission bits requested for new files and directories. Returns 0022 if an
+// error occurs.
 func (fs *FS) Umask() os.FileMode {
 	var umask os.FileMode
 	err := fs.db.View(func(tx *bolt.Tx) error {
@@ -228,8 +229,8 @@ func (fs *FS) Umask() os.FileMode {
 		return nil
 	})
 	if err != nil {
-		// Return default umask on error instead of panicking
-		return 0755
+		// Return the default umask on error instead of panicking.
+		return 0022
 	}
 
 	return umask
@@ -526,7 +527,11 @@ func (fs *FS) saveData(ino uint64, data []byte) error {
 		}
 		defer f.Close()
 
-		if _, err := f.Write(data); err != nil {
+		sealed, err := fs.enc.Load().sealContent(data)
+		if err != nil {
+			return err
+		}
+		if _, err := f.Write(sealed); err != nil {
 			return fmt.Errorf("failed to write data: %w", err)
 		}
 
@@ -575,7 +580,11 @@ func (fs *FS) loadData(ino uint64) ([]byte, error) {
 			return nil, fmt.Errorf("failed to read file: %w", err)
 		}
 
-		return data, nil
+		plain, err := fs.enc.Load().openContent(data)
+		if err != nil {
+			return nil, err
+		}
+		return plain, nil
 	}
 
 	if fs.chunked() {
@@ -661,6 +670,20 @@ func (fs *FS) resizeContent(node *iNode, size int64) error {
 	return nil
 }
 
+// isDescendantPath reports whether child is parent itself or lives inside it.
+// Both paths must be clean, absolute virtual paths.
+func isDescendantPath(parent, child string) bool {
+	parent = path.Clean(parent)
+	child = path.Clean(child)
+	if parent == child {
+		return true
+	}
+	if parent == "/" {
+		return strings.HasPrefix(child, "/")
+	}
+	return strings.HasPrefix(child, parent+"/")
+}
+
 // cleanPath - takes the absolute or relative path provided by `name` and
 // returns the directory and filename of the cleand absolute path.
 func (fs *FS) cleanPath(name string) (string, string) {
@@ -707,57 +730,102 @@ func (fs *FS) Rename(oldpath, newpath string) error {
 		linkErr.New = dstDir
 		return linkErr
 	}
-	if dstChild != nil {
-		linkErr.Err = os.ErrExist
+	sameDir := srcParent.Ino == dstParent.Ino
+	if sameDir && srcFilename == dstFilename {
+		// Reject an identity rename explicitly: reporting success would hide
+		// a caller that resolved the wrong destination.
+		linkErr.Err = syscall.EINVAL
+		return linkErr
+	}
+
+	// Moving a directory into itself or one of its own descendants would
+	// detach the whole subtree from the tree.
+	if dstParent.Ino == srcChild.Ino || isDescendantPath(path.Join(srcDir, srcFilename), dstDir) {
+		linkErr.Err = syscall.EINVAL
+		return linkErr
+	}
+
+	// POSIX lets a non-directory replace a non-directory. Replacing a
+	// directory is only possible for an empty one, which this implementation
+	// does not attempt.
+	if dstChild != nil && (srcChild.IsDir() || dstChild.IsDir()) {
+		if dstChild.IsDir() && !srcChild.IsDir() {
+			linkErr.Err = syscall.EISDIR
+		} else {
+			linkErr.Err = syscall.EEXIST
+		}
 		linkErr.New = path.Join(dstDir, dstFilename)
 		return linkErr
 	}
 
-	// Check if source and destination are in the same directory
-	sameDir := srcParent.Ino == dstParent.Ino
+	// Remove the replaced entry before linking the new name.
+	if dstChild != nil {
+		if _, err := dstParent.Unlink(dstFilename); err != nil {
+			linkErr.Err = err
+			return linkErr
+		}
+	}
 
-	// Add the new link
-	_, err := dstParent.Link(dstFilename, srcChild.Ino)
-	if err != nil {
+	if _, err := dstParent.Link(dstFilename, srcChild.Ino); err != nil {
 		linkErr.Err = err
 		return linkErr
 	}
 
-	// If same directory, do both operations on the same inode
 	if sameDir {
-		_, err = dstParent.Unlink(srcFilename)
-		if err != nil {
-			linkErr.Err = err
-			return linkErr
-		}
-		_, err = fs.saveInode(dstParent)
-		if err != nil {
+		// The source and destination names share one parent inode.
+		if _, err := dstParent.Unlink(srcFilename); err != nil {
 			linkErr.Err = err
 			return linkErr
 		}
 	} else {
-		// Different directories - save each parent separately
-		_, err = fs.saveInode(dstParent)
-		if err != nil {
-			linkErr.Err = err
-			return linkErr
-		}
-
-		_, err = srcParent.Unlink(srcFilename)
-		if err != nil {
-			linkErr.Err = err
-			return linkErr
-		}
-
-		_, err = fs.saveInode(srcParent)
-		if err != nil {
+		if _, err := srcParent.Unlink(srcFilename); err != nil {
 			linkErr.Err = err
 			return linkErr
 		}
 	}
 
-	if dstChild != nil {
-		dstChild.countDown()
+	// Persist both parents, and the replaced inode, in one transaction. A
+	// failure can therefore never leave two names for one inode without a
+	// matching link count.
+	deleteReplaced := false
+	err := fs.db.Update(func(tx *bolt.Tx) error {
+		b, err := fs.openFsBucketWithCache(tx)
+		if err != nil {
+			return err
+		}
+		if err := b.PutInode(dstParent.Ino, dstParent); err != nil {
+			return err
+		}
+		if !sameDir {
+			if err := b.PutInode(srcParent.Ino, srcParent); err != nil {
+				return err
+			}
+		}
+		if dstChild == nil {
+			return nil
+		}
+		if dstChild.countDown() == 0 {
+			deleteReplaced = true
+			key := i2b(dstChild.Ino)
+			if err := b.inodes.Delete(key); err != nil {
+				return err
+			}
+			if fs.contentFS == nil {
+				b.data.Delete(key)
+			}
+			b.symlinks.Delete(key)
+			return b.deleteAllChunks(dstChild.Ino)
+		}
+		return b.PutInode(dstChild.Ino, dstChild)
+	})
+	if err != nil {
+		linkErr.Err = err
+		return linkErr
+	}
+	if deleteReplaced && fs.contentFS != nil {
+		if err := fs.contentFS.Remove(inoToPath(dstChild.Ino)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
 
 	return nil
@@ -793,6 +861,12 @@ func (fs *FS) Copy(source, destination string) error {
 	if dstChild != nil {
 		pathErr.Err = os.ErrExist
 		pathErr.Path = path.Join(dstDir, dstFilename)
+		return pathErr
+	}
+
+	// Copying a directory into itself would create a self-referential tree.
+	if dstParent.Ino == srcChild.Ino || isDescendantPath(path.Join(srcDir, srcFilename), dstDir) {
+		pathErr.Err = syscall.EINVAL
 		return pathErr
 	}
 
@@ -1024,8 +1098,8 @@ func (fs *FS) openFile(name string, flag int, perm os.FileMode, depth int) (absf
 			return file, pathErr
 		}
 
-		// Create file
-		child = newInode(perm &^ os.ModeType)
+		// Create file, applying the configured umask to the permission bits.
+		child = newInode(perm &^ os.ModeType &^ fs.Umask())
 		err := fs.saveParentChild(parent, filename, child)
 		if err != nil {
 			pathErr.Err = err
@@ -1286,7 +1360,7 @@ func (fs *FS) mkdir(name string, perm os.FileMode) error {
 		return pathErr
 	}
 
-	child = newInode(os.ModeDir | (perm &^ os.ModeType))
+	child = newInode(os.ModeDir | (perm &^ os.ModeType &^ fs.Umask()))
 	err := fs.saveParentChild(parent, filename, child)
 	if err != nil {
 		pathErr.Err = err
@@ -1340,9 +1414,9 @@ func (fs *FS) Remove(name string) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
-	// cannot remove the root
+	// The root cannot be removed.
 	if name == "/" {
-		return nil
+		return &os.PathError{Op: "remove", Path: name, Err: syscall.EBUSY}
 	}
 
 	pathErr := &os.PathError{Op: "remove", Path: name}
@@ -1527,14 +1601,18 @@ func (fs *FS) RemoveAll(name string) error {
 			fs.cache.Invalidate(parent.Ino)
 			fs.cache.Invalidate(child.Ino)
 		}
-		fs.saveInode(parent)
+		if _, err := fs.saveInode(parent); err != nil {
+			return err
+		}
 	} else if child == nil && parent != nil {
 		// Removing all children from parent
 		parent.Children = parent.Children[:0]
 		if fs.cache != nil {
 			fs.cache.Invalidate(parent.Ino)
 		}
-		fs.saveInode(parent)
+		if _, err := fs.saveInode(parent); err != nil {
+			return err
+		}
 	}
 
 	return nil

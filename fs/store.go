@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strings"
 	"sync"
 
 	"github.com/malivvan/storm/fs/absfs"
@@ -52,6 +53,12 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		return nil, ErrNilParam
 	}
 
+	for _, part := range cfg.Root {
+		if err := validateBucketName(string(part)); err != nil {
+			return nil, err
+		}
+	}
+
 	enc, err := resolveConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -62,6 +69,19 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		root: cloneRoot(cfg.Root),
 		enc:  enc,
 	}, nil
+}
+
+// validateBucketName rejects names that would make the literal-bucket and
+// slash-joined path views disagree. An empty name is allowed where the caller
+// documents it (the Store root itself).
+func validateBucketName(name string) error {
+	if name == "" {
+		return nil
+	}
+	if name == "." || name == ".." || strings.Contains(name, "/") {
+		return fmt.Errorf("%w: invalid bucket name %q", ErrNilParam, name)
+	}
+	return nil
 }
 
 // Root returns a copy of the Store's root bucket path.
@@ -87,6 +107,9 @@ func (s *Store) Open(name string) (*FS, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrNilParam
 	}
+	if err := validateBucketName(name); err != nil {
+		return nil, err
+	}
 
 	if err := s.checkMode(name); err != nil {
 		return nil, err
@@ -105,6 +128,9 @@ func (s *Store) Open(name string) (*FS, error) {
 func (s *Store) OpenWithContentFS(name string, contentFS absfs.FileSystem) (*FS, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrNilParam
+	}
+	if err := validateBucketName(name); err != nil {
+		return nil, err
 	}
 
 	if err := s.checkMode(name); err != nil {
@@ -165,6 +191,9 @@ func (s *Store) DeleteFS(name string) error {
 	}
 	if name == "" {
 		return ErrNilParam
+	}
+	if err := validateBucketName(name); err != nil {
+		return err
 	}
 
 	return s.db.Update(func(tx *bolt.Tx) error {
@@ -347,27 +376,6 @@ func (s *Store) rootBucket(tx *bolt.Tx) *bolt.Bucket {
 		}
 	}
 	return b
-}
-
-// createRootBucket creates the configured root path, returning the innermost
-// bucket. An empty path returns nil.
-func (s *Store) createRootBucket(tx *bolt.Tx) (*bolt.Bucket, error) {
-	var b *bolt.Bucket
-	for _, name := range s.root {
-		if len(name) == 0 {
-			continue
-		}
-		var err error
-		if b == nil {
-			b, err = tx.CreateBucketIfNotExists(name)
-		} else {
-			b, err = b.CreateBucketIfNotExists(name)
-		}
-		if err != nil {
-			return nil, err
-		}
-	}
-	return b, nil
 }
 
 // cloneRoot returns a deep copy of a bucket path.

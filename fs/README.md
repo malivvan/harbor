@@ -27,7 +27,7 @@ The inode cache provides significant performance improvements by caching frequen
 bdb, _ := bolt.Open("myfs.db", 0644, nil)
 defer bdb.Close()
 
-store, _ := fs.Open(ctx, bdb, nil, nil)
+store, _ := fs.Open(ctx, bdb, fs.Config{})
 filesystem, _ := store.Open("")
 defer filesystem.Close()
 
@@ -51,7 +51,7 @@ multiple named file systems beneath that root:
 bdb, _ := bolt.Open("myfs.db", 0644, nil)
 defer bdb.Close()
 
-store, _ := fs.Open(ctx, bdb, []byte("tenant"), nil)
+store, _ := fs.Open(ctx, bdb, fs.Config{Root: [][]byte{[]byte("tenant")}})
 defer store.Close()
 
 docs, _ := store.Open("docs")
@@ -71,14 +71,14 @@ Create read-only point-in-time views of the filesystem:
 
 ```go
 // Create a snapshot
-snapshot, _ := fs.CreateSnapshot("backup-2024")
+snapshot, _ := filesystem.CreateSnapshot("backup-2024")
 defer snapshot.Release()
 
 // Read files from snapshot
 data, _ := snapshot.ReadFile("/config.json")
 
 // Walk snapshot filesystem
-snapshot.Walk("/", func(path string, info os.FileInfo, err error) error {
+fs.Walk(snapshot, "/", func(path string, info os.FileInfo, err error) error {
     fmt.Println(path)
     return nil
 })
@@ -87,7 +87,7 @@ snapshot.Walk("/", func(path string, info os.FileInfo, err error) error {
 snapshot.CopyToFS("/config.json", "/config-restored.json")
 
 // Use snapshot manager for multiple snapshots
-sm := fs.NewSnapshotManager()
+sm := filesystem.NewSnapshotManager()
 sm.Create("daily-backup")
 snap, _ := sm.Get("daily-backup")
 ```
@@ -105,7 +105,7 @@ import (
 // Use default BoltDB storage.
 bdb, _ := bolt.Open("myfs.db", 0644, nil)
 defer bdb.Close()
-store, _ := fs.Open(ctx, bdb, nil, nil)
+store, _ := fs.Open(ctx, bdb, fs.Config{})
 filesystem, _ := store.Open("")
 defer filesystem.Close()
 
@@ -154,7 +154,7 @@ not configured. Open a Store with `Open` and a `Config`:
 
 ```go
 key := loadKey() // exactly fs.KeySize (32) bytes
-store, err := fs.Open(ctx, bdb, nil, &fs.Config{
+store, err := fs.Open(ctx, bdb, fs.Config{
     Secret:          key,
     EncryptMetadata: true, // seal inode blobs: names, modes, sizes, times
     EncryptContent:  true, // seal file content and symlink paths

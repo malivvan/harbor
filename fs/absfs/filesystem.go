@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -329,7 +330,7 @@ func (efs *extendedFS) MkdirAll(name string, perm os.FileMode) error {
 	// Clean the path using Unix-style path cleaning
 	name = path.Clean(name)
 
-	// Build directories one at a time
+	// Build directories one at a time.
 	p := "/"
 	for _, component := range strings.Split(name, "/") {
 		if component == "" {
@@ -339,7 +340,20 @@ func (efs *extendedFS) MkdirAll(name string, perm os.FileMode) error {
 		if p == "/" {
 			continue
 		}
-		efs.Mkdir(p, perm)
+		if err := efs.Mkdir(p, perm); err != nil {
+			if !errors.Is(err, os.ErrExist) {
+				return err
+			}
+			// The component exists. It must be a directory: Mkdir also
+			// reports ErrExist when a file occupies the path.
+			info, statErr := efs.Stat(p)
+			if statErr != nil {
+				return err
+			}
+			if !info.IsDir() {
+				return &os.PathError{Op: "mkdir", Path: p, Err: syscall.ENOTDIR}
+			}
+		}
 	}
 
 	return nil
