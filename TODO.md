@@ -455,6 +455,8 @@ no-filter **0.358 ms / 48 KB / 433 allocs**; HNSW filtered **2.65 ms / 3,413 all
 build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 
 ### 3.1 `FlatIndex.Search` deep-clones the payload of every matching point, then discards all but topK — HIGH
+
+> **Status:** ✅ FIXED — the scan collects `{id, version, distance, point}`; payload maps are deep-cloned only for the topK results that survive truncation.
 - **Location:** `vec/flat_index.go:64-90` (loop at `:65`, `Payload: clonePayload(...)` at `:75`).
 - **Problem:** For each of n points it computes the distance **and** deep-copies the payload map
   (incl. nested maps/slices); only `topK` survive the truncation, so ~n−topK deep copies are

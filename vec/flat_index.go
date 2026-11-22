@@ -61,33 +61,50 @@ func (f *FlatIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	var results []ScoredPoint
+	type candidate struct {
+		id      string
+		version uint64
+		dist    float32
+		point   *PointStruct
+	}
+
+	candidates := make([]candidate, 0, len(f.points))
 	for id, point := range f.points {
 		if !MatchFilter(point.Payload, filter) {
 			continue
 		}
 
-		dist := CalculateDistance(f.metric, query, point.Vector)
-		results = append(results, ScoredPoint{
-			ID:      id,
-			Version: point.Version,
-			Score:   dist,
-			Payload: clonePayload(point.Payload),
+		candidates = append(candidates, candidate{
+			id:      id,
+			version: point.Version,
+			dist:    CalculateDistance(f.metric, query, point.Vector),
+			point:   point,
 		})
 	}
 
-	sort.Slice(results, func(i, j int) bool {
+	sort.Slice(candidates, func(i, j int) bool {
 		if f.metric == Euclid {
-			return results[i].Score < results[j].Score
+			return candidates[i].dist < candidates[j].dist
 		}
-		return results[i].Score > results[j].Score
+		return candidates[i].dist > candidates[j].dist
 	})
 
-	if topK > len(results) {
-		topK = len(results)
+	if topK > len(candidates) {
+		topK = len(candidates)
 	}
+	candidates = candidates[:topK]
 
-	return results[:topK], nil
+	// Payloads are deep-copied only for the results that survive topK.
+	results := make([]ScoredPoint, len(candidates))
+	for i, c := range candidates {
+		results[i] = ScoredPoint{
+			ID:      c.id,
+			Version: c.version,
+			Score:   c.dist,
+			Payload: clonePayload(c.point.Payload),
+		}
+	}
+	return results, nil
 }
 
 // Delete removes a point from the index by its ID.
