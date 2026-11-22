@@ -209,6 +209,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low.
 
 ### 1.14 Index result slices grow by `append` without capacity — MEDIUM
+
+> **Status:** ✅ FIXED — list and unique index result slices are pre-sized from `IndexBucket.Stats().KeyN` (tightened by `Limit`), while empty results stay nil as before.
 - **Location:** `db/index/list.go:252-317` (`All`/`AllRecords`/`Range`/`Prefix`),
   `db/index/unique.go:146-181`.
 - **Problem:** `[][]byte` results are built with repeated `append`; `ListIndex.All` is ~18% of

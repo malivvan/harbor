@@ -305,7 +305,7 @@ func (idx *ListIndex) All(ctx context.Context, value []byte, opts *Options) ([][
 		return nil, wrapError("index all", err)
 	}
 
-	var list [][]byte
+	list := resultSlice(resultCap(idx.IndexBucket, opts))
 	c := idx.IndexBucket.Cursor()
 	cur := internal.Cursor{C: c, Reverse: opts != nil && opts.Reverse}
 
@@ -373,7 +373,7 @@ func (idx *ListIndex) AllRecords(ctx context.Context, opts *Options) ([][]byte, 
 		return nil, wrapError("index all records", err)
 	}
 
-	var list [][]byte
+	list := resultSlice(resultCap(idx.IndexBucket, opts))
 
 	c := internal.Cursor{C: idx.IndexBucket.Cursor(), Reverse: opts != nil && opts.Reverse}
 
@@ -415,7 +415,7 @@ func (idx *ListIndex) Range(ctx context.Context, min []byte, max []byte, opts *O
 		return nil, wrapError("index range", err)
 	}
 
-	var list [][]byte
+	list := resultSlice(resultCap(idx.IndexBucket, opts))
 
 	c := internal.RangeCursor{
 		C:       idx.IndexBucket.Cursor(),
@@ -468,7 +468,7 @@ func (idx *ListIndex) Prefix(ctx context.Context, prefix []byte, opts *Options) 
 		return nil, wrapError("index prefix", err)
 	}
 
-	var list [][]byte
+	list := resultSlice(resultCap(idx.IndexBucket, opts))
 
 	c := internal.PrefixCursor{
 		C:       idx.IndexBucket.Cursor(),
