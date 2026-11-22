@@ -679,6 +679,8 @@ The big `ts` wins (skip satisfied retention on insert, stream block aggregation,
 - **Risk:** Low (the merge contract "last value for a timestamp wins" must be preserved).
 
 ### 4.2 Non-block `InsertMany` does an extra `Get` per point and re-reads/re-writes metadata JSON each call — MEDIUM
+
+> **Status:** ✅ FIXED — metadata is only re-encoded and rewritten when the point count actually changed (or a legacy series first gains retention); an insert that adds or removes nothing no longer decodes and re-seals the metadata document.
 - **Location:** `ts/series.go:206-260` (`bucket.Get(key)` before each `Put` at `:223`; `readMeta`
   + `writeMeta` later).
 - **Problem:** `bucket.Get(key[:])` adds a second B-tree lookup per point purely to compute
@@ -702,6 +704,8 @@ The big `ts` wins (skip satisfied retention on insert, stream block aggregation,
 - **Risk:** Low (config/guidance change).
 
 ### 4.4 `Series.Insert` allocates a one-element slice per call — LOW
+
+> **Status:** ✅ FIXED — `Insert` has a dedicated single-point transaction: non-block series write the key directly, block series use `insertBlockPoint`/mergePoint, and neither allocates the one-element `[]Point` or group map.
 - **Location:** `ts/series.go:174-177` (`InsertMany(ctx, []Point{p})`).
 - **Problem:** Every single insert allocates `[]Point{p}` and runs the batch path (map merge in
   block mode, loop in non-block).

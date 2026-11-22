@@ -172,8 +172,50 @@ func (se *Series) SetLabels(ctx context.Context, labels map[string]string) error
 }
 
 // Insert stores one point, replacing any point with the same timestamp.
+// It avoids the one-element slice and group map that InsertMany needs.
 func (se *Series) Insert(ctx context.Context, p Point) error {
-	return se.InsertMany(ctx, []Point{p})
+	if se == nil || se.store == nil {
+		return ErrNilParam
+	}
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	return se.store.b.Update(func(tx *bolt.Tx) error {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+		if err := se.store.ensureMarker(tx); err != nil {
+			return err
+		}
+		bucket, err := se.store.createSeriesBucket(tx, se.name)
+		if err != nil {
+			return err
+		}
+
+		added := 0
+		if se.store.blockDuration() > 0 {
+			var err error
+			added, err = se.store.insertBlockPoint(ctx, bucket, p)
+			if err != nil {
+				return err
+			}
+		} else {
+			key := encodeKey(p.Timestamp)
+			value, err := se.store.sealValue(p.Value)
+			if err != nil {
+				return err
+			}
+			if bucket.Get(key[:]) == nil {
+				added = 1
+			}
+			if err := bucket.Put(key[:], value); err != nil {
+				return err
+			}
+		}
+
+		return se.updateMetaAfterInsert(ctx, tx, bucket, added)
+	})
 }
 
 // InsertMany stores multiple points in a single transaction. Out-of-order
@@ -229,41 +271,51 @@ func (se *Series) InsertMany(ctx context.Context, points []Point) error {
 			}
 		}
 
-		meta, err := se.store.readMeta(tx, se.name)
-		if err != nil {
-			return err
-		}
-		metaKey, err := se.store.bucketKey(se.name)
-		if err != nil {
-			return err
-		}
-		metaBucket, err := se.store.metaBucket(tx, false)
-		if err != nil {
-			return err
-		}
-		hadMeta := metaBucket != nil && metaBucket.Get(metaKey) != nil
-
-		meta.Count += int64(added)
-		if !meta.Retention.satisfied(meta.Count) {
-			removed, err := se.store.pruneSeriesBucket(ctx, bucket, meta.Retention, se.store.nowNanos())
-			if err != nil {
-				return err
-			}
-			meta.Count -= int64(removed)
-		}
-		if meta.Count < 0 {
-			meta.Count = 0
-		}
-		// A series with no metadata and no retention policy must not gain a
-		// metadata record just from an insert.
-		if hadMeta || meta.Retention != (Retention{}) {
-			if err := se.store.writeMeta(tx, se.name, meta); err != nil {
-				return err
-			}
-		}
-
-		return checkContext(ctx)
+		return se.updateMetaAfterInsert(ctx, tx, bucket, added)
 	})
+}
+
+// updateMetaAfterInsert adjusts the persisted count and applies retention.
+// Metadata is only rewritten when the count actually changed (or a legacy
+// series first gains a retention policy), so streaming inserts do not decode
+// and re-encode the metadata document on every call.
+func (se *Series) updateMetaAfterInsert(ctx context.Context, tx *bolt.Tx, bucket *bolt.Bucket, added int) error {
+	meta, err := se.store.readMeta(tx, se.name)
+	if err != nil {
+		return err
+	}
+	metaKey, err := se.store.bucketKey(se.name)
+	if err != nil {
+		return err
+	}
+	metaBucket, err := se.store.metaBucket(tx, false)
+	if err != nil {
+		return err
+	}
+	hadMeta := metaBucket != nil && metaBucket.Get(metaKey) != nil
+
+	removed := 0
+	meta.Count += int64(added)
+	if !meta.Retention.satisfied(meta.Count) {
+		removed, err = se.store.pruneSeriesBucket(ctx, bucket, meta.Retention, se.store.nowNanos())
+		if err != nil {
+			return err
+		}
+		meta.Count -= int64(removed)
+	}
+	if meta.Count < 0 {
+		meta.Count = 0
+	}
+
+	// A series with no metadata and no retention policy must not gain a
+	// metadata record just from an insert.
+	if (hadMeta && (added > 0 || removed > 0)) || (!hadMeta && meta.Retention != (Retention{})) {
+		if err := se.store.writeMeta(tx, se.name, meta); err != nil {
+			return err
+		}
+	}
+
+	return checkContext(ctx)
 }
 
 // Get returns the point exactly at ts, or ErrNotFound.

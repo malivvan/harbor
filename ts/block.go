@@ -184,6 +184,41 @@ func (s *Store) insertBlocks(ctx context.Context, bucket *bolt.Bucket, points []
 	return added, nil
 }
 
+// insertBlockPoint merges a single point into its block without allocating a
+// one-element input slice or group map.
+func (s *Store) insertBlockPoint(ctx context.Context, bucket *bolt.Bucket, point Point) (int, error) {
+	if err := checkContext(ctx); err != nil {
+		return 0, err
+	}
+	start := blockStart(point.Timestamp, s.blockDuration())
+	existing, _, err := s.readBlock(bucket, start)
+	if err != nil {
+		return 0, err
+	}
+	merged := mergePoint(existing, point)
+	added := len(merged) - len(existing)
+	if err := s.writeBlock(bucket, start, merged); err != nil {
+		return 0, err
+	}
+	return added, nil
+}
+
+// mergePoint inserts or replaces one point in a sorted block.
+func mergePoint(existing []Point, point Point) []Point {
+	i := sort.Search(len(existing), func(i int) bool {
+		return existing[i].Timestamp >= point.Timestamp
+	})
+	if i < len(existing) && existing[i].Timestamp == point.Timestamp {
+		out := append([]Point(nil), existing...)
+		out[i] = point
+		return out
+	}
+	out := make([]Point, 0, len(existing)+1)
+	out = append(out, existing[:i]...)
+	out = append(out, point)
+	return append(out, existing[i:]...)
+}
+
 // scanBlocks calls fn for every point in [start, end] in time order.
 func (s *Store) scanBlocks(ctx context.Context, bucket *bolt.Bucket, start, end int64, fn func(Point) error) error {
 	firstKey := encodeKey(blockStart(start, s.blockDuration()))
