@@ -591,6 +591,12 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 			return fmt.Errorf("%w: %s", ErrCollectionNotFound, colName)
 		}
 
+		// Convert and size every point first, then encode the batch into one
+		// exact-size arena. bbolt keeps the value slices until the transaction
+		// commits, so one shared arena is safe where a reused scratch buffer
+		// would overwrite earlier values.
+		storedPoints := make([]*StoredPoint, len(points))
+		total := 0
 		for i := range points {
 			p := &points[i]
 
@@ -616,8 +622,16 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 			if err != nil {
 				return fmt.Errorf("failed to encode point %s: %w", p.ID, err)
 			}
-			data := binco.Encode(StoredPointBinco, *stored)
-			sealed, err := s.sealBytes(data)
+			storedPoints[i] = stored
+			total += StoredPointBinco.Size(*stored)
+		}
+
+		arena := make([]byte, 0, total)
+		for i, stored := range storedPoints {
+			p := &points[i]
+			start := len(arena)
+			arena = binco.AppendEncode(arena, StoredPointBinco, *stored)
+			sealed, err := s.sealBytes(arena[start:])
 			if err != nil {
 				return fmt.Errorf("failed to encrypt point %s: %w", p.ID, err)
 			}

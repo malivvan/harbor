@@ -547,6 +547,8 @@ build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 - **Risk:** Medium (wire-format / `SchemaFingerprint` migration).
 
 ### 3.8 `binco.Encode` allocates a fresh buffer per point per flush — MEDIUM
+
+> **Status:** ✅ FIXED — a flush converts and sizes all points first, then encodes them into one exact-size arena (`binco.AppendEncode`), so encoding allocates once per batch instead of once per point. The arena stays valid until bbolt commits, and the sealed (encrypted) path still owns its per-point buffer.
 - **Location:** `vec/store.go:619`.
 - **Problem:** One full-size allocation per point per flush (vector `D·4` + payload), before
   `b.Put` copies into the page.
