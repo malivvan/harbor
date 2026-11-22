@@ -529,26 +529,39 @@ func (s *Store) openValue(key string, raw []byte) ([]byte, error) {
 	return plain, nil
 }
 
-// lookup returns the decoded value and presence of key.
+// lookup returns the decoded value and presence of key. It takes the store
+// read lock once and checks the closed state before the caller validates the
+// key, preserving the ErrClosed-precedence contract.
 func (s *Store) lookup(key string) (value string, found bool, err error) {
-	err = s.withDB(func(bdb *bolt.DB) error {
-		return bdb.View(func(tx *bolt.Tx) error {
-			b := tx.Bucket(kvBucket)
-			if b == nil {
-				return nil
-			}
-			raw := b.Get([]byte(key))
-			if raw == nil {
-				return nil
-			}
-			decoded, err := s.openValue(key, raw)
-			if err != nil {
-				return err
-			}
-			value = string(decoded)
-			found = true
+	if s == nil {
+		return "", false, ErrClosed
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil {
+		return "", false, ErrClosed
+	}
+	return s.lookupLocked(key)
+}
+
+// lookupLocked is lookup for callers that already hold the read lock.
+func (s *Store) lookupLocked(key string) (value string, found bool, err error) {
+	err = s.bs.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(kvBucket)
+		if b == nil {
 			return nil
-		})
+		}
+		raw := b.Get([]byte(key))
+		if raw == nil {
+			return nil
+		}
+		decoded, err := s.openValue(key, raw)
+		if err != nil {
+			return err
+		}
+		value = string(decoded)
+		found = true
+		return nil
 	})
 	return value, found, err
 }
@@ -576,15 +589,12 @@ func (s *Store) scanKeys(fn func(string)) error {
 // Get returns the value stored under key. An empty key returns ErrInvalidKey,
 // and a nil or closed store returns ErrClosed before the key is validated.
 func (s *Store) Get(key string) (string, error) {
-	if err := s.checkOpen(); err != nil {
+	value, found, err := s.lookup(key)
+	if err != nil {
 		return "", err
 	}
 	if key == "" {
 		return "", ErrInvalidKey
-	}
-	value, found, err := s.lookup(key)
-	if err != nil {
-		return "", err
 	}
 	if !found {
 		return "", ErrKeyNotFound
@@ -594,72 +604,117 @@ func (s *Store) Get(key string) (string, error) {
 
 // Set stores key/value in the key/value bucket. An empty value removes the key.
 func (s *Store) Set(key, val string) error {
-	if err := s.checkOpen(); err != nil {
-		return err
+	if s == nil {
+		return ErrClosed
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil {
+		return ErrClosed
 	}
 	if key == "" {
 		return ErrInvalidKey
 	}
-	return s.withDB(func(bdb *bolt.DB) error {
-		return bdb.Update(func(tx *bolt.Tx) error {
-			b, err := tx.CreateBucketIfNotExists(kvBucket)
-			if err != nil {
-				return err
-			}
-			if val == "" {
-				return b.Delete([]byte(key))
-			}
-			raw, err := s.sealValue([]byte(val))
-			if err != nil {
-				return err
-			}
-			return b.Put([]byte(key), raw)
-		})
+	return s.bs.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists(kvBucket)
+		if err != nil {
+			return err
+		}
+		if val == "" {
+			return b.Delete([]byte(key))
+		}
+		raw, err := s.sealValue([]byte(val))
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(key), raw)
 	})
 }
 
 // Delete removes key. Deleting a missing key is not an error.
 func (s *Store) Delete(key string) error {
-	if err := s.checkOpen(); err != nil {
-		return err
+	if s == nil {
+		return ErrClosed
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil {
+		return ErrClosed
 	}
 	if key == "" {
 		return ErrInvalidKey
 	}
-	return s.withDB(func(bdb *bolt.DB) error {
-		return bdb.Update(func(tx *bolt.Tx) error {
-			b := tx.Bucket(kvBucket)
-			if b == nil {
-				return nil
-			}
-			return b.Delete([]byte(key))
-		})
+	return s.bs.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(kvBucket)
+		if b == nil {
+			return nil
+		}
+		return b.Delete([]byte(key))
 	})
 }
 
 // Has reports whether key exists.
 func (s *Store) Has(key string) (bool, error) {
-	if err := s.checkOpen(); err != nil {
+	_, found, err := s.lookup(key)
+	if err != nil {
 		return false, err
 	}
 	if key == "" {
 		return false, ErrInvalidKey
 	}
-	_, found, err := s.lookup(key)
-	return found, err
+	return found, nil
 }
 
 // Keys returns all keys in byte order. Nested buckets are skipped.
 func (s *Store) Keys() ([]string, error) {
+	if s == nil {
+		return nil, ErrClosed
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil {
+		return nil, ErrClosed
+	}
+
 	var keys []string
-	err := s.scanKeys(func(key string) { keys = append(keys, key) })
+	err := s.bs.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(kvBucket)
+		if b == nil {
+			return nil
+		}
+		keys = make([]string, 0, b.Stats().KeyN)
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if v == nil {
+				continue
+			}
+			keys = append(keys, string(k))
+		}
+		return nil
+	})
 	return keys, err
 }
 
 // Len returns the number of keys in the key/value bucket.
 func (s *Store) Len() (int, error) {
+	if s == nil {
+		return 0, ErrClosed
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil {
+		return 0, ErrClosed
+	}
+
+	// The key/value bucket never contains nested buckets, so KeyN is an exact
+	// O(1) count instead of a full cursor walk.
 	n := 0
-	err := s.scanKeys(func(string) { n++ })
+	err := s.bs.View(func(tx *bolt.Tx) error {
+		if b := tx.Bucket(kvBucket); b != nil {
+			n = b.Stats().KeyN
+		}
+		return nil
+	})
 	return n, err
 }
 

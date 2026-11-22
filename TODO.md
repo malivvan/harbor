@@ -743,6 +743,8 @@ The big `ts` wins (skip satisfied retention on insert, stream block aggregation,
 ## 5. Top-level `storm` package
 
 ### 5.1 Every KV operation acquires the store `RWMutex` twice — LOW-MEDIUM
+
+> **Status:** ✅ FIXED — KV methods now take the store read lock once and use `s.bs` directly, instead of `checkOpen` plus `withDB` (two lock cycles and a closure). `ErrClosed` still takes precedence over key validation.
 - **Location:** `storm.go:481-506` (`withDB`/`checkOpen`), used by `lookup`, `scanKeys`,
   `Get`/`Set`/`Delete`/`Has`/`Keys`/`Len` (`storm.go:533-664`).
 - **Problem:** `Get` calls `checkOpen()` (RLock/RUnlock) and then `lookup` → `withDB`
@@ -754,6 +756,8 @@ The big `ts` wins (skip satisfied retention on insert, stream block aggregation,
 - **Risk:** Low.
 
 ### 5.2 `Len` and `Keys` scan every value instead of using bucket stats — LOW
+
+> **Status:** ✅ FIXED — `Len` returns `bucket.Stats().KeyN` (the KV bucket has no nested buckets) and `Keys` preallocates from the same count while still skipping nested values.
 - **Location:** `storm.go:556-574` (`scanKeys`), `storm.go:652-664`.
 - **Problem:** `Len` walks the whole cursor to count; `Keys` appends without capacity. The KV
   bucket never contains nested buckets (nested entries are only the sub-store roots under other
