@@ -7,6 +7,29 @@
 
 ---
 
+## Implementation status (2026-11-22)
+
+The remediation was implemented on branch `master` with one or more commits per
+area:
+
+- **P0-1 … P0-12:** fixed, each with regression tests. Details are in the
+  commit history (`git log --oneline`) and in [POST.md](POST.md).
+- **P1:** S3 SigV4 copy signing, chunked-write offset commit, corrupt-metadata
+  guards, format-version checks, S3 `ReadDir` contract, root `Close` after
+  `Vec().Close()`, the vec failed-flush/delete race and `EncryptPointIDs`
+  value encryption are fixed. Quantizer-setting persistence and sub-store
+  rotation ergonomics are called out as pre-tag verification items in
+  [POST.md](POST.md).
+- **P2/P3:** `Limit(0)` semantics, the pre-auth KDF ceiling, reserved payload
+  keys, S3 XML error handling, the MIT license, `SECURITY.md`,
+  `CONTRIBUTING.md` and `CHANGELOG.md` are done. The remaining P2/P3 items are
+  listed as follow-ups in [POST.md](POST.md).
+- **Verification:** `gofmt`, `go build`, `go vet`, `go test ./...`,
+  `staticcheck@v0.8.2 ./...` and `govulncheck@v1.10.0 ./...` are green; the Go
+  floor is 1.27.4 and the lint tools are pinned.
+
+---
+
 ## Verdict
 
 **Not ready for a first public release.** Everything builds, the test suite and `-race` pass, and the cryptographic core is sound. However, the review found **twelve release blockers** that can silently corrupt, truncate, hide or strand user data, plus a deadlock in a documented API and a permanently red CI pipeline.

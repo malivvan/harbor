@@ -150,6 +150,9 @@ func (s *Store) NewCollectionWithParams(name string, vectorLen int, metric Dista
 // Points are first written to the memory index, then buffered for bbolt persistence.
 // Returns an error if any point has an invalid vector length or if persistence fails.
 func (c *Collection) Upsert(points []PointStruct) error {
+	if err := validatePayloadKeys(points); err != nil {
+		return err
+	}
 	c.mu.Lock()
 
 	// 1. Validate and deep-copy: the caller may reuse its vectors/payloads
@@ -367,6 +370,22 @@ func (c *Collection) Delete(points []string, filter *Filter) (int, error) {
 	}
 
 	return successCount, nil
+}
+
+// validatePayloadKeys rejects payload keys that the storage layer owns.
+func validatePayloadKeys(points []PointStruct) error {
+	for _, p := range points {
+		if p.Payload == nil {
+			continue
+		}
+		if _, ok := p.Payload[payloadJSONKey]; ok {
+			return fmt.Errorf("vec: payload key %q is reserved", payloadJSONKey)
+		}
+		if _, ok := p.Payload["__quantized_vector"]; ok {
+			return fmt.Errorf("vec: payload key %q is reserved", "__quantized_vector")
+		}
+	}
+	return nil
 }
 
 // rebuffer prepends a batch detached by a failed flush to writeBuf, dropping

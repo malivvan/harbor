@@ -613,6 +613,9 @@ func (s *Store) EnsureCollection(colName string) error {
 // If quantization is enabled, vectors are compressed before storage.
 // Returns an error if the collection doesn't exist or if serialization fails.
 func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
+	if err := validatePayloadKeys(points); err != nil {
+		return err
+	}
 	if err := s.checkOpen(); err != nil {
 		return err
 	}

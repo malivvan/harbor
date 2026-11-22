@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/malivvan/storm/db/q"
 	"github.com/malivvan/storm/internal"
@@ -306,6 +307,15 @@ func (q *query) query(ctx context.Context, tx *bolt.Tx, sink sink) error {
 	if q.limit == 0 {
 		if err := checkContext(ctx); err != nil {
 			return err
+		}
+		// Limit(0) asks for no records: a successful empty result. flush would
+		// report ErrNotFound for an empty read and for a no-op delete.
+		if ls, ok := sink.(*listSink); ok {
+			reflect.Indirect(ls.ref).Set(reflect.MakeSlice(reflect.Indirect(ls.ref).Type(), 0, 0))
+			return nil
+		}
+		if _, ok := sink.(*deleteSink); ok {
+			return nil
 		}
 		return sink.flush(ctx)
 	}

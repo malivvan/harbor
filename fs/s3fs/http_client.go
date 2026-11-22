@@ -272,7 +272,9 @@ func (c *httpS3Client) CopyObject(ctx context.Context, input *CopyObjectInput) (
 	var result struct {
 		ETag string `xml:"ETag"`
 	}
-	_ = xml.Unmarshal(body, &result)
+	if err := xml.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
 	return &CopyObjectOutput{ETag: result.ETag}, nil
 }
 
@@ -431,7 +433,9 @@ func (c *httpS3Client) CompleteMultipartUpload(ctx context.Context, input *Compl
 	var result struct {
 		ETag string `xml:"ETag"`
 	}
-	_ = xml.Unmarshal(data, &result)
+	if err := xml.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
 	return &CompleteMultipartUploadOutput{ETag: result.ETag}, nil
 }
 

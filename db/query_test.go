@@ -180,8 +180,7 @@ func TestSelectFindLimit(t *testing.T) {
 			q.Gte("Value", 18),
 		),
 	)).Limit(0).Find(ctx, &scores)
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrNotFound)
+	require.NoError(t, err, "Limit(0) is an empty success")
 	require.Len(t, scores, 0)
 }
 

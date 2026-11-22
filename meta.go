@@ -46,7 +46,7 @@ const (
 	// stored unauthenticated (they are needed before the canary can be
 	// verified), so out-of-range values must be rejected before deriving.
 	maxKDFTime    uint32 = 100
-	maxKDFMemory  uint32 = 4 * 1024 * 1024 // KiB, 4 GiB
+	maxKDFMemory  uint32 = 1 * 1024 * 1024 // KiB, 1 GiB
 	maxKDFThreads uint8  = 64
 )
 
