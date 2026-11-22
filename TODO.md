@@ -115,152 +115,37 @@ revision and may shift; use the named symbols and files to locate the code.
 - **I11** — `fs.mu` is an `RWMutex`; multi-step read paths take `RLock`,
   writers take `Lock`, and `Chdir` is serialized.
 
-# 4. Panics, crashes and unbounded resource use
+# 4. Panics, crashes and unbounded resource use — RESOLVED
 
-## P1. [High] `fs.File.Write` panics on a large offset
-**Location:** `fs/file.go:125-170`, especially `size := len(p) + int(f.offset)`
-and `data[int(f.offset):]`.
-**Problem:** `Seek(math.MaxInt64)` followed by `Write` overflows/panics.
-Reproduced:
-```
-PANIC: runtime error: slice bounds out of range [9223372036854775807:0]
-```
-There is no file-size limit, so even non-overflowing huge offsets attempt
-multi-gigabyte allocations.
-**Fix:** Reject offsets/sizes above a configurable maximum (return `EFBIG`),
-check integer overflow before allocating, and add tests for `MaxInt64`,
-`MaxInt32`, and a large-but-valid sparse write policy.
-
-## P2. [High] `fs.Truncate`/`resizeBytes` panics or OOMs on a huge size
-**Location:** `fs/fs.go:620-645` (`resizeBytes`), `fs/fs.go:1203-1230`
-(`Truncate`), `fs/fs.go:646-676` (`resizeContent`).
-**Problem:** `Truncate(path, math.MaxInt64)` panics:
-```
-PANIC: runtime error: makeslice: len out of range
-```
-**Fix:** Bound the size and return `EFBIG`/`EINVAL`; enforce the same bound in
-`File.Write`, chunked writes and the external contentFS path.
-
-## P3. [High] `fs.File` methods panic after `Close`
-**Location:** `fs/file.go:193-215` (`Close` sets `f.node = nil`), then
-`Read`/`Write`/`Seek`/`Readdir`/`ReadDir`/`Truncate` dereference `f.node`.
-**Problem:** Reproduced: `Read` and `Seek` after `Close` panic with a nil
-pointer dereference; `Stat` after `Close` returns `nil, nil` and its
-`FileInfo` methods panic later.
-**Fix:** Track a closed flag and return `os.ErrClosed` from every method; make
-`Stat` return an error. Add tests for every `File` method after `Close`.
-
-## P4. [High] HNSW search panics on a huge `topK`
-**Location:** `vec/hnsw_index.go:182-240`, `vec/hnsw/graph.go:105`
-(`make([]searchCandidate[K], 0, k)`).
-**Problem:** `Collection.Search` only checks `topK > 0`; `Search(query, nil,
-math.MaxInt)` panics:
-```
-PANIC: runtime error: makeslice: cap out of range
-```
-**Fix:** Clamp `topK` to the index count (or a sane maximum) before calling the
-graph, and add a test with `math.MaxInt`.
-
-## P5. [Medium] `vec` panics when `Config.Root` contains only empty segments
-**Location:** `vec/store.go:332-350` (`createRootBucket` skips empty segments
-and returns nil), `vec/store.go:384-400`
-(`createCollectionBucket` dereferences it).
-**Problem:** `vec.Open(..., Config{Root: [][]byte{{}}})` succeeds; the first
-`NewCollection` panics:
-```
-PANIC: invalid memory address or nil pointer dereference
-... bbolt.(*Bucket).CreateBucketIfNotExists
-```
-`ts` filters empty segments (`ts/aead.go:212-222`) and guards a nil root;
-`vec` does neither. `metaBucket` has the same nil-return pattern.
-**Fix:** Filter empty segments in `Open` (as `ts` does), validate/reject an
-all-empty root, and guard every `createRootBucket` caller.
-
-## P6. [Medium] `s3fs` truncate panics on negative sizes and OOMs on huge ones
-**Location:** `fs/s3fs/s3fs.go:575-615` (`FileSystem.Truncate`),
-`fs/s3fs/s3file.go:351-373` (`File.Truncate`).
-**Problem:** `FileSystem.Truncate(-1)` reaches `content[:size]` (slice bounds
-panic); a size larger than the object triggers `make([]byte, size)` (OOM).
-`File.Truncate` has the same `make([]byte, size)` growth path.
-**Fix:** Reject negative sizes with `os.ErrInvalid`; bound positive growth
-(e.g., S3 part limits or a configurable maximum) and add tests.
-
-## P7. [Medium] `s3fs.File.Write` can overflow `int` for large offsets
-**Location:** `fs/s3fs/s3file.go:127-160`, `end := int(rel) + len(b)`.
-**Problem:** A large `Seek` offset plus a write overflows `int`, producing a
-negative/absurd length and a panic or OOM in `make`.
-**Fix:** Validate `rel` and `len(b)` against `maxInt` and a maximum object size
-before allocating.
-
-## P8. [Medium] `db` query matchers panic on unexported fields or non-struct values
-**Location:** `db/q/fieldmatcher.go:33-56`.
-**Problem:** `field.Interface()` panics for an unexported field (``cannot
-return value obtained from unexported field``), and `v.FieldByName` panics when
-the record is not a struct. A caller-supplied field name can therefore crash a
-query.
-**Fix:** Check `field.IsValid()`/`field.CanInterface()` and the record kind,
-returning `ErrUnknownField` instead of panicking.
-
-## P9. [Medium] `internal/absfs.ParseFileMode` panics on an over-long mode string
-**Location:** `internal/absfs/filemode.go:11-75`.
-**Problem:** Only `len(input) < 10` is rejected; a longer string iterates past
-the 9-entry `permissions` array (`permissions[i]` → index out of range).
-**Fix:** Require exactly 10 characters (or iterate only the first 9) and add a
-fuzz test.
-
-## P10. [Medium] HNSW import can allocate multi-gigabyte structures
-**Location:** `vec/hnsw/encode.go:20-35` (`maxEncodedLength = 1<<30`),
-`binaryRead` for strings/slices, `Import` for layers/nodes/neighbors.
-**Problem:** A malicious length prefix of `1<<30` passes the cap; for
-`[]float32` that is a 4 GiB allocation, and `make([]K, nNeighbors)` can be just
-as large. `M`/`Ml`/`EfSearch` from the stream are not validated either.
-**Fix:** Bound lengths by the remaining input size, use a much smaller
-element cap, and validate parameters (`M > 0`, `0 < Ml < 1`) on import.
-
-## P11. [Medium] Invalid HNSW `Ml` causes panics or enormous layer allocation
-**Location:** `vec/hnsw/graph.go:321-350` (`maxLevel`, `randomLevel`).
-**Problem:** `Ml == 1` divides by `log(1/1) == 0`; the resulting infinite level
-is converted to an `int` and `Add` appends layers in a loop, likely OOM.
-`Ml > 1` yields a negative denominator. `Add` also panics on a dimension
-mismatch and a nil `Distance`.
-**Fix:** Validate `Ml` in `0 < Ml < 1` (and `M > 0`) when setting it, return
-errors instead of panicking where possible, and add guard tests.
-
-## P12. [High] Unauthenticated KDF parameters can exhaust memory/CPU on `Open`
-**Location:** `storm.go:246-267` (`loadOrCreateState` derives keys before
-verifying the canary), `meta.go:79-90` (`validateKDFParams` only checks
-positivity and `memory >= 8*threads`).
-**Problem:** A store's salt/KDF parameters are unauthenticated by necessity,
-but a tampered/corrupt metadata record can set `Memory` up to ~4 TiB and
-`Time`/`Threads` arbitrarily high. `Open` runs Argon2id with those parameters
-*before* the canary check, so an attacker with write access (or a corrupt file)
-causes OOM or a CPU hang.
-**Fix:** Cap accepted parameters (e.g., memory ≤ 4 GiB, time ≤ 100, threads ≤
-64), and reject out-of-range metadata as `ErrCorruptStore` before deriving.
-
-## P13. [Medium] `internal/absfs.extendedFS.Truncate` ignores the requested size
-**Location:** `internal/absfs/filesystem.go:434-450`.
-**Problem:** The fallback opens the file with `O_WRONLY|O_TRUNC`, closes it and
-returns — `size` is never used, so `Truncate(path, 5)` zeroes the file. The
-existing test only checks that the call returns nil.
-**Fix:** Implement the resize (read, resize, write) or return
-`ErrNotImplemented`; add a test asserting the resulting length.
-
-## P14. [Medium] `internal/absfs.extendedFS.ReadFile` silently truncates a growing file and can OOM
-**Location:** `internal/absfs/filesystem.go:478-515`.
-**Problem:** It pre-allocates `make([]byte, size)` from `Stat` and
-`io.ReadFull`s exactly `size` bytes; if the file grows in between, the tail is
-silently dropped. A huge reported size causes a huge allocation/panic.
-**Fix:** Use `io.ReadAll` (optionally seeded by the size hint) and cap the
-pre-allocation.
-
-## P15. [Low] `internal/absfs.extendedFS.RemoveAll` returns an error for a missing path
-**Location:** `internal/absfs/filesystem.go:362-432`.
-**Problem:** `RemoveAll` opens the path first and returns the `Open` error;
-`os.RemoveAll` and `fs.FS.RemoveAll` return nil for a missing path.
-**Fix:** Treat `os.ErrNotExist` as success, and close each file once.
-
----
+- **P1/P2** — `fs` enforces a 1 TiB `maxFileSize`: `File.Write`/`WriteAt` check
+  the offset/size before arithmetic and `resizeContent` rejects oversized
+  truncations with `EFBIG`.
+- **P3** — `fs.File` tracks `closed`; `Read`/`Write`/`ReadAt`/`WriteAt`/`Seek`/
+  `Stat`/`Truncate`/`Readdir`/`Readdirnames`/`ReadDir` return `os.ErrClosed`
+  and `Close` is idempotent.
+- **P4** — HNSW search clamps `topK`/`k` to the index size, so a huge topK
+  cannot allocate an enormous candidate slice.
+- **P5** — `vec.Open` filters empty root segments and every root-bucket caller
+  guards a nil root; an all-empty root behaves as the database root.
+- **P6/P7** — `s3fs` rejects negative/oversized truncations and write offsets
+  against `maxObjectSize` before allocating.
+- **P8** — `db/q` matchers reject non-struct records and unexported/invalid
+  fields with `ErrUnknownField` instead of panicking.
+- **P9** — `absfs.ParseFileMode` requires exactly 10 characters.
+- **P10** — HNSW import caps encoded lengths at 2^24 and validates
+  `M`/`Ml`/`EfSearch`.
+- **P11** — HNSW normalizes an invalid `Ml` to 0.25 instead of panicking or
+  allocating enormous levels; `Add` defaults a nil distance function.
+- **P12** — `storm` caps stored Argon2 parameters (t ≤ 100, m ≤ 4 GiB, p ≤ 64)
+  before deriving, so tampered metadata cannot exhaust memory/CPU.
+- **P13** — `absfs.extendedFS.Truncate` now resizes by reading, resizing and
+  rewriting with `O_TRUNC`.
+- **P14** — `absfs.extendedFS.ReadFile` uses `io.ReadAll` and cannot silently
+  drop a growing file's tail.
+- **P15** — `absfs.extendedFS.RemoveAll` treats a missing path as success and
+  closes its directory once.
+- Contract tests updated (absfs RemoveAll, s3fs multipart truncate, keychain
+  empty payloads).
 
 # 5. Efficiency
 

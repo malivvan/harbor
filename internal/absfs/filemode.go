@@ -11,8 +11,8 @@ import (
 func ParseFileMode(input string) (os.FileMode, error) {
 	var mode os.FileMode
 
-	if len(input) < 10 {
-		return 0, fmt.Errorf("unable to parse file mode string too short length == %d", len(input))
+	if len(input) != 10 {
+		return 0, fmt.Errorf("unable to parse file mode string, expected 10 characters, got %d", len(input))
 	}
 
 	switch string(input[:1]) {

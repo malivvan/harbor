@@ -138,7 +138,7 @@ func (f *File) Write(b []byte) (int, error) {
 	// Map the logical offset into the current (not-yet-flushed) buffer. Bytes
 	// below flushed have already been uploaded and can no longer be rewritten.
 	rel := f.offset - f.flushed
-	if rel < 0 {
+	if rel < 0 || rel > maxObjectSize-int64(len(b)) {
 		return 0, os.ErrInvalid
 	}
 	end := int(rel) + len(b)
@@ -237,7 +237,7 @@ func (f *File) WriteAt(b []byte, off int64) (int, error) {
 	}
 
 	rel := off - f.flushed
-	if rel < 0 {
+	if rel < 0 || rel > maxObjectSize-int64(len(b)) {
 		return 0, os.ErrInvalid
 	}
 
@@ -356,7 +356,7 @@ func (f *File) Truncate(size int64) error {
 		return os.ErrInvalid
 	}
 
-	if size < 0 {
+	if size < 0 || size > maxObjectSize {
 		return os.ErrInvalid
 	}
 

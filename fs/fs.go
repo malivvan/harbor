@@ -650,6 +650,9 @@ func (fs *FS) resizeContent(node *iNode, size int64) error {
 	if size < 0 {
 		return syscall.EINVAL
 	}
+	if size > maxFileSize {
+		return syscall.EFBIG
+	}
 	ino := node.Ino
 
 	switch {

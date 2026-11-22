@@ -363,6 +363,9 @@ func (efs *extendedFS) removeAll(p string) error {
 	// open the file to check if it's a directory
 	f, err := efs.Open(p)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
 
@@ -405,12 +408,7 @@ func (efs *extendedFS) removeAll(p string) error {
 		}
 	}
 
-	// Close the directory before removing it
-	if err := f.Close(); err != nil && closeErr == nil {
-		closeErr = err
-	}
-
-	// Finally, remove the directory itself
+	// Finally, remove the directory itself. The deferred Close runs afterwards.
 	if err := efs.filer.Remove(p); err != nil {
 		return err
 	}
@@ -431,6 +429,8 @@ func (efs *extendedFS) RemoveAll(name string) (err error) {
 	return efs.removeAll(name)
 }
 
+const maxTruncateSize int64 = 1 << 40
+
 func (efs *extendedFS) Truncate(name string, size int64) error {
 	name = toSlash(name)
 	if filer, ok := efs.filer.(truncater); ok {
@@ -441,9 +441,25 @@ func (efs *extendedFS) Truncate(name string, size int64) error {
 			name = path.Join(efs.cwd, name)
 		}
 	}
+	if size < 0 || size > maxTruncateSize {
+		return &os.PathError{Op: "truncate", Path: name, Err: os.ErrInvalid}
+	}
+
+	// No native Truncate: read the file, resize and rewrite it. Opening with
+	// O_TRUNC removes any tail left by a shrink.
+	data, err := efs.ReadFile(name)
+	if err != nil {
+		return err
+	}
+	resized := make([]byte, size)
+	copy(resized, data)
 
 	f, err := efs.filer.OpenFile(name, os.O_WRONLY|os.O_TRUNC, 0666)
 	if err != nil {
+		return err
+	}
+	if _, err := f.Write(resized); err != nil {
+		_ = f.Close()
 		return err
 	}
 	return f.Close()
@@ -486,34 +502,14 @@ func (efs *extendedFS) ReadFile(name string) ([]byte, error) {
 		}
 	}
 
-	// Fallback: Open, Stat for size hint, Read all, Close
+	// Fallback: read everything. A Stat size hint would truncate a file that
+	// grew between the stat and the read.
 	f, err := efs.Open(name)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	// Get size hint for efficient allocation
-	var size int64
-	if info, err := f.Stat(); err == nil {
-		size = info.Size()
-	}
-
-	// Pre-allocate buffer if we have size info
-	if size > 0 {
-		buf := make([]byte, size)
-		n, err := io.ReadFull(f, buf)
-		if err == io.ErrUnexpectedEOF {
-			// File was shorter than expected, return what we got
-			return buf[:n], nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		return buf, nil
-	}
-
-	// Unknown size, read all
 	return io.ReadAll(f)
 }
 

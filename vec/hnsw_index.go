@@ -196,6 +196,9 @@ func (h *HNSWIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 	if len(h.points) == 0 {
 		return nil, nil
 	}
+	if topK > len(h.points) {
+		topK = len(h.points)
+	}
 
 	// Without a filter the graph result is already the answer.
 	if filter == nil {

@@ -32,8 +32,15 @@ func (r fieldMatcherDelegate) Match(i interface{}) (bool, error) {
 }
 
 func (r fieldMatcherDelegate) MatchValue(v *reflect.Value) (bool, error) {
-	field := v.FieldByName(r.Field)
-	if !field.IsValid() {
+	if v == nil || !v.IsValid() {
+		return false, ErrUnknownField
+	}
+	rec := reflect.Indirect(*v)
+	if rec.Kind() != reflect.Struct {
+		return false, ErrUnknownField
+	}
+	field := rec.FieldByName(r.Field)
+	if !field.IsValid() || !field.CanInterface() {
 		return false, ErrUnknownField
 	}
 	return r.MatchField(field.Interface())
@@ -55,12 +62,16 @@ func (r field2fieldMatcherDelegate) Match(i interface{}) (bool, error) {
 }
 
 func (r field2fieldMatcherDelegate) MatchValue(v *reflect.Value) (bool, error) {
-	field1 := v.FieldByName(r.Field1)
-	if !field1.IsValid() {
+	if v == nil || !v.IsValid() {
 		return false, ErrUnknownField
 	}
-	field2 := v.FieldByName(r.Field2)
-	if !field2.IsValid() {
+	rec := reflect.Indirect(*v)
+	if rec.Kind() != reflect.Struct {
+		return false, ErrUnknownField
+	}
+	field1 := rec.FieldByName(r.Field1)
+	field2 := rec.FieldByName(r.Field2)
+	if !field1.IsValid() || !field1.CanInterface() || !field2.IsValid() || !field2.CanInterface() {
 		return false, ErrUnknownField
 	}
 	return compare(field1.Interface(), field2.Interface(), r.Tok), nil

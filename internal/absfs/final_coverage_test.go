@@ -106,10 +106,10 @@ func TestFileSystemRemoveAllNonexistent(t *testing.T) {
 	mock := newMockFiler()
 	fs := ExtendFiler(mock)
 
-	// Test RemoveAll on nonexistent path
+	// RemoveAll follows os.RemoveAll: a missing path is not an error.
 	err := fs.RemoveAll("/nonexistent")
-	if err == nil {
-		t.Error("RemoveAll on nonexistent path should fail")
+	if err != nil {
+		t.Errorf("RemoveAll on a nonexistent path = %v, want nil", err)
 	}
 }
 

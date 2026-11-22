@@ -15,6 +15,10 @@ import (
 // opened with write permissions, which should return EOF when read.
 const dirWriteFlags = 3712
 
+// maxFileSize bounds a single file so a huge offset/size cannot overflow the
+// int arithmetic or trigger an enormous allocation.
+const maxFileSize int64 = 1 << 40
+
 // File implements the absfs.File interface, providing a file interface for boltdb
 type File struct {
 	fs *FS
@@ -26,6 +30,7 @@ type File struct {
 
 	offset    int64
 	diroffset int
+	closed    bool
 }
 
 // Name returns the name of the file as presented to Open.
@@ -36,6 +41,9 @@ func (f *File) Name() string {
 // Read reads up to len(b) bytes from the File. It returns the number of bytes
 // read and any error encountered. At end of file, Read returns 0, io.EOF.
 func (f *File) Read(p []byte) (int, error) {
+	if f.closed {
+		return 0, os.ErrClosed
+	}
 	f.fs.mu.Lock()
 	defer f.fs.mu.Unlock()
 
@@ -112,6 +120,9 @@ func (f *File) readChunked(p []byte) (int, error) {
 // returns a non-nil error when n < len(b). At end of file, that error is
 // io.EOF.
 func (f *File) ReadAt(b []byte, off int64) (n int, err error) {
+	if f.closed {
+		return 0, os.ErrClosed
+	}
 	if f.flags&absfs.O_ACCESS == os.O_WRONLY {
 		return 0, os.ErrPermission
 	}
@@ -123,6 +134,9 @@ func (f *File) ReadAt(b []byte, off int64) (n int, err error) {
 }
 
 func (f *File) Write(p []byte) (int, error) {
+	if f.closed {
+		return 0, os.ErrClosed
+	}
 	f.fs.mu.Lock()
 	defer f.fs.mu.Unlock()
 
@@ -139,6 +153,9 @@ func (f *File) Write(p []byte) (int, error) {
 	}
 	if f.offset < 0 {
 		return 0, &os.PathError{Op: "write", Path: f.name, Err: os.ErrInvalid}
+	}
+	if f.offset > maxFileSize-int64(len(p)) {
+		return 0, &os.PathError{Op: "write", Path: f.name, Err: syscall.EFBIG}
 	}
 
 	if f.fs.chunked() && f.fs.contentFS == nil {
@@ -188,7 +205,10 @@ func (f *File) Write(p []byte) (int, error) {
 // returns the number of bytes written and an error, if any. WriteAt returns
 // a non-nil error when n != len(b).
 func (f *File) WriteAt(b []byte, off int64) (n int, err error) {
-	if off < 0 {
+	if f.closed {
+		return 0, os.ErrClosed
+	}
+	if off < 0 || off > maxFileSize-int64(len(b)) {
 		return 0, &os.PathError{Op: "writeat", Path: f.name, Err: os.ErrInvalid}
 	}
 	f.offset = off
@@ -199,11 +219,13 @@ func (f *File) WriteAt(b []byte, off int64) (n int, err error) {
 // SetDeadline, any pending I/O operations will be canceled and return
 // immediately with an error.
 func (f *File) Close() error {
-	err := f.Sync()
-	if err != nil {
+	if f.closed {
+		return nil
+	}
+	if err := f.Sync(); err != nil {
 		return err
 	}
-
+	f.closed = true
 	f.node = nil
 	return nil
 }
@@ -214,6 +236,9 @@ func (f *File) Close() error {
 // returns the new offset and an error, if any. The behavior of Seek on a file
 // opened with O_APPEND is not specified.
 func (f *File) Seek(offset int64, whence int) (ret int64, err error) {
+	if f.closed {
+		return 0, os.ErrClosed
+	}
 	switch whence {
 	case io.SeekStart:
 		f.offset = offset
@@ -231,6 +256,9 @@ func (f *File) Seek(offset int64, whence int) (ret int64, err error) {
 // Stat returns the FileInfo structure describing file. If there is an error, it
 // will be of type *PathError.
 func (f *File) Stat() (os.FileInfo, error) {
+	if f.closed {
+		return nil, os.ErrClosed
+	}
 	return &fileinfo{filepath.Base(f.name), f.node}, nil
 }
 
@@ -261,6 +289,9 @@ func (f *File) Sync() error {
 // error before the end of the directory, Readdir returns the FileInfo read
 // until that point and a non-nil error.
 func (f *File) Readdir(n int) ([]os.FileInfo, error) {
+	if f.closed {
+		return nil, os.ErrClosed
+	}
 	if f.flags&absfs.O_ACCESS == os.O_WRONLY {
 		return nil, os.ErrPermission
 	}
@@ -315,6 +346,9 @@ func (f *File) Readdir(n int) ([]os.FileInfo, error) {
 // error before the end of the directory, Readdirnames returns the names read
 // until that point and a non-nil error.
 func (f *File) Readdirnames(n int) ([]string, error) {
+	if f.closed {
+		return nil, os.ErrClosed
+	}
 	if f.flags&absfs.O_ACCESS == os.O_WRONLY {
 		return nil, os.ErrPermission
 	}
@@ -356,6 +390,9 @@ func (f *File) Readdirnames(n int) ([]string, error) {
 // it changes the size of the link's target. If there is an error, it will be of
 // type *PathError.
 func (f *File) Truncate(size int64) error {
+	if f.closed {
+		return os.ErrClosed
+	}
 	f.fs.mu.Lock()
 	defer f.fs.mu.Unlock()
 
@@ -387,6 +424,9 @@ func (f *File) WriteString(s string) (n int, err error) {
 // In this case, if ReadDir succeeds (reads all the way to the end of the
 // directory), it returns the slice and a nil error.
 func (f *File) ReadDir(n int) ([]fs.DirEntry, error) {
+	if f.closed {
+		return nil, os.ErrClosed
+	}
 	if f.flags&absfs.O_ACCESS == os.O_WRONLY {
 		return nil, os.ErrPermission
 	}

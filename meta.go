@@ -42,6 +42,15 @@ func hasFlag(flags, other uint16) bool {
 }
 
 const (
+	// Maximum accepted Argon2id parameters. The salt and cost parameters are
+	// stored unauthenticated (they are needed before the canary can be
+	// verified), so out-of-range values must be rejected before deriving.
+	maxKDFTime    uint32 = 100
+	maxKDFMemory  uint32 = 4 * 1024 * 1024 // KiB, 4 GiB
+	maxKDFThreads uint8  = 64
+)
+
+const (
 	// SaltSize is the length in bytes of a generated KDF salt.
 	SaltSize = 16
 
@@ -82,6 +91,9 @@ func validateKDFParams(time, memory uint32, threads uint8, flags uint16, base er
 	}
 	if memory < 8*uint32(threads) {
 		return fmt.Errorf("%w: KDF memory must be at least %d KiB", base, 8*uint32(threads))
+	}
+	if time > maxKDFTime || memory > maxKDFMemory || threads > maxKDFThreads {
+		return fmt.Errorf("%w: KDF parameters exceed the supported maximum", base)
 	}
 	if flags&^EncryptAll != 0 {
 		return fmt.Errorf("%w: unknown encryption flags %#x", base, flags)

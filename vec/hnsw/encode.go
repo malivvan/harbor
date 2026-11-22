@@ -17,7 +17,7 @@ var byteOrder = binary.LittleEndian
 // maxEncodedLength caps the number of elements/size read from an encoded
 // stream. It keeps a corrupt or malicious length prefix from triggering a huge
 // allocation (or a panic) instead of an error.
-const maxEncodedLength = 1 << 30
+const maxEncodedLength = 1 << 24
 
 // checkEncodedLength validates a length prefix read from an encoded stream.
 func checkEncodedLength(ln int) error {
@@ -226,6 +226,15 @@ func (h *Graph[K]) Import(r io.Reader) error {
 
 	if version != encodingVersion {
 		return fmt.Errorf("incompatible encoding version: %d", version)
+	}
+	if h.M <= 0 || h.M > 1<<20 {
+		return fmt.Errorf("invalid M %d", h.M)
+	}
+	if h.Ml <= 0 || h.Ml >= 1 {
+		return fmt.Errorf("invalid Ml %v", h.Ml)
+	}
+	if h.EfSearch <= 0 || h.EfSearch > 1<<24 {
+		return fmt.Errorf("invalid EfSearch %d", h.EfSearch)
 	}
 
 	var nLayers int

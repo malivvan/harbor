@@ -49,11 +49,10 @@ func TestFileSystemRemoveAllStatError(t *testing.T) {
 	mock := newMockFiler()
 	fs := ExtendFiler(mock)
 
-	// This is tricky - we need a file that opens but Stat fails
-	// For now, just ensure RemoveAll handles errors properly
+	// RemoveAll follows os.RemoveAll: a missing path is not an error.
 	err := fs.RemoveAll("/nonexistent-for-stat-test")
-	if err == nil {
-		t.Error("RemoveAll should fail on nonexistent file")
+	if err != nil {
+		t.Errorf("RemoveAll on a nonexistent path = %v, want nil", err)
 	}
 }
 

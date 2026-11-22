@@ -31,6 +31,9 @@ import (
 // S3 requires a minimum part size of 5MB for all parts except the last.
 const DefaultPartSize = 5 * 1024 * 1024 // 5MB
 
+// maxObjectSize bounds in-memory buffers and offsets for one object.
+const maxObjectSize int64 = 1 << 40
+
 // FileSystem implements absfs.Filer for S3 object storage.
 type FileSystem struct {
 	client   S3Client
@@ -577,6 +580,9 @@ func (fs *FileSystem) Truncate(name string, size int64) error {
 	name, err = sanitizePath(name)
 	if err != nil {
 		return err
+	}
+	if size < 0 || size > maxObjectSize {
+		return &os.PathError{Op: "truncate", Path: name, Err: os.ErrInvalid}
 	}
 
 	// Read the existing file content

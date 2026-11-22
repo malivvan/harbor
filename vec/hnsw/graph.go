@@ -319,8 +319,8 @@ func (g *Graph[K]) constructionEf() int {
 // maxLevel returns an upper-bound on the number of levels in the graph
 // based on the size of the base layer.
 func maxLevel(ml float64, numNodes int) int {
-	if ml == 0 {
-		panic("ml must be greater than 0")
+	if ml <= 0 || ml >= 1 {
+		ml = 0.25
 	}
 
 	if numNodes == 0 {
@@ -341,9 +341,6 @@ func (h *Graph[K]) randomLevel() int {
 	// by calculating a probably good one from the size of the base layer.
 	max := 1
 	if len(h.layers) > 0 {
-		if h.Ml == 0 {
-			panic("(*Graph).Ml must be greater than 0")
-		}
 		max = maxLevel(h.Ml, h.layers[0].size())
 	}
 
@@ -397,6 +394,9 @@ func ptr[T any](v T) *T {
 // Add inserts nodes into the graph.
 // If another node with the same ID exists, it is replaced.
 func (g *Graph[K]) Add(nodes ...Node[K]) {
+	if g.Distance == nil {
+		g.Distance = CosineDistance
+	}
 	for _, node := range nodes {
 		key := node.Key
 		vec := node.Value
@@ -513,6 +513,9 @@ func (h *Graph[K]) Search(near Vector, k int) []Node[K] {
 	h.assertDims(near)
 	if len(h.layers) == 0 {
 		return nil
+	}
+	if n := h.Len(); k > n {
+		k = n
 	}
 
 	// EfSearch <= 0 collapses the candidate list to the direct neighbours and
