@@ -30,6 +30,12 @@ type iNode struct {
 	Gid uint32
 
 	Children entries
+
+	// Transient directory-entry tracking for the dirents bucket. These are
+	// never gob-encoded.
+	dirSyncAll bool
+	dirChanged map[string]uint64
+	dirRemoved map[string]struct{}
 }
 
 // Ctime returns the creation time of the inode.
@@ -169,10 +175,11 @@ func (e entries) Less(i, j int) bool { return e[i].Name < e[j].Name }
 func newInode(mode os.FileMode) *iNode {
 	now := time.Now()
 	return &iNode{
-		atime: now,
-		mtime: now,
-		ctime: now,
-		Mode:  mode,
+		atime:      now,
+		mtime:      now,
+		ctime:      now,
+		Mode:       mode,
+		dirSyncAll: mode&os.ModeDir != 0,
 	}
 }
 
@@ -189,6 +196,7 @@ func copyInode(source *iNode) *iNode {
 	target.SetCtime(source.Ctime())
 	target.SetAtime(source.Atime())
 	target.SetMtime(source.Mtime())
+	target.dirSyncAll = target.IsDir()
 
 	for i := range source.Children {
 		target.Children[i] = &entry{
@@ -220,8 +228,31 @@ func (n *iNode) Link(name string, ino uint64) (uint64, error) {
 
 	// swap the ino in the entry for the ino provided (0 if we just created it)
 	ino, n.Children[x].Ino = n.Children[x].Ino, ino
+	n.trackDirChange(name, n.Children[x].Ino)
 	n.modified()
 	return ino, nil
+}
+
+// trackDirChange records that name now maps to ino in a directory.
+func (n *iNode) trackDirChange(name string, ino uint64) {
+	if n.dirRemoved != nil {
+		delete(n.dirRemoved, name)
+	}
+	if n.dirChanged == nil {
+		n.dirChanged = make(map[string]uint64)
+	}
+	n.dirChanged[name] = ino
+}
+
+// trackDirRemove records that name was unlinked from a directory.
+func (n *iNode) trackDirRemove(name string) {
+	if n.dirChanged != nil {
+		delete(n.dirChanged, name)
+	}
+	if n.dirRemoved == nil {
+		n.dirRemoved = make(map[string]struct{})
+	}
+	n.dirRemoved[name] = struct{}{}
 }
 
 func (n *iNode) Unlink(name string) (uint64, error) {
@@ -233,6 +264,7 @@ func (n *iNode) Unlink(name string) (uint64, error) {
 		return 0, syscall.ENOENT // os.ErrNotExist
 	}
 	old := n.Children[x].Ino
+	n.trackDirRemove(n.Children[x].Name)
 	copy(n.Children[x:], n.Children[x+1:])
 	n.Children = n.Children[:len(n.Children)-1]
 	n.modified()
@@ -254,7 +286,13 @@ func (f *fsBucket) decodeNode(ino uint64, node *iNode) error {
 	if err != nil {
 		return err
 	}
-	return gob.NewDecoder(bytes.NewReader(plain)).Decode(node)
+	if err := gob.NewDecoder(bytes.NewReader(plain)).Decode(node); err != nil {
+		return err
+	}
+	if node.IsDir() {
+		return f.decodeDirents(ino, node)
+	}
+	return nil
 }
 
 // decodeRawNode decodes an unsealed gob inode. It is used only to migrate the
@@ -280,8 +318,19 @@ func (f *fsBucket) encodeNode(ino uint64, node *iNode) error {
 	if node == nil {
 		return errNilNode
 	}
+	encoded := node
+	if node.IsDir() {
+		if err := f.syncDirents(ino, node); err != nil {
+			return err
+		}
+		// Entries live in the dirents bucket; keep the inode blob small.
+		blob := *node
+		blob.Children = nil
+		encoded = &blob
+	}
+
 	w := new(bytes.Buffer)
-	if err := gob.NewEncoder(w).Encode(node); err != nil {
+	if err := gob.NewEncoder(w).Encode(encoded); err != nil {
 		return err
 	}
 	data, err := f.enc.sealMetadata(w.Bytes())

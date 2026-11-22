@@ -914,7 +914,10 @@ func (fs *FS) Rename(oldpath, newpath string) error {
 				b.data.Delete(key)
 			}
 			b.symlinks.Delete(key)
-			return b.deleteAllChunks(dstChild.Ino)
+			if err := b.deleteAllChunks(dstChild.Ino); err != nil {
+				return err
+			}
+			return b.deleteDirents(dstChild.Ino)
 		}
 		return b.PutInode(dstChild.Ino, dstChild)
 	})
@@ -1440,6 +1443,9 @@ func (fs *FS) saveParentChild(parent *iNode, filename string, child *iNode) erro
 				if err := b.deleteAllChunks(oldChild.Ino); err != nil {
 					return err
 				}
+				if err := b.deleteDirents(oldChild.Ino); err != nil {
+					return err
+				}
 			} else if err := b.PutInode(old, oldChild); err != nil {
 				return err
 			}
@@ -1471,12 +1477,13 @@ func (fs *FS) deleteInode(ino uint64) error {
 		if fs.contentFS == nil {
 			b.data.Delete(key)
 		}
-		// Remove any chunked content and symlink target so they do not leak.
+		// Remove any chunked content, symlink target and directory entries so
+		// they do not leak.
 		b.symlinks.Delete(key)
 		if err := b.deleteAllChunks(ino); err != nil {
 			return err
 		}
-		return nil
+		return b.deleteDirents(ino)
 	})
 	if err != nil {
 		return err
@@ -1729,9 +1736,13 @@ func (fs *FS) RemoveAll(name string) error {
 					return err
 				}
 			}
-			// Remove chunked content and symlink targets to avoid leaks.
+			// Remove chunked content, symlink targets and directory entries
+			// to avoid leaks.
 			b.symlinks.Delete(key)
 			if err := b.deleteAllChunks(ino); err != nil {
+				return err
+			}
+			if err := b.deleteDirents(ino); err != nil {
 				return err
 			}
 		}
@@ -1746,11 +1757,13 @@ func (fs *FS) RemoveAll(name string) error {
 			if child != nil {
 				for i, entry := range p.Children {
 					if entry.Ino == child.Ino {
+						p.trackDirRemove(entry.Name)
 						p.Children = append(p.Children[:i], p.Children[i+1:]...)
 						break
 					}
 				}
 			} else {
+				p.dirSyncAll = true
 				p.Children = p.Children[:0]
 			}
 			if err := b.PutInode(p.Ino, p); err != nil {

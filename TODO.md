@@ -378,6 +378,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low-Medium (respect tx lifetime).
 
 ### 2.10 Every directory mutation rewrites the entire children blob — MEDIUM
+
+> **Status:** ✅ FIXED — directory entries are now stored as separate `dirents/<ino><name> -> child ino` keys. `Link`/`Unlink` record only the changed names and `PutInode` applies just those keys; the inode blob no longer carries the children list. Legacy blobs are still read and are migrated on the next write; deletions clean up entry keys. Regression tests cover separate storage, unlink/rename, blob fallback and migration.
 - **Location:** `fs/inode.go:206-225` (`Link`), `fs/inode.go:227-240` (`Unlink`),
   `fs/inode.go:276-292` (`encodeNode`, gob of all children), `fs/tx.go:176-196` (`PutInode`).
 - **Problem:** A directory inode is one value holding all children; each create/remove/rename

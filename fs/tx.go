@@ -8,7 +8,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-var buckets = []string{"state", "inodes", "data", "symlinks"}
+var buckets = []string{"state", "inodes", "data", "symlinks", direntsBucketName}
 
 // 0 is nil for iNode ids
 var nilIno uint64
@@ -21,8 +21,10 @@ type fsBucket struct {
 	data     *bolt.Bucket
 	symlinks *bolt.Bucket
 	chunks   *bolt.Bucket // Optional chunked-content bucket
+	dirents  *bolt.Bucket // Optional per-entry directory keys
 	cache    *inodeCache  // Optional cache for read operations
 	enc      *encState    // nil when encryption is disabled
+	parent   bucketer     // parent of the fs buckets, for lazy bucket creation
 }
 
 type bucketer interface {
@@ -60,7 +62,9 @@ func newFsBucketWithCache(b bucketer, cache *inodeCache) *fsBucket {
 		data:     data,
 		symlinks: symlinks,
 		chunks:   b.Bucket([]byte("chunks")),
+		dirents:  b.Bucket([]byte(direntsBucketName)),
 		cache:    cache,
+		parent:   b,
 	}
 }
 

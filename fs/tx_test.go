@@ -68,6 +68,8 @@ func Test_newFsBucket(t *testing.T) {
 				inodes:   b.Bucket([]byte("inodes")),
 				data:     b.Bucket([]byte("data")),
 				symlinks: b.Bucket([]byte("symlinks")),
+				dirents:  b.Bucket([]byte(direntsBucketName)),
+				parent:   b,
 			}
 
 			// tests
