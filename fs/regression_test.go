@@ -25,7 +25,8 @@ func countChunkKeys(t *testing.T, db *bolt.DB, root []byte, name string, ino uin
 		if b.chunks == nil {
 			return nil
 		}
-		prefix := chunkKey(ino, 0)[:8]
+		var prefixBuf [8]byte
+		prefix := chunkPrefix(&prefixBuf, ino)
 		c := b.chunks.Cursor()
 		for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
 			n++

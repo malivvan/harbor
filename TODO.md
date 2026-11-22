@@ -426,6 +426,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low (nonce uniqueness preserved by refilling).
 
 ### 2.14 `chunkKey` escapes to the heap on every chunk access — LOW
+
+> **Status:** ✅ FIXED — `chunkKey`/`chunkPrefix` now write into a caller-owned array and return a slice of it, so the key no longer escapes to the heap on every chunk access.
 - **Location:** `fs/chunk.go:14-19`.
 - **Problem:** returns `key[:]` of a stack array, so it escapes → one 16-byte alloc per
   `readChunk`/`writeChunk`.

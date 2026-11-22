@@ -10,12 +10,19 @@ import (
 
 const chunksBucketName = "chunks"
 
-// chunkKey identifies a chunk by inode and chunk index.
-func chunkKey(ino uint64, idx int64) []byte {
-	var key [16]byte
-	binary.BigEndian.PutUint64(key[:8], ino)
-	binary.BigEndian.PutUint64(key[8:], uint64(idx))
-	return key[:]
+// chunkKey writes the key identifying a chunk by inode and chunk index into
+// dst and returns a slice of it. The caller owns dst, so the key does not have
+// to escape to the heap.
+func chunkKey(dst *[16]byte, ino uint64, idx int64) []byte {
+	binary.BigEndian.PutUint64(dst[:8], ino)
+	binary.BigEndian.PutUint64(dst[8:], uint64(idx))
+	return dst[:]
+}
+
+// chunkPrefix writes the inode prefix shared by every chunk key of ino.
+func chunkPrefix(dst *[8]byte, ino uint64) []byte {
+	binary.BigEndian.PutUint64(dst[:], ino)
+	return dst[:]
 }
 
 // chunked reports whether content is stored as encrypted chunks.
@@ -57,7 +64,8 @@ func (b *fsBucket) readChunk(ino uint64, idx int64) ([]byte, error) {
 	if b == nil || b.chunks == nil {
 		return nil, nil
 	}
-	raw := b.chunks.Get(chunkKey(ino, idx))
+	var key [16]byte
+	raw := b.chunks.Get(chunkKey(&key, ino, idx))
 	if raw == nil {
 		return nil, nil
 	}
@@ -68,7 +76,8 @@ func (b *fsBucket) writeChunk(ino uint64, idx int64, data []byte) error {
 	if b == nil || b.chunks == nil {
 		return os.ErrInvalid
 	}
-	key := chunkKey(ino, idx)
+	var keyBuf [16]byte
+	key := chunkKey(&keyBuf, ino, idx)
 	if len(data) == 0 {
 		return b.chunks.Delete(key)
 	}
@@ -176,7 +185,8 @@ func (b *fsBucket) truncateData(ino uint64, size, chunkSize int64) error {
 	}
 
 	firstDelete := (size + chunkSize - 1) / chunkSize
-	prefix := chunkKey(ino, 0)[:8]
+	var prefixBuf [8]byte
+	prefix := chunkPrefix(&prefixBuf, ino)
 	var keys [][]byte
 	cursor := b.chunks.Cursor()
 	for key, _ := cursor.Seek(prefix); key != nil && bytes.HasPrefix(key, prefix); key, _ = cursor.Next() {
@@ -211,7 +221,8 @@ func (b *fsBucket) deleteAllChunks(ino uint64) error {
 	if b == nil || b.chunks == nil {
 		return nil
 	}
-	prefix := chunkKey(ino, 0)[:8]
+	var prefixBuf [8]byte
+	prefix := chunkPrefix(&prefixBuf, ino)
 	var keys [][]byte
 	cursor := b.chunks.Cursor()
 	for key, _ := cursor.Seek(prefix); key != nil && bytes.HasPrefix(key, prefix); key, _ = cursor.Next() {
@@ -230,7 +241,8 @@ func (b *fsBucket) readAllChunks(ino uint64) ([]byte, error) {
 	if b == nil || b.chunks == nil {
 		return nil, nil
 	}
-	prefix := chunkKey(ino, 0)[:8]
+	var prefixBuf [8]byte
+	prefix := chunkPrefix(&prefixBuf, ino)
 	var out []byte
 	cursor := b.chunks.Cursor()
 	for key, raw := cursor.Seek(prefix); key != nil && bytes.HasPrefix(key, prefix); key, raw = cursor.Next() {
@@ -249,7 +261,8 @@ func (b *fsBucket) writeAllChunks(ino uint64, data []byte, chunkSize int64) erro
 		return os.ErrInvalid
 	}
 
-	prefix := chunkKey(ino, 0)[:8]
+	var prefixBuf [8]byte
+	prefix := chunkPrefix(&prefixBuf, ino)
 	var keys [][]byte
 	cursor := b.chunks.Cursor()
 	for key, _ := cursor.Seek(prefix); key != nil && bytes.HasPrefix(key, prefix); key, _ = cursor.Next() {
