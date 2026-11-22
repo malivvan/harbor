@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -75,8 +76,15 @@ func (f *File) Read(p []byte) (int, error) {
 		return 0, err
 	}
 
-	// Validate and sync node size with actual data size
+	// Validate and sync node size with actual data size. For external content
+	// a mismatch means the content and the metadata disagree (a failed write or
+	// a deleted object); shrinking the logical file here would silently adopt
+	// the shorter content as the truth.
 	if f.node.Size != int64(len(data)) {
+		if f.fs.contentFS != nil {
+			return 0, &os.PathError{Op: "read", Path: f.name,
+				Err: fmt.Errorf("inode size %d does not match external content size %d", f.node.Size, len(data))}
+		}
 		f.node.Size = int64(len(data))
 		_, err := f.fs.saveInode(f.node)
 		if err != nil {
@@ -217,12 +225,14 @@ func (f *File) Write(p []byte) (int, error) {
 	f.node.Size = int64(len(data))
 
 	if f.fs.contentFS != nil {
-		ino, err := f.fs.saveInode(f.node)
-		if err != nil {
+		// Commit the content before the size-bearing inode. If the content
+		// write fails, metadata still describes the previous, complete file;
+		// the opposite order advertises bytes that never reached the store.
+		if err := f.fs.saveData(f.node.Ino, data); err != nil {
 			return 0, err
 		}
-		if err := f.fs.saveData(ino, data); err != nil {
-			return n, err
+		if _, err := f.fs.saveInode(f.node); err != nil {
+			return 0, err
 		}
 		return n, nil
 	}

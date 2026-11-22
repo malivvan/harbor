@@ -724,13 +724,14 @@ func (fs *FS) resizeContent(node *iNode, size int64) error {
 		switch {
 		case fs.contentFS != nil:
 			if size == 0 {
-				// Truncate-to-0 is a delete: no need to read and re-encrypt
-				// the whole file just to discard it.
-				if err := fs.contentFS.Remove(inoToPath(ino)); err != nil && !os.IsNotExist(err) {
+				// Truncate-to-0 is a delete: persist the size-0 inode first.
+				// Deleting the external content first and then failing to
+				// commit the inode would lose the only copy while metadata
+				// still advertises the old size.
+				if _, err := fs.saveInode(node); err != nil {
 					return err
 				}
-				_, err := fs.saveInode(node)
-				return err
+				return fs.contentFS.Remove(inoToPath(ino))
 			}
 			data, err := fs.loadData(ino)
 			if err != nil {
