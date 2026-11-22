@@ -264,7 +264,7 @@ func (s *Store) checkMode(name string) error {
 		if !m.matches(enc) {
 			return fmt.Errorf("%w: encryption settings do not match the filesystem", ErrWrongMode)
 		}
-		return enc.verifyCanary(canary)
+		return enc.verifyCanary(canary, m)
 	}
 
 	if enc == nil {

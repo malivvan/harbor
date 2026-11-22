@@ -352,11 +352,11 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 			}
 			if meta != nil {
 				if raw := meta.Get([]byte(markerKey)); raw != nil {
-					_, canary, err := decodeMarker(raw)
+					m, canary, err := decodeMarker(raw)
 					if err != nil {
 						return err
 					}
-					if err := enc.verifyCanary(canary); err != nil {
+					if err := enc.verifyCanary(canary, m); err != nil {
 						return err
 					}
 				}

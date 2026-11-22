@@ -38,8 +38,9 @@ type FS struct {
 	enc atomic.Pointer[encState]
 
 	// mu serializes inode load-modify-save cycles so concurrent operations on
-	// the same directory or inode do not lose updates.
-	mu sync.Mutex
+	// the same directory or inode do not lose updates. Read paths take RLock so
+	// a multi-transaction read cannot observe a concurrent mutation.
+	mu sync.RWMutex
 }
 
 // encState returns the current encryption state (nil when disabled).
@@ -320,6 +321,13 @@ func (fs *FS) saveInode(node *iNode) (ino uint64, err error) {
 
 // ReadDir reads the named directory and returns a list of directory entries sorted by filename.
 func (filesystem *FS) ReadDir(name string) ([]fs.DirEntry, error) {
+	filesystem.mu.RLock()
+	defer filesystem.mu.RUnlock()
+	return filesystem.readDir(name)
+}
+
+// readDir is ReadDir without the lock; callers must hold fs.mu.
+func (filesystem *FS) readDir(name string) ([]fs.DirEntry, error) {
 	dir, filename := filesystem.cleanPath(name)
 	p := path.Join(dir, filename)
 	node, err := filesystem.resolve(p)
@@ -348,6 +356,8 @@ func (filesystem *FS) ReadDir(name string) ([]fs.DirEntry, error) {
 
 // ReadFile reads the named file and returns its contents.
 func (fs *FS) ReadFile(name string) ([]byte, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
 	dir, filename := fs.cleanPath(name)
 	p := path.Join(dir, filename)
 	node, err := fs.resolve(p)
@@ -520,21 +530,24 @@ func (fs *FS) saveData(ino uint64, data []byte) error {
 			return fmt.Errorf("failed to create directory: %w", err)
 		}
 
-		// Write file atomically
 		f, err := fs.contentFS.OpenFile(contentPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 		if err != nil {
 			return fmt.Errorf("failed to create file: %w", err)
 		}
-		defer f.Close()
 
 		sealed, err := fs.enc.Load().sealContent(data)
-		if err != nil {
-			return err
+		if err == nil {
+			_, err = f.Write(sealed)
 		}
-		if _, err := f.Write(sealed); err != nil {
+		// The external filesystem may flush/upload on Close (s3fs does), so the
+		// Close error is part of the write result.
+		closeErr := f.Close()
+		if err != nil {
 			return fmt.Errorf("failed to write data: %w", err)
 		}
-
+		if closeErr != nil {
+			return fmt.Errorf("failed to finalize data: %w", closeErr)
+		}
 		return nil
 	}
 
@@ -599,7 +612,8 @@ func (fs *FS) loadData(ino uint64) ([]byte, error) {
 		}
 		d := b.data.Get(i2b(ino))
 		if d == nil {
-			d = []byte{}
+			data = []byte{}
+			return nil
 		}
 		plain, err := fs.enc.Load().openContent(d)
 		if err != nil {
@@ -908,6 +922,12 @@ func (fs *FS) copyNode(src *iNode) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
+	copied := false
+	defer func() {
+		if !copied {
+			_ = fs.deleteInode(newIno)
+		}
+	}()
 
 	switch {
 	case src.Mode&os.ModeSymlink != 0:
@@ -952,6 +972,7 @@ func (fs *FS) copyNode(src *iNode) (uint64, error) {
 		}
 	}
 
+	copied = true
 	return newIno, nil
 }
 
@@ -972,6 +993,8 @@ func (fs *FS) readLink(ino uint64) (string, error) {
 // Chdir - changes the current directory to the absolute or relative path
 // provided by `Chdir`
 func (fs *FS) Chdir(name string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
 	dir, filename := fs.cleanPath(name)
 	_, err := fs.resolve(dir)
 	if err != nil {
@@ -983,6 +1006,8 @@ func (fs *FS) Chdir(name string) error {
 
 // Getwd returns the current working directory, the error value is always `nil`.
 func (fs *FS) Getwd() (dir string, err error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
 	return fs.cwd, nil
 }
 
@@ -1160,6 +1185,8 @@ func (fs *FS) openFile(name string, flag int, perm os.FileMode, depth int) (absf
 // Stat returns the FileInfo structure describing file. If there is an error,
 // it will be of type *os.PathError.
 func (fs *FS) Stat(name string) (os.FileInfo, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
 	return fs.statWithDepth(name, 0)
 }
 
@@ -1273,33 +1300,48 @@ func (fs *FS) loadParentChild(dir, filename string) (*iNode, *iNode) {
 func (fs *FS) saveParentChild(parent *iNode, filename string, child *iNode) error {
 	filename = strings.Trim(filename, "/")
 	child.countUp()
-	ino, err := fs.saveInode(child)
-	if err != nil {
-		return err
-	}
-	old, err := parent.Link(filename, ino)
-	if err != nil {
-		return err
-	}
-	if old != 0 {
-		oldChild, err := fs.loadInode(old)
+	return fs.db.Update(func(tx *bolt.Tx) error {
+		b, err := fs.openFsBucketWithCache(tx)
 		if err != nil {
 			return err
 		}
-		if oldChild.countDown() == 0 {
-			fs.deleteInode(oldChild.Ino)
+		ino := child.Ino
+		if ino == 0 {
+			ino, err = b.NextInode()
+			if err != nil {
+				return err
+			}
 		}
-		_, err = fs.saveInode(oldChild)
+		if err := b.PutInode(ino, child); err != nil {
+			return err
+		}
+		old, err := parent.Link(filename, ino)
 		if err != nil {
 			return err
 		}
-	}
-
-	_, err = fs.saveInode(parent)
-	if err != nil {
-		return err
-	}
-	return nil
+		if old != 0 {
+			oldChild, err := b.GetInode(old)
+			if err != nil {
+				return err
+			}
+			if oldChild.countDown() == 0 {
+				key := i2b(oldChild.Ino)
+				if err := b.inodes.Delete(key); err != nil {
+					return err
+				}
+				if fs.contentFS == nil {
+					b.data.Delete(key)
+				}
+				b.symlinks.Delete(key)
+				if err := b.deleteAllChunks(oldChild.Ino); err != nil {
+					return err
+				}
+			} else if err := b.PutInode(old, oldChild); err != nil {
+				return err
+			}
+		}
+		return b.PutInode(parent.Ino, parent)
+	})
 }
 
 func (fs *FS) deleteInode(ino uint64) error {
@@ -1480,7 +1522,7 @@ func (fs *FS) RemoveAll(name string) error {
 		p := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 
-		info, err := fs.Lstat(p)
+		info, err := fs.lstat(p)
 		if err != nil {
 			if os.IsNotExist(err) {
 				// A missing path (or a child that vanished concurrently) is
@@ -1497,7 +1539,7 @@ func (fs *FS) RemoveAll(name string) error {
 
 		// Only traverse into actual directories, not symlinks to directories
 		if info.IsDir() && (info.Mode()&os.ModeSymlink == 0) {
-			entries, err := fs.ReadDir(p)
+			entries, err := fs.readDir(p)
 			if err != nil {
 				return err
 			}
@@ -1581,38 +1623,38 @@ func (fs *FS) RemoveAll(name string) error {
 				return err
 			}
 		}
+
+		// Update the parent in the same transaction, so a failure cannot leave
+		// the parent listing deleted inodes.
+		if parent != nil {
+			p, err := b.GetInode(parent.Ino)
+			if err != nil {
+				return err
+			}
+			if child != nil {
+				for i, entry := range p.Children {
+					if entry.Ino == child.Ino {
+						p.Children = append(p.Children[:i], p.Children[i+1:]...)
+						break
+					}
+				}
+			} else {
+				p.Children = p.Children[:0]
+			}
+			if err := b.PutInode(p.Ino, p); err != nil {
+				return err
+			}
+			if fs.cache != nil {
+				fs.cache.Invalidate(p.Ino)
+				if child != nil {
+					fs.cache.Invalidate(child.Ino)
+				}
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return err
-	}
-
-	// Remove the entry from parent's children if child exists
-	if child != nil && parent != nil {
-		// Remove child from parent's Children list
-		for i, entry := range parent.Children {
-			if entry.Ino == child.Ino {
-				parent.Children = append(parent.Children[:i], parent.Children[i+1:]...)
-				break
-			}
-		}
-		// Invalidate cache entries for parent and child
-		if fs.cache != nil {
-			fs.cache.Invalidate(parent.Ino)
-			fs.cache.Invalidate(child.Ino)
-		}
-		if _, err := fs.saveInode(parent); err != nil {
-			return err
-		}
-	} else if child == nil && parent != nil {
-		// Removing all children from parent
-		parent.Children = parent.Children[:0]
-		if fs.cache != nil {
-			fs.cache.Invalidate(parent.Ino)
-		}
-		if _, err := fs.saveInode(parent); err != nil {
-			return err
-		}
 	}
 
 	return nil
@@ -1707,6 +1749,13 @@ func (fs *FS) Chmod(name string, mode os.FileMode) error {
 // attempt to follow the link. If there is an error, it will be of type
 // *PathError.
 func (fs *FS) Lstat(name string) (os.FileInfo, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	return fs.lstat(name)
+}
+
+// lstat is Lstat without the lock; callers must hold fs.mu.
+func (fs *FS) lstat(name string) (os.FileInfo, error) {
 	pathErr := &os.PathError{Op: "lstat", Path: name}
 	dir, filename := fs.cleanPath(name)
 	node, err := fs.resolve(path.Join(dir, filename))

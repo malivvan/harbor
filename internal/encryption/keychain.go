@@ -55,11 +55,12 @@ func (k *Keychain) Keys() [][]byte {
 	return keys
 }
 
-// Seal encrypts plain with the primary key, prefixing a fresh random nonce. An
-// empty payload and a nil keychain are pass-throughs: stores that skip empty
-// values therefore keep skipping them, and never write a nonce-only payload.
+// Seal encrypts plain with the primary key, prefixing a fresh random nonce. A
+// nil keychain is a passthrough. Empty plaintext is sealed as well: an empty
+// payload at rest is therefore distinguishable from a valid sealed value, so
+// truncating a value to zero bytes cannot bypass authentication.
 func (k *Keychain) Seal(plain []byte) ([]byte, error) {
-	if k == nil || len(plain) == 0 {
+	if k == nil {
 		return plain, nil
 	}
 
@@ -78,12 +79,15 @@ func (k *Keychain) Seal(plain []byte) ([]byte, error) {
 	return append(out, sealed...), nil
 }
 
-// Open decrypts raw with the primary key and then any fallback key. An empty
-// payload and a nil keychain are pass-throughs; anything that no key
-// authenticates yields ErrAuthFailed.
+// Open decrypts raw with the primary key and then any fallback key. A nil
+// keychain is a passthrough. An empty payload at rest is rejected: it cannot be
+// a sealed value, so it must not be treated as empty plaintext.
 func (k *Keychain) Open(raw []byte) ([]byte, error) {
-	if k == nil || len(raw) == 0 {
+	if k == nil {
 		return raw, nil
+	}
+	if len(raw) == 0 {
+		return nil, ErrAuthFailed
 	}
 
 	for _, engine := range k.engines {

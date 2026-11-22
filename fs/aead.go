@@ -86,7 +86,7 @@ func (e *encState) sealContent(plain []byte) ([]byte, error) {
 }
 
 func (e *encState) openContent(raw []byte) ([]byte, error) {
-	if e == nil || !e.encContent || len(raw) == 0 {
+	if e == nil || !e.encContent {
 		return raw, nil
 	}
 	return e.open(raw)
@@ -116,6 +116,21 @@ type marker struct {
 	chunkSize   int
 }
 
+// flagsByte returns the marker bits for the configured state.
+func (m marker) flagsByte() byte {
+	var f byte
+	if m.encContent {
+		f |= markerFlagContent
+	}
+	if m.encMetadata {
+		f |= markerFlagMetadata
+	}
+	if m.chunkSize > 0 {
+		f |= markerFlagChunked
+	}
+	return f
+}
+
 func (m marker) matches(e *encState) bool {
 	return m.encContent == e.encContent &&
 		m.encMetadata == e.encMetadata &&
@@ -125,11 +140,6 @@ func (m marker) matches(e *encState) bool {
 // encodeMarker serializes the marker with a sealed canary used to verify the
 // key: opening the canary with the wrong key fails with ErrAuthFailed.
 func (e *encState) encodeMarker() ([]byte, error) {
-	canary, err := e.seal([]byte(canaryPlaintext))
-	if err != nil {
-		return nil, err
-	}
-
 	var flags byte
 	if e.encContent {
 		flags |= markerFlagContent
@@ -139,6 +149,11 @@ func (e *encState) encodeMarker() ([]byte, error) {
 	}
 	if e.chunkSize > 0 {
 		flags |= markerFlagChunked
+	}
+
+	canary, err := e.seal([]byte(encryption.CanaryPlaintext(canaryPlaintext, flags, uint64(e.chunkSize))))
+	if err != nil {
+		return nil, err
 	}
 
 	return encryption.EncodeMarker(markerSpec, encryption.Marker{
@@ -163,8 +178,8 @@ func decodeMarker(raw []byte) (marker, []byte, error) {
 }
 
 // verifyCanary confirms the configured keys decrypt the stored canary.
-func (e *encState) verifyCanary(canary []byte) error {
-	return encryption.VerifyCanary(e.kc, canary, canaryPlaintext)
+func (e *encState) verifyCanary(canary []byte, m marker) error {
+	return encryption.VerifyCanary(e.kc, canary, encryption.CanaryPlaintext(canaryPlaintext, m.flagsByte(), uint64(m.chunkSize)))
 }
 
 func resolveConfig(cfg Config) (*encState, error) {

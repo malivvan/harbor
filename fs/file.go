@@ -129,6 +129,14 @@ func (f *File) Write(p []byte) (int, error) {
 	if f.flags&absfs.O_ACCESS == os.O_RDONLY {
 		return 0, &os.PathError{Op: "write", Path: f.name, Err: syscall.EBADF}
 	}
+	if f.flags&os.O_APPEND != 0 {
+		node, err := f.fs.loadInode(f.node.Ino)
+		if err != nil {
+			return 0, err
+		}
+		f.offset = node.Size
+		f.node.Size = node.Size
+	}
 	if f.offset < 0 {
 		return 0, &os.PathError{Op: "write", Path: f.name, Err: os.ErrInvalid}
 	}

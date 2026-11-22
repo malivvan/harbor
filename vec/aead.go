@@ -94,7 +94,7 @@ func (e *encState) open(raw []byte) ([]byte, error) {
 // sealPoints seals a point blob or collection metadata when EncryptPoints is
 // enabled.
 func (e *encState) sealPoints(plain []byte) ([]byte, error) {
-	if e == nil || !e.encPoints || len(plain) == 0 {
+	if e == nil || !e.encPoints {
 		return plain, nil
 	}
 	return e.seal(plain)
@@ -102,7 +102,7 @@ func (e *encState) sealPoints(plain []byte) ([]byte, error) {
 
 // openPoints reverses sealPoints.
 func (e *encState) openPoints(raw []byte) ([]byte, error) {
-	if e == nil || !e.encPoints || len(raw) == 0 {
+	if e == nil || !e.encPoints {
 		return raw, nil
 	}
 	return e.open(raw)
@@ -169,6 +169,21 @@ type marker struct {
 	encNames  bool
 }
 
+// flagsByte returns the marker bits for the configured state.
+func (m marker) flagsByte() byte {
+	var f byte
+	if m.encPoints {
+		f |= markerFlagPoints
+	}
+	if m.encIDs {
+		f |= markerFlagIDs
+	}
+	if m.encNames {
+		f |= markerFlagNames
+	}
+	return f
+}
+
 func (m marker) matches(e *encState) bool {
 	return m.encPoints == e.encPoints &&
 		m.encIDs == e.encIDs &&
@@ -178,11 +193,6 @@ func (m marker) matches(e *encState) bool {
 // encodeMarker serializes the marker with a sealed canary used to verify the
 // key: opening the canary with the wrong key fails with ErrAuthFailed.
 func encodeMarker(e *encState) ([]byte, error) {
-	canary, err := e.seal([]byte(canaryPlaintext))
-	if err != nil {
-		return nil, err
-	}
-
 	var flags byte
 	if e.encPoints {
 		flags |= markerFlagPoints
@@ -192,6 +202,11 @@ func encodeMarker(e *encState) ([]byte, error) {
 	}
 	if e.encNames {
 		flags |= markerFlagNames
+	}
+
+	canary, err := e.seal([]byte(encryption.CanaryPlaintext(canaryPlaintext, flags, 0)))
+	if err != nil {
+		return nil, err
 	}
 
 	return encryption.EncodeMarker(markerSpec, encryption.Marker{
@@ -215,8 +230,8 @@ func decodeMarker(raw []byte) (marker, []byte, error) {
 }
 
 // verifyCanary confirms the configured keys decrypt the stored canary.
-func (e *encState) verifyCanary(canary []byte) error {
-	return encryption.VerifyCanary(e.kc, canary, canaryPlaintext)
+func (e *encState) verifyCanary(canary []byte, m marker) error {
+	return encryption.VerifyCanary(e.kc, canary, encryption.CanaryPlaintext(canaryPlaintext, m.flagsByte(), 0))
 }
 
 // loadMarker reads the store marker, if present.

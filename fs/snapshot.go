@@ -17,6 +17,12 @@ import (
 // Snapshot represents a read-only point-in-time view of the filesystem.
 // Snapshots are implemented using BoltDB's read-only transactions (MVCC),
 // which provide consistent views without blocking writes to the main filesystem.
+//
+// When the filesystem uses an external contentFS, the snapshot isolates the
+// bbolt metadata (names, inodes, chunked content) but external content is read
+// live. A concurrent write or delete in the external store is visible through
+// the snapshot; use an immutable/versioned external backend if point-in-time
+// content is required.
 type Snapshot struct {
 	fs       *FS
 	tx       *bolt.Tx

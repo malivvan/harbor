@@ -360,10 +360,11 @@ func (f *File) Truncate(size int64) error {
 		return os.ErrInvalid
 	}
 
-	// Abort any in-progress multipart upload since we can't truncate
-	// already-uploaded parts. Only the not-yet-flushed buffer survives.
-	f.abortMultipartLocked()
-	f.flushed = 0
+	// Already-flushed parts cannot be truncated, and aborting the upload would
+	// discard the file's prefix. Refuse instead of silently losing data.
+	if f.multipartID != "" || f.flushed > 0 {
+		return &os.PathError{Op: "truncate", Path: f.name, Err: os.ErrInvalid}
+	}
 
 	if size < int64(len(f.buffer)) {
 		f.buffer = f.buffer[:size]

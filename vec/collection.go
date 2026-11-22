@@ -170,7 +170,12 @@ func (c *Collection) Upsert(points []PointStruct) error {
 		return fmt.Errorf("failed to update memory index: %w", err)
 	}
 
-	// 3. Buffer for bbolt persistence（攒批减少 fsync）
+	// 3. Buffer for bbolt persistence（攒批减少 fsync）. Holding the store's
+	// flush lock keeps a concurrent Flush/Close from missing this batch.
+	if c.storage != nil {
+		c.storage.flushMu.Lock()
+		defer c.storage.flushMu.Unlock()
+	}
 	c.writeBuf = append(c.writeBuf, batch...)
 	if len(c.writeBuf) >= c.flushThreshold {
 		return c.flushUnsafe()

@@ -45,9 +45,11 @@ type Store struct {
 	quantizer Quantizer
 	useQuant  bool
 
-	// mu guards collections. closeMu serializes Close.
+	// mu guards collections. closeMu serializes Close. flushMu serializes
+	// Flush/Close against new buffered writes.
 	mu          sync.Mutex
 	closeMu     sync.Mutex
+	flushMu     sync.Mutex
 	collections map[string]*Collection
 
 	// enc is the optional encryption state. It is an atomic pointer so a
@@ -323,7 +325,7 @@ func (s *Store) checkMode(ctx context.Context) error {
 		if !m.matches(enc) {
 			return fmt.Errorf("%w: encryption settings do not match the store", ErrWrongMode)
 		}
-		return enc.verifyCanary(canary)
+		return enc.verifyCanary(canary, m)
 	}
 
 	// No marker: only a store without data may be initialized as encrypted.
@@ -530,6 +532,8 @@ func (s *Store) trackCollection(c *Collection) {
 
 // flushCollections drains the write buffer of every tracked collection.
 func (s *Store) flushCollections() error {
+	s.flushMu.Lock()
+	defer s.flushMu.Unlock()
 	s.mu.Lock()
 	collections := make([]*Collection, 0, len(s.collections))
 	for _, c := range s.collections {

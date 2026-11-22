@@ -300,7 +300,7 @@ func (s *Store) verifyFS(name string) error {
 			if !m.matches(enc) {
 				return fmt.Errorf("%w: encryption settings do not match the filesystem", ErrWrongMode)
 			}
-			if err := enc.verifyCanary(canary); err != nil {
+			if err := enc.verifyCanary(canary, m); err != nil {
 				return err
 			}
 		}

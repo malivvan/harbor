@@ -306,7 +306,11 @@ func (fsys *FS) loadChunkedData(ino uint64) ([]byte, error) {
 		if err != nil {
 			return err
 		}
-		out, err = b.readAllChunks(ino)
+		node, err := b.GetInode(ino)
+		if err != nil {
+			return err
+		}
+		out, err = b.readDataRange(ino, 0, node.Size, fsys.chunkSize())
 		return err
 	})
 	return out, err

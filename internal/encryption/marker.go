@@ -104,6 +104,13 @@ func DecodeMarker(spec MarkerSpec, raw []byte) (Marker, error) {
 	return m, nil
 }
 
+// CanaryPlaintext binds a base canary string to a marker's flags and extra
+// field. The sealed canary then authenticates the on-disk mode as well as the
+// key, so flipping a flag invalidates the marker.
+func CanaryPlaintext(base string, flags byte, extra uint64) string {
+	return fmt.Sprintf("%s/0x%02x/0x%016x", base, flags, extra)
+}
+
 // VerifyCanary confirms that kc decrypts sealed back to want, which proves the
 // configured keys open the store. A keychain that cannot decrypt it yields
 // ErrAuthFailed.

@@ -88,131 +88,32 @@ revision and may shift; use the named symbols and files to locate the code.
 - Regression tests: `db/review_wrong_test.go`, `vec/review_wrong_test.go`,
   `ts/review_wrong_test.go`, plus the updated `TestToBytes`.
 
-# 3. Data-loss / integrity
+# 3. Data-loss / integrity — RESOLVED
 
-## I1. [High] Empty ciphertext bypasses authentication and silently truncates data
-**Location:** `internal/encryption/keychain.go:61-100` (`Seal`/`Open` treat
-length 0 as a passthrough), callers such as `fs/fs.go:555-600` (`loadData`),
-`fs/file.go:40-70` (`Read`).
-**Problem:** An attacker (or corruption) that replaces a sealed value with the
-empty byte string is not detected: `Open` returns an empty plaintext. For fs
-content this silently turns the file into an empty file with a `nil` error.
-Reproduced: writing 9 bytes with `EncryptContent`, then setting the `data`
-bucket value to `[]byte{}`, reopens and reads `""` with `err=nil` (inode size
-still 9). Similar zero-fill happens when a chunk is deleted
-(`fs/chunk.go:readDataRange` skips missing chunks).
-**Fix:** Distinguish "absent" (bbolt `Get` returns nil) from "present but
-empty at rest"; stores should treat a present zero-length sealed payload as
-`ErrAuthFailed`, except for entities explicitly allowed to be empty at rest.
-Alternatively bind the plaintext length into the AEAD associated data.
-
-## I2. [Medium] Sub-store markers do not authenticate their flags/extra fields
-**Location:** `db/aead.go:177-215`, `fs/aead.go:119-145`, `ts/aead.go:131-160`,
-`vec/aead.go:172-210`. Each `encodeMarker` seals a constant canary; `matches`
-compares decoded flags to the configured state.
-**Problem:** The root `storm` canary was fixed to bind the flags
-(`storm.go:336-366`), but the four sub-store markers still seal a constant.
-An attacker who flips a marker flag/extra (e.g., `markerFlagValues`, ts block
-duration, fs chunk size) can open the store with a config matching the flipped
-value: `matches` succeeds and the canary still verifies, so ciphertext is
-misread as plaintext (or vice versa). When the caller's config is fixed the
-tamper only causes `ErrWrongMode` (a denial of service), but direct sub-store
-users who load config from disk are exposed to silent misreads.
-**Fix:** Bind the marker flags/extra into the canary plaintext (as the root
-package does), or pass them as GCM associated data. Add a tamper test for each
-sub-store.
-
-## I3. [High] `fs.saveData` ignores the external `contentFS` `Close` error
-**Location:** `fs/fs.go:508-548`, especially `defer f.Close()` at line 528.
-**Problem:** When `contentFS` is an upload-on-close filesystem (s3fs is), the
-actual write happens in `Close`. `saveData` never checks that error, so a
-failed upload is reported as success and the inode points at missing content.
-The same pattern exists in `fs/snapshot.go:278` (`CopyToFS`).
-**Fix:** Call `Close` explicitly and propagate its error (and use a
-temp-key-then-rename/commit protocol where the backend allows it). Add a test
-with a contentFS whose `Close` fails.
-
-## I4. [High] `s3fs.File.Truncate` discards already-uploaded multipart content
-**Location:** `fs/s3fs/s3file.go:351-390`.
-**Problem:** For a large file with an in-progress multipart upload, `Truncate`
-aborts the upload (discarding uploaded parts) and sets `flushed = 0`, keeping
-only the unflushed buffer. Truncating such a file therefore loses its prefix
-instead of resizing it.
-**Fix:** Do not support truncating a file after parts have been flushed; return
-an error, or re-download the object, apply the truncation and rewrite it.
-Document the limitation and add a test.
-
-## I5. [Medium] `fs.RemoveAll`/`saveParentChild`/`copyNode` are not atomic
-**Location:** `fs/fs.go:1460-1620` (`RemoveAll`: content removal, inode
-deletion and parent update in separate transactions), `fs/fs.go:1273-1315`
-(`saveParentChild`), `fs/fs.go:900-950` (`copyNode`).
-**Problem:** A failure between transactions leaves dangling children, an
-orphaned inode, a stale parent listing or leaked copied inodes.
-**Fix:** Perform the inode/data/parent mutations of a removal (and the
-child+parent creation of a link) in a single `bolt.Update`; for `copyNode`,
-stage the subtree or add cleanup on failure. Add failure-injection tests.
-
-## I6. [Medium] `fs` `O_APPEND` writes use the open-time size, not the current end
-**Location:** `fs/fs.go:1150-1160` (`openFile` sets `f.offset = child.Size`),
-`fs/file.go:125-180` (`Write`).
-**Problem:** With concurrent appenders, one handle overwrites the bytes another
-appended after the first handle was opened; `O_APPEND` is not atomic.
-**Fix:** For `O_APPEND`, reload the inode size and seek to the end inside the
-`fs.mu`-protected write, or document that concurrent appends are unsupported.
-
-## I7. [Medium] `fs.Snapshot` is not point-in-time for external `contentFS`
-**Location:** `fs/snapshot.go:191-211` (`readContent` calls
-`fs.loadData(node.Ino)` for an external contentFS).
-**Problem:** bbolt-based content is read from the snapshot's read transaction,
-but external content is read live; concurrent writes/deletes change what the
-snapshot returns.
-**Fix:** Either snapshot external content (copy-on-create/versioning) or
-document that snapshots only isolate bbolt metadata/content and add a test that
-pins the behavior.
-
-## I8. [Medium] `fs` chunk reads can silently shift data when a chunk is missing
-**Location:** `fs/chunk.go:224-245` (`readAllChunks` concatenates chunks without
-respecting indexes) and `fs/chunk.go:78-120` (`readDataRange` zero-fills gaps).
-`loadChunkedData` is used by `loadData` (e.g., `copyNode`).
-**Problem:** A deleted/missing middle chunk makes `readAllChunks` concatenate
-the next chunk at the wrong offset, silently changing file content; the
-range-based reader instead zero-fills, so the two paths disagree.
-**Fix:** Index chunks explicitly and reject gaps (or zero-fill consistently),
-and add a test with a missing chunk.
-
-## I9. [Low] `vec.Collection` writes can be missed by a concurrent `Store.Flush`/`Close`
-**Location:** `vec/store.go:479-500` (`flushCollections` copies the collection
-list and flushes), `vec/collection.go:150-170` (`Upsert` buffers after the
-index update).
-**Problem:** An `Upsert` that appends to `writeBuf` after its collection was
-flushed but before `closed` is set can be lost; the in-memory index shows the
-point but storage does not.
-**Fix:** Serialize `Store.Flush`/`Close` with `Collection.Upsert` (a store-wide
-lock or a per-collection closed flag checked under `c.mu`), or document that
-concurrent writers must stop before closing.
-
-## I10. [Low] `db` `newMeta` ignores the codec-record write error
-**Location:** `db/metadata.go:13-40`, `m.Put([]byte(metaCodec), ...)`.
-**Problem:** A failed `Put` (e.g., read-only transaction/disk error) leaves the
-metadata bucket without a codec while the caller proceeds.
-**Fix:** Check and return the error.
-
-## I11. [Medium] `fs` read paths are not atomic across transactions
-**Location:** `fs/fs.go:350-372` (`ReadFile`: `resolve` then
-`readRange`/`loadData` in separate transactions), `fs/fs.go:321-348`
-(`ReadDir`: resolve then per-child `loadInode`), `fs/fs.go:150-170`
-(`OpenFile`/`Mkdir`/`Remove`/`Rename` hold `fs.mu`, but `ReadFile`/`ReadDir`
-do not).
-**Problem:** A concurrent rename/remove/truncate between the inode resolution
-and the data read can yield a torn result (a stale inode pointing at deleted
-content, an empty file for a just-removed path, or a directory listing whose
-children vanish mid-loop). The same applies to `fs.Sub`/`Snapshot` paths that
-call back into `loadData`.
-**Fix:** Perform each high-level read inside a single bbolt read transaction
-(resolve + read), and take `fs.mu.RLock` around the multi-step operations that
-must not interleave with writers.
-
----
+- **I1** — an encrypted keychain now seals empty plaintext too and treats a
+  present zero-length payload as `ErrAuthFailed`; the store helpers no longer
+  short-circuit empty payloads and `fs.loadData` treats an absent data key as
+  an empty file. Truncating sealed bytes to zero is now detected.
+- **I2** — `encryption.CanaryPlaintext` binds the marker flags/extra into the
+  sealed canary, and `db`, `fs`, `ts` and `vec` use it, so flipping a marker
+  flag invalidates authentication.
+- **I3** — `fs.saveData` checks the external contentFS `Close` error (the
+  upload step for s3fs) and reports failures.
+- **I4** — `s3fs.File.Truncate` refuses to truncate after parts were flushed
+  instead of aborting the upload and dropping the file prefix.
+- **I5** — `saveParentChild` writes the child and parent in one transaction;
+  `RemoveAll` updates the parent in the same transaction that deletes the
+  inodes; `copyNode` deletes a partially copied subtree on failure. External
+  content deletion remains outside the bbolt transaction by necessity.
+- **I6** — `O_APPEND` writes reload the inode size under `fs.mu`.
+- **I7** — the snapshot documentation states that external contentFS objects are
+  read live and are not point-in-time.
+- **I8** — `loadChunkedData` reads through `readDataRange` with the inode size,
+  so gaps are zero-filled and padding is trimmed.
+- **I9** — `vec.Store.flushMu` serializes `Flush`/`Close` against `Upsert`.
+- **I10** — `db.newMeta` returns the codec-record write error.
+- **I11** — `fs.mu` is an `RWMutex`; multi-step read paths take `RLock`,
+  writers take `Lock`, and `Chdir` is serialized.
 
 # 4. Panics, crashes and unbounded resource use
 

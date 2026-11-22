@@ -944,7 +944,7 @@ func TestMultipart_MultipleSmallWrites(t *testing.T) {
 	}
 }
 
-func TestMultipart_Truncate_AbortsUpload(t *testing.T) {
+func TestMultipart_TruncateRefused(t *testing.T) {
 	mock := NewMockS3Client()
 	fs := NewWithClient(mock, "test-bucket")
 	fs.partSize = 50
@@ -954,35 +954,33 @@ func TestMultipart_Truncate_AbortsUpload(t *testing.T) {
 		t.Fatalf("OpenFile failed: %v", err)
 	}
 
-	// Write enough to start multipart
-	f.Write(make([]byte, 100))
-
+	// Write enough to flush a part and start a multipart upload.
+	if _, err := f.Write(make([]byte, 100)); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
 	file := f.(*File)
 	if file.multipartID == "" {
 		t.Fatal("Multipart should have started")
 	}
 
-	// Truncate should abort multipart
-	f.Truncate(10)
-	if file.multipartID != "" {
-		t.Error("Truncate should abort multipart upload")
+	// Truncating already-uploaded content would lose the file's prefix, so it
+	// must be refused and leave the upload intact.
+	if err := f.Truncate(10); err == nil {
+		t.Fatal("Truncate should be refused after parts were flushed")
 	}
-	if len(file.buffer) != 10 {
-		t.Errorf("Buffer should be 10 bytes after truncate, got %d", len(file.buffer))
+	if file.multipartID == "" {
+		t.Fatal("the multipart upload must not be aborted")
 	}
 
-	// Close should use PutObject since multipart was aborted
-	err = f.Close()
-	if err != nil {
+	if err := f.Close(); err != nil {
 		t.Fatalf("Close failed: %v", err)
 	}
-
 	stored, ok := mock.GetTestObject("trunc.bin")
 	if !ok {
 		t.Fatal("Object should exist")
 	}
-	if len(stored) != 10 {
-		t.Errorf("Stored size = %d, want 10", len(stored))
+	if len(stored) != 100 {
+		t.Errorf("Stored size = %d, want the original 100 bytes", len(stored))
 	}
 }
 

@@ -64,18 +64,21 @@ func TestKeychainSealOpen(t *testing.T) {
 	require.ErrorIs(t, err, ErrAuthFailed, "truncated ciphertext must not panic or pass")
 }
 
-func TestKeychainEmptyPassthrough(t *testing.T) {
+func TestKeychainEmptyPayloads(t *testing.T) {
 	kc, err := NewKeychain([][]byte{testKey(13)})
 	require.NoError(t, err)
 
 	for _, empty := range [][]byte{nil, {}} {
 		sealed, err := kc.Seal(empty)
 		require.NoError(t, err)
-		require.Empty(t, sealed, "an empty payload is never sealed")
+		require.NotEmpty(t, sealed, "empty plaintext is sealed so truncation at rest is detectable")
 
-		plain, err := kc.Open(empty)
+		plain, err := kc.Open(sealed)
 		require.NoError(t, err)
-		require.Empty(t, plain, "an empty payload opens as itself")
+		require.Empty(t, plain)
+
+		_, err = kc.Open(empty)
+		require.ErrorIs(t, err, ErrAuthFailed, "a present empty payload cannot be valid ciphertext")
 	}
 }
 

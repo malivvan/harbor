@@ -128,6 +128,18 @@ type marker struct {
 	blockDur  int64
 }
 
+// flagsByte returns the marker bits for the configured state.
+func (m marker) flagsByte() byte {
+	var f byte
+	if m.encValues {
+		f |= markerFlagValues
+	}
+	if m.encNames {
+		f |= markerFlagNames
+	}
+	return f
+}
+
 func (m marker) matches(s *encState) bool {
 	return m.encValues == s.encValues &&
 		m.encNames == s.encNames &&
@@ -136,17 +148,17 @@ func (m marker) matches(s *encState) bool {
 
 // encodeMarker serializes the marker with a sealed canary for key verification.
 func (e *encState) encodeMarker() ([]byte, error) {
-	canary, err := e.seal([]byte(canaryPlaintext))
-	if err != nil {
-		return nil, err
-	}
-
 	var flags byte
 	if e.encValues {
 		flags |= markerFlagValues
 	}
 	if e.encNames {
 		flags |= markerFlagNames
+	}
+
+	canary, err := e.seal([]byte(encryption.CanaryPlaintext(canaryPlaintext, flags, uint64(e.blockDur))))
+	if err != nil {
+		return nil, err
 	}
 
 	return encryption.EncodeMarker(markerSpec, encryption.Marker{
@@ -200,8 +212,8 @@ func (s *Store) readMarker(db *bolt.DB) (marker, []byte, bool, error) {
 }
 
 // verifyCanary checks that at least one configured key can decrypt the canary.
-func (e *encState) verifyCanary(canary []byte) error {
-	return encryption.VerifyCanary(e.kc, canary, canaryPlaintext)
+func (e *encState) verifyCanary(canary []byte, m marker) error {
+	return encryption.VerifyCanary(e.kc, canary, encryption.CanaryPlaintext(canaryPlaintext, m.flagsByte(), uint64(m.blockDur)))
 }
 
 // ensureMarker writes the encryption marker if the store does not have one yet.
@@ -317,7 +329,7 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		if !existing.matches(settings) {
 			return nil, fmt.Errorf("%w: encryption settings do not match the store", ErrWrongMode)
 		}
-		if err := s.encState().verifyCanary(canary); err != nil {
+		if err := s.encState().verifyCanary(canary, existing); err != nil {
 			return nil, err
 		}
 		return s, nil

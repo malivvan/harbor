@@ -189,7 +189,7 @@ func (s *Store) checkMode(ctx context.Context) error {
 		if !m.matches(enc) {
 			return fmt.Errorf("%w: encryption settings do not match the store", ErrWrongMode)
 		}
-		return enc.verifyCanary(canary)
+		return enc.verifyCanary(canary, m)
 	}
 
 	// No marker: only a brand-new store may be initialized as encrypted.
