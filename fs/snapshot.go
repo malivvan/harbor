@@ -11,12 +11,18 @@ import (
 	"time"
 
 	"github.com/malivvan/storm/internal/absfs"
-	bolt "go.etcd.io/bbolt"
 )
 
 // Snapshot represents a read-only point-in-time view of the filesystem.
-// Snapshots are implemented using BoltDB's read-only transactions (MVCC),
-// which provide consistent views without blocking writes to the main filesystem.
+//
+// The metadata and content are materialized into memory when the snapshot is
+// created, and the bbolt read transaction is released immediately. Holding a
+// read transaction for the lifetime of a snapshot pins the database mmap: a
+// later write that needs to remap (for example CopyToFS writing to the same
+// database) would block forever waiting for the reader. Materializing also
+// means snapshots do not pin the MVCC view or prevent the database file from
+// growing. Snapshots are therefore non-durable and their memory cost is
+// proportional to the size of the filesystem.
 //
 // When the filesystem uses an external contentFS, the snapshot isolates the
 // bbolt metadata (names, inodes, chunked content) but external content is read
@@ -24,36 +30,110 @@ import (
 // the snapshot; use an immutable/versioned external backend if point-in-time
 // content is required.
 type Snapshot struct {
-	fs       *FS
-	tx       *bolt.Tx
-	bucket   *fsBucket
-	created  time.Time
-	name     string
-	released bool
+	fs         *FS
+	nodes      map[uint64]*iNode
+	content    map[uint64][]byte
+	contentErr map[uint64]error
+	links      map[uint64]string
+	created    time.Time
+	name       string
+	released   bool
 }
 
 // CreateSnapshot creates a new read-only snapshot of the filesystem.
-// The snapshot must be released by calling Release() when done to free resources.
+// The snapshot must be released by calling Release() when done to free memory.
 func (fsys *FS) CreateSnapshot(name string) (*Snapshot, error) {
 	tx, err := fsys.db.Begin(false) // false = read-only transaction
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback() // read-only: Rollback is the close operation
 
 	bucket, err := fsys.openFsBucket(tx) // Snapshots don't use the cache
 	if err != nil {
-		tx.Rollback()
 		return nil, err
 	}
 
-	return &Snapshot{
-		fs:       fsys,
-		tx:       tx,
-		bucket:   bucket,
-		created:  time.Now(),
-		name:     name,
-		released: false,
-	}, nil
+	return fsys.materializeSnapshot(bucket, name)
+}
+
+// materializeSnapshot copies the inode table, file content and symlink targets
+// into private buffers so the snapshot no longer needs the read transaction.
+func (fsys *FS) materializeSnapshot(bucket *fsBucket, name string) (*Snapshot, error) {
+	snap := &Snapshot{
+		fs:         fsys,
+		nodes:      make(map[uint64]*iNode),
+		content:    make(map[uint64][]byte),
+		contentErr: make(map[uint64]error),
+		links:      make(map[uint64]string),
+		created:    time.Now(),
+		name:       name,
+	}
+
+	if err := bucket.inodes.ForEach(func(k, v []byte) error {
+		if len(k) != 8 || len(v) == 0 {
+			return nil
+		}
+		ino := b2i(k)
+		node := newInode(0)
+		if err := bucket.decodeNode(ino, node); err != nil {
+			return err
+		}
+		snap.nodes[ino] = node
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	// External content is deliberately left live; see the type comment.
+	if fsys.contentFS == nil {
+		for ino, node := range snap.nodes {
+			if !node.Mode.IsRegular() || node.Size <= 0 {
+				continue
+			}
+			if fsys.chunked() {
+				data, err := bucket.readDataRange(ino, 0, node.Size, fsys.chunkSize())
+				if err != nil {
+					// Do not let one corrupt file abort snapshot creation;
+					// surface the error when that file is read.
+					snap.contentErr[ino] = err
+					continue
+				}
+				snap.content[ino] = data
+				continue
+			}
+			raw := bucket.data.Get(i2b(ino))
+			if raw == nil {
+				snap.content[ino] = []byte{}
+				continue
+			}
+			plain, err := bucket.enc.openContent(raw)
+			if err != nil {
+				// Surface the corruption when this file is read instead of
+				// failing the whole snapshot.
+				snap.contentErr[ino] = err
+				continue
+			}
+			// raw aliases the mmap; keep a private copy.
+			snap.content[ino] = append([]byte(nil), plain...)
+		}
+	}
+
+	if err := bucket.symlinks.ForEach(func(k, v []byte) error {
+		if len(k) != 8 || v == nil {
+			return nil
+		}
+		plain, err := bucket.enc.openContent(v)
+		if err != nil {
+			return err
+		}
+		snap.links[b2i(k)] = string(plain)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return snap, nil
 }
 
 // Name returns the snapshot's name.
@@ -66,14 +146,18 @@ func (s *Snapshot) Created() time.Time {
 	return s.created
 }
 
-// Release closes the snapshot and frees associated resources.
+// Release frees the snapshot and its in-memory state.
 // The snapshot cannot be used after calling Release().
 func (s *Snapshot) Release() error {
 	if s.released {
 		return nil
 	}
 	s.released = true
-	return s.tx.Rollback() // Rollback is safe for read-only transactions
+	s.nodes = nil
+	s.content = nil
+	s.contentErr = nil
+	s.links = nil
+	return nil
 }
 
 // resolve resolves a path within the snapshot to an iNode.
@@ -82,17 +166,16 @@ func (s *Snapshot) resolve(path string) (*iNode, error) {
 		return nil, os.ErrClosed
 	}
 
-	node := new(iNode)
 	ino := s.fs.rootIno
 
-	loadedNode, err := s.bucket.GetInode(ino)
+	loadedNode, err := s.inode(ino)
 	if err != nil {
 		return nil, err
 	}
-	*node = *loadedNode
+	node := *loadedNode
 
 	if path == "/" {
-		return node, nil
+		return &node, nil
 	}
 
 	for _, name := range strings.Split(strings.TrimLeft(path, "/"), "/") {
@@ -105,14 +188,24 @@ func (s *Snapshot) resolve(path string) (*iNode, error) {
 		}
 
 		// replace node with child or error
-		loadedNode, err = s.bucket.GetInode(node.Children[x].Ino)
+		loadedNode, err = s.inode(node.Children[x].Ino)
 		if err != nil {
 			return nil, err
 		}
-		*node = *loadedNode
+		node = *loadedNode
 	}
 
-	return node, nil
+	return &node, nil
+}
+
+// inode returns a copy of the materialized inode table entry for ino.
+func (s *Snapshot) inode(ino uint64) (*iNode, error) {
+	node, ok := s.nodes[ino]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	copied := *node
+	return &copied, nil
 }
 
 // Stat returns file information for the given path in the snapshot.
@@ -153,7 +246,7 @@ func (s *Snapshot) ReadDir(name string) ([]fs.DirEntry, error) {
 
 	var entries []fs.DirEntry
 	for _, child := range node.Children {
-		childNode, err := s.bucket.GetInode(child.Ino)
+		childNode, err := s.inode(child.Ino)
 		if err != nil {
 			continue // Skip entries we can't read
 		}
@@ -198,8 +291,8 @@ func (s *Snapshot) ReadFile(name string) ([]byte, error) {
 	return result, nil
 }
 
-// readContent returns the content of node, consulting the external content
-// filesystem and chunked storage before falling back to the bbolt data bucket.
+// readContent returns the content of node. External content is read live;
+// everything else comes from the materialized snapshot.
 // readContent returns the whole content of node and whether the returned
 // buffer is private to the caller (and therefore safe to mutate).
 func (s *Snapshot) readContent(node *iNode) ([]byte, bool, error) {
@@ -208,23 +301,19 @@ func (s *Snapshot) readContent(node *iNode) ([]byte, bool, error) {
 		data, err := s.fs.loadData(node.Ino)
 		return data, true, err
 	}
-	if s.fs.chunked() {
-		data, err := s.bucket.readDataRange(node.Ino, 0, node.Size, s.fs.chunkSize())
-		return data, true, err
-	}
 
-	data := s.bucket.data.Get(i2b(node.Ino))
-	if data == nil {
+	if err, ok := s.contentErr[node.Ino]; ok {
+		return nil, false, err
+	}
+	data, ok := s.content[node.Ino]
+	if !ok {
 		// File exists but has no data (empty file)
 		return []byte{}, true, nil
 	}
-	enc := s.bucket.enc
-	plain, err := enc.openContent(data)
-	if err != nil {
-		return nil, false, err
-	}
-	fresh := enc != nil && enc.encContent
-	return plain, fresh, nil
+	// Return a private copy so callers cannot modify the snapshot.
+	result := make([]byte, len(data))
+	copy(result, data)
+	return result, true, nil
 }
 
 // Readlink reads the target of a symbolic link in the snapshot.
@@ -245,7 +334,7 @@ func (s *Snapshot) Readlink(name string) (string, error) {
 		return "", &os.PathError{Op: "readlink", Path: name, Err: os.ErrInvalid}
 	}
 
-	target := s.bucket.Readlink(node.Ino)
+	target := s.links[node.Ino]
 	return target, nil
 }
 
@@ -293,10 +382,15 @@ func (s *Snapshot) CopyToFS(srcPath, dstPath string) error {
 		if err != nil {
 			return err
 		}
-		defer file.Close()
 
 		_, err = file.Write(data)
 		if err != nil {
+			_ = file.Close()
+			return err
+		}
+		// Never discard the Close error: an external/S3 content store commits
+		// the object there.
+		if err := file.Close(); err != nil {
 			return err
 		}
 	}
@@ -428,13 +522,36 @@ func (f *snapshotFile) ensureData() error {
 	return nil
 }
 
-// readRange reads part of a chunked snapshot file without materializing it.
+// readRange reads part of a materialized snapshot file.
 func (f *snapshotFile) readRange(off, n int64) ([]byte, error) {
-	fs := f.snapshot.fs
 	if n <= 0 {
 		return nil, nil
 	}
-	return f.snapshot.bucket.readDataRange(f.node.Ino, off, n, fs.chunkSize())
+	if err, ok := f.snapshot.contentErr[f.node.Ino]; ok {
+		return nil, err
+	}
+	data, ok := f.snapshot.content[f.node.Ino]
+	if !ok {
+		if f.snapshot.fs.contentFS != nil {
+			full, err := f.snapshot.fs.loadData(f.node.Ino)
+			if err != nil {
+				return nil, err
+			}
+			data = full
+		} else {
+			return nil, nil
+		}
+	}
+	if off >= int64(len(data)) {
+		return nil, nil
+	}
+	end := off + n
+	if end > int64(len(data)) {
+		end = int64(len(data))
+	}
+	out := make([]byte, end-off)
+	copy(out, data[off:end])
+	return out, nil
 }
 func (s *Snapshot) Create(name string) (absfs.File, error) { return nil, os.ErrPermission }
 func (s *Snapshot) OpenFile(name string, flag int, perm os.FileMode) (absfs.File, error) {
@@ -738,7 +855,7 @@ func (f *snapshotFile) Readdir(n int) ([]os.FileInfo, error) {
 	infos := make([]os.FileInfo, n)
 	endOffset := f.diroffset + n
 	for i, entry := range children[f.diroffset:endOffset] {
-		node, err := f.snapshot.bucket.GetInode(entry.Ino)
+		node, err := f.snapshot.inode(entry.Ino)
 		if err != nil {
 			return nil, err
 		}
@@ -782,7 +899,7 @@ func (f *snapshotFile) ReadDir(n int) ([]fs.DirEntry, error) {
 	entries := make([]fs.DirEntry, n)
 	endOffset := f.diroffset + n
 	for i, entry := range children[f.diroffset:endOffset] {
-		node, err := f.snapshot.bucket.GetInode(entry.Ino)
+		node, err := f.snapshot.inode(entry.Ino)
 		if err != nil {
 			return nil, err
 		}

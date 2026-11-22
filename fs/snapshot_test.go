@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -584,8 +585,6 @@ func TestSnapshotManager_ReleaseAll(t *testing.T) {
 }
 
 func TestSnapshot_CopyToFS(t *testing.T) {
-	t.Skip("CopyToFS has a design flaw - it tries to write while holding a read transaction, causing BoltDB deadlock")
-
 	path := tempFile()
 	defer os.Remove(path)
 
@@ -701,4 +700,77 @@ func TestSnapshotLazyOpenSeeks(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 4, n)
 	require.Equal(t, "6789", string(buf))
+}
+
+// TestSnapshotDoesNotBlockWrites regresses the read-transaction/mmap deadlock:
+// a snapshot used to hold a bbolt read transaction, so a write that needed to
+// grow the mmap blocked forever. Snapshots are now materialized eagerly.
+func TestSnapshotDoesNotBlockWrites(t *testing.T) {
+	path := tempFile()
+	defer os.Remove(path)
+
+	fsys, err := openFSForTest(t, path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fsys.Close()
+
+	f, err := fsys.Create("/large.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := make([]byte, 2<<20)
+	for i := range original {
+		original[i] = byte(i)
+	}
+	if _, err := f.Write(original); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := fsys.CreateSnapshot("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snap.Release()
+
+	// Enough new data to force the bbolt mmap to grow while the snapshot is
+	// alive. With a held read transaction this write would deadlock.
+	done := make(chan error, 1)
+	go func() {
+		out, err := fsys.Create("/grow.bin")
+		if err != nil {
+			done <- err
+			return
+		}
+		if _, err := out.Write(make([]byte, 2<<20)); err != nil {
+			_ = out.Close()
+			done <- err
+			return
+		}
+		done <- out.Close()
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("write blocked while a snapshot was open")
+	}
+
+	// The snapshot still exposes the state at creation time.
+	if _, err := snap.Stat("/grow.bin"); !os.IsNotExist(err) {
+		t.Fatalf("snapshot saw a post-creation file: %v", err)
+	}
+	data, err := snap.ReadFile("/large.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != len(original) {
+		t.Fatalf("snapshot content length = %d, want %d", len(data), len(original))
+	}
 }
