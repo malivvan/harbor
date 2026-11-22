@@ -14,6 +14,9 @@ import (
 	bolterrors "go.etcd.io/bbolt/errors"
 )
 
+// Name is the conventional root bucket the harbor root package uses for the
+// vec sub-store. It is not applied implicitly: an empty Config.Root means the
+// database root.
 const Name = "vec"
 
 // ErrClosed is returned when an operation targets a closed store.
@@ -376,6 +379,7 @@ func (s *Store) checkMode(ctx context.Context) error {
 	return s.storeMarker(enc)
 }
 
+// ErrNilContext is returned when a nil context is passed to an operation.
 var ErrNilContext = fmt.Errorf("context is nil")
 
 func checkContext(ctx context.Context) error {
@@ -607,10 +611,11 @@ func (s *Store) EnsureCollection(colName string) error {
 	})
 }
 
-// UpsertPoints saves or updates a batch of points to disk.
-// Points are serialized as Protocol Buffers and stored with their ID as the key.
-// If quantization is enabled, vectors are compressed before storage.
-// Returns an error if the collection doesn't exist or if serialization fails.
+// UpsertPoints saves or updates a batch of points to disk. Points are encoded
+// with the positional binary format described in binary.go and stored with
+// their ID as the key. If quantization is enabled, vectors are compressed
+// before storage. Returns an error if the collection does not exist or if
+// serialization fails.
 func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 	if err := validatePayloadKeys(points); err != nil {
 		return err

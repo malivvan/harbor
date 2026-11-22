@@ -4,8 +4,7 @@ import "math"
 
 // Quantizer defines the interface for vector quantization
 // Quantization reduces the memory footprint of vectors by compressing them
-// from 32-bit floats to smaller representations like 8-bit integers
-
+// from 32-bit floats to smaller representations like 8-bit integers.
 type Quantizer interface {
 	// Quantize compresses a float32 vector to a compressed representation
 	Quantize(vector []float32) []byte
@@ -19,9 +18,7 @@ type Quantizer interface {
 
 // SQ8Quantizer implements scalar quantization to unsigned 8-bit integers.
 // Each vector element is scaled to [0, 255] based on the min and max values of
-// the vector (the earlier comment claimed [-128, 127], which the code never
-// produced).
-
+// the vector.
 type SQ8Quantizer struct{}
 
 // NewSQ8Quantizer creates a new SQ8 quantizer

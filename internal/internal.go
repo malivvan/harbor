@@ -6,6 +6,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+// AppID identifies this module in persisted metadata.
 const AppID = "com.github.malivvan.harbor"
 
 // Cursor that can be reversed

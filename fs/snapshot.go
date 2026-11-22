@@ -474,9 +474,18 @@ var _ absfs.FileSystem = (*Snapshot)(nil)
 // The following methods make Snapshot compatible with absfs.FS
 // for read-only operations. Write operations return errors.
 
+// Chdir always returns os.ErrPermission: snapshots are read-only.
 func (s *Snapshot) Chdir(dir string) error { return os.ErrPermission }
+
+// Getwd returns the working directory of the filesystem that created the
+// snapshot.
 func (s *Snapshot) Getwd() (string, error) { return s.fs.Getwd() }
-func (s *Snapshot) TempDir() string        { return s.fs.TempDir() }
+
+// TempDir returns the temporary directory of the filesystem that created the
+// snapshot.
+func (s *Snapshot) TempDir() string { return s.fs.TempDir() }
+
+// Open opens a file or directory from the snapshot in read-only mode.
 func (s *Snapshot) Open(name string) (absfs.File, error) {
 	if s.released {
 		return nil, os.ErrClosed
@@ -553,7 +562,12 @@ func (f *snapshotFile) readRange(off, n int64) ([]byte, error) {
 	copy(out, data[off:end])
 	return out, nil
 }
+
+// Create always returns os.ErrPermission: snapshots are read-only.
 func (s *Snapshot) Create(name string) (absfs.File, error) { return nil, os.ErrPermission }
+
+// OpenFile opens a file from the snapshot. Only read-only access is allowed;
+// any other flag combination returns os.ErrPermission.
 func (s *Snapshot) OpenFile(name string, flag int, perm os.FileMode) (absfs.File, error) {
 	// Only allow read-only access for snapshots
 	access := flag & absfs.O_ACCESS
@@ -562,15 +576,33 @@ func (s *Snapshot) OpenFile(name string, flag int, perm os.FileMode) (absfs.File
 	}
 	return nil, os.ErrPermission
 }
-func (s *Snapshot) Mkdir(name string, perm os.FileMode) error         { return os.ErrPermission }
-func (s *Snapshot) MkdirAll(path string, perm os.FileMode) error      { return os.ErrPermission }
-func (s *Snapshot) Remove(name string) error                          { return os.ErrPermission }
-func (s *Snapshot) RemoveAll(path string) error                       { return os.ErrPermission }
-func (s *Snapshot) Truncate(name string, size int64) error            { return os.ErrPermission }
-func (s *Snapshot) Chmod(name string, mode os.FileMode) error         { return os.ErrPermission }
-func (s *Snapshot) Chown(name string, uid, gid int) error             { return os.ErrPermission }
+
+// Mkdir always returns os.ErrPermission: snapshots are read-only.
+func (s *Snapshot) Mkdir(name string, perm os.FileMode) error { return os.ErrPermission }
+
+// MkdirAll always returns os.ErrPermission: snapshots are read-only.
+func (s *Snapshot) MkdirAll(path string, perm os.FileMode) error { return os.ErrPermission }
+
+// Remove always returns os.ErrPermission: snapshots are read-only.
+func (s *Snapshot) Remove(name string) error { return os.ErrPermission }
+
+// RemoveAll always returns os.ErrPermission: snapshots are read-only.
+func (s *Snapshot) RemoveAll(path string) error { return os.ErrPermission }
+
+// Truncate always returns os.ErrPermission: snapshots are read-only.
+func (s *Snapshot) Truncate(name string, size int64) error { return os.ErrPermission }
+
+// Chmod always returns os.ErrPermission: snapshots are read-only.
+func (s *Snapshot) Chmod(name string, mode os.FileMode) error { return os.ErrPermission }
+
+// Chown always returns os.ErrPermission: snapshots are read-only.
+func (s *Snapshot) Chown(name string, uid, gid int) error { return os.ErrPermission }
+
+// Chtimes always returns os.ErrPermission: snapshots are read-only.
 func (s *Snapshot) Chtimes(name string, atime, mtime time.Time) error { return os.ErrPermission }
-func (s *Snapshot) Rename(oldpath, newpath string) error              { return os.ErrPermission }
+
+// Rename always returns os.ErrPermission: snapshots are read-only.
+func (s *Snapshot) Rename(oldpath, newpath string) error { return os.ErrPermission }
 
 // Sub returns an fs.FS corresponding to the subtree rooted at dir in the snapshot.
 func (s *Snapshot) Sub(dir string) (fs.FS, error) {

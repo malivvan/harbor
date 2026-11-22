@@ -14,6 +14,9 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+// Name is the conventional root bucket the harbor root package uses for the fs
+// sub-store. It is not applied implicitly: an empty Config.Root means the
+// database root.
 const Name = "fs"
 
 var (
@@ -129,7 +132,8 @@ func (s *Store) Open(name string) (*FS, error) {
 }
 
 // OpenWithContentFS creates or opens the named file system with an external
-// content filesystem.
+// content filesystem. The backend must implement the module-internal
+// absfs.FileSystem interface; an *FS from this package qualifies.
 func (s *Store) OpenWithContentFS(name string, contentFS absfs.FileSystem) (*FS, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrNilParam

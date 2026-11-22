@@ -1,188 +1,309 @@
-# BoltFS - A Complete Filesystem Implementation for BoltDB
+# fs — a file system inside BoltDB
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/harbor/fs.svg)](https://pkg.go.dev/github.com/malivvan/harbor/fs)
-[![Go Report Card](https://goreportcard.com/badge/github.com/malivvan/harbor/fs)](https://goreportcard.com/report/github.com/malivvan/harbor/fs)
-[![CI](https://github.com/malivvan/harbor/fs/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/harbor/fs/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](../LICENSE)
+[![CI](https://github.com/malivvan/harbor/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/harbor/actions/workflows/ci.yml)
 
-BoltFS provides a full featured filesystem on top of a boltdb database. This
-package implements most of the filesystem functions from the `os` standard
-library package, even including support for symbolic links.
+`fs` implements a complete file system on top of bbolt. It supports
+directories, regular files, symbolic links, POSIX-like metadata,
+`filepath.Walk`-style and concurrent walking, read-only snapshots, an inode
+cache, external content back ends, and optional chunked encryption.
 
-## Features
-
-- Compatible with the abstract filesystem interface `absfs.SymlinkFileSystem`
-- Support for hard and soft linking
-- Walk method like `filepath.Walk`
-- **Thread-safe in-memory inode cache** for improved performance
-- **Snapshot support** using BoltDB's MVCC for point-in-time filesystem views
-- **External content storage** for storing file content outside BoltDB (filesystem, S3, etc.)
-- Extensive tests with >90% coverage
-
-### Inode Cache
-
-The inode cache provides significant performance improvements by caching frequently accessed inodes in memory:
+A `Store` manages any number of named file systems under one root bucket:
 
 ```go
-bdb, _ := bolt.Open("myfs.db", 0644, nil)
-defer bdb.Close()
+// Through the root package.
+vfs, err := store.FS().Open("documents")
 
-store, _ := fs.Open(ctx, bdb, fs.Config{})
-filesystem, _ := store.Open("")
-defer filesystem.Close()
-
-// Get cache statistics
-stats := filesystem.CacheStats()
-fmt.Printf("Hit rate: %.2f%%\n", stats.HitRate())
-
-// Adjust cache size (default: 1000)
-filesystem.SetCacheSize(5000)
-
-// Flush cache if needed
-filesystem.FlushCache()
-```
-
-### Store-managed file systems
-
-A `Store` wraps an existing bbolt database and a root bucket, then manages
-multiple named file systems beneath that root:
-
-```go
-bdb, _ := bolt.Open("myfs.db", 0644, nil)
-defer bdb.Close()
-
-store, _ := fs.Open(ctx, bdb, fs.Config{Root: [][]byte{[]byte("tenant")}})
-defer store.Close()
-
-docs, _ := store.Open("docs")
-media, _ := store.Open("media")
-
-names, _ := store.FileSystems()
-_ = store.DeleteFS("media")
-```
-
-The `Store` borrows `bdb`; neither `Store.Close` nor a file system's `Close`
-closes the native database. Use `Store.Open` / `Store.OpenWithContentFS` for
-file systems managed by a Store.
-
-### Snapshots
-
-Create read-only point-in-time views of the filesystem:
-
-```go
-// Create a snapshot
-snapshot, _ := filesystem.CreateSnapshot("backup-2024")
-defer snapshot.Release()
-
-// Read files from snapshot
-data, _ := snapshot.ReadFile("/config.json")
-
-// Walk snapshot filesystem
-fs.Walk(snapshot, "/", func(path string, info os.FileInfo, err error) error {
-    fmt.Println(path)
-    return nil
+// Or directly, with a caller-owned bbolt handle.
+fsStore, err := fs.Open(ctx, bdb, fs.Config{
+	Root: [][]byte{[]byte("fs")},
 })
+defer fsStore.Close() // does not close bdb
 
-// Restore files from snapshot
-snapshot.CopyToFS("/config.json", "/config-restored.json")
-
-// Use snapshot manager for multiple snapshots
-sm := filesystem.NewSnapshotManager()
-sm.Create("daily-backup")
-snap, _ := sm.Get("daily-backup")
+vfs, err := fsStore.Open("documents")
+defer vfs.Close() // does not close bdb
 ```
 
-### External Content Storage
+`Store.Close` and `FS.Close` release wrappers only. The caller owns the bbolt
+handle and must keep it open while the file systems are in use.
 
-Store file content in any `absfs.FileSystem` implementation while keeping metadata in BoltDB:
+A store can list and remove the file systems it manages:
 
 ```go
-import (
-    "github.com/malivvan/harbor/fs"
-    "github.com/absfs/memfs"  // or any absfs implementation
-)
-
-// Use default BoltDB storage.
-bdb, _ := bolt.Open("myfs.db", 0644, nil)
-defer bdb.Close()
-store, _ := fs.Open(ctx, bdb, fs.Config{})
-filesystem, _ := store.Open("")
-defer filesystem.Close()
-
-// Use memfs for file content (in-memory storage).
-contentFS, _ := memfs.NewFS()
-filesystem, _ = store.OpenWithContentFS("", contentFS)
-defer filesystem.Close()
-
-// Or set content filesystem on an existing file system.
-contentFS, _ = memfs.NewFS()
-filesystem.SetContentFS(contentFS)
+names, err := fsStore.FileSystems()
+err = fsStore.DeleteFS("documents")
+root := fsStore.Root() // copy of the root bucket path
 ```
 
-**Custom Storage Backends:**
+## File systems and files
 
-Any `absfs.FileSystem` implementation can be used:
+An empty name (`fsStore.Open("")`) uses the store's root bucket itself.
 
 ```go
-// Example: osfs for local filesystem storage
-type OSFileSystem struct {
-    basePath string
+if err := vfs.MkdirAll("/reports/2026", 0o755); err != nil {
+	return err
 }
 
-func (fs *OSFileSystem) OpenFile(name string, flag int, perm os.FileMode) (absfs.File, error) {
-    // Implement absfs.FileSystem interface
-    // Store files in basePath + name
+f, err := vfs.Create("/reports/2026/q1.txt") // create or truncate
+if err != nil {
+	return err
 }
-// ... implement other absfs.FileSystem methods
+if _, err := f.Write([]byte("hello")); err != nil {
+	return err
+}
+if err := f.Close(); err != nil {
+	return err
+}
 
-// Use custom filesystem
-osfs := &OSFileSystem{basePath: "/data/content"}
-filesystem, _ := store.OpenWithContentFS("", osfs)
+data, err := vfs.ReadFile("/reports/2026/q1.txt")
+
+info, err := vfs.Stat("/reports/2026/q1.txt")
+entries, err := vfs.ReadDir("/reports")
 ```
 
-**Benefits:**
-- **Idiomatic design**: Uses standard `absfs.FileSystem` interface
-- **Composable**: Chain/layer multiple absfs implementations
-- **Rich ecosystem**: Use any existing absfs implementation (memfs, osfs, s3fs, etc.)
-- **Backward compatible**: Defaults to BoltDB storage
-- **Automatic cleanup**: Files deleted from external storage when removed
-
-## Optional encryption
-
-Encryption is opt-in and leaves the plaintext bbolt format untouched when it is
-not configured. Open a Store with `Open` and a `Config`:
+`OpenFile` accepts the `fs.O_*` flags (`O_RDONLY`, `O_WRONLY`, `O_RDWR`,
+`O_APPEND`, `O_CREATE`, `O_EXCL`, `O_SYNC`, `O_TRUNC`):
 
 ```go
-key := loadKey() // exactly fs.KeySize (32) bytes
-store, err := fs.Open(ctx, bdb, fs.Config{
-    Secret:          key,
-    EncryptMetadata: true, // seal inode blobs: names, modes, sizes, times
-    EncryptContent:  true, // seal file content and symlink paths
-})
-filesystem, err := store.Open("vault")
+f, err := vfs.OpenFile("/reports/2026/q1.txt", fs.O_CREATE|fs.O_WRONLY, 0o644)
 ```
 
-- `EncryptMetadata` seals gob-encoded inodes; inode numbers and structural
-  bucket keys stay clear.
-- `EncryptContent` seals file content and symlink paths.
-- `ChunkSize` (bytes) stores content as independently sealed chunks, so random
-  reads, writes and truncation touch only the affected chunks.
-- A per-filesystem `FENC` marker records the mode, and a sealed canary verifies
-  the key at open time (wrong key returns `fs.ErrAuthFailed`).
-- Opening an encrypted filesystem without a key, changing the mode, or asking
-  for encryption on a filesystem that already holds plaintext data returns
-  `fs.ErrWrongMode`.
-- `ReEncryptFS`, `RotateAll` and `VerifyAll` rotate keys and verify data.
+The returned `absfs.File` supports `Read`, `Write`, `ReadAt`, `WriteAt`, `Seek`,
+`Stat`, `Truncate`, `Sync`, `ReadDir`, `Readdir`, `Readdirnames`, `Name` and
+`Close`. `Sync` is a no-op because `Write` commits before returning.
 
-External content filesystems configured with `SetContentFS` remain plaintext;
-encryption applies to content stored in the bbolt data/chunk buckets.
+Other operations:
 
-## Coming soon
+```go
+err = vfs.Rename("/reports/2026/q1.txt", "/reports/2026/q1-final.txt")
+err = vfs.Copy("/reports/2026/q1-final.txt", "/reports/q1-copy.txt")
+err = vfs.Truncate("/reports/q1-copy.txt", 0)
+err = vfs.Remove("/reports/q1-copy.txt")
+err = vfs.RemoveAll("/reports")
 
-- Improved test coverage
-- FastWalk high performance walker (non sorted, os.FileMode only)
+err = vfs.Chmod("/reports/2026/q1-final.txt", 0o600)
+err = vfs.Chtimes("/reports/2026/q1-final.txt", atime, mtime)
+err = vfs.Chown("/reports/2026/q1-final.txt", uid, gid)
+
+mode := vfs.Umask()
+vfs.SetUmask(0o022)
+```
+
+### Links
+
+```go
+err := vfs.Symlink("/reports/2026/q1-final.txt", "/latest.txt")
+
+target, err := vfs.Readlink("/latest.txt")
+info, err := vfs.Lstat("/latest.txt") // does not follow the link
+info, err = vfs.Stat("/latest.txt")   // follows the link
+```
+
+There is no public hard-link API; inode-level linking is an implementation
+detail used by copy and rename. Renaming and removing entries update the parent
+directory's inode and the affected indexes.
+
+### Walking
+
+`fs.Walk` has the shape of `filepath.Walk` and accepts any `absfs.Filer`,
+including an `FS` or a `Snapshot`:
+
+```go
+err := fs.Walk(vfs, "/", func(path string, info os.FileInfo, err error) error {
+	if err != nil {
+		return err
+	}
+	if info.IsDir() && info.Name() == ".trash" {
+		return filepath.SkipDir
+	}
+	fmt.Println(path)
+	return nil
+})
+```
+
+`fs.FastWalk` traverses directories concurrently and passes an `io/fs.DirEntry`
+to avoid unnecessary `Stat` calls. The callback may run from several
+goroutines, so it must be safe for concurrent use. Returning `filepath.SkipDir`
+skips a directory; returning `fs.ErrTraverseLink` makes a symlink be traversed
+as a directory (callers are responsible for cycle detection).
+
+```go
+err := fs.FastWalk(vfs, "/", func(path string, d iofs.DirEntry, err error) error {
+	if err != nil {
+		return err
+	}
+	fmt.Println(path)
+	return nil
+})
+```
+
+Use `fs.FastWalkWithConfig` to control worker count and symlink following:
+
+```go
+err := fs.FastWalkWithConfig(vfs, "/", &fs.FastWalkConfig{
+	NumWorkers:     8,
+	FollowSymlinks: false,
+}, fn)
+```
+
+## Snapshots
+
+```go
+snap, err := vfs.CreateSnapshot("before-import")
+if err != nil {
+	return err
+}
+defer snap.Release()
+
+data, err := snap.ReadFile("/reports/2026/q1-final.txt")
+entries, err := snap.ReadDir("/reports")
+info, err := snap.Stat("/reports/2026/q1-final.txt")
+
+err = snap.CopyToFS("/reports/2026/q1-final.txt", "/restored.txt")
+```
+
+Snapshots are read-only. Their metadata and content are materialized into
+memory when created, and the bbolt read transaction is released immediately.
+This avoids pinning the database mmap or blocking writers, at the cost of
+memory proportional to the file system size. Snapshots are not durable.
+
+Write operations on a snapshot return `os.ErrPermission`, and `OpenFile`
+permits only read-only access.
+
+A `SnapshotManager` groups snapshots by name:
+
+```go
+sm := vfs.NewSnapshotManager()
+
+snap, err := sm.Create("daily")
+snap, ok := sm.Get("daily")
+names := sm.List()
+err = sm.Delete("daily")
+err = sm.ReleaseAll()
+```
+
+## Inode cache
+
+Each file system keeps a thread-safe LRU cache of inodes (1000 entries by
+default). Reads consult the cache; mutations invalidate affected entries.
+
+```go
+stats := vfs.CacheStats()
+fmt.Printf("hit rate: %.2f%%\n", stats.HitRate())
+
+vfs.SetCacheSize(5000) // 0 or negative disables the cache
+vfs.FlushCache()
+```
+
+## External content
+
+Content can live in another file system while metadata stays in the database.
+The content backend must implement the module-internal `absfs.FileSystem`
+interface, so an in-module file system is the supported option:
+
+```go
+content, err := fsStore.Open("content") // a plain fs.FS in another bucket
+if err != nil {
+	return err
+}
+
+vfs, err := fsStore.OpenWithContentFS("documents", content)
+if err != nil {
+	return err
+}
+```
+
+`FileSystem` values returned by this package (including snapshots) satisfy the
+interface. `fs/s3fs` implements `absfs.Filer`, not the full `FileSystem`, so
+using it as a content backend currently requires an adapter inside this module.
+External implementations of `absfs.FileSystem` cannot be passed directly from
+another module, because `internal/absfs` is not importable. External content is
+not encrypted by `fs`; `EncryptContent` applies to content stored in the bbolt
+`data`/`chunks` buckets.
+
+## Encryption
+
+Encryption is opt-in and per file system. A plaintext file system keeps the
+existing on-disk format.
+
+```go
+fsStore, err := fs.Open(ctx, bdb, fs.Config{
+	Root:            [][]byte{[]byte("fs")},
+	Secret:          key, // exactly 32 bytes
+	EncryptMetadata: true,
+	EncryptContent:  true,
+	ChunkSize:       64 * 1024,
+})
+
+vfs, err := fsStore.Open("vault")
+```
+
+| Field | Effect |
+|-------|--------|
+| `EncryptMetadata` | Seals inode blobs, hiding names, modes, sizes and times. |
+| `EncryptContent` | Seals file content and symlink targets. |
+| `ChunkSize` | Stores content as independently sealed chunks of this many plaintext bytes. A positive value implies content encryption. |
+
+`fs.DefaultChunkSize` is 64 KiB. Chunking matters for large files: without it,
+the whole file is one sealed blob and every write re-seals all content. With
+chunking, a write or truncation touches only the affected chunks.
+
+A per-file-system `FENC` marker records the mode, and a sealed canary verifies
+the key at open time:
+
+- opening an encrypted file system without a key returns `fs.ErrWrongMode`,
+- a wrong key returns `fs.ErrAuthFailed`,
+- changing the mode returns `fs.ErrWrongMode`,
+- asking for encryption on a file system that already holds plaintext data
+  returns `fs.ErrWrongMode`.
+
+`Store.RotateAll` re-encrypts every file system and the marker under a new key;
+`Store.VerifyAll` checks that everything decrypts. `Store.ReEncryptFS` is a
+partial rotation for one file system: finish with `RotateAll` before closing
+the store. Rotation requires an already encrypted store; there is no in-place
+plaintext migration.
+
+See [../docs/encryption.md](../docs/encryption.md).
+
+## On-disk layout and limits
+
+Each file system bucket contains `state`, `inodes`, `data`, `symlinks`, and
+optional `chunks`/`dirents` buckets. Directories are encoded as a single inode
+value containing their children, so creating, removing or renaming an entry is
+O(children) for that directory. Very wide directories are therefore expensive
+to mutate, though reads and lookups remain indexed.
+
+Snapshots are memory-resident, not durable. Use `CopyToFS` to materialize the
+files you need.
+
+## Errors
+
+| Sentinel | Meaning |
+|----------|---------|
+| `fs.ErrNilParam` | Nil required argument. |
+| `fs.ErrNilContext` | Nil context. |
+| `fs.ErrIncompatibleVersion` | Unsupported on-disk format. |
+| `fs.ErrWrongMode` | Encryption mode does not match the marker. |
+| `fs.ErrAuthFailed` | Ciphertext failed authentication. |
+| `fs.ErrInvalidKey` | Missing or malformed key. |
+| `fs.ErrInvalidConfig` | Inconsistent encryption config. |
+| `fs.ErrTraverseLink` | `FastWalk` sentinel: traverse this symlink as a directory. |
+
+Standard file errors (`os.ErrNotExist`, `os.ErrPermission`, `os.ErrExist`) are
+returned through `*os.PathError`/`*os.LinkError` where applicable.
+
+## Performance
+
+- Use `Config.ChunkSize` for large files and random writes.
+- Reuse one `FS` value; each has its own inode cache.
+- Increase the cache for read-heavy, many-inode workloads, or disable it to
+  bound memory.
+- `FastWalk` is significantly faster than `Walk` on large trees because it
+  traverses concurrently and avoids `Stat` when only type information is
+  needed.
+- A single `Write` merges its inode and content changes into one transaction.
 
 ## License
 
-MIT license. See [LICENSE](../LICENSE) for more information.
-
+MIT — see [../LICENSE](../LICENSE). Start the whole-module tour at
+[../docs/getting-started.md](../docs/getting-started.md).

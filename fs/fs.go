@@ -32,7 +32,7 @@ const formatVersionKey = "formatVersion"
 // fsFormatVersion is the current filesystem format revision.
 const fsFormatVersion uint64 = 1
 
-// FS implements absfs.FileSystem for the boltdb packages `github.com/coreos/bbolt`.
+// FS implements absfs.FileSystem on top of bbolt.
 type FS struct {
 	db          *bolt.DB
 	bucket      string
@@ -188,10 +188,10 @@ func (fs *FS) Close() error {
 	return nil
 }
 
-// SetContentFS sets an external filesystem for storing file content.
-// This allows file content to be stored in any absfs.FileSystem implementation
-// (memfs, osfs, s3fs, etc.) instead of in BoltDB. This should be called before
-// any file operations.
+// SetContentFS sets an external filesystem for storing file content. The
+// backend must implement the module-internal absfs.FileSystem interface; an
+// *FS from this package qualifies. File content is then stored in that
+// filesystem instead of in BoltDB. Call this before any file operations.
 func (fs *FS) SetContentFS(contentFS absfs.FileSystem) {
 	fs.contentFS = contentFS
 }
@@ -1227,6 +1227,7 @@ func (fs *FS) resolve(path string) (*iNode, error) {
 
 }
 
+// Open flags accepted by OpenFile. They mirror the os package flags.
 const (
 	O_RDONLY = 0       // open the file read-only.
 	O_WRONLY = 1       // open the file write-only.

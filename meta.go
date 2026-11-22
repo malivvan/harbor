@@ -13,24 +13,41 @@ import (
 // Encryption flags. Every bit enables encryption for one part of a sub-store;
 // aggregate flags combine the bits of a whole sub-store.
 const (
+	// EncryptNone disables encryption for a store created with Plaintext.
 	EncryptNone uint16 = 0
 )
 
 const (
+	// EncryptDBKeys encrypts db primary keys, index values and key/value keys.
 	EncryptDBKeys uint16 = 1 << iota
+	// EncryptDBValues encrypts db record values and typed key/value values.
 	EncryptDBValues
+	// EncryptDBMetadata encrypts db auto-increment counters.
 	EncryptDBMetadata
+	// EncryptFSContent encrypts fs file content and symlink targets.
 	EncryptFSContent
+	// EncryptFSMetadata encrypts fs inode blobs.
 	EncryptFSMetadata
+	// EncryptTSValues encrypts ts point values and series metadata.
 	EncryptTSValues
+	// EncryptTSSeriesNames encrypts ts series bucket and metadata names.
 	EncryptTSSeriesNames
+	// EncryptVecPointIDs encrypts vec point IDs.
 	EncryptVecPointIDs
+	// EncryptVecCollectionNames encrypts vec collection names.
 	EncryptVecCollectionNames
+	// EncryptVecPoints encrypts vec point blobs and collection metadata.
 	EncryptVecPoints
-	EncryptDB  = EncryptDBKeys | EncryptDBValues | EncryptDBMetadata
-	EncryptFS  = EncryptFSContent | EncryptFSMetadata
-	EncryptTS  = EncryptTSValues | EncryptTSSeriesNames
+	// EncryptDB combines every db encryption flag.
+	EncryptDB = EncryptDBKeys | EncryptDBValues | EncryptDBMetadata
+	// EncryptFS combines every fs encryption flag.
+	EncryptFS = EncryptFSContent | EncryptFSMetadata
+	// EncryptTS combines every ts encryption flag.
+	EncryptTS = EncryptTSValues | EncryptTSSeriesNames
+	// EncryptVec combines every vec encryption flag.
 	EncryptVec = EncryptVecPointIDs | EncryptVecCollectionNames | EncryptVecPoints
+	// EncryptAll enables encryption for every sub-store and is the default for
+	// a new store that does not set Options.Encrypt.
 	EncryptAll = EncryptDB | EncryptFS | EncryptTS | EncryptVec
 )
 

@@ -21,13 +21,13 @@ Implementors can create stand alone filesystems that implement the `absfs.Filer`
 - ✅ **Well-tested** - 89% code coverage
 - 🌍 **Cross-platform** - Unix-style paths work on Windows, macOS, and Linux
 
-## Install 
+## Install
 
 ```bash
 $ go get github.com/malivvan/harbor/internal/absfs
 ```
 
-## The Interfaces 
+## The Interfaces
 `absfs` defines 4 interfaces.
 
 1. `Filer` - The minimum set of methods that an implementation must define.
@@ -139,8 +139,8 @@ type SymlinkFileSystem interface {
 
 ---
 
-### [OsFs](https://github.com/absfs/osfs) 
-An `absfs.FileSystem` implementation that wraps the equivalent `os` standard library filesystem functions. Using `osfs` is essentially identical to using the `os` package except that it implements a per object current working directory. 
+### [OsFs](https://github.com/absfs/osfs)
+An `absfs.FileSystem` implementation that wraps the equivalent `os` standard library filesystem functions. Using `osfs` is essentially identical to using the `os` package except that it implements a per object current working directory.
 
 ### [MemFs](https://github.com/absfs/memfs)
 The `memfs` filesystem implements a memory only filesystem.
@@ -155,13 +155,13 @@ The Pass Through FileSystem (`ptfs`) takes any object that implements `absfs.Fil
 The `rofs` is a read-only filesystem that can wrap any other filesystem implementation and make it read only.
 
 ### [BaseFS](https://github.com/absfs/basefs)
-The `basefs` filesystem takes a `absfs.FileSystem` and an absolute path within that filesystem, and provides a `absfs.FileSystem` interface that is rooted at that path. Relative paths are handled correctly such that it is not possible to 'escape' the base path constraint (for example by using a path like "/.."). In addition errors are rewritten to accurately obscure the base path. 
+The `basefs` filesystem takes a `absfs.FileSystem` and an absolute path within that filesystem, and provides a `absfs.FileSystem` interface that is rooted at that path. Relative paths are handled correctly such that it is not possible to 'escape' the base path constraint (for example by using a path like "/.."). In addition errors are rewritten to accurately obscure the base path.
 
 ### [HttpFS](https://github.com/absfs/httpfs)
 A filesystem that can convert a `absfs.FileSystem` to a `http.FileSystem` interface for use with `http.FileServer`.
 
 ### [CorFS](https://github.com/absfs/corfs) (cache on read fs)
-An `absfs.Filer` that wraps two `absfs.Filer`s when data is read if it doesn't exist in the second tier filesytem the filer copies data from the underlying file systems into the second tier filesystem causing it to function like a cache. 
+An `absfs.Filer` that wraps two `absfs.Filer`s when data is read if it doesn't exist in the second tier filesytem the filer copies data from the underlying file systems into the second tier filesystem causing it to function like a cache.
 
 ### [CowFS](https://github.com/absfs/cowfs) (copy on write fs)
 An `absfs.Filer` that wraps two `absfs.Filer`s the first of which may be a read only filesystem. Any attempt to modify or write data to a CowFS causes the Filer to write those changes to the secondary fs leaving the underlying filesystem unmodified.
@@ -210,7 +210,7 @@ fs := NewFS("")
 fs.Create("/config/app.json")  // Works on all platforms!
 ```
 
-See [PATH_HANDLING.md](PATH_HANDLING.md) and [examples/cross-platform](examples/cross-platform/) for details.
+See [PATH_HANDLING.md](PATH_HANDLING.md) for details.
 
 ## Implementing a Custom Filesystem
 
@@ -286,7 +286,6 @@ See [PATH_HANDLING.md](PATH_HANDLING.md) for comprehensive cross-platform path b
 
 ### Reference
 - [GoDoc](https://pkg.go.dev/github.com/malivvan/harbor/internal/absfs) - API documentation
-- [Changelog](CHANGELOG.md) - Version history and changes
 
 ## Contributing
 

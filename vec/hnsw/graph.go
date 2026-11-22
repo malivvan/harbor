@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// Vector is a float32 embedding.
 type Vector = []float32
 
 // Node is a node in the graph.
@@ -17,6 +18,7 @@ type Node[K cmp.Ordered] struct {
 	Value Vector
 }
 
+// MakeNode returns a Node with the given key and vector.
 func MakeNode[K cmp.Ordered](key K, vec Vector) Node[K] {
 	return Node[K]{Key: key, Value: vec}
 }
@@ -579,8 +581,9 @@ func (g *Graph[K]) assertDims(n Vector) {
 	if len(g.layers) == 0 {
 		return
 	}
-	// 图可能因 Remove 删空而存在但无节点：此时无可参考的维度基准，
-	// 跳过检查——即将插入的节点会重新建立维度基准。
+	// The graph can exist with no nodes after everything was removed. There
+	// is no dimension to compare against yet, so skip the check; the node
+	// being inserted will establish the dimension.
 	entry := g.layers[0].entry()
 	if entry == nil {
 		return
@@ -676,8 +679,9 @@ func (g *Graph[K]) Add(nodes ...Node[K]) {
 				if ep, ok := layer.nodes[*elevator]; ok {
 					searchPoint = ep
 				} else {
-					// Replace 场景（高层 g.Delete 已删除旧节点、新节点尚未在本层
-					// 重插）下 elevator 会悬空，回退到本层入口节点。
+					// During a replace, the higher layer removed the old
+					// node before this layer reinserted the new one, so the
+					// elevator may be stale. Fall back to the layer entry.
 					searchPoint = layer.entry()
 				}
 			}
@@ -775,16 +779,17 @@ func (h *Graph[K]) SearchWithDistances(near Vector, k int) []NodeWithDistance[K]
 	for layer := len(h.layers) - 1; layer >= 0; layer-- {
 		searchPoint := h.layers[layer].entry()
 		if searchPoint == nil {
-			// 空层：可能是替换删除（Add 覆盖同 key）后残留的高层，或图已被删空。
-			// 底层为空意味着图中已无任何节点，直接返回空结果。
+			// Empty layer: either a leftover upper layer from a replace
+			// (Add overwriting the same key) or the graph has been emptied.
+			// An empty bottom layer means there are no nodes at all.
 			if layer == 0 {
 				return nil
 			}
 			continue
 		}
 
-		// elevator 可能悬空（本层节点在替换场景中被删除、新节点尚未重插），
-		// 回退到本层入口节点。
+		// The elevator may be stale because a replace removed the old node
+		// before reinserting the new one. Fall back to the layer entry.
 		if elevator != nil {
 			if ep, ok := h.layers[layer].nodes[*elevator]; ok {
 				searchPoint = ep
@@ -797,7 +802,7 @@ func (h *Graph[K]) SearchWithDistances(near Vector, k int) []NodeWithDistance[K]
 		if layer > 0 {
 			nodes := searchPoint.search(1, efSearch, near, h.Distance)
 			if len(nodes) == 0 {
-				// 防御：理论上 search 至少返回入口节点自身。
+				// Defensive: search should at least return the entry node.
 				continue
 			}
 			elevator = ptr(nodes[0].node.Key)

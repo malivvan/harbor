@@ -189,6 +189,7 @@ type APIError struct {
 	Message    string
 }
 
+// Error returns the S3 error code, message and HTTP status in a readable form.
 func (e *APIError) Error() string {
 	if e.Code == "" && e.Message == "" {
 		return "s3fs: request failed with status " + httpStatusText(e.StatusCode)

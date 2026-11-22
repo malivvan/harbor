@@ -209,9 +209,10 @@ func TestHNSWIndexNilGraph(t *testing.T) {
 	})
 }
 
-// TestHNSWIndexOverwriteUpdate 验证对已存在 ID 做覆盖更新（单点）不会 panic。
-// 这是内嵌补丁 fork 的回归用例：上游 coder/hnsw v0.6.1 的 Add 在替换场景会
-// panic("node not added")，此前由 workspace 外部 replace 兜底修复。
+// TestHNSWIndexOverwriteUpdate verifies that overwriting an existing ID in a
+// single Upsert does not panic. This is a regression test for the in-tree fork:
+// upstream coder/hnsw v0.6.1 panics with "node not added" when Add replaces a
+// node.
 func TestHNSWIndexOverwriteUpdate(t *testing.T) {
 	idx := NewHNSWIndex(Cosine)
 
@@ -221,7 +222,7 @@ func TestHNSWIndexOverwriteUpdate(t *testing.T) {
 		t.Fatalf("failed to upsert initial point: %v", err)
 	}
 
-	// 覆盖更新同一个 ID：旧向量 (1,0) 替换为新向量 (0,1)
+	// Overwrite the same ID: replace the old vector (1,0) with (0,1).
 	if err := idx.Upsert([]PointStruct{
 		{ID: "a", Vector: []float32{0.0, 1.0}, Payload: map[string]interface{}{"v": 2}},
 	}); err != nil {
@@ -232,7 +233,8 @@ func TestHNSWIndexOverwriteUpdate(t *testing.T) {
 		t.Fatalf("expected count 1 after overwrite, got %d", idx.Count())
 	}
 
-	// 覆盖后，与新向量一致的查询应命中该点，且新 payload 生效
+	// After the overwrite, a query matching the new vector must find the
+	// point and see the new payload.
 	results, err := idx.Search([]float32{0.0, 1.0}, nil, 1)
 	if err != nil {
 		t.Fatalf("failed to search: %v", err)
@@ -245,9 +247,10 @@ func TestHNSWIndexOverwriteUpdate(t *testing.T) {
 	}
 }
 
-// TestHNSWIndexReinsertAfterEmpty 验证图被删空后重新 Upsert 不会 panic。
-// 内嵌补丁 fork 修复了 assertDims 在「layers 残留但无节点」的空图上的维度检查，
-// 上游 v0.6.1 在此场景会对 nil entry 解引用 panic。
+// TestHNSWIndexReinsertAfterEmpty verifies that re-inserting after every point
+// was deleted does not panic. The in-tree fork fixes assertDims on an empty
+// graph that still has layers but no nodes; upstream v0.6.1 dereferences a nil
+// entry in that case.
 func TestHNSWIndexReinsertAfterEmpty(t *testing.T) {
 	idx := NewHNSWIndex(Cosine)
 
@@ -258,7 +261,7 @@ func TestHNSWIndexReinsertAfterEmpty(t *testing.T) {
 		t.Fatalf("failed to upsert points: %v", err)
 	}
 
-	// 逐类删光所有点，使图进入空态
+	// Delete every point category so the graph becomes empty.
 	for _, cat := range []string{"A", "B"} {
 		if _, err := idx.DeleteByFilter(&Filter{
 			Must: []Condition{{Key: "cat", Match: MatchValue{Value: cat}}},
@@ -270,7 +273,7 @@ func TestHNSWIndexReinsertAfterEmpty(t *testing.T) {
 		t.Fatalf("expected count 0 after deletion, got %d", idx.Count())
 	}
 
-	// 删空后重新插入新点，不应 panic
+	// Re-insert after emptying the graph; this must not panic.
 	if err := idx.Upsert([]PointStruct{
 		{ID: "3", Vector: []float32{0.0, 0.0, 1.0}},
 	}); err != nil {

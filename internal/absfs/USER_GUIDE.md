@@ -597,7 +597,7 @@ fs := yourapp.NewFS("")
 fs.Create("/config/app.json")  // Works on all platforms!
 ```
 
-See [PATH_HANDLING.md](PATH_HANDLING.md) for complete details and the [cross-platform example](examples/cross-platform/).
+See [PATH_HANDLING.md](PATH_HANDLING.md) for complete details.
 
 ### Platform-Specific Paths
 

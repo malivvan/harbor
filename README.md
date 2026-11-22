@@ -1,91 +1,61 @@
-# harbor [![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/harbor/db.svg)](https://pkg.go.dev/github.com/malivvan/harbor/db)
+# harbor
 
-Harbor is a simple and powerful toolkit for [BoltDB](https://github.com/etcd-io/bbolt), forked from [Storm](https://github.com/asdine/storm). It provides indexes, a wide range of methods to store and fetch data, an advanced query system, and much more.
+[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/harbor.svg)](https://pkg.go.dev/github.com/malivvan/harbor)
+[![CI](https://github.com/malivvan/harbor/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/harbor/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Table of Contents
+Harbor is a self-contained, encrypted storage toolkit built on
+[BoltDB](https://github.com/etcd-io/bbolt). One database file, one password, and
+four stores you can use together or on their own:
 
-- [Installation](#installation)
-- [Quick start](#quick-start)
-- [Declaring models](#declaring-models)
-- [Model tags](#model-tags)
-- [Custom bucket names](#custom-bucket-names)
-- [Opening a database](#opening-a-database)
-- [CRUD operations](#crud-operations)
-  - [Save](#save)
-  - [Fetch by ID or field](#fetch-by-id-or-field)
-  - [Fetch multiple records](#fetch-multiple-records)
-  - [Query API](#query-api)
-  - [Update](#update)
-  - [Delete](#delete)
-  - [Count, Init, Drop, ReIndex](#count-init-drop-reindex)
-- [Managed transactions](#managed-transactions)
-  - [Attaching to a caller-owned transaction](#attaching-to-a-caller-owned-transaction)
-- [Nodes and nested buckets](#nodes-and-nested-buckets)
-- [Key/value store](#keyvalue-store)
-  - [Time series store (ts)](#time-series-store-ts)
-- [Context and cancellation](#context-and-cancellation)
-- [Error handling](#error-handling)
-- [Database lifecycle](#database-lifecycle)
-- [Codecs](#codecs)
-- [Testing and CI](#testing-and-ci)
-- [License](#license)
-- [Credits](#credits)
+- **`db`** — a structured record store with indexes, unique constraints, a
+  matcher-based query API, and callback-managed transactions.
+- **`fs`** — a complete in-database file system with symbolic links, snapshots,
+  an inode cache, and chunked content.
+- **`ts`** — a time-series store with ordered range scans, aggregation, labels,
+  and retention policies.
+- **`vec`** — a vector store with Flat and HNSW indexes, payload filters, SQ8
+  quantization, and buffered writes.
+
+The root `harbor` package opens a single bbolt file behind one password, derives
+a separate key for each store, and exposes them through `DB()`, `FS()`, `TS()`
+and `Vec()`. Every store can also be used directly with its own `*bolt.DB`.
+
+## Features
+
+- **One file, one password.** Argon2id stretches the password; SLIP-0021
+  domain separation derives one independent key per sub-store.
+- **Encryption is built in, not bolted on.** AES-256-GCM seals records, files,
+  points and documents; deterministic AES-SIV keeps exact lookups working when
+  keys themselves must be hidden.
+- **Context-aware.** Database operations accept `context.Context` and honor
+  cancellation at operation boundaries and loop checkpoints.
+- **Transactional.** Managed read/write transactions, plus `Attach` for mixing
+  Harbor operations with raw bbolt writes in one atomic transaction.
+- **Concurrency-tested.** The suite runs with `-race`, and CI also benchmarks
+  the hot paths on every pull request.
+- **No C dependencies and no external database.** A single Go module and one
+  bbolt file.
 
 ## Installation
 
-Harbor requires **Go 1.27.3** or later.
+Harbor requires Go 1.27.4 or later.
 
 ```sh
 go get github.com/malivvan/harbor
 ```
 
-```go
-import harbor "github.com/malivvan/harbor/db"
-```
+The module contains the root `harbor` package and four sub-packages:
 
-The public API lives in the `db` package.
+| Package | Import path | Guide |
+|---------|-------------|-------|
+| `harbor` | `github.com/malivvan/harbor` | this file, [docs/getting-started.md](docs/getting-started.md) |
+| `db` | `github.com/malivvan/harbor/db` | [db/README.md](db/README.md) |
+| `fs` | `github.com/malivvan/harbor/fs` | [fs/README.md](fs/README.md) |
+| `ts` | `github.com/malivvan/harbor/ts` | [ts/README.md](ts/README.md) |
+| `vec` | `github.com/malivvan/harbor/vec` | [vec/README.md](vec/README.md) |
 
-## Package layout
-
-This module contains several packages:
-
-- `db` — the Harbor toolkit documented in this README (indexes, queries, managed
-  transactions).
-- `ts` — the time-series store documented in [Time series store (ts)](#time-series-store-ts).
-- `fs` — a complete filesystem on top of bbolt; see [`fs/README.md`](fs/README.md).
-- `vec` — a vector store with Flat and HNSW indexes, filters, quantization and
-  optional encryption.
-- `harbor` (the module root) — opens one bbolt file behind one password and
-  exposes the `DB`, `FS`, `TS` and `Vec` sub-stores.
-
-The API reference below covers `db` and `ts`; the other packages are summarized
-in this section.
-
-### Root store
-
-```go
-import harbor "github.com/malivvan/harbor"
-
-store, err := harbor.Open(ctx, "app.db", 0600, &harbor.Options{
-    Password: "correct horse battery staple",
-})
-if err != nil {
-    log.Fatal(err)
-}
-defer store.Close()
-
-// Sub-stores share the same bbolt file and password.
-_ = store.DB().Save(ctx, &User{Name: "alice"})
-vfs, _ := store.FS().Open("documents")
-_ = store.TS().Series("cpu").Insert(ctx, ts.Point{Timestamp: time.Now().UnixNano(), Value: 0.5})
-_ = store.Vec()
-
-// Flushes buffered vector writes before closing the shared handle.
-_ = store.Close()
-```
-
-`harbor.Open` creates Argon2id metadata and derives one domain-separated key per
-sub-store; use `Options{Plaintext: true}` to opt out of encryption entirely.
+API reference: [pkg.go.dev/github.com/malivvan/harbor](https://pkg.go.dev/github.com/malivvan/harbor).
 
 ## Quick start
 
@@ -98,705 +68,340 @@ import (
 	"log"
 	"time"
 
-	harbor "github.com/malivvan/harbor/db"
-	bolt "go.etcd.io/bbolt"
+	"github.com/malivvan/harbor"
+	"github.com/malivvan/harbor/ts"
 )
 
 type User struct {
 	ID    int    `db:"id,increment"`
 	Name  string `db:"index"`
 	Email string `db:"unique"`
-	Age   int    `db:"index"`
 }
 
 func main() {
 	ctx := context.Background()
 
-	bDB, err := bolt.Open("my.db", 0600, &bolt.Options{Timeout: time.Second})
+	store, err := harbor.Open(ctx, "app.db", 0o600, &harbor.Options{
+		Password: "correct horse battery staple",
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer func() {
-		if err := bDB.Close(); err != nil {
+		if err := store.Close(); err != nil {
 			log.Println("close:", err)
 		}
 	}()
 
-	db, err := harbor.Open(ctx, bDB, harbor.Config{})
-	if err != nil {
+	// Structured records and indexes.
+	user := User{Name: "alice", Email: "alice@example.com"}
+	if err := store.DB().Save(ctx, &user); err != nil {
 		log.Fatal(err)
 	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			log.Println("close:", err)
-		}
-	}()
 
-	// Save
-	u := User{Name: "Alice", Email: "alice@example.com", Age: 30}
-	if err := db.Save(ctx, &u); err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println("saved ID:", u.ID)
-
-	// Fetch by indexed field
 	var found User
-	if err := db.One(ctx, "Email", "alice@example.com", &found); err != nil {
+	if err := store.DB().One(ctx, "Email", "alice@example.com", &found); err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("found:", found.Name)
+	fmt.Println("saved user:", found.ID, found.Name)
+
+	// Time-series points.
+	series := store.TS().Series("cpu")
+	if err := series.Insert(ctx, ts.Point{
+		Timestamp: time.Now().UnixNano(),
+		Value:     0.42,
+	}); err != nil {
+		log.Fatal(err)
+	}
+
+	// A file system inside the same database.
+	vfs, err := store.FS().Open("documents")
+	if err != nil {
+		log.Fatal(err)
+	}
+	f, err := vfs.Create("/notes.txt")
+	if err != nil {
+		log.Fatal(err)
+	}
+	if _, err := f.Write([]byte("hello from harbor")); err != nil {
+		log.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		log.Fatal(err)
+	}
+
+	// `store.Close` flushes buffered vector writes and closes the database.
 }
 ```
 
-## Declaring models
+`harbor.Open` takes ownership of the bbolt handle it opens: `Store.Close` flushes
+pending vector writes and closes it. The sub-store packages (`db.Open`, `fs.Open`,
+`ts.Open`, `vec.Open`) borrow a caller-owned `*bolt.DB` instead and never close
+it. See [Database lifecycle](#database-lifecycle).
 
-Harbor maps Go structs to BoltDB buckets. The struct name becomes the bucket name unless a `BucketNamer` implementation provides a custom name.
+## What each store gives you
+
+### Records — `db`
+
+Map Go structs to buckets, declare indexes with struct tags, and query with
+`One`, `Find`, `All`, `Range`, `Prefix`, or the matcher API.
 
 ```go
 type User struct {
 	ID        int       `db:"id,increment"`
-	Group     string    `db:"index"`
+	Team      string    `db:"index"`
 	Email     string    `db:"unique"`
 	Name      string
-	Age       int       `db:"index"`
 	CreatedAt time.Time `db:"index"`
 }
-```
 
-The primary key is identified by the `id` tag or — if no `id` tag is present — by a field named `ID`. It must be non-zero and consistently serializable by the configured codec. Auto-increment is available only for integer fields.
-
-### Inline structs
-
-Use the `inline` tag to flatten embedded structs. The container's bucket name is used.
-
-```go
-type Base struct {
-	Ident string `db:"id"`
-}
-
-type User struct {
-	Base      `db:"inline"`
-	Group     string `db:"index"`
-	Email     string `db:"unique"`
-	Name      string
-	CreatedAt time.Time `db:"index"`
-}
-```
-
-## Model tags
-
-| Tag          | Description |
-|--------------|-------------|
-| `id`         | Marks the primary key field. |
-| `increment`  | Auto-increments integer fields. `increment=100` sets a starting value. |
-| `index`      | Creates a list index for the field. |
-| `unique`     | Creates a unique index for the field. |
-| `inline`     | Flattens an embedded struct into the parent. |
-
-All tags belong to the `db` struct-tag namespace: `` `db:"id,increment"` ``.
-
-## Custom bucket names
-
-### `BucketNamer` interface
-
-Structs can implement `BucketNamer` to provide a custom bucket name:
-
-```go
-type User struct {
-	ID   int    `db:"id,increment"`
-	Name string `db:"index"`
-}
-
-func (u User) HarborBucketName() string {
-	return "customers"
-}
-```
-
-The custom bucket name is used consistently across all list and point operations.
-
-### Runtime-generated structs
-
-Anonymous types created via `reflect.StructOf` can be used with `db.From()` to provide an explicit bucket name:
-
-```go
-dynType := reflect.StructOf([]reflect.StructField{
-	{
-		Name: "ID",
-		Type: reflect.TypeOf(uint64(0)),
-		Tag:  reflect.StructTag(`db:"id,increment"`),
-	},
-	{
-		Name: "Name",
-		Type: reflect.TypeOf(""),
-		Tag:  reflect.StructTag(`db:"index"`),
-	},
-})
-
-record := reflect.New(dynType)
-record.Elem().FieldByName("Name").SetString("Dynamic Alice")
-if err := db.From("dynamic_users").Save(ctx, record.Interface()); err != nil {
-	log.Fatal(err)
-}
-```
-
-Use the same reconstructed runtime type and explicit node path for subsequent reads and mutations.
-
-## Opening a database
-
-`Open` wraps an already-open bbolt database:
-
-```go
-func Open(ctx context.Context, db *bolt.DB, cfg db.Config) (*Store, error)
-```
-
-The parameters are:
-
-- `db` — a caller-owned `*bolt.DB`. It must be non-nil and remain open while Harbor is in use.
-- `cfg` — optional store configuration. `cfg.Root` is an optional bucket path (`[][]byte`); each element is one nested bucket name, and an empty path operates from the database root. `cfg.Codec` selects the codec used for entities; pass a zero `Config` (or a nil `Codec`) to use the default JSON codec.
-
-`Open` does not take ownership of `db`. `DB.Close()` releases the Harbor wrapper but
-leaves the bbolt database open; the caller remains responsible for closing it.
-
-```go
-bDB, err := bolt.Open("my.db", 0600, &bolt.Options{Timeout: 10 * time.Second})
-if err != nil {
-	log.Fatal(err)
-}
-defer func() {
-	if err := bDB.Close(); err != nil {
-		log.Println("native close:", err)
-	}
-}()
-
-db, err := harbor.Open(ctx, bDB, harbor.Config{})
-if err != nil {
-	log.Fatal(err)
-}
-defer func() {
-	if err := db.Close(); err != nil {
-		log.Println("harbor close:", err)
-	}
-}()
-```
-
-A nil `db` is rejected with an error matching `ErrNilParam`. Use `From` to
-operate below a root bucket or `WithCodec` to select a different codec for a
-node.
-
-## CRUD operations
-
-Database open, CRUD, finder, query, scanner, KV, and managed-transaction operations accept `context.Context`. Lifecycle methods such as `Close` do not.
-
-### Save
-
-```go
-user := User{Name: "John", Email: "john@example.com", Age: 21}
-err := db.Save(ctx, &user)
-// user.ID is now set if auto-increment is configured
-```
-
-`Save` creates the bucket and indexes if needed, enforces unique constraints, and persists the record. Saving a record with a duplicate unique value returns `ErrAlreadyExists`.
-
-### Auto-increment
-
-```go
-type Product struct {
-	ID                 int    `db:"id,increment"`
-	Name               string
-	Count              uint64 `db:"increment"`
-	IndexedCount       uint32 `db:"index,increment"`
-	UniqueCount        int16  `db:"unique,increment=100"`
-}
-
-p := Product{Name: "Widget"}
-db.Save(ctx, &p)
-// p.ID == 1, p.Count == 1, p.IndexedCount == 1, p.UniqueCount == 100
-```
-
-### Fetch by ID or field
-
-```go
-var user User
-
-// By indexed unique field
-err := db.One(ctx, "Email", "john@example.com", &user)
-
-// By unindexed field (full scan)
-err = db.One(ctx, "Name", "John", &user)
-
-// By primary key
-err = db.One(ctx, "ID", 10, &user)
-```
-
-`One` uses the index when available, otherwise performs a full scan.
-
-### Fetch multiple records
-
-```go
-var users []User
-err := db.Find(ctx, "Group", "staff", &users)
-
-// All records
-err = db.All(ctx, &users)
-
-// All sorted by index
-err = db.AllByIndex(ctx, "CreatedAt", &users)
-
-// Range query on indexed field
-err = db.Range(ctx, "Age", 21, 30, &users)
-
-// Prefix query; indexed fields use their index, while Name falls back to a scan.
-err = db.Prefix(ctx, "Name", "Jo", &users)
-```
-
-Pagination is available via `FindOption`:
-
-```go
-err := db.Find(ctx, "Group", "staff", &users, harbor.Limit(10), harbor.Skip(5))
-err = db.All(ctx, &users, harbor.Limit(10), harbor.Skip(5), harbor.Reverse())
-```
-
-### Query API
-
-For complex queries, use `Select` with matchers from the `q` package:
-
-```go
-import "github.com/malivvan/harbor/db/q"
-
-// Matchers
-q.Eq("Name", "John")
-q.Gt("Age", 7)
-q.Gte("Age", 21)
-q.Lt("Age", 77)
-q.Lte("Age", 77)
-q.In("Group", []string{"staff", "admin"})
-q.Re("Name", "^Jo")
-q.StrictEq("Field", value)
-
-// Combined matchers
-q.And(q.Gt("Age", 7), q.Re("Name", "^J"))
-q.Or(q.Eq("Group", "staff"), q.Eq("Group", "admin"))
-q.Not(q.Eq("Group", "blocked"))
-
-// Build and execute
-var users []User
-err := db.Select(q.Gte("ID", 10), q.Lte("ID", 100)).
-	Limit(10).Skip(5).Reverse().OrderBy("Age").
-	Find(ctx, &users)
-
-var single User
-err = db.Select(q.Eq("Email", "john@example.com")).First(ctx, &single)
-
-// Delete matching records
-err = db.Select(q.Lt("Age", 18)).Delete(ctx, &User{})
-
-// Count matching records
-count, err := db.Select(q.Eq("Group", "staff")).Count(ctx, &User{})
-
-// Iterate one by one
-err = db.Select(q.Gte("ID", 10)).Each(ctx, &User{}, func(record any) error {
-	u := record.(*User)
-	fmt.Println(u.Name)
-	return nil
-})
-```
-
-### Update
-
-```go
-// Update non-zero fields
-err := db.Update(ctx, &User{ID: 10, Name: "Jack", Age: 45})
-
-// Update a single field (including zero values)
-err := db.UpdateField(ctx, &User{ID: 10}, "Age", 0)
-```
-
-### Delete
-
-```go
-var user User
-db.One(ctx, "ID", 10, &user)
-err := db.DeleteStruct(ctx, &user)
-```
-
-### Count, Init, Drop, ReIndex
-
-```go
-// Count records
-count, err := db.Count(ctx, &User{})
-
-// Pre-create buckets and indexes
-err = db.Init(ctx, &User{})
-
-// Drop a bucket
-err = db.Drop(ctx, "User")
-err = db.Drop(ctx, &User{})
-
-// Rebuild indexes
-err = db.ReIndex(ctx, &User{})
-```
-
-## Managed transactions
-
-Harbor provides callback-managed transactions only. Manual `Begin`/`Commit`/`Rollback` APIs do not exist.
-
-### ReadTransaction
-
-```go
-err := db.ReadTransaction(ctx, func(tx harbor.Node) error {
-	var u User
-	if err := tx.One(ctx, "ID", 1, &u); err != nil {
-		return err
-	}
-	fmt.Println(u.Name)
-	return nil
-})
-```
-
-### WriteTransaction
-
-```go
-err := db.WriteTransaction(ctx, func(tx harbor.Node) error {
-	if err := tx.Save(ctx, &accountA); err != nil {
-		return err
-	}
-	if err := tx.Save(ctx, &accountB); err != nil {
-		return err
-	}
-	return nil
-})
-```
-
-**Semantics:**
-
-- The callback executes exactly once (`bbolt.Update` never retries).
-- If the callback returns an error, the transaction rolls back and the callback error is returned.
-- If the context is cancelled before commit, the transaction rolls back and `ctx.Err()` is returned.
-- If the callback cancels the context and also returns an error, the callback error remains primary.
-- After a successful commit, cancellation is not retroactively applied.
-- Panics propagate unchanged after bbolt unwinds the transaction.
-
-### Attaching to a caller-owned transaction
-
-For units of work that must own their bbolt transaction (for example, to mix
-Harbor record/index operations with raw BoltDB bucket writes), use `Attach`
-to bind a Harbor facade to an existing transaction:
-
-```go
-// bDB is the caller-owned *bbolt.DB passed to harbor.Open.
-tx, err := bDB.Begin(true)
-if err != nil {
+users := store.DB()
+if err := users.Save(ctx, &User{Team: "core", Email: "a@example.com"}); err != nil {
 	return err
 }
-defer tx.Rollback()
 
-txn, err := db.Attach(tx) // harbor.Tx
+var team []User
+err := users.Find(ctx, "Team", "core", &team, db.Limit(20), db.Skip(0))
+```
+
+```go
+import (
+	"github.com/malivvan/harbor/db"
+	"github.com/malivvan/harbor/db/q"
+)
+
+var recent []User
+err := users.Select(q.Gte("CreatedAt", cutoff)).
+	OrderBy("CreatedAt").Reverse().Limit(50).Find(ctx, &recent)
+```
+
+Full guide: [db/README.md](db/README.md). Supported tags are `id`, `increment`,
+`index`, `unique` and `inline`; implement `db.BucketNamer` for a custom bucket
+name.
+
+### Files — `fs`
+
+An `absfs`-compatible file system stored in the same bbolt file. File systems
+are named, so one store can hold many independent roots.
+
+```go
+vfs, err := store.FS().Open("documents")
 if err != nil {
 	return err
 }
 
-// Harbor record write (record + indexes) in the caller's transaction…
-if err := txn.Save(ctx, &account); err != nil {
+if err := vfs.MkdirAll("/reports/2026", 0o755); err != nil {
 	return err
 }
-
-// …and a raw BoltDB write in the same transaction, committed atomically.
-audit, err := tx.CreateBucketIfNotExists([]byte("audit"))
+f, err := vfs.Create("/reports/2026/q1.txt")
 if err != nil {
 	return err
 }
-if err := audit.Put([]byte("event"), []byte("created")); err != nil {
+if _, err := f.Write([]byte("ok")); err != nil {
+	return err
+}
+if err := f.Close(); err != nil {
 	return err
 }
 
-return tx.Commit()
+data, err := vfs.ReadFile("/reports/2026/q1.txt")
+snapshot, err := vfs.CreateSnapshot("before-import")
+defer snapshot.Release()
 ```
 
-**Semantics:**
+`fs` supports symbolic links, `filepath.Walk`-style traversal, concurrent
+`FastWalk`, read-only snapshots, an inode cache, external content back ends, and
+chunked encrypted content. Full guide: [fs/README.md](fs/README.md).
 
-- `Tx` exposes the full `Node` surface (`Save`, `Update`, `One`, `Find`,
-  `All`, queries, scans, KV access); descendants from `From`, `WithCodec`,
-  `PrefixScan`, and `RangeScan` remain transaction-bound.
-- Harbor never commits, rolls back, closes, or replaces the supplied
-  transaction, and it never opens a managed transaction for a bound `Tx`.
-- Reads and writes through the bound `Tx` use the supplied transaction:
-  uncommitted writes are visible to reads through the same `Tx` and invisible
-  to every other transaction until the caller commits.
-- `Attach` accepts writable and read-only transactions. Writes through a
-  read-only transaction fail with bbolt's `ErrTxNotWritable`.
-- The transaction must belong to this database: otherwise `Attach` returns
-  `ErrTxFromDifferentDB`. A nil transaction or nil receiver returns
-  `ErrNilParam`.
-- A bound `Tx` is valid only for the lifetime of its transaction. Using it
-  after `Commit` or `Rollback` is undefined behavior, exactly like using the
-  bbolt transaction itself (writes fail with `ErrTxClosed`; reads may panic).
+### Time series — `ts`
 
-## Nodes and nested buckets
-
-Use `From` to work with nested buckets. Every node supports the full API:
-
-```go
-notes := db.From("notes")
-privateNotes := notes.From("private")
-workNotes := notes.From("work")
-
-privateNotes.Save(ctx, &Note{ID: "p1", Text: "private"})
-workNotes.Save(ctx, &Note{ID: "w1", Text: "work"})
-
-// From accepts any number of path segments
-personalNotes := notes.From("private", "personal")
-```
-
-A node can be further configured with `WithCodec`:
-
-```go
-node := db.From("data").WithCodec(db.JSONCodec)
-```
-
-The `Bucket()` method returns the bucket path as a `[]string`. The `BucketScanner` interface provides `PrefixScan` and `RangeScan` for discovering sub-buckets.
-
-## Key/value store
-
-Harbor can also be used as a simple key/value store:
-
-```go
-// Store
-err := db.Set(ctx, "logs", time.Now(), "breakfast started")
-err = db.Set(ctx, "sessions", sessionID, &someUser)
-
-// Retrieve
-var user User
-err = db.Get(ctx, "sessions", sessionID, &user)
-
-// Raw bytes
-raw, err := db.GetBytes(ctx, "logs", key)
-err = db.SetBytes(ctx, "cache", "key", []byte("value"))
-
-// Existence check
-exists, err := db.KeyExists(ctx, "sessions", sessionID)
-
-// Delete
-err = db.Delete(ctx, "sessions", sessionID)
-```
-
-### Time series store (ts)
-
-The `ts` package stores named series of timestamped points. A `Store` manages
-series under a root bucket, and each point is stored as an order-preserving
-8-byte timestamp key with an 8-byte `float64` value:
+Points are keyed by their timestamp, so no secondary index is needed for range
+scans. Series carry labels and an optional retention policy.
 
 ```go
 import "github.com/malivvan/harbor/ts"
 
-store, err := ts.Open(ctx, bDB, ts.Config{Root: [][]byte{[]byte("metrics")}})
-if err != nil {
-	log.Fatal(err)
-}
-defer store.Close()
-
-cpu := store.Series("cpu")
+series := store.TS().Series("requests")
 now := time.Now().UnixNano()
 
-err = cpu.Insert(ctx, ts.Point{Timestamp: now, Value: 0.5})
-err = cpu.SetLabels(ctx, map[string]string{"host": "web-1"})
+if err := series.InsertMany(ctx, []ts.Point{
+	{Timestamp: now - int64(time.Minute), Value: 120},
+	{Timestamp: now, Value: 148},
+}); err != nil {
+	return err
+}
 
-points, err := cpu.Range(ctx, now, now)
-samples, err := cpu.Aggregate(ctx, now, now, int64(time.Second), ts.AggAvg)
+points, err := series.Range(ctx, now-int64(time.Hour), now)
+samples, err := series.Aggregate(ctx, now-int64(time.Hour), now,
+	int64(time.Minute), ts.AggAvg)
 
-// keep only the last 24h and at most 10_000 points
-err = cpu.SetRetention(ctx, ts.Retention{MaxAge: 24 * time.Hour, MaxPoints: 10_000})
-
-// explicit maintenance (also enforced automatically on insert)
-removed, err := cpu.EnforceRetention(ctx, time.Now().UnixNano())
+err = series.SetRetention(ctx, ts.Retention{
+	MaxAge:    24 * time.Hour,
+	MaxPoints: 100_000,
+})
 ```
 
-`ts.Open(ctx, db, cfg)` borrows the caller-owned bbolt database and never
-closes it. Because keys are chronological, `Range` and `RangeEach` scan in time
-order without an in-memory index. Aggregations support `min`, `max`, `avg`,
-`sum`, `count`, `first`, and `last`; `DeleteRange`, `Drop`, and `DeleteSeries`
-remove points or entire series.
+Full guide: [ts/README.md](ts/README.md).
 
-Retention is configured per series. `MaxAge` drops points older than the
-reference time minus the age, and `MaxPoints` keeps only the most recent
-`MaxPoints` points. Policies persist in series metadata, are enforced
-automatically by `Insert`/`InsertMany`, and can be applied explicitly with
-`Series.EnforceRetention`. `Store.EnforceRetention` applies every persisted
-policy, and `Store.SetNow` injects a clock for deterministic tests.
+### Vectors — `vec`
 
-## Context and cancellation
-
-Database open, CRUD, finder, query, scanner, KV, and managed-transaction paths accept `context.Context`; passing nil to those context-aware operations returns an error matching `ErrNilContext`. `Close` is a lifecycle exception.
-
-Cancellation is cooperative, not preemptive. Harbor checks the context at operation boundaries and loop checkpoints. It cannot interrupt:
-
-- a filesystem syscall,
-- a bbolt mutex or lock wait,
-- codec code that does not observe a context,
-- a user callback that has not returned control.
-
-No abandoned goroutines are used to simulate cancellation. Published read destinations and successfully committed writes are not retroactively changed to cancellation errors.
-
-Real applications should pass request or job contexts rather than creating a new `context.Background()` at each persistence call.
-
-## Error handling
-
-Always use `errors.Is` for sentinel classification, never direct equality or string comparison:
+Collections store fixed-dimension vectors with payload filters. Choose HNSW for
+large collections or `FlatIndex` for exact search.
 
 ```go
-var user User
-if err := db.One(ctx, "ID", 999, &user); err != nil {
-	if errors.Is(err, harbor.ErrNotFound) {
-		// handle missing record
-	}
-	if errors.Is(err, context.Canceled) {
-		// handle cancellation
-	}
+import "github.com/malivvan/harbor/vec"
+
+docs, err := store.Vec().NewCollection("docs", 3, vec.Cosine, true)
+if err != nil {
+	return err
 }
+
+err = docs.Upsert([]vec.PointStruct{
+	{ID: "a", Vector: []float32{1, 0, 0}, Payload: vec.Payload{"lang": "en"}},
+	{ID: "b", Vector: []float32{0, 1, 0}, Payload: vec.Payload{"lang": "de"}},
+})
+if err != nil {
+	return err
+}
+
+filter := &vec.Filter{Must: []vec.Condition{
+	{Key: "lang", Match: vec.MatchValue{Value: "en"}},
+}}
+hits, err := docs.Search([]float32{1, 0, 0}, filter, 5)
 ```
 
-### Operation wrapping
+Writes are buffered and flushed in batches; call `docs.Flush()` or
+`store.Close()` before shutting down. Full guide: [vec/README.md](vec/README.md).
 
-Errors are wrapped with an operation label:
+## Encryption
 
+A new store is encrypted by default with `EncryptAll`. The password is never
+stored: it is stretched with Argon2id, then SLIP-0021 derives one key per
+sub-store. Encryption flags are persisted in unencrypted metadata and bound to
+a sealed canary, so opening a store with the wrong password, key, or mode fails
+loudly instead of returning garbage.
+
+```go
+store, err := harbor.Open(ctx, "app.db", 0o600, &harbor.Options{
+	Password: "correct horse battery staple",
+	Encrypt:  harbor.EncryptDB | harbor.EncryptTS,
+})
 ```
-harbor <operation>: <cause>
-```
 
-Wrapping preserves Harbor sentinels, `context.Canceled`, `context.DeadlineExceeded`, bbolt errors, callback errors, and codec errors in the error chain. Callers can match the innermost cause with `errors.Is` through the wrapper.
+Use `Plaintext: true` to create an unencrypted store, or choose individual
+flags:
 
-### Sentinels
+| Flag | Protects |
+|------|----------|
+| `EncryptDBKeys` | db primary keys, index values, key/value keys |
+| `EncryptDBValues` | db record and key/value values |
+| `EncryptDBMetadata` | db auto-increment counters |
+| `EncryptFSContent` | fs file content and symlink targets |
+| `EncryptFSMetadata` | fs inode blobs (names, modes, sizes, times) |
+| `EncryptTSValues` | ts point values and series metadata |
+| `EncryptTSSeriesNames` | ts series and metadata names |
+| `EncryptVecPointIDs` | vec point IDs |
+| `EncryptVecCollectionNames` | vec collection names |
+| `EncryptVecPoints` | vec point blobs and collection metadata |
 
-| Sentinel | Meaning |
-|----------|---------|
-| `ErrNotFound` | Record not found |
-| `ErrAlreadyExists` | Duplicate unique value |
-| `ErrNilContext` | Nil context passed to an operation |
-| `ErrNilParam` | Nil required non-context argument |
-| `ErrNoID` | No ID field or `id` tag found |
-| `ErrZeroID` | ID field is a zero value |
-| `ErrBadType` | Unexpected value type |
-| `ErrUnknownTag` | Unrecognised struct tag |
-| `ErrIdxNotFound` | Index not found |
-| `ErrSlicePtrNeeded` | Expected pointer to slice |
-| `ErrStructPtrNeeded` | Expected pointer to struct |
-| `ErrPtrNeeded` | Expected pointer |
-| `ErrNoName` | Struct has no name and no bucket specified |
-| `ErrIncompatibleValue` | Value type does not match field type |
-| `ErrDifferentCodec` | Codec incompatible with existing bucket |
+Aggregates (`EncryptDB`, `EncryptFS`, `EncryptTS`, `EncryptVec`) and
+`EncryptAll` combine these bits. The encryption and KDF fields of `Options`
+only apply when creating a store; an existing store always uses its persisted
+settings.
 
-Do not parse error strings. Use `errors.Is` (and `errors.As` if a typed error is introduced with structured fields).
+Key rotation is available on the sub-store packages through `RotateAll` /
+`ReEncrypt` (and `VerifyAll` verifies that every value decrypts). A full
+rotation requires exclusive access to the store. The root `harbor` package
+derives its keys from the password and does not expose rotation: use the
+sub-store packages directly with keys you manage, or export and re-import to
+change the password. Migrating a plaintext store to an encrypted one in place
+is not supported. See [docs/encryption.md](docs/encryption.md) for the threat
+model and the partial rotation caveats.
 
 ## Database lifecycle
 
-Harbor always borrows the bbolt database supplied to `Open`:
+The two entry points differ in who owns the bbolt handle:
 
-- `Open` accepts an already-open `*bolt.DB`.
-- A nil database returns an error matching `ErrNilParam`.
-- Harbor does not close the database.
-- `DB.Close()` returns nil and does not close the underlying database.
-- The caller owns the lifecycle and must keep the database open while Harbor is active.
+- `harbor.Open` opens the file itself; `Store.Close` flushes buffered vector
+  writes and closes the database. It is safe to call more than once, and the
+  sub-store accessors return `nil` afterwards.
+- `db.Open`, `fs.Open`, `ts.Open` and `vec.Open` wrap an already-open
+  `*bolt.DB`. Their `Close` methods release the wrapper only; the caller keeps
+  ownership of the database. If several stores share one handle, close the
+  handle after all wrappers are closed.
 
-Close the bbolt database after `DB.Close()` when it is no longer needed.
+A `nil` context is rejected by context-aware operations with `ErrNilContext`
+(or the store's equivalent sentinel); `Close` is a lifecycle exception and
+takes no context.
 
-## Performance notes
+## Error handling
 
-A few defaults are chosen for portability, not maximum throughput:
-
-- **Codec.** Entity records use `encoding/json` by default. JSON decoding
-  dominates unindexed scans, `Count` and `Delete` over large buckets. For
-  throughput-sensitive workloads pass a faster codec through
-  `db.Config.Codec` (or `harbor.Options.Codec`). `Count` and
-  matcher-less `Delete` already skip decoding entirely.
-- **fsync.** Every bbolt commit is an fsync. Batch writes instead of saving
-  one record per loop: use `db.WriteTransaction` for multiple entity
-  operations, the `vec.Collection.Upsert` batch API (points are buffered and
-  flushed together), and `ts.Series.InsertMany`. `fs` merges the inode and
-  content writes of a single `Write` into one transaction.
-- **Encrypted time series.** With `ts.Config.EncryptValues`, set
-  `ts.Config.BlockDuration` for high-volume series: a block is sealed and
-  opened once instead of every point being sealed separately.
-
-The repository ships benchmarks for the hot paths
-(`go test -run '^$' -bench . -benchmem ./vec ./ts`); CI runs them and, on pull
-requests, prints a `benchstat` comparison against the base commit.
-
-## Codecs
-
-Harbor marshals data to BoltDB using a codec. The default is JSON, exposed as
-`db.JSONCodec`. Set `Config.Codec` to override it:
+Classify errors with `errors.Is`, never by comparing strings:
 
 ```go
-import harbordb "github.com/malivvan/harbor/db"
-
-store, err := harbor.Open(ctx, bDB, harbor.Config{}) // JSON, the default
-store, err = harbor.Open(ctx, bDB, harbordb.Config{
-	Codec: harbordb.JSONCodec, // explicit
-})
-```
-
-### Built-in codec
-
-| Package | Import path | Codec variable |
-|---------|-------------|----------------|
-| JSON (default) | `harbor/db` | `db.JSONCodec` |
-
-Encryption is not a codec. Pass a `Config` with a `Secret` to `Open` to enable
-native, optional AEAD encryption for a store; a zero config keeps creating
-plaintext stores.
-
-```go
-store, err := harbor.Open(ctx, bDB, harbor.Config{
-	Secret:          key,  // raw 32-byte key
-	EncryptValues:   true, // seal record and key/value values
-	EncryptMetadata: true, // seal auto-increment counters
-	EncryptKeys:     true, // SIV-encrypt primary keys, index values and kv keys
-})
-```
-
-Stores are sealed with AES-256-GCM. Encrypted stores carry a marker, so opening
-one without a config (or with the wrong settings) fails with `ErrWrongMode` and
-a wrong key fails with `ErrAuthFailed`.
-`Store.ReEncrypt` rotates the key and `Store.VerifyAll` re-reads the store to
-confirm everything decrypts.
-
-### Custom codecs
-
-Implement the `db.Codec` interface:
-
-```go
-type Codec interface {
-	Marshal(v any) ([]byte, error)
-	Unmarshal(b []byte, v any) error
-	Name() string
+var user User
+err := store.DB().One(ctx, "Email", "missing@example.com", &user)
+switch {
+case errors.Is(err, db.ErrNotFound):
+	// Record does not exist.
+case errors.Is(err, context.Canceled):
+	// The request was cancelled.
 }
 ```
 
-### Codec compatibility
+Errors are wrapped as `harbor <operation>: <cause>` while preserving the
+original cause, context errors, bbolt errors and callback errors in the chain.
 
-Harbor records codec metadata for record/KV leaf buckets and an encoded database-version value used during `Open`. An incompatible root codec is classified with `ErrDifferentCodec`; metadata-validating initialization and write operations also classify a mismatched node codec this way. Read paths may instead return the underlying decode error, so nodes configured with `WithCodec` must continue using their matching codec.
+## Contexts and cancellation
 
-## Concurrency and rotation
+CRUD, query, scan, key/value and managed-transaction operations accept a
+context. Cancellation is cooperative: Harbor checks at operation boundaries and
+loop checkpoints, but cannot interrupt a bbolt lock wait, a syscall, codec code,
+or a callback that has not returned. No background goroutines are used to
+simulate cancellation, and successfully committed writes or published read
+results are not retroactively changed to cancellation errors.
 
-Store operations are safe for concurrent use. Rotation is different: it swaps
-the keys used for new writes and re-encrypts existing data, so it follows a
-stricter contract.
+## Performance notes
 
-- A full `RotateAll`/`ReEncrypt` is atomic and must be run with exclusive
-  access to the store. Do not issue writes from other goroutines while it is
-  running.
-- A per-entity rotation (`ReEncryptSeries`, `ReEncryptFS`,
-  `ReEncryptCollection`) is a partial migration. It keeps the old marker so the
-  entities that were not rewritten stay readable, but the store is only
-  self-consistent after `RotateAll` completes the migration. Do not close a
-  store between a per-entity rotation and `RotateAll`.
-- Rotation is not a plaintext migration path: the store must already be
-  encrypted. Export and re-import to change an unencrypted store into an
-  encrypted one.
+The defaults favor portability and safety. For throughput-sensitive workloads:
 
-## Testing and CI
+- Pass a faster `db.Codec` than JSON for decode-heavy scans.
+- Batch writes with `db.WriteTransaction`, `ts.Series.InsertMany`, or
+  `vec.Collection.Upsert` instead of writing one record per loop; every bbolt
+  commit is an fsync.
+- For encrypted time series, set `ts.Config.BlockDuration` so blocks are sealed
+  and opened once instead of once per point.
+- Use `fs.Config.ChunkSize` for large files so writes and truncations touch only
+  the affected chunks.
+
+The repository ships benchmarks for the hot paths:
 
 ```sh
-# Formatting and build
+go test -run '^$' -bench . -benchmem ./vec ./ts
+```
+
+## Documentation
+
+- [docs/getting-started.md](docs/getting-started.md) — a guided tour of all four
+  stores, transactions, and lifecycle.
+- [docs/encryption.md](docs/encryption.md) — key derivation, encryption flags,
+  rotation, and threat model.
+- [docs/architecture.md](docs/architecture.md) — package map, on-disk layout,
+  concurrency model, and compatibility.
+- [db/README.md](db/README.md) — models, tags, CRUD, queries, transactions,
+  key/value access, and codecs.
+- [fs/README.md](fs/README.md) — file systems, snapshots, external content, and
+  encryption.
+- [ts/README.md](ts/README.md) — series, aggregation, retention, and encrypted
+  blocks.
+- [vec/README.md](vec/README.md) — collections, indexes, filters, quantization,
+  and buffering.
+- [fs/s3fs/README.md](fs/s3fs/README.md) — the S3-backed `absfs.Filer`.
+
+## Development
+
+```sh
+# Formatting, vet and build
 test -z "$(gofmt -l .)"
 go vet ./...
 go build ./...
@@ -805,23 +410,32 @@ go build ./...
 go test -count=1 -timeout 180s ./...
 go test -race -count=1 -timeout 300s ./...
 
-# Staticcheck (optional)
-go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+# Static analysis
+go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
 
 # Coverage
 go test -count=1 -timeout 180s -covermode=atomic -coverprofile=coverage.out ./...
-go tool cover -func=coverage.out > coverage.txt
+go tool cover -func=coverage.out
 ```
 
-The same commands run in CI (`.github/workflows/ci.yml`) on every push to
-`master` and on every pull request.
+CI runs the same checks on every push to `master` and every pull request; see
+[.github/workflows/ci.yml](.github/workflows/ci.yml).
+
+## Status
+
+Harbor is at its first public release (`v0.1.x`). The on-disk formats are
+versioned and refuse data from an incompatible build instead of misreading it.
+Pin a module version, and treat pre-1.0 API changes as potentially breaking.
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
 
-Harbor is a fork of [asdine/storm](https://github.com/asdine/storm); the
-original MIT copyright notices are preserved in [LICENSE](LICENSE).
+Harbor is a fork of [asdine/storm](https://github.com/asdine/storm) and keeps
+the original MIT copyright notices. It also vendors code derived from the Go
+project (Argon2, BLAKE2b, CPU feature detection), the `absfs` interfaces, and
+[`coder/hnsw`](https://github.com/coder/hnsw); their licenses are preserved next
+to the code.
 
 ## Credits
 

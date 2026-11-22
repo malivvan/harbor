@@ -219,7 +219,7 @@ func TestCollectionHNSWParams(t *testing.T) {
 	}
 	col.Upsert(points)
 
-	// 刷盘确保持久化完成
+	// Flush ensures the write is persisted.
 	if err := col.Flush(); err != nil {
 		t.Fatalf("Failed to flush: %v", err)
 	}

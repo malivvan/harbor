@@ -11,9 +11,10 @@ import (
 // It provides thread-safe operations for inserting, searching, and deleting vectors.
 // Each collection has a fixed vector dimension and uses a specific distance metric.
 //
-// 写入缓冲：Upsert 将数据先写入内存 HNSW 索引（查询即时可见），
-// 然后缓冲到 writeBuf 中，攒够 flushThreshold 个点再批量写入 bbolt，
-// 从而将 N 次 fsync 降为 1 次，显著提升索引吞吐。
+// Writes are buffered: Upsert updates the in-memory index immediately (so
+// searches see the new points) and appends them to writeBuf. Once
+// flushThreshold points are buffered, they are written to bbolt in one batch,
+// turning N fsyncs into one.
 type Collection struct {
 	Name      string   // Unique name of the collection
 	VectorLen int      // Dimension of vectors in this collection
@@ -23,8 +24,8 @@ type Collection struct {
 	index   VectorIndex // Transparent index engine (Flat or HNSW)
 	storage *Store      // Embedded Persistence
 
-	writeBuf       []PointStruct // 缓冲写入的点，攒批后批量刷盘减少 fsync
-	flushThreshold int           // writeBuf 达到此大小时触发刷盘
+	writeBuf       []PointStruct // points buffered for the next batch write
+	flushThreshold int           // flush when writeBuf reaches this size
 	lastVersion    uint64        // last store-managed Version handed out
 
 	// tombMu guards tombstones: IDs deleted while a flush batch was detached.
@@ -34,8 +35,9 @@ type Collection struct {
 	tombstones map[string]struct{}
 }
 
-// DefaultFlushThreshold 默认写入缓冲阈值（点数量）。
-// 攒够此数量的点后统一写入 bbolt，将多次 fsync 合并为一次。
+// DefaultFlushThreshold is the default write-buffer threshold in points. Once
+// this many points are buffered they are written to bbolt together, merging
+// several fsyncs into one.
 const DefaultFlushThreshold = 64
 
 // NewCollection initializes a new vector collection, optionally loading from storage.
@@ -142,10 +144,11 @@ func (s *Store) NewCollectionWithParams(name string, vectorLen int, metric Dista
 
 // Upsert adds or updates points in the collection.
 //
-// 写入流程：
-//  1. 更新内存 HNSW 索引（查询即时可见）
-//  2. 将点追加到 writeBuf 缓冲
-//  3. 当缓冲区达到 flushThreshold 时批量写入 bbolt（将 N 次 fsync 降为 1 次）
+// Write path:
+//  1. Update the in-memory index so the points are immediately searchable.
+//  2. Append the points to writeBuf.
+//  3. When the buffer reaches flushThreshold, write the batch to bbolt in one
+//     transaction, turning N fsyncs into one.
 //
 // Points are first written to the memory index, then buffered for bbolt persistence.
 // Returns an error if any point has an invalid vector length or if persistence fails.
@@ -174,7 +177,7 @@ func (c *Collection) Upsert(points []PointStruct) error {
 		batch[i].Version = version
 	}
 
-	// 2. Update Memory Index Immediately（查询需要最新数据）. The in-tree
+	// 2. Update the memory index immediately so searches see the new points. The in-tree
 	// indexes accept ownership of the already-cloned batch, avoiding a second
 	// deep copy per point.
 	if owned, ok := c.index.(interface{ upsertOwned([]PointStruct) error }); ok {
@@ -187,7 +190,7 @@ func (c *Collection) Upsert(points []PointStruct) error {
 		return fmt.Errorf("failed to update memory index: %w", err)
 	}
 
-	// 3. Buffer for bbolt persistence（攒批减少 fsync）.
+	// 3. Buffer for bbolt persistence, batching to reduce fsyncs.
 	c.writeBuf = append(c.writeBuf, batch...)
 	if c.storage == nil || len(c.writeBuf) < c.flushThreshold {
 		c.mu.Unlock()
@@ -215,7 +218,7 @@ func (c *Collection) Upsert(points []PointStruct) error {
 	return nil
 }
 
-// Flush 强制将 writeBuf 中所有缓冲点写入 bbolt。
+// Flush writes every buffered point in writeBuf to bbolt.
 func (c *Collection) Flush() error {
 	c.mu.Lock()
 	flush := c.writeBuf
@@ -356,7 +359,8 @@ func (c *Collection) Delete(points []string, filter *Filter) (int, error) {
 		}
 	}
 
-	// 3. Only now drop the IDs from the write buffer（防止刷盘时重写已删数据）:
+	// 3. Only now drop the IDs from the write buffer, so a flush cannot
+	// resurrect points deleted in the meantime:
 	// dropping them first would lose the points still present in the index when
 	// the storage delete fails.
 	if len(c.writeBuf) > 0 {

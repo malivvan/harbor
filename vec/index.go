@@ -1,5 +1,21 @@
-// Package vec provides the core functionality for a vector database library.
-// It includes vector indexing, storage, and search capabilities.
+// Package vec provides a persistent vector store on top of bbolt.
+//
+// A [Store] owns collections. Each [Collection] stores points with a fixed
+// vector dimension and a distance metric, and answers similarity searches with
+// either an exact [FlatIndex] or an approximate HNSW index. Points are kept in
+// memory for search and buffered on write so that many points share one bbolt
+// transaction.
+//
+// Payloads are arbitrary key/value metadata used by [Filter] to restrict
+// searches and deletes. Optional scalar quantization ([SQ8Quantizer]) shrinks
+// stored vectors, and optional AEAD encryption seals points, point IDs and
+// collection names.
+//
+// # Concurrency
+//
+// A Store and its Collections are safe for concurrent use. Buffered writes are
+// flushed when [DefaultFlushThreshold] points accumulate, and callers that own
+// the bbolt handle can force a flush with [Store.Flush].
 package vec
 
 // VectorIndex defines the standard interface for vector search engines.

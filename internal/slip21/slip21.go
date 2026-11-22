@@ -21,9 +21,14 @@ const (
 )
 
 var (
+	// ErrInvalidPath is returned when a derivation path is malformed.
 	ErrInvalidPath = errors.New("invalid derivation path")
+
+	// ErrInvalidSeed is returned when the seed is empty or too long.
 	ErrInvalidSeed = errors.New("invalid seed length")
-	ErrDestroyed   = errors.New("node has been destroyed")
+
+	// ErrDestroyed is returned when a destroyed node is used again.
+	ErrDestroyed = errors.New("node has been destroyed")
 
 	pathRegex = regexp.MustCompile(`^m(/.+)*$`)
 )

@@ -6,6 +6,7 @@ import (
 	"strings"
 )
 
+// Open flags. They mirror the os package flags and are used by OpenFile.
 const (
 	O_ACCESS = 0x3 // masks the access mode (O_RDONLY, O_WRONLY, or O_RDWR)
 

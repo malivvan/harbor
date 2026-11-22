@@ -18,6 +18,8 @@ const (
 	ListSeparator = ':'
 )
 
+// ErrNotImplemented is returned by optional operations that a filesystem does
+// not support.
 var ErrNotImplemented = errors.New("not implemented")
 
 // toSlash normalizes a path to always use forward slashes.
@@ -27,14 +29,18 @@ func toSlash(p string) string {
 	return strings.ReplaceAll(p, "\\", "/")
 }
 
+// ReadOnlyFiler is the minimal read-only file interface.
 type ReadOnlyFiler interface {
 	Open(name string) (io.ReadCloser, error)
 }
 
+// WriteOnlyFiler is the minimal write-only file interface.
 type WriteOnlyFiler interface {
 	Open(name string) (io.WriteCloser, error)
 }
 
+// Filer is the minimal file-system interface: it opens files and manipulates
+// individual directory entries.
 type Filer interface {
 
 	// OpenFile opens a file using the given flags and the given mode.
@@ -81,6 +87,8 @@ type Filer interface {
 	Sub(dir string) (fs.FS, error)
 }
 
+// FileSystem extends Filer with working-directory handling and whole-tree
+// convenience operations.
 type FileSystem interface {
 	Filer
 
@@ -94,6 +102,7 @@ type FileSystem interface {
 	Truncate(name string, size int64) error
 }
 
+// SymLinker adds symbolic-link operations to a file system.
 type SymLinker interface {
 	// SameFile(fi1, fi2 os.FileInfo) bool
 
@@ -119,6 +128,7 @@ type SymLinker interface {
 	Symlink(oldname, newname string) error
 }
 
+// SymlinkFileSystem is a FileSystem that also supports symbolic links.
 type SymlinkFileSystem interface {
 	FileSystem
 	SymLinker

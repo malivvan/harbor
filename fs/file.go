@@ -171,6 +171,10 @@ func (f *File) ReadAt(b []byte, off int64) (n int, err error) {
 	return n, err
 }
 
+// Write writes len(p) bytes from p to the file at the current offset,
+// growing the file as needed. It returns the number of bytes written and
+// any error encountered. Write always writes the whole slice or returns an
+// error.
 func (f *File) Write(p []byte) (int, error) {
 	if f.closed {
 		return 0, os.ErrClosed
