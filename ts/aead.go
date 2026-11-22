@@ -38,6 +38,11 @@ type Config struct {
 
 	// BlockDuration groups points into encrypted time blocks of this width in
 	// nanoseconds. It must be non-negative; zero disables block mode.
+	//
+	// With EncryptValues and high write/scan volume, block mode is strongly
+	// recommended: each block is sealed and opened once, whereas non-block mode
+	// seals every point separately. A duration around a few seconds to a
+	// minute is a good default for streaming metrics.
 	BlockDuration int64
 }
 

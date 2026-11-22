@@ -512,6 +512,16 @@ func (se *Series) Range(ctx context.Context, start, end int64) ([]Point, error) 
 			return nil
 		}
 
+		// Pre-size from the persisted count when available; otherwise the
+		// bucket key count is a reasonable hint.
+		hint := bucket.Stats().KeyN
+		if se.store.blockDuration() > 0 {
+			if meta, metaErr := se.store.readMeta(tx, se.name); metaErr == nil && meta.Count > 0 {
+				hint = int(meta.Count)
+			}
+		}
+		points = make([]Point, 0, hint)
+
 		if se.store.blockDuration() > 0 {
 			return se.store.scanBlocks(ctx, bucket, start, end, func(point Point) error {
 				points = append(points, point)
@@ -608,7 +618,10 @@ func (se *Series) Count(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
-	var count int
+	var (
+		count   int
+		persist bool
+	)
 	err := se.store.b.View(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
@@ -631,6 +644,9 @@ func (se *Series) Count(ctx context.Context) (int, error) {
 		if se.store.blockDuration() > 0 {
 			var blockErr error
 			count, blockErr = se.store.countBlocks(ctx, bucket)
+			// Legacy or crash-recovered series: persist the count once so
+			// subsequent calls do not decrypt every block again.
+			persist = blockErr == nil && count > 0
 			return blockErr
 		}
 		count = bucket.Stats().KeyN
@@ -638,6 +654,21 @@ func (se *Series) Count(ctx context.Context) (int, error) {
 	})
 	if err != nil {
 		return 0, err
+	}
+
+	if persist {
+		// Best effort: a failed cache write must not fail the count.
+		_ = se.store.b.Update(func(tx *bolt.Tx) error {
+			meta, err := se.store.readMeta(tx, se.name)
+			if err != nil {
+				return err
+			}
+			if meta.Count != 0 {
+				return nil
+			}
+			meta.Count = int64(count)
+			return se.store.writeMeta(tx, se.name, meta)
+		})
 	}
 	return count, nil
 }

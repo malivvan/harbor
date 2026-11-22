@@ -692,6 +692,8 @@ The big `ts` wins (skip satisfied retention on insert, stream block aggregation,
 - **Risk:** Low.
 
 ### 4.3 Encrypted non-block series pay a full AEAD open per point on every range read — MEDIUM (design/guidance)
+
+> **Status:** ✅ FIXED — documented `Config.BlockDuration` as the recommended mode for encrypted high-volume series: one seal/open per block instead of per point.
 - **Location:** `ts/encode.go:86-106` (`decodePoint`), `ts/series.go:526-547` (`Range` scan),
   `ts/aggregate.go:149-166`.
 - **Problem:** With `EncryptValues` and no `BlockDuration`, each stored point is independently
@@ -715,6 +717,8 @@ The big `ts` wins (skip satisfied retention on insert, stream block aggregation,
 - **Risk:** Low.
 
 ### 4.5 Block-mode `Count` still decrypts every block when `meta.Count == 0` — LOW
+
+> **Status:** ✅ FIXED — when a legacy/crash-recovered block-mode series has no persisted count, `Count` scans once and best-effort persists the result, so subsequent calls are O(1).
 - **Location:** `ts/series.go:571-590`.
 - **Problem:** `Count` returns persisted `meta.Count` when > 0, but falls back to
   `countBlocks` (decrypt + unpack every block) when it is 0 — including for a genuinely empty
@@ -725,6 +729,8 @@ The big `ts` wins (skip satisfied retention on insert, stream block aggregation,
 - **Risk:** Low.
 
 ### 4.6 `Range`/`RangeEach` allocate the result slice without capacity — LOW
+
+> **Status:** ✅ FIXED — `Range` pre-sizes its result slice from the persisted series count (or the bucket key count), avoiding repeated growth.
 - **Location:** `ts/series.go:395-460`.
 - **Problem:** `points := make([]Point, 0)` grows by doubling for large ranges.
 - **Fix:** pre-size from `meta.Count` (an over-estimate is fine) or `bucket.Stats().KeyN` in
