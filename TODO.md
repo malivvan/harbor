@@ -197,6 +197,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low.
 
 ### 1.13 Matcher field lookup re-resolves `FieldByName` per record — MEDIUM
+
+> **Status:** ✅ FIXED — matcher field index paths are cached per (type, field) and resolved with `FieldByIndex`, eliminating the per-record `FieldByName` scan. Regression test covers promoted and unknown fields.
 - **Location:** `db/q/fieldmatcher.go:34-47,64-77`.
 - **Problem:** `fieldMatcherDelegate.MatchValue`/`field2fieldMatcherDelegate.MatchValue` call
   `rec.FieldByName(f.Field)` for every record (linear field scan + `reflect.Value` build);
