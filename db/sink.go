@@ -526,7 +526,19 @@ func (l *listSink) add(ctx context.Context, i item) error {
 	}
 
 	if l.isPtr {
-		l.results = reflect.Append(l.results, *i.value)
+		// The scratch value is reused for every decoded record. Appending
+		// *i.value directly therefore made every element of a []*T result
+		// alias the last record: an ordered query with a matcher returned the
+		// wrong row when the last visited row did not match. Copy the record
+		// into a fresh pointer. See TestOrderedQueryKeepsTheMatcher.
+		value := *i.value
+		copied := reflect.New(l.elemType)
+		if value.Kind() == reflect.Pointer {
+			copied.Elem().Set(value.Elem())
+		} else {
+			copied.Elem().Set(value)
+		}
+		l.results = reflect.Append(l.results, copied)
 	} else {
 		l.results = reflect.Append(l.results, reflect.Indirect(*i.value))
 	}
