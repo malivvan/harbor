@@ -70,21 +70,30 @@ func (idx *IDIndex) Get(ctx context.Context, value []byte) ([]byte, error) {
 	return raw, nil
 }
 
-// All returns all the ids corresponding to the given value
+// All returns all the ids corresponding to the given value. The ID index is
+// backed by the record bucket itself, so the matching ID is the key.
 func (idx *IDIndex) All(ctx context.Context, value []byte, opts *Options) ([][]byte, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, wrapError("index all", err)
+	}
+
+	if opts != nil && opts.Limit == 0 {
+		return nil, nil
 	}
 
 	id := idx.IndexBucket.Get(value)
 	if err := checkContext(ctx); err != nil {
 		return nil, wrapError("index all", err)
 	}
-	if id != nil {
-		return [][]byte{id}, nil
+	if id == nil {
+		return nil, nil
 	}
 
-	return nil, nil
+	if opts != nil && opts.Skip > 0 {
+		return nil, nil
+	}
+
+	return [][]byte{value}, nil
 }
 
 // AllRecords returns no IDs: the primary bucket is the record store, not a

@@ -198,3 +198,44 @@ func TestOrderByPromotedField(t *testing.T) {
 	err := db.Select().OrderBy("NoSuchField").Find(ctx, &bad)
 	require.ErrorIs(t, err, ErrNotFound)
 }
+
+type incrementIDRecord struct {
+	ID   int    `db:"increment"`
+	Name string `db:"index"`
+}
+
+func TestIncrementTaggedIDUsesDirectKeyPath(t *testing.T) {
+	ctx := context.Background()
+	cc := &countingCodec{}
+	db, cleanup := createDB(t, testCodec(cc))
+	defer cleanup()
+
+	for i := 0; i < 10; i++ {
+		rec := incrementIDRecord{Name: "n"}
+		require.NoError(t, db.Save(ctx, &rec))
+		require.Equal(t, i+1, rec.ID)
+	}
+
+	cc.unmarshals.Store(0)
+	var got incrementIDRecord
+	require.NoError(t, db.One(ctx, "ID", 10, &got))
+	require.Equal(t, 10, got.ID)
+	require.EqualValues(t, 1, cc.unmarshals.Load(),
+		"One by the primary key must take the direct key path, not a scan")
+
+	// Find keeps working on the same field.
+	cc.unmarshals.Store(0)
+	var found []incrementIDRecord
+	require.NoError(t, db.Find(ctx, "ID", 7, &found))
+	require.Len(t, found, 1)
+	require.Equal(t, 7, found[0].ID)
+	require.EqualValues(t, 1, cc.unmarshals.Load())
+
+	// Save with an explicit ID and update still index correctly.
+	rec := incrementIDRecord{ID: 42, Name: "x"}
+	require.NoError(t, db.Save(ctx, &rec))
+	var byName []incrementIDRecord
+	require.NoError(t, db.Find(ctx, "Name", "x", &byName))
+	require.Len(t, byName, 1)
+	require.Equal(t, 42, byName[0].ID)
+}

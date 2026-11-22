@@ -323,6 +323,11 @@ func extractField(value *reflect.Value, field *reflect.StructField, m *structCon
 				IncrementStart: 1,
 			}
 			m.Fields[field.Name] = f
+		} else {
+			// A tagged ID (for example `db:"increment"`) is still the
+			// primary key: make it addressable by the direct key path.
+			f.IsID = true
+			f.Index = tagID
 		}
 		m.ID = f
 	}

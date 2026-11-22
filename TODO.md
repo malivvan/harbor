@@ -112,6 +112,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low-Medium — preserve existing ordering semantics.
 
 ### 1.6 Primary key tagged `db:"increment"` (or bare `ID`) misses the O(1) key path — HIGH
+
+> **Status:** ✅ FIXED — an existing `ID` field tagged `db:"increment"` (or bare `ID`) now gets `IsID=true` and `Index=tagID`, so `One`/`Find` use the direct record key; `IDIndex.All` now returns the key rather than the record payload. Regression test asserts a single decode for `One`/`Find` by ID.
 - **Location:** `db/extract.go:196-215` (fallback sets `m.ID = f` but leaves `f.IsID=false`,
   `f.Index=""`), `db/finder.go:93-95,222-240` (fast path guard `!field.IsID && field.Index==""`).
 - **Problem:** For `type T struct { ID int \`db:"increment"\` }`, `m.ID` is set but `IsID`/`Index`
