@@ -300,6 +300,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low (read-only batching; keep the tx short).
 
 ### 2.4 Two-or-more write transactions (each an fsync) per logical write — HIGH
+
+> **Status:** ✅ FIXED — non-chunked `Write` persists inode and content in one `db.Update` (`saveInodeAndData`); chunked `Write` does the same for chunks + inode (`writeRangeAndInode`). Chunked writes now also refresh the inode cache.
 - **Location:** `fs/file.go:164-176` (chunked: `writeRange` then `saveInode`),
   `fs/file.go:194-202` (non-chunked: `saveInode` then `saveData`), plus `fs/fs.go:1145`
   `saveParentChild` on create.

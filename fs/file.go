@@ -189,14 +189,11 @@ func (f *File) Write(p []byte) (int, error) {
 	}
 
 	if f.fs.chunked() && f.fs.contentFS == nil {
-		if err := f.fs.writeRange(f.node.Ino, f.offset, p); err != nil {
-			return 0, err
-		}
 		f.offset += int64(len(p))
 		if f.offset > f.node.Size {
 			f.node.Size = f.offset
 		}
-		if _, err := f.fs.saveInode(f.node); err != nil {
+		if err := f.fs.writeRangeAndInode(f.node.Ino, f.offset-int64(len(p)), p, f.node); err != nil {
 			return 0, err
 		}
 		return len(p), nil
@@ -219,13 +216,18 @@ func (f *File) Write(p []byte) (int, error) {
 	f.offset += int64(n)
 	f.node.Size = int64(len(data))
 
-	ino, err := f.fs.saveInode(f.node)
-	if err != nil {
-		return 0, err
+	if f.fs.contentFS != nil {
+		ino, err := f.fs.saveInode(f.node)
+		if err != nil {
+			return 0, err
+		}
+		if err := f.fs.saveData(ino, data); err != nil {
+			return n, err
+		}
+		return n, nil
 	}
 
-	err = f.fs.saveData(ino, data)
-	if err != nil {
+	if _, err := f.fs.saveInodeAndData(f.node, data); err != nil {
 		return n, err
 	}
 

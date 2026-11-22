@@ -45,7 +45,7 @@ func (fsys *FS) openFsBucketForWrite(tx *bolt.Tx) (*fsBucket, error) {
 	if _, err := bb.CreateBucketIfNotExists([]byte(chunksBucketName)); err != nil {
 		return nil, err
 	}
-	b := newFsBucket(bb)
+	b := newFsBucketWithCache(bb, fsys.cache)
 	if b == nil {
 		return nil, os.ErrNotExist
 	}
@@ -277,6 +277,21 @@ func (fsys *FS) readRange(ino uint64, off, n int64) ([]byte, error) {
 		return err
 	})
 	return out, err
+}
+
+// writeRangeAndInode writes a range of chunks and updates the inode in one
+// transaction, so a chunked Write commits (and fsyncs) once.
+func (fsys *FS) writeRangeAndInode(ino uint64, off int64, data []byte, node *iNode) error {
+	return fsys.db.Update(func(tx *bolt.Tx) error {
+		b, err := fsys.openFsBucketForWrite(tx)
+		if err != nil {
+			return err
+		}
+		if err := b.writeDataRange(ino, off, data, fsys.chunkSize()); err != nil {
+			return err
+		}
+		return b.PutInode(ino, node)
+	})
 }
 
 func (fsys *FS) writeRange(ino uint64, off int64, data []byte) error {

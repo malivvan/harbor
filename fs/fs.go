@@ -310,6 +310,34 @@ func (fs *FS) saveInode(node *iNode) (ino uint64, err error) {
 	return ino, err
 }
 
+// saveInodeAndData persists an inode and its whole-file content in a single
+// write transaction. ino is 0 when the node needs a new inode number.
+func (fs *FS) saveInodeAndData(node *iNode, data []byte) (ino uint64, err error) {
+	sealed, err := fs.enc.Load().sealContent(data)
+	if err != nil {
+		return 0, err
+	}
+
+	ino = node.Ino
+	err = fs.db.Update(func(tx *bolt.Tx) error {
+		b, err := fs.openFsBucketWithCache(tx)
+		if err != nil {
+			return err
+		}
+		if ino == 0 {
+			ino, err = b.NextInode()
+			if err != nil {
+				return err
+			}
+		}
+		if err := b.PutInode(ino, node); err != nil {
+			return err
+		}
+		return b.data.Put(i2b(ino), sealed)
+	})
+	return ino, err
+}
+
 // ReadDir reads the named directory and returns a list of directory entries sorted by filename.
 func (filesystem *FS) ReadDir(name string) ([]fs.DirEntry, error) {
 	filesystem.mu.RLock()
