@@ -504,6 +504,8 @@ build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 - **Risk:** Low.
 
 ### 3.5 Generic heap boxes every element through `interface{}` — MEDIUM
+
+> **Status:** ✅ FIXED — the generic heap no longer uses `container/heap`: `Push`/`Pop` operate on `[]T` with direct sift-up/sift-down (no interface boxing), `Min` is O(1), and the maximum index is tracked across swaps so `Max` is O(1) amortised.
 - **Location:** `vec/hnsw/heap/heap.go:29-38` (`Push(x interface{})`, `Pop() interface{}`) used
   via `container/heap`.
 - **Problem:** Each push/pop of a `searchCandidate` boxes into an interface and type-asserts on
