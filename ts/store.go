@@ -299,6 +299,23 @@ func (s *Store) seriesBucket(tx *bolt.Tx, name string) (*bolt.Bucket, error) {
 	return root.Bucket(key), nil
 }
 
+// seriesCount returns the number of points currently stored in a series.
+// Non-block series use the bucket key count; block series decrypt their blocks.
+func (s *Store) seriesCount(ctx context.Context, tx *bolt.Tx, name string) (int64, error) {
+	bucket, err := s.seriesBucket(tx, name)
+	if err != nil {
+		return 0, err
+	}
+	if bucket == nil {
+		return 0, nil
+	}
+	if s.blockDuration() > 0 {
+		count, err := s.countBlocks(ctx, bucket)
+		return int64(count), err
+	}
+	return int64(bucket.Stats().KeyN), nil
+}
+
 func (s *Store) createSeriesBucket(tx *bolt.Tx, name string) (*bolt.Bucket, error) {
 	key, err := s.bucketKey(name)
 	if err != nil {

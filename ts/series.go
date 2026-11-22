@@ -164,6 +164,15 @@ func (se *Series) SetLabels(ctx context.Context, labels map[string]string) error
 			return err
 		}
 		meta.Labels = labels
+		// Seed the count for a series that predates count tracking, so a
+		// later insert does not start from a stale zero.
+		if meta.Count == 0 {
+			count, err := se.store.seriesCount(ctx, tx, se.name)
+			if err != nil {
+				return err
+			}
+			meta.Count = count
+		}
 		if err := se.store.writeMeta(tx, se.name, meta); err != nil {
 			return err
 		}
