@@ -352,6 +352,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Medium (framing/`readDataRange` bounds).
 
 ### 2.8 Inode cache `Get`/`Put` deep-copy the whole inode including all `Children` — MEDIUM
+
+> **Status:** ✅ FIXED — read paths (`resolve`, `loadInodes`) use `getInodeShared`, which returns the cached inode without a deep copy; mutation paths still use the copying `Get`, and `loadParentChild` clones the children slice before Link/Unlink. Regression test proves copy-on-write.
 - **Location:** `fs/cache.go:62` (`Get`), `fs/cache.go:81` (`Put`), `fs/inode.go:179-201`
   (`copyInode`).
 - **Problem:** Every cache hit allocates a new inode and entries slice and copies every child;

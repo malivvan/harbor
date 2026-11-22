@@ -224,6 +224,29 @@ func (f *fsBucket) GetInode(ino uint64) (*iNode, error) {
 	return node, nil
 }
 
+// getInodeShared returns a cached inode without copying it. The caller must
+// not mutate the returned node.
+func (f *fsBucket) getInodeShared(ino uint64) (*iNode, error) {
+	if ino == nilIno {
+		return nil, errInvalidIno
+	}
+
+	if f.cache != nil {
+		if node := f.cache.GetShared(ino); node != nil {
+			return node, nil
+		}
+	}
+
+	node := newInode(0)
+	if err := f.decodeNode(ino, node); err != nil {
+		return nil, err
+	}
+	if f.cache != nil {
+		f.cache.Put(ino, node, false)
+	}
+	return node, nil
+}
+
 // Get returns the state value for the given` key`.
 func (f *fsBucket) Get(key string) ([]byte, error) {
 	data := f.state.Get([]byte(key))

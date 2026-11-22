@@ -548,7 +548,7 @@ func (fs *FS) loadInodes(inos []uint64) ([]*iNode, error) {
 			return err
 		}
 		for i, ino := range inos {
-			node, err := b.GetInode(ino)
+			node, err := b.getInodeShared(ino)
 			if err != nil {
 				return err
 			}
@@ -1148,7 +1148,7 @@ func (fs *FS) resolve(path string) (*iNode, error) {
 		}
 
 		ino := fs.rootIno
-		loadedNode, err := b.GetInode(ino)
+		loadedNode, err := b.getInodeShared(ino)
 		if err != nil {
 			return err
 		}
@@ -1168,7 +1168,7 @@ func (fs *FS) resolve(path string) (*iNode, error) {
 			}
 
 			// replace node with child or error
-			loadedNode, err = b.GetInode(node.Children[x].Ino)
+			loadedNode, err = b.getInodeShared(node.Children[x].Ino)
 			if err != nil {
 				return err
 			}
@@ -1378,6 +1378,9 @@ func (fs *FS) loadParentChild(dir, filename string) (*iNode, *iNode) {
 		return nil, nil
 	}
 
+	// resolve returns a struct copy whose Children slice aliases the cache;
+	// clone it before any Link/Unlink mutation.
+	parent.Children = append(entries(nil), parent.Children...)
 	if !sort.IsSorted(parent.Children) {
 		sort.Sort(parent.Children)
 	}

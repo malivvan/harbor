@@ -62,6 +62,34 @@ func (c *inodeCache) Get(ino uint64) *iNode {
 	return copyInode(entry.node)
 }
 
+// GetShared retrieves an inode without copying it. Callers must treat the
+// returned node as immutable: mutation paths must use Get (which copies) or
+// clone the parts they change.
+func (c *inodeCache) GetShared(ino uint64) *iNode {
+	if !c.enabled {
+		return nil
+	}
+
+	c.mu.RLock()
+	entry, ok := c.entries[ino]
+	c.mu.RUnlock()
+
+	if !ok {
+		c.mu.Lock()
+		c.misses++
+		c.mu.Unlock()
+		return nil
+	}
+
+	c.mu.Lock()
+	entry.lastUsed = time.Now()
+	c.hits++
+	node := entry.node
+	c.mu.Unlock()
+
+	return node
+}
+
 // Put adds or updates an inode in the cache.
 func (c *inodeCache) Put(ino uint64, node *iNode, dirty bool) {
 	if !c.enabled || node == nil {

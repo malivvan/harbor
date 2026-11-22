@@ -383,3 +383,51 @@ func TestInodeCache_Concurrent(t *testing.T) {
 		t.Error("cache should have entries")
 	}
 }
+
+// TestSharedInodeCacheIsCopyOnWrite verifies that resolving a directory does
+// not alias the cached children slice in a way that later mutations leak into
+// the previously returned node.
+func TestSharedInodeCacheIsCopyOnWrite(t *testing.T) {
+	store, _ := openEncStore(t, []byte("ts"), Config{})
+	fsys, err := store.Open("fs")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 3; i++ {
+		writeTestFile(t, fsys, fmt.Sprintf("/f%d", i), "x")
+	}
+
+	root, err := fsys.resolve("/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(root.Children); got != 3 {
+		t.Fatalf("expected 3 children, got %d", got)
+	}
+
+	// Creating a fourth file mutates the parent inode through the cache; the
+	// previously resolved node must keep its own view.
+	writeTestFile(t, fsys, "/f3", "x")
+	if got := len(root.Children); got != 3 {
+		t.Fatalf("resolved node leaked a mutation: got %d children", got)
+	}
+
+	fresh, err := fsys.resolve("/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(fresh.Children); got != 4 {
+		t.Fatalf("expected 4 children after create, got %d", got)
+	}
+
+	// The persisted inode must agree with the cache view.
+	fsys.FlushCache()
+	disk, err := fsys.resolve("/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(disk.Children); got != 4 {
+		t.Fatalf("expected 4 persisted children, got %d", got)
+	}
+}
