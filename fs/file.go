@@ -129,8 +129,11 @@ func (f *File) ReadAt(b []byte, off int64) (n int, err error) {
 	if off < 0 {
 		return 0, &os.PathError{Op: "readat", Path: f.name, Err: os.ErrInvalid}
 	}
+	saved := f.offset
 	f.offset = off
-	return f.Read(b)
+	n, err = f.Read(b)
+	f.offset = saved
+	return n, err
 }
 
 func (f *File) Write(p []byte) (int, error) {
@@ -211,8 +214,11 @@ func (f *File) WriteAt(b []byte, off int64) (n int, err error) {
 	if off < 0 || off > maxFileSize-int64(len(b)) {
 		return 0, &os.PathError{Op: "writeat", Path: f.name, Err: os.ErrInvalid}
 	}
+	saved := f.offset
 	f.offset = off
-	return f.Write(b)
+	n, err = f.Write(b)
+	f.offset = saved
+	return n, err
 }
 
 // Close closes the File, rendering it unusable for I/O. On files that support
@@ -436,16 +442,19 @@ func (f *File) ReadDir(n int) ([]fs.DirEntry, error) {
 		return nil, syscall.ENOTDIR
 	}
 	children := f.node.Children
-	if f.diroffset >= len(children) {
-		return nil, io.EOF
-	}
-
-	// Calculate how many entries to return
 	remaining := len(children) - f.diroffset
 	if n < 1 {
+		if remaining <= 0 {
+			return []fs.DirEntry{}, nil
+		}
 		n = remaining
-	} else if n > remaining {
-		n = remaining
+	} else {
+		if remaining <= 0 {
+			return nil, io.EOF
+		}
+		if n > remaining {
+			n = remaining
+		}
 	}
 
 	entries := make([]fs.DirEntry, n)
