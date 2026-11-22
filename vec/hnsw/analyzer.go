@@ -10,8 +10,19 @@ type Analyzer[K cmp.Ordered] struct {
 	Graph *Graph[K]
 }
 
+// Height returns the number of non-empty layers. Counting len(layers) would
+// include trailing empty layers left behind by Delete.
 func (a *Analyzer[T]) Height() int {
-	return len(a.Graph.layers)
+	if a == nil || a.Graph == nil {
+		return 0
+	}
+	height := 0
+	for _, layer := range a.Graph.layers {
+		if len(layer.nodes) > 0 {
+			height++
+		}
+	}
+	return height
 }
 
 // Connectivity returns the average number of edges in the

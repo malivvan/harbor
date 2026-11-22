@@ -32,7 +32,6 @@ func CosineDistance(a, b []float32) float32 {
 
 // EuclideanDistance computes the Euclidean distance between two vectors.
 func EuclideanDistance(a, b []float32) float32 {
-	// TODO: can we speedup with vek?
 	var sum float32 = 0
 	n := min(len(a), len(b))
 	for i := 0; i < n; i++ {

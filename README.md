@@ -45,6 +45,53 @@ import storm "github.com/malivvan/storm/db"
 
 The public API lives in the `db` package.
 
+## Package layout
+
+This module contains several packages:
+
+- `db` — the Storm toolkit documented in this README (indexes, queries, managed
+  transactions).
+- `ts` — the time-series store documented in [Time series store (ts)](#time-series-store-ts).
+- `fs` — a complete filesystem on top of bbolt; see [`fs/README.md`](fs/README.md).
+- `vec` — a vector store with Flat and HNSW indexes, filters, quantization and
+  optional encryption.
+- `storm` (the module root) — opens one bbolt file behind one password and
+  exposes the `DB`, `FS`, `TS` and `Vec` sub-stores plus a small key/value API.
+
+The API reference below covers `db` and `ts`; the other packages are summarized
+in this section.
+
+### Root store
+
+```go
+import storm "github.com/malivvan/storm"
+
+store, err := storm.Open(ctx, "app.db", 0600, &storm.Options{
+    Password: "correct horse battery staple",
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer store.Close()
+
+// Key/value API. Values are sealed by default (EncryptKVValues); keys stay
+// readable so byte-ordered listing keeps working.
+_ = store.Set("feature:dark-mode", "on")
+value, _ := store.Get("feature:dark-mode")
+
+// Sub-stores share the same bbolt file and password.
+_ = store.DB().Save(ctx, &User{Name: "alice"})
+vfs, _ := store.FS().Open("documents")
+_ = store.TS().Series("cpu").Insert(ctx, ts.Point{Timestamp: time.Now().UnixNano(), Value: 0.5})
+_ = store.Vec()
+
+// Flushes buffered vector writes before closing the shared handle.
+_ = store.Close()
+```
+
+`storm.Open` creates Argon2id metadata and derives one domain-separated key per
+sub-store; use `Options{Plaintext: true}` to opt out of encryption entirely.
+
 ## Quick start
 
 ```go

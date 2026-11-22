@@ -504,15 +504,29 @@ func (h *Graph[K]) Search(near Vector, k int) []Node[K] {
 	if k <= 0 {
 		return nil
 	}
+	// A hand-built or imported graph may lack a distance function. Ordering is
+	// impossible without one, so return no results instead of nil-panicking.
+	if h == nil || h.Distance == nil {
+		return nil
+	}
 
 	h.assertDims(near)
 	if len(h.layers) == 0 {
 		return nil
 	}
 
-	var (
-		efSearch = h.EfSearch
+	// EfSearch <= 0 collapses the candidate list to the direct neighbours and
+	// can return fewer than k results. Default it and never search a smaller
+	// candidate list than the number of requested results.
+	efSearch := h.EfSearch
+	if efSearch <= 0 {
+		efSearch = 20
+	}
+	if efSearch < k {
+		efSearch = k
+	}
 
+	var (
 		elevator *K
 	)
 

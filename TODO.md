@@ -260,68 +260,39 @@ Regression tests live in `vec/todo_review_test.go`.
 
 # 8. `vec/hnsw`, `vec/vek`, and remaining internal packages
 
-## N1. [Medium] HNSW `Upsert` can panic on inconsistent dimensions in the first batch
-**Location:** `vec/hnsw_index.go` (`Upsert` validation), `vec/hnsw/graph.go`
-`assertDims`.
-**Problem:** Validation is skipped when `graph.Dims()==0`; the first node sets
-the dimension, a later node in the same batch with a different length panics.
-**Fix:** Validate every point against `len(points[0].Vector)` even for an empty
-graph; return an error.
-**Test:** Mixed-dimension first batch returns an error, does not panic.
+All items in this section are resolved:
 
-## N2. [Medium] `vec/vek`, `internal/math32`, `internal/partial`, `internal/constraints` are unwired
-**Location:** `vec/vek/*`, `vec/vek/vek32/*`, `internal/math32`, `internal/partial`,
-`internal/constraints`.
-**Problem:** Nothing in the module imports `vec/vek`; the internal packages are
-used only by vek. This is a large amount of generated SIMD/assembly and copied
-code with no consumer. `vec/hnsw/distance.go` has a TODO asking whether to use
-vek.
-**Fix:** Decide whether vek is a supported utility (document it and test it) or
-remove the subtree and its internal dependencies.
-**Test:** If kept, add an integration test proving which public feature uses it.
-
-## N3. [Low] `Analyzer.Height()` overcounts after deletions and is untested
-**Location:** `vec/hnsw/analyzer.go`.
-**Problem:** It returns `len(Graph.layers)`, including trailing empty layers left
-by `Delete`; no analyzer tests exist.
-**Fix:** Count non-empty layers (or document slot count) and add
-Topography/Connectivity/Height tests after deleting all nodes.
-
-## N4. [Low] `Graph.Search` lacks guards for nil Distance and non-positive EfSearch
-**Location:** `vec/hnsw/graph.go`.
-**Problem:** `Add` guards nil Distance; `Search` does not. `EfSearch<=0` collapses
-the traversal to direct neighbors; a hand-built/imported graph degrades silently
-or nil-panics.
-**Fix:** Validate/default `EfSearch` and nil Distance in `Search`; add tests for
-both.
-
-## N5. [Low] Missing analyzer/graph guard tests
-Add tests for N3/N4 and for a zero-value `Graph`.
-
----
+- **N1** — `HNSWIndex.Upsert` validates every point against `len(points[0].Vector)`
+  even when the graph is empty, so a mixed-dimension first batch returns an
+  error instead of panicking (`TestHNSWMixedDimensionFirstBatch`).
+- **N2** — the unwired `vec/vek` subtree and its only consumers
+  (`internal/math32`, `internal/partial`, `internal/constraints`) were removed.
+  The HNSW TODO that referenced vek is gone.
+- **N3** — `Analyzer.Height` counts non-empty layers instead of every slot left
+  by `Delete`, and handles a nil graph (`TestAnalyzerHeightCountsNonEmptyLayers`,
+  `TestAnalyzerNilGraph`).
+- **N4** — `Graph.Search` returns no results for a nil `Distance` instead of
+  panicking, defaults a non-positive `EfSearch`, and never searches a candidate
+  list smaller than `k` (`TestGraphSearchNilDistance`,
+  `TestGraphSearchNonPositiveEfSearch`).
+- **N5** — added the analyzer/graph guard tests above plus a zero-value graph
+  search test (`TestZeroValueGraphSearch`).
 
 # 9. Cross-cutting cleanup
 
-## C1. [Low] Dead/unwired packages and exports
-- `internal/slip10` (see E4)
-- `internal/machine` (see E5)
-- `vec/vek` + `internal/math32`/`partial`/`constraints` (see N2)
-- `fs/inode` package and several `absfs` exports (see F16)
-- `encState.enabled` in db/vec (see D5/V11)
-- `deleteSink.removed`, `testBoltOptions` (see D5)
+All items in this section are resolved:
 
-## C2. [Low] Stale artifacts and CI mismatch
-- `storm.db` in the repository root (H5).
-- No `.github` workflow despite README claims; README Go version/pinned
-  staticcheck mismatch (H4).
-- Uncommitted working tree (H2).
-
-## C3. [Low] README coverage
-The README documents `db` and `ts` only; it has no sections for the root
-`storm` package (password, metadata, KV API, sub-store accessors), `fs`, or
-`vec`. Add scoped docs or explicitly state that the README covers only `db`/`ts`.
-
----
+- **C1** — removed `internal/slip10`, `internal/machine`, `vec/vek` and its
+  internal dependencies, the `fs/inode` package, `fs/store.go`'s
+  `createRootBucket`, and the dead `encState.enabled`/`deleteSink.removed`/
+  `testBoltOptions` helpers. The `absfs` compatibility exports were retained
+  (and now live under `internal/absfs`, so they are no longer public surface).
+  `dirWriteFlags` is actually used and stays.
+- **C2** — no `storm.db` artifact remains, `.github/workflows/ci.yml` exists and
+  matches the README, and the refactor is committed in coherent steps.
+- **C3** — the README now documents the module's package layout, including the
+  root `storm` store (password, metadata, KV API and sub-store accessors),
+  `fs` and `vec`, and states explicitly that the API reference covers `db`/`ts`.
 
 # Suggested fix order
 

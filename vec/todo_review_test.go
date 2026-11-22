@@ -348,3 +348,16 @@ func TestEncStateHasNoEnabledHelper(t *testing.T) {
 	require.Nil(t, e)
 	_ = errors.Is(ErrCollectionNotFound, ErrCollectionNotFound)
 }
+
+// TestHNSWMixedDimensionFirstBatch covers N1: a mixed-dimension first batch must
+// return an error instead of panicking inside Graph.Add.
+func TestHNSWMixedDimensionFirstBatch(t *testing.T) {
+	idx := NewHNSWIndex(Cosine)
+	require.NotPanics(t, func() {
+		err := idx.Upsert([]PointStruct{
+			{ID: "a", Vector: []float32{1, 0}},
+			{ID: "b", Vector: []float32{1, 0, 0}},
+		})
+		require.Error(t, err)
+	})
+}
