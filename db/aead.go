@@ -439,10 +439,18 @@ func (n *node) marshal(v any) ([]byte, error) {
 
 // unmarshal opens raw and decodes it with the node codec. With no encryption
 // configured it is an exact passthrough to codec.Unmarshal.
+//
+// The destination is zeroed before decoding. Codecs such as encoding/json and
+// gob only overwrite fields present in the payload, so a reused destination
+// (ReIndex, batched scans, OrderBy) would otherwise inherit values from the
+// previously decoded record.
 func (n *node) unmarshal(raw []byte, v any) error {
 	plain, err := n.open(raw)
 	if err != nil {
 		return err
+	}
+	if dest := reflect.ValueOf(v); dest.IsValid() && dest.Kind() == reflect.Ptr && !dest.IsNil() {
+		dest.Elem().Set(reflect.Zero(dest.Elem().Type()))
 	}
 	return n.codec.Unmarshal(plain, v)
 }
