@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"reflect"
 	"sync/atomic"
 	"testing"
 
@@ -120,4 +121,54 @@ func TestUnindexedScanPresizedResults(t *testing.T) {
 	var reversed []User
 	require.NoError(t, db.All(ctx, &reversed, Reverse()))
 	require.Len(t, reversed, 25)
+}
+
+func TestStructMetaCacheBindsPerCall(t *testing.T) {
+	a := &User{ID: 1, Name: "a"}
+	b := &User{ID: 2, Name: "b"}
+
+	va := reflect.ValueOf(a)
+	ca, err := extract(&va)
+	require.NoError(t, err)
+
+	_, cached := structMetaCache.Load(reflect.TypeOf(User{}))
+	require.True(t, cached, "User metadata should be cached")
+
+	vb := reflect.ValueOf(b)
+	cb, err := extract(&vb)
+	require.NoError(t, err)
+
+	require.Equal(t, 1, ca.ID.Value.Interface())
+	require.Equal(t, 2, cb.ID.Value.Interface(), "values must be bound per call")
+	require.False(t, ca.ID.IsZero)
+
+	// The bound value must alias the caller's record, not a snapshot.
+	a.Name = "changed"
+	require.Equal(t, "changed", ca.Fields["Name"].Value.String())
+
+	// Dynamic fields (zero state) are refreshed on every bind.
+	c := &User{}
+	vc := reflect.ValueOf(c)
+	cc, err := extract(&vc)
+	require.NoError(t, err)
+	require.True(t, cc.ID.IsZero)
+	require.True(t, cc.Fields["Name"].IsZero)
+}
+
+func TestStructMetaCachePromotedInlineFields(t *testing.T) {
+	v := reflect.ValueOf(&NestedID{ToEmbed: ToEmbed{ID: "x"}, Name: "n"})
+	cfg, err := extract(&v)
+	require.NoError(t, err)
+	require.Equal(t, "x", cfg.ID.Value.Interface())
+	require.Equal(t, "x", cfg.Fields["ID"].Value.Interface())
+	require.Equal(t, "NestedID", cfg.Name)
+}
+
+func TestStructMetaCacheSkipsPointerInline(t *testing.T) {
+	v := reflect.ValueOf(&ClassicInline{})
+	_, err := extract(&v)
+	require.NoError(t, err)
+
+	_, cached := structMetaCache.Load(reflect.TypeOf(ClassicInline{}))
+	require.False(t, cached, "types with inline pointers are value-dependent and must not be cached")
 }

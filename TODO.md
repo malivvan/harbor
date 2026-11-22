@@ -63,6 +63,8 @@ so "defeating SIMD" is not a concern here.
   which the cursor already excludes).
 
 ### 1.3 Struct metadata is re-parsed from tags on every operation; `isZero` uses `reflect.DeepEqual` — HIGH
+
+> **Status:** ✅ FIXED — static per-type field metadata (names, index kinds, ID, increment, promoted-field paths) is cached in a `sync.Map`; each call binds fresh `Value` pointers and zero state, and `isZero` uses allocation-free `reflect.Value.IsZero`. Types with inline pointer fields stay on the dynamic path. Regression tests cover per-call binding and promoted inline fields.
 - **Location:** `db/extract.go:82-133` (`extract`), `db/extract.go:135-218` (`extractField`),
   `db/extract.go:256-260` (`isZero`); callers `db/type_store.go:400-406,464`,
   `db/finder.go:88,208,506,642`.
