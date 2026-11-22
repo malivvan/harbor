@@ -1109,3 +1109,29 @@ func TestNestedRoot(t *testing.T) {
 		return nil
 	}))
 }
+
+// BenchmarkInsertBlockMode measures streaming inserts into encrypted time
+// blocks, where every insert merges into one block instead of writing a
+// separate point key.
+func BenchmarkInsertBlockMode(b *testing.B) {
+	db, err := bolt.Open(filepath.Join(b.TempDir(), "ts-bench-block.db"), 0600, &bolt.Options{Timeout: time.Second})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = db.Close() })
+
+	store, err := Open(context.Background(), db, Config{Secret: testKey(51), Root: [][]byte{[]byte("bench-root")}, BlockDuration: int64(10 * time.Second)})
+	if err != nil {
+		b.Fatal(err)
+	}
+	series := store.Series("bench")
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := series.Insert(ctx, Point{Timestamp: int64(i), Value: float64(i)}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

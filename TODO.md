@@ -774,6 +774,8 @@ The big `ts` wins (skip satisfied retention on insert, stream block aggregation,
 ## 6. Cross-cutting: measurement and regression protection
 
 ### 6.1 There are no `vec` benchmarks and few `fs`/`ts` benchmarks — MEDIUM (process)
+
+> **Status:** ✅ FIXED — added `BenchmarkFlatSearch`, `BenchmarkHNSWSearch`, `BenchmarkHNSWBuild`, `BenchmarkStoreFlush`/`BenchmarkStoreLoad` in `vec/bench_test.go`, plus `BenchmarkInsertBlockMode` in `ts` (ts already had Insert/InsertMany/Range/Aggregate/retention benchmarks).
 - **Problem:** `vec` (the most allocation-sensitive package) has no in-repo benchmarks, so the
   wins above cannot be measured or protected against regression. `ts` has none either.
 - **Fix:** add `BenchmarkFlatSearch`, `BenchmarkHNSWSearch`, `BenchmarkHNSWBuild`,
@@ -783,6 +785,8 @@ The big `ts` wins (skip satisfied retention on insert, stream block aggregation,
 - **Risk:** Low.
 
 ### 6.2 Add benchmarks/`benchstat` and a race job to CI — LOW-MEDIUM
+
+> **Status:** ✅ FIXED — CI already runs `go test -race ./...`; a new `bench` job runs `go test -bench . -benchmem ./...` and, on pull requests, prints a `benchstat` comparison against the base commit (base benchmarks are best-effort, since older commits may not have them).
 - **Problem:** No perf regression gate.
 - **Fix:** run `go test -race ./...` and `go test -bench . -benchmem ./...` in CI, compare with
   `benchstat` on PRs that touch hot paths.
@@ -790,6 +794,8 @@ The big `ts` wins (skip satisfied retention on insert, stream block aggregation,
 - **Risk:** Low.
 
 ### 6.3 The default `db` codec is `encoding/json` — MEDIUM (documentation/API)
+
+> **Status:** ✅ FIXED — README "Performance notes" documents the JSON cost, points at `db.Config.Codec`/`storm.Options.Codec`, and notes that Count/delete already skip decoding.
 - **Problem:** JSON decode is the single biggest cost in scans (see §1.1–§1.3). The codec is
   already pluggable (`db.Config.Codec`), but the docs/examples default to JSON with no note on
   the cost.
@@ -800,6 +806,8 @@ The big `ts` wins (skip satisfied retention on insert, stream block aggregation,
 - **Risk:** Low.
 
 ### 6.4 bbolt `fsync` dominates small writes — note, not a defect
+
+> **Status:** ✅ FIXED — README "Performance notes" documents batching via `db.WriteTransaction`, `vec.Collection.Upsert`, `ts.Series.InsertMany`, and the merged fs write transaction.
 - **Problem:** `db.Save`/`fs.Write`/`ts.Insert` each commit a bbolt transaction (an fsync). This
   is inherent, and batching is the intended remedy.
 - **Fix (guidance):** document batching via `db.WriteTransaction` and the `vec`/`ts` batch APIs;

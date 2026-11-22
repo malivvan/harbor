@@ -40,6 +40,35 @@ jobs:
       - name: coverage summary
         run: go tool cover -func=coverage.out > coverage.txt
 
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: benchmarks (head)
+        run: go test -run '^$' -bench . -benchmem -benchtime=100ms -count=1 ./... | tee bench-head.txt
+
+      - name: benchmarks (base, PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          git worktree add /tmp/base "${{ github.event.pull_request.base.sha }}"
+          (cd /tmp/base && go test -run '^$' -bench . -benchmem -benchtime=100ms -count=1 ./... > /tmp/bench-base.txt) || true
+          if [ -s /tmp/bench-base.txt ]; then
+            go run golang.org/x/perf/cmd/benchstat@latest /tmp/bench-base.txt bench-head.txt
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks
+          path: bench-head.txt
+
   lint:
     runs-on: ubuntu-latest
     steps:

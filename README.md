@@ -703,6 +703,28 @@ Storm always borrows the bbolt database supplied to `Open`:
 
 Close the bbolt database after `DB.Close()` when it is no longer needed.
 
+## Performance notes
+
+A few defaults are chosen for portability, not maximum throughput:
+
+- **Codec.** Entity records use `encoding/json` by default. JSON decoding
+  dominates unindexed scans, `Count` and `Delete` over large buckets. For
+  throughput-sensitive workloads pass a faster codec through
+  `db.Config.Codec` (or `storm.Options.Codec`). `Count` and
+  matcher-less `Delete` already skip decoding entirely.
+- **fsync.** Every bbolt commit is an fsync. Batch writes instead of saving
+  one record per loop: use `db.WriteTransaction` for multiple entity
+  operations, the `vec.Collection.Upsert` batch API (points are buffered and
+  flushed together), and `ts.Series.InsertMany`. `fs` merges the inode and
+  content writes of a single `Write` into one transaction.
+- **Encrypted time series.** With `ts.Config.EncryptValues`, set
+  `ts.Config.BlockDuration` for high-volume series: a block is sealed and
+  opened once instead of every point being sealed separately.
+
+The repository ships benchmarks for the hot paths
+(`go test -run '^$' -bench . -benchmem ./vec ./ts`); CI runs them and, on pull
+requests, prints a `benchstat` comparison against the base commit.
+
 ## Codecs
 
 Storm marshals data to BoltDB using a codec. The default is JSON, exposed as
