@@ -692,10 +692,31 @@ func (g *Graph[K]) Add(nodes ...Node[K]) {
 	}
 }
 
+// NodeWithDistance is a search result that carries the distance the graph
+// already computed for it.
+type NodeWithDistance[K cmp.Ordered] struct {
+	Node     Node[K]
+	Distance float32
+}
+
 // Search finds the k nearest neighbors from the target node.
 // The returned nodes are ordered by ascending distance according to the
 // graph's Distance function.
 func (h *Graph[K]) Search(near Vector, k int) []Node[K] {
+	scored := h.SearchWithDistances(near, k)
+	if len(scored) == 0 {
+		return nil
+	}
+	out := make([]Node[K], len(scored))
+	for i := range scored {
+		out[i] = scored[i].Node
+	}
+	return out
+}
+
+// SearchWithDistances is Search plus the distance already computed during the
+// graph walk, so callers do not have to recompute it for every result.
+func (h *Graph[K]) SearchWithDistances(near Vector, k int) []NodeWithDistance[K] {
 	if k <= 0 {
 		return nil
 	}
@@ -761,10 +782,13 @@ func (h *Graph[K]) Search(near Vector, k int) []Node[K] {
 		}
 
 		nodes := searchPoint.search(k, efSearch, near, h.Distance)
-		out := make([]Node[K], 0, len(nodes))
+		out := make([]NodeWithDistance[K], 0, len(nodes))
 
 		for _, node := range nodes {
-			out = append(out, node.node.Node)
+			out = append(out, NodeWithDistance[K]{
+				Node:     node.node.Node,
+				Distance: node.dist,
+			})
 		}
 
 		return out

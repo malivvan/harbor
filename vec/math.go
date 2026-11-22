@@ -90,3 +90,16 @@ func euclideanDistance(a, b []float32) float32 {
 	// Note: For Euclid, smaller is better. We'll handle this in sorting.
 	return float32(math.Sqrt(float64(sum)))
 }
+
+// euclideanDistanceSquared is the squared Euclidean distance. Ranking by it
+// is equivalent to ranking by the true distance, but avoids a square root per
+// comparison; callers take the root for the final score.
+func euclideanDistanceSquared(a, b []float32) float32 {
+	var sum float32
+	n := min(len(a), len(b))
+	for i := 0; i < n; i++ {
+		diff := a[i] - b[i]
+		sum += diff * diff
+	}
+	return sum
+}

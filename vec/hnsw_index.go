@@ -89,32 +89,25 @@ func NewHNSWIndexWithParams(metric Distance, params HNSWParams) *HNSWIndex {
 
 	g := hnsw.NewGraph[string]()
 
-	// Configure Distance Function based on our definitions
+	// Configure the distance function once, so the graph's inner loop makes a
+	// direct call. Vectors are normalized for cosine, making its distance a
+	// single dot product; Euclid ranks by squared distance and only the final
+	// top-K scores take the square root.
 	switch metric {
 	case Euclid:
-		g.Distance = func(a, b []float32) float32 {
-			var sum float32
-			for i := range a {
-				diff := a[i] - b[i]
-				sum += diff * diff
-			}
-			return float32(math.Sqrt(float64(sum)))
-		}
+		g.Distance = euclideanDistanceSquared
 	case Dot:
 		g.Distance = func(a, b []float32) float32 {
-			var sum float32
-			for i := range a {
-				sum += a[i] * b[i]
-			}
-			// hnsw minimizes distance, so we invert dot product
-			return -sum
+			// hnsw minimizes distance, so we invert the dot product.
+			return -dotProduct(a, b)
 		}
 	case Cosine:
 		fallthrough
 	default:
-		// Default is Cosine Distance (1 - CosineSimilarity)
-		// hnsw seeks minimum distance, so 1 - sim is correct
-		g.Distance = hnsw.CosineDistance
+		// Vectors are unit length, so 1 - dot is the cosine distance.
+		g.Distance = func(a, b []float32) float32 {
+			return 1 - dotProduct(a, b)
+		}
 	}
 
 	// Set HNSW parameters. EfConstruction is what Graph.Add uses to pick the
@@ -163,7 +156,7 @@ func (h *HNSWIndex) Upsert(points []PointStruct) error {
 	nodes := make([]hnsw.Node[string], 0, len(points))
 	for i := range points {
 		stored[i] = clonePoint(&points[i])
-		nodes = append(nodes, hnsw.MakeNode(stored[i].ID, stored[i].Vector))
+		nodes = append(nodes, hnsw.MakeNode(stored[i].ID, h.graphVector(stored[i].Vector)))
 	}
 
 	// Batch add to graph first: only mirror the points that really made it into
@@ -197,7 +190,7 @@ func (h *HNSWIndex) upsertOwned(points []PointStruct) error {
 	}
 	nodes := make([]hnsw.Node[string], 0, len(points))
 	for i := range points {
-		nodes = append(nodes, hnsw.MakeNode(points[i].ID, points[i].Vector))
+		nodes = append(nodes, hnsw.MakeNode(points[i].ID, h.graphVector(points[i].Vector)))
 	}
 	h.graph.Add(nodes...)
 	for i := range points {
@@ -257,6 +250,46 @@ func (h *HNSWIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 	return results, nil
 }
 
+// graphVector returns the representation stored in the graph. Cosine uses
+// unit-length vectors so its distance is a single dot product.
+func (h *HNSWIndex) graphVector(v []float32) []float32 {
+	if h.metric == Cosine || h.metric == "" {
+		return normalizeVector(v)
+	}
+	return v
+}
+
+// scoreFromGraphDistance converts an internal graph distance back to the
+// public score used by CalculateDistance.
+func (h *HNSWIndex) scoreFromGraphDistance(d float32) float32 {
+	switch h.metric {
+	case Euclid:
+		return float32(math.Sqrt(float64(d)))
+	case Dot:
+		return -d
+	default:
+		return 1 - d
+	}
+}
+
+// normalizeVector returns a unit-length copy of v. A zero vector is returned
+// unchanged; its similarity is already well-defined as zero.
+func normalizeVector(v []float32) []float32 {
+	var sum float32
+	for _, x := range v {
+		sum += x * x
+	}
+	if sum == 0 {
+		return v
+	}
+	inv := 1 / float32(math.Sqrt(float64(sum)))
+	out := make([]float32, len(v))
+	for i, x := range v {
+		out[i] = x * inv
+	}
+	return out
+}
+
 // scan evaluates the filter against every indexed point and returns the
 // matching points ranked by the configured metric. It is the exact fallback
 // used when a filtered graph search cannot fill the requested result set.
@@ -285,11 +318,14 @@ func (h *HNSWIndex) scan(query []float32, filter *Filter) []ScoredPoint {
 // collect fetches fetchK graph candidates, applies filter and returns the
 // matching points ranked by the configured metric.
 func (h *HNSWIndex) collect(query []float32, filter *Filter, fetchK int) []ScoredPoint {
-	neighbors := h.graph.Search(query, fetchK)
+	// The graph has already computed every visited distance. Convert it to
+	// the public score instead of recomputing the metric for each result.
+	graphQuery := h.graphVector(query)
+	neighbors := h.graph.SearchWithDistances(graphQuery, fetchK)
 
 	results := make([]ScoredPoint, 0, len(neighbors))
 	for _, neighbor := range neighbors {
-		point, exists := h.points[neighbor.Key]
+		point, exists := h.points[neighbor.Node.Key]
 		if !exists {
 			continue
 		}
@@ -299,7 +335,7 @@ func (h *HNSWIndex) collect(query []float32, filter *Filter, fetchK int) []Score
 		results = append(results, ScoredPoint{
 			ID:      point.ID,
 			Version: point.Version,
-			Score:   CalculateDistance(h.metric, query, point.Vector),
+			Score:   h.scoreFromGraphDistance(neighbor.Distance),
 			Payload: clonePayload(point.Payload),
 		})
 	}

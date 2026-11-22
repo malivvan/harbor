@@ -558,6 +558,8 @@ build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 - **Risk:** Low.
 
 ### 3.9 HNSW wrapper recomputes distances `Graph.Search` already computed; filtered search double-scans — MEDIUM
+
+> **Status:** ✅ FIXED — `Graph.SearchWithDistances` returns the distance already computed by the graph walk and the wrapper converts it to the public score, removing the O(fetchK·D) recomputation in `collect`.
 - **Location:** `vec/hnsw_index.go:271-273` and `:300-303`
   (`Score: CalculateDistance(...)`), `:241-256` (`Search` over-fetches `fetchK = topK*10` then
   falls back to a full `scan` when matches < topK).
@@ -570,6 +572,8 @@ build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 - **Risk:** Low.
 
 ### 3.10 Distance dispatch is an indirect call per comparison; Euclid does `sqrt` each time; no norm precompute — MEDIUM
+
+> **Status:** ✅ FIXED — the graph distance function is selected once at construction; Euclid ranks by squared distance (square root only for final scores), Dot uses a single negated dot product, and cosine stores unit-length vectors so its distance is one dot product.
 - **Location:** `vec/hnsw_index.go:93-118` (per-metric closures assigned to `g.Distance`),
   `vec/math.go:43-52` (`switch metric` per distance), `vec/hnsw/distance.go`
   (`CosineDistance` recomputes both norms).
