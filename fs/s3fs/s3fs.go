@@ -302,6 +302,16 @@ func (fs *FileSystem) Mkdir(name string, perm os.FileMode) error {
 		name += "/"
 	}
 
+	// An object at the same path is a file, not a directory.
+	if _, fileErr := fs.client.HeadObject(fs.ctx, &HeadObjectInput{
+		Bucket: fs.bucket,
+		Key:    strings.TrimSuffix(name, "/"),
+	}); fileErr == nil {
+		return &os.PathError{Op: "mkdir", Path: name, Err: os.ErrExist}
+	} else if !errors.Is(fileErr, ErrNotFound) {
+		return wrapError("mkdir", name, fileErr)
+	}
+
 	// Check if directory already exists
 	_, err = fs.client.HeadObject(fs.ctx, &HeadObjectInput{
 		Bucket: fs.bucket,

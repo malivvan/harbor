@@ -176,6 +176,36 @@ func (h *HNSWIndex) Upsert(points []PointStruct) error {
 	return nil
 }
 
+// upsertOwned stores points without cloning; the caller transfers ownership.
+func (h *HNSWIndex) upsertOwned(points []PointStruct) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.graph == nil {
+		return fmt.Errorf("HNSW graph is nil, cannot upsert points")
+	}
+	if len(points) == 0 {
+		return nil
+	}
+	dims := h.graph.Dims()
+	if dims == 0 {
+		dims = len(points[0].Vector)
+	}
+	for i := range points {
+		if got := len(points[i].Vector); got != dims {
+			return fmt.Errorf("point %s has invalid vector dimension %d (expected %d)", points[i].ID, got, dims)
+		}
+	}
+	nodes := make([]hnsw.Node[string], 0, len(points))
+	for i := range points {
+		nodes = append(nodes, hnsw.MakeNode(points[i].ID, points[i].Vector))
+	}
+	h.graph.Add(nodes...)
+	for i := range points {
+		h.points[points[i].ID] = &points[i]
+	}
+	return nil
+}
+
 // Search performs an approximate nearest neighbor search using the HNSW algorithm.
 // It uses a post-filtering strategy: over-fetches results to account for filtered points,
 // then applies the payload filter and returns the topK matches.

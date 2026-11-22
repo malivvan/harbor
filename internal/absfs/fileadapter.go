@@ -51,11 +51,16 @@ func (f *fileadapter) ReadAt(b []byte, off int64) (n int, err error) {
 	if file, ok := f.sf.(ater); ok {
 		return file.ReadAt(b, off)
 	}
-	_, err = f.sf.Seek(off, io.SeekStart)
+	cur, err := f.sf.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return 0, err
 	}
-	return f.sf.Read(b)
+	if _, err = f.sf.Seek(off, io.SeekStart); err != nil {
+		return 0, err
+	}
+	n, err = f.sf.Read(b)
+	_, _ = f.sf.Seek(cur, io.SeekStart)
+	return n, err
 }
 
 // Stat - is a pass through function to the nested `Seekable` interface.
@@ -70,11 +75,16 @@ func (f *fileadapter) WriteAt(b []byte, off int64) (n int, err error) {
 	if file, ok := f.sf.(ater); ok {
 		return file.WriteAt(b, off)
 	}
-	_, err = f.sf.Seek(off, io.SeekStart)
+	cur, err := f.sf.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return 0, err
 	}
-	return f.sf.Write(b)
+	if _, err = f.sf.Seek(off, io.SeekStart); err != nil {
+		return 0, err
+	}
+	n, err = f.sf.Write(b)
+	_, _ = f.sf.Seek(cur, io.SeekStart)
+	return n, err
 }
 
 // WriteString - is a convenience function that calls `Write` with `s` after

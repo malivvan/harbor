@@ -156,6 +156,10 @@ Resolved in this pass:
 - **E4 (partial)** — `save` uses a new O(1) `HasValueID` check on list and
   unique indexes instead of scanning every ID for a value. `UniqueIndex.RemoveID`
   still scans the index and remains open below.
+- **E7** — collections hand ownership of the already-cloned batch to the Flat
+  and HNSW indexes, dropping the second deep copy per point.
+- **E8** — the regex caches in `vec` and `db/q` are bounded (they reset at
+  1024 entries).
 - **E9** — `InodeInit` records an initialized flag instead of calling
   `Stats()` on every open, `newFS` writes the encryption marker only when it is
   missing, and the umask is cached in the `FS` instead of read for every
@@ -290,7 +294,7 @@ symlinks; here it creates the file and truncates the symlink inode.
 no-follow variants, and return `ENOENT` from `Truncate` on a missing path.
 Add tests for each API on symlinks.
 
-## A4. [Medium] `fs.MkdirAll` succeeds when the path is an existing non-directory
+## A4. [Resolved] `fs.MkdirAll` succeeds when the path is an existing non-directory
 **Location:** `fs/fs.go:1382-1420`.
 **Problem:** `mkdir` returns `os.ErrExist` for any existing child; `mkdirAll`
 treats `ErrExist` as success. Reproduced:
@@ -300,7 +304,7 @@ MkdirAll(/file) where /file is a regular file -> err=nil
 **Fix:** On `ErrExist`, stat the path and return `ENOTDIR` if it is not a
 directory; add a test.
 
-## A5. [Medium] `fs.File.ReadDir(0)` at EOF returns `io.EOF`, contradicting its doc and `Readdir`
+## A5. [Resolved] `fs.File.ReadDir(0)` at EOF returns `io.EOF`, contradicting its doc and `Readdir`
 **Location:** `fs/file.go:381-420` vs `fs/file.go:270-320`.
 **Problem:** `ReadDir` checks `f.diroffset >= len(children)` before `n < 1` and
 returns `io.EOF`; `Readdir` returns an empty slice and nil for `n <= 0`.
@@ -311,7 +315,7 @@ ReadDir(0) at EOF: n=0 err=EOF
 ```
 **Fix:** Apply the `n <= 0` rule before the EOF check; add a test.
 
-## A6. [Medium] `fs.ReadAt`/`WriteAt` mutate the sequential offset
+## A6. [Resolved] `fs.ReadAt`/`WriteAt` mutate the sequential offset
 **Location:** `fs/file.go:114-123` (`ReadAt` sets `f.offset = off` then calls
 `Read`), `fs/file.go:182-190` (`WriteAt`).
 **Problem:** `io.ReaderAt`/`io.WriterAt` must not change the file offset.
@@ -323,7 +327,7 @@ defect.
 **Fix:** Save/restore the offset under the lock (or use a local offset for the
 read/write path); add tests that assert the offset is unchanged.
 
-## A7. [Medium] `s3fs.Mkdir` does not reject an existing file, and `File.Close` is not idempotent
+## A7. [Partially resolved] `s3fs.Mkdir` does not reject an existing file, and `File.Close` is not idempotent
 **Location:** `fs/s3fs/s3fs.go:292-330` (checks only the `name/` marker),
 `fs/s3fs/s3file.go:264-319` (does not reset `writing`/`multipartID`/`parts`).
 **Problem:** A file at `name` and a directory marker `name/` can coexist; a

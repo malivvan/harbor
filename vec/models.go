@@ -370,6 +370,13 @@ func containsString(s, substr string) bool {
 // point, so recompiling the same pattern would dominate a filtered scan.
 var regexCache sync.Map // map[string]*regexp.Regexp
 
+// regexCacheSize counts the memoized patterns.
+func regexCacheSize() int {
+	n := 0
+	regexCache.Range(func(_, _ any) bool { n++; return true })
+	return n
+}
+
 // compileRegex compiles pattern once, caching both success and failure. An
 // invalid pattern is stored as nil and never matches.
 func compileRegex(pattern string) *regexp.Regexp {
@@ -383,6 +390,12 @@ func compileRegex(pattern string) *regexp.Regexp {
 	if err != nil {
 		regexCache.Store(pattern, nil)
 		return nil
+	}
+	if cached, ok := regexCache.Load(pattern); ok && cached != nil {
+		return cached.(*regexp.Regexp)
+	}
+	if regexCacheSize() > 1024 {
+		regexCache.Clear()
 	}
 	regexCache.Store(pattern, re)
 	return re

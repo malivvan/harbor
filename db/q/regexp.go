@@ -17,6 +17,9 @@ func Re(field string, re string) Matcher {
 	regexpCache.RUnlock()
 
 	regexpCache.Lock()
+	if len(regexpCache.m) >= 1024 {
+		regexpCache.m = make(map[string]*regexp.Regexp)
+	}
 	r, err := regexp.Compile(re)
 	if err == nil {
 		regexpCache.m[re] = r

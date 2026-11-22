@@ -1432,11 +1432,19 @@ func (fs *FS) mkdirAll(name string, perm os.FileMode) error {
 		}
 		p = path.Join(p, part)
 		err := fs.mkdir(p, perm)
-
 		if err != nil {
 			patherr, ok := err.(*os.PathError)
 			if !ok || patherr.Err != os.ErrExist {
 				return err
+			}
+			// Mkdir reports ErrExist for any existing entry; only a directory
+			// is an acceptable intermediate component.
+			node, resolveErr := fs.resolve(p)
+			if resolveErr != nil {
+				return err
+			}
+			if !node.IsDir() {
+				return &os.PathError{Op: "mkdir", Path: p, Err: syscall.ENOTDIR}
 			}
 		}
 	}

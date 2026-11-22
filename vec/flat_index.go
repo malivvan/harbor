@@ -39,6 +39,16 @@ func (f *FlatIndex) Upsert(points []PointStruct) error {
 	return nil
 }
 
+// upsertOwned stores points without cloning; the caller transfers ownership.
+func (f *FlatIndex) upsertOwned(points []PointStruct) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range points {
+		f.points[points[i].ID] = &points[i]
+	}
+	return nil
+}
+
 // Search performs a brute-force search for the nearest neighbors.
 // It calculates the distance between the query vector and all stored vectors,
 // filters by payload if specified, and returns the topK results.

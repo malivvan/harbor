@@ -165,8 +165,14 @@ func (c *Collection) Upsert(points []PointStruct) error {
 		batch[i].Version = version
 	}
 
-	// 2. Update Memory Index Immediately（查询需要最新数据）
-	if err := c.index.Upsert(batch); err != nil {
+	// 2. Update Memory Index Immediately（查询需要最新数据）. The in-tree
+	// indexes accept ownership of the already-cloned batch, avoiding a second
+	// deep copy per point.
+	if owned, ok := c.index.(interface{ upsertOwned([]PointStruct) error }); ok {
+		if err := owned.upsertOwned(batch); err != nil {
+			return fmt.Errorf("failed to update memory index: %w", err)
+		}
+	} else if err := c.index.Upsert(batch); err != nil {
 		return fmt.Errorf("failed to update memory index: %w", err)
 	}
 
