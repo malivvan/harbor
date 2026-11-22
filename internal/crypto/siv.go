@@ -3,14 +3,12 @@ package crypto
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
-	"io"
-
-	"golang.org/x/crypto/hkdf"
 )
 
 // SIVEngine implements AES-SIV (Synthetic Initialization Vector) mode
@@ -271,10 +269,7 @@ func DeriveSIV(masterKey []byte, info string) (*SIVEngine, error) {
 		return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, KeySize, len(masterKey))
 	}
 
-	key := make([]byte, sivKeySize)
-	if _, err := io.ReadFull(hkdf.New(sha256.New, masterKey, nil, []byte(info)), key); err != nil {
-		return nil, fmt.Errorf("deriving SIV key for %q: %w", info, err)
-	}
+	key := hkdfSHA256(masterKey, nil, []byte(info), sivKeySize)
 
 	return NewSIVEngine(key)
 }
@@ -333,4 +328,29 @@ func (c *SIVNameCipher) OpenName(encoded []byte) ([]byte, error) {
 		return nil, fmt.Errorf("%w: malformed encrypted name: %v", ErrAuthFailed, err)
 	}
 	return c.engine.Decrypt(ciphertext[:n])
+}
+
+// hkdfSHA256 implements HKDF (RFC 5869) with SHA-256. It replaces the small
+// part of the external HKDF package this package previously used: extract with HMAC-SHA256
+// as the PRF, then expand to length bytes. A nil salt means HashLen zero bytes,
+// as RFC 5869 specifies.
+func hkdfSHA256(secret, salt, info []byte, length int) []byte {
+	if salt == nil {
+		salt = make([]byte, sha256.Size)
+	}
+	extract := hmac.New(sha256.New, salt)
+	extract.Write(secret)
+	prk := extract.Sum(nil)
+
+	out := make([]byte, 0, length)
+	var block []byte
+	for counter := byte(1); len(out) < length; counter++ {
+		expand := hmac.New(sha256.New, prk)
+		expand.Write(block)
+		expand.Write(info)
+		expand.Write([]byte{counter})
+		block = expand.Sum(nil)
+		out = append(out, block...)
+	}
+	return out[:length]
 }

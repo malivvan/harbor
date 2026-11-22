@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/malivvan/storm/internal/argon2"
 	bolt "go.etcd.io/bbolt"
-	"golang.org/x/crypto/argon2"
 )
 
 // Encryption flags. Every bit enables encryption for one part of a sub-store;
