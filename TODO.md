@@ -232,6 +232,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low.
 
 ### 1.16 `From` deep-clones the bucket path per scan result — LOW
+
+> **Status:** ✅ FIXED — `From` copies only the path slice header and appends the new segments; bucket path elements are immutable, so parent segments are shared instead of deep-cloned. Root configuration still clones on Open.
 - **Location:** `db/node.go:64-72`, used per result in `db/scan.go:78,152`.
 - **Problem:** `PrefixScan`/`RangeScan` call `From(...)` per matched child and `From` copies
   every path element; `withTransaction` copies the node per call.

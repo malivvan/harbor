@@ -63,7 +63,9 @@ func cloneBucketPath(path [][]byte) [][]byte {
 // All Store operations on the new node will be executed relative to this bucket.
 func (n node) From(addend ...string) Node {
 	path := make([][]byte, 0, len(n.root)+len(addend))
-	path = append(path, cloneBucketPath(n.root)...)
+	// Bucket path elements are immutable once created, so the parent path can
+	// be shared: only the outer slice is copied for the new node.
+	path = append(path, n.root...)
 	for _, part := range addend {
 		path = append(path, []byte(part))
 	}
