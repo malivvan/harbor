@@ -205,7 +205,7 @@ func TestKeyValueStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Keys: %v", err)
 	}
-	if !reflect.DeepEqual(allKeys, []string{"0", "1", "kdf", "Metadata", "plain", "version"}) {
+	if !reflect.DeepEqual(allKeys, []string{"0", "1", "Metadata", "kdf", "plain", "version"}) {
 		t.Fatalf("Keys() = %v", allKeys)
 	}
 	mustClose(t, s)

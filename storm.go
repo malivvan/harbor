@@ -167,47 +167,12 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		}
 	}()
 
-	md, init, err := readMetadata(bdb)
+	md, keys, err := loadOrCreateState(bdb, options)
 	if err != nil {
 		return nil, err
 	}
-	if !init {
-		keys, err := deriveKeys(options.Password, md.Salt, md.Time, md.Memory, md.Threads)
-		if err != nil {
-			return nil, err
-		}
-		if err := verifyCanary(keys.canary, md.Canary); err != nil {
-			keys.wipe()
-			return nil, fmt.Errorf("%w: %w", ErrInvalidPassword, err)
-		}
-		return md, keys, nil
-	}
+	defer keys.wipe()
 
-	salt, kdfTime, kdfMemory, kdfThreads, flags, err := newKDFParams(options)
-	if err != nil {
-		return Metadata{}, nil, err
-	}
-	keys, err := deriveKeys(options.Password, salt, kdfTime, kdfMemory, kdfThreads)
-	if err != nil {
-		return Metadata{}, nil, err
-	}
-	canary, err := sealCanary(keys.canary)
-	if err != nil {
-		keys.wipe()
-		return Metadata{}, nil, err
-	}
-	md = Metadata{
-		Salt:    salt,
-		Time:    kdfTime,
-		Flags:   flags,
-		Memory:  kdfMemory,
-		Threads: kdfThreads,
-		Canary:  canary,
-	}
-	if err := writeMetadata(bdb, md); err != nil {
-		keys.wipe()
-		return Metadata{}, nil, err
-	}
 	s := &Store{bs: bdb}
 
 	// Bind each sub-store to its own derived key and explicit bucket root.
