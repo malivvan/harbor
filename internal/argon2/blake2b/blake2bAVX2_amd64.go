@@ -6,7 +6,7 @@
 
 package blake2b
 
-import "golang.org/x/sys/cpu"
+import "github.com/malivvan/storm/internal/cpu"
 
 func init() {
 	useAVX2 = cpu.X86.HasAVX2

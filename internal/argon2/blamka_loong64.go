@@ -6,7 +6,7 @@
 
 package argon2
 
-import "golang.org/x/sys/cpu"
+import "github.com/malivvan/storm/internal/cpu"
 
 func init() {
 	// useLSX (declared in blamka_generic.go) gates the LSX vector path.
