@@ -49,10 +49,16 @@ func (c *RangeCursor) First() ([]byte, []byte) {
 		}
 		k, v := c.C.Seek(c.Max)
 
+		// Seek returns nil when max sorts above every key: fall back to the
+		// last key so "everything up to max" still works in reverse.
+		if k == nil {
+			return c.C.Last()
+		}
+
 		// If Seek lands beyond the upper bound, step back so values whose
 		// prefix merely starts with max (e.g. "abcd" for max "abc") are not
 		// included.
-		if k != nil && c.CompareFn(k, c.Max) > 0 {
+		if c.CompareFn(k, c.Max) > 0 {
 			k, v = c.C.Prev()
 		}
 

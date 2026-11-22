@@ -11,13 +11,15 @@ import (
 type KeyValueStore interface {
 	// Get a value from a bucket
 	Get(ctx context.Context, bucketName string, key any, to any) error
-	// Set a key/value pair into a bucket
+	// Set a key/value pair into a bucket. A nil value stores a zero-length
+	// value; Get yields the destination's zero value for it.
 	Set(ctx context.Context, bucketName string, key any, value any) error
 	// Delete deletes a key from a bucket
 	Delete(ctx context.Context, bucketName string, key any) error
 	// GetBytes gets a raw value from a bucket.
 	GetBytes(ctx context.Context, bucketName string, key any) ([]byte, error)
-	// SetBytes sets a raw value into a bucket.
+	// SetBytes sets a raw value into a bucket. A nil value stores a
+	// zero-length value.
 	SetBytes(ctx context.Context, bucketName string, key any, value []byte) error
 	// KeyExists reports the presence of a key in a bucket.
 	KeyExists(ctx context.Context, bucketName string, key any) (bool, error)
@@ -100,7 +102,9 @@ func (n *node) getBytes(ctx context.Context, tx *bolt.Tx, bucketName string, id 
 	return raw, nil
 }
 
-// SetBytes sets a raw value into a bucket.
+// SetBytes sets a raw value into a bucket. A nil value stores a zero-length
+// value; the typed Get reports the destination's zero value for it, and
+// GetBytes returns an empty slice.
 func (n *node) SetBytes(ctx context.Context, bucketName string, key any, value []byte) error {
 	if err := checkContext(ctx); err != nil {
 		return wrapError("kv set bytes", err)
@@ -192,6 +196,14 @@ func (n *node) Get(ctx context.Context, bucketName string, key any, to any) erro
 			return err
 		}
 
+		// A zero-length stored value has no encoded form. Treat it as the zero
+		// value instead of failing the decode, so records written by the raw
+		// SetBytes API stay readable.
+		if len(raw) == 0 {
+			ref.Elem().Set(reflect.Zero(ref.Elem().Type()))
+			return checkContext(ctx)
+		}
+
 		// Decode into a temporary to preserve destination on error.
 		temporary := reflect.New(ref.Elem().Type())
 		if err := n.unmarshal(raw, temporary.Interface()); err != nil {
@@ -207,7 +219,9 @@ func (n *node) Get(ctx context.Context, bucketName string, key any, to any) erro
 	}))
 }
 
-// Set a key/value pair into a bucket
+// Set a key/value pair into a bucket. A nil value stores a zero-length value;
+// the typed Get returns the destination's zero value rather than a decode
+// error. Use a typed nil pointer to store an encoded JSON null instead.
 func (n *node) Set(ctx context.Context, bucketName string, key any, value any) error {
 	if err := checkContext(ctx); err != nil {
 		return wrapError("kv set", err)

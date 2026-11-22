@@ -98,82 +98,31 @@ All items in this section are resolved:
 
 # 4. `db` package
 
-## D1. [High] `generatePrefix` panics for an empty indexed value
-**Location:** `db/index/list.go` `generatePrefix`, called from `ListIndex.All`,
-`Get`, `Remove`.
-**Problem:** For `value == nil/[]`, the function allocates `len+2`: a 2-byte
-slice, then writes `prefix[2]` → `index out of range`. Reachable through
-`Find(ctx, field, "", &dst)` and `One(ctx, field, "", &dst)` for list-indexed
-fields.
-**Reproduced:** Both panic with
-`runtime error: index out of range [2] with length 2`.
-**Fix:** Use `append(append([]byte{}, value...), '_', '_')`, or treat empty
-values as “no possible match”/reject them consistently.
-**Test:** Find/One with an empty value on an indexed field returns
-`ErrNotFound`, not a panic.
+All items in this section are resolved:
 
-## D2. [High] Reverse range returns no rows when `max` is above all keys
-**Location:** `internal/internal.go` `RangeCursor.First` (reverse branch), used
-by `ListIndex.Range`, `UniqueIndex.Range`, `IDIndex.Range` and the public
-`db.Range`/`rnge`.
-**Problem:** `Seek(max)` returns `nil` when `max` is beyond every key; the code
-returns `nil` instead of falling back to the last key, so descending
-“everything up to X” queries return zero rows.
-**Reproduced:** With `abc1..abc3`, reverse range `["abc1","zzz"]` returns 0;
-forward returns 3.
-**Fix:** In the reverse branch, `if k == nil { return c.C.Last() }` before the
-`Prev` adjustment.
-**Test:** Reverse ranges with both bounds beyond the dataset.
+- **D1** — `generatePrefix` no longer allocates a 2-byte buffer for an empty
+  value. `Get`, `All` and `Remove` treat an empty value as "no match"; they
+  return `ErrNotFound`/nil instead of panicking.
+- **D2** — the reverse `RangeCursor.First` falls back to `Cursor.Last()` when
+  `Seek(max)` returns nil, so reverse "everything up to X" works when X sorts
+  above every key.
+- **D3** — `ListIndex.All`, `Get` and `Remove` skip nested buckets (`id ==
+  nil`), so the `storm__ids` sentinel no longer shadows the value `"storm"`.
+- **D4** — documented and tested the chosen contract: `Set`/`SetBytes` with a
+  nil value store a zero-length value, `KeyExists` reports it, `GetBytes`
+  returns empty and the typed `Get` yields the destination's zero value.
+- **D5** — removed the unused `(*encState).enabled`, `deleteSink.removed` and
+  `testBoltOptions`.
+- **D6** — `Config.Root` and the node root comment now say an empty root is the
+  database root; `["db"]` is the storm root package's explicit choice.
+- **D7** — removed the nonexistent `Copy` operation references.
+- **D8** — `node.readTx` checks the context after the callback in both the
+  attached-transaction and `bolt.View` paths.
 
-## D3. [Medium] `ListIndex.All`/`Get` include the internal `storm__ids` sentinel
-**Location:** `db/index/list.go` `All`, `Get`; sentinel created in
-`NewUniqueIndex(b, []byte("storm__ids"))`.
-**Problem:** For an indexed value `"storm"`, the generated prefix `"storm__"`
-matches the nested sentinel bucket `"storm__ids"` (nil value). `AllRecords`,
-`Range` and `Prefix` skip it; `All` and `Get` do not. `Find`/`One` then report
-`ErrNotFound` even when the matching record exists.
-**Fix:** Skip nil IDs/sentinel keys in `All`; advance past them in `Get`.
-**Test:** Save a record whose indexed value is `"storm"` and assert
-`Find`/`One` find it.
+Regression tests: `TestFindEmptyIndexedValue`, `TestReverseRangeAboveMax`,
+`TestListIndexValueMatchingSentinel`, `TestKVSetNilReadsBackAsZero`,
+`TestReadTxChecksContextAfterCallback`.
 
-## D4. [Medium] KV `Set(..., nil)` writes a value that `Get` cannot read
-**Location:** `db/kv.go` `Set`, `Get`, `GetBytes`.
-**Problem:** `Set(ctx, bucket, key, nil)` stores a zero-length value. `GetBytes`
-and `KeyExists` succeed, but typed `Get` tries to decode empty bytes and fails
-with a JSON/decode error.
-**Fix:** Choose one contract: nil means delete, nil is rejected, or `Get`
-returns the zero value for an empty stored value. Document and test it.
-**Test:** `Set(nil) → Get` and `Set(nil) → KeyExists`.
-
-## D5. [Low] Dead code and write-only state
-**Location:** `db/aead.go` `(*encState).enabled`; `db/sink.go`
-`deleteSink.removed`; `db/node_test.go` `testBoltOptions`.
-**Problem:** `enabled` is unused; `removed` is incremented but never read;
-`testBoltOptions` is unused.
-**Fix:** Remove or wire them up.
-
-## D6. [Low] Root-default docs are wrong
-**Location:** `db/aead.go` `Config.Root`; `db/node.go` root comment.
-**Problem:** Docs say nil/empty Root uses `"db"` and that the normal root is
-`["db"]`. Actual `db.Open` uses the database root for empty Root; only the root
-`storm` package passes a `"db"` bucket.
-**Fix:** Correct both comments.
-
-## D7. [Low] Docs mention a nonexistent `Copy` operation
-**Location:** `db/attach.go`, `db/transaction.go`, `db/node.go`.
-**Problem:** Comments refer to `Copy`/`Copy Store operations`, but no `Copy`
-method exists. One comment also appears to be a bad search/replace of “All”.
-**Fix:** Remove/replace the stale references.
-
-## D8. [Low] `node.readTx` lacks the post-callback context check
-**Location:** `db/node.go` `readTx` versus `readWriteTx`.
-**Problem:** `readWriteTx` checks the context after the callback; `readTx` does
-not (both in-tx and `bolt.View` paths), so cancellation after a completed read
-callback is not reported, unlike the managed transaction API.
-**Fix:** Add `checkContext(ctx)` after the callback and test cancellation after
-the read body.
-
----
 
 # 5. `fs` package
 

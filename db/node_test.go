@@ -168,14 +168,6 @@ func testCodec(c Codec) testOpenOption {
 	}
 }
 
-// testBoltOptions selects the bbolt file mode and options for tests.
-func testBoltOptions(mode os.FileMode, options *bolt.Options) testOpenOption {
-	return func(opts *testOpenOptions) {
-		opts.mode = mode
-		opts.boltOptions = options
-	}
-}
-
 func defaultTestOpenOptions() testOpenOptions {
 	return testOpenOptions{
 		mode:        0600,

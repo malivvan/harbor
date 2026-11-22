@@ -16,8 +16,9 @@ const KeySize = encryption.KeySize
 // the plaintext on-disk format and uses the default JSON codec.
 type Config struct {
 	// Root is the bucket path below which all Storm data lives. Each element
-	// is one nested bucket name. A nil or empty Root uses the default "db"
-	// bucket.
+	// is one nested bucket name. A nil or empty Root means the database root,
+	// so Storm's buckets are top-level. The storm root package passes
+	// [][]byte{[]byte("db")} explicitly.
 	Root [][]byte
 
 	// Codec encodes and decodes entities. A nil Codec selects the default JSON
@@ -72,11 +73,6 @@ type encState struct {
 	// sivs holds the per-domain deterministic name ciphers, derived from the
 	// primary key. Read-only after construction.
 	sivs map[string]*encryption.SIVNameCipher
-}
-
-// enabled reports whether the state encrypts anything.
-func (e *encState) enabled() bool {
-	return e != nil
 }
 
 // seal encrypts plain with the primary engine, prefixing a fresh random nonce.

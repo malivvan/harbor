@@ -125,10 +125,18 @@ func (idx *ListIndex) Remove(ctx context.Context, value []byte) error {
 
 	c := idx.IndexBucket.Cursor()
 	prefix := generatePrefix(value)
+	if prefix == nil {
+		return nil
+	}
 
-	for k, _ := c.Seek(prefix); bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+	for k, v := c.Seek(prefix); bytes.HasPrefix(k, prefix); k, v = c.Next() {
 		if err := checkContext(ctx); err != nil {
 			return wrapError("index remove", err)
+		}
+		// Skip nested buckets such as the storm__ids sentinel, which the
+		// prefix of the value "storm" also matches.
+		if v == nil {
+			continue
 		}
 		// Defensive copy: cursor buffer is not stable across mutations.
 		keyCopy := make([]byte, len(k))
@@ -203,11 +211,18 @@ func (idx *ListIndex) Get(ctx context.Context, value []byte) ([]byte, error) {
 
 	c := idx.IndexBucket.Cursor()
 	prefix := generatePrefix(value)
+	if prefix == nil {
+		return nil, nil
+	}
 
-	k, id := c.Seek(prefix)
-	if bytes.HasPrefix(k, prefix) {
+	for k, id := c.Seek(prefix); bytes.HasPrefix(k, prefix); k, id = c.Next() {
 		if err := checkContext(ctx); err != nil {
 			return nil, wrapError("index get", err)
+		}
+		// The storm__ids sentinel is a nested bucket (nil value) that shares
+		// the prefix of the value "storm".
+		if id == nil {
+			continue
 		}
 		return id, nil
 	}
@@ -230,6 +245,9 @@ func (idx *ListIndex) All(ctx context.Context, value []byte, opts *Options) ([][
 	cur := internal.Cursor{C: c, Reverse: opts != nil && opts.Reverse}
 
 	prefix := generatePrefix(value)
+	if prefix == nil {
+		return nil, nil
+	}
 
 	k, id := c.Seek(prefix)
 	if cur.Reverse {
@@ -240,7 +258,9 @@ func (idx *ListIndex) All(ctx context.Context, value []byte, opts *Options) ([][
 			if err := checkContext(ctx); err != nil {
 				return nil, wrapError("index all", err)
 			}
-			count++
+			if idc != nil {
+				count++
+			}
 			k, id = kc, idc
 		}
 		if kc != nil {
@@ -252,6 +272,11 @@ func (idx *ListIndex) All(ctx context.Context, value []byte, opts *Options) ([][
 	for ; bytes.HasPrefix(k, prefix); k, id = cur.Next() {
 		if err := checkContext(ctx); err != nil {
 			return nil, wrapError("index all", err)
+		}
+
+		// Skip the storm__ids sentinel and any other nested bucket.
+		if id == nil {
+			continue
 		}
 
 		if opts != nil && opts.Skip > 0 {
@@ -416,13 +441,14 @@ func (idx *ListIndex) Prefix(ctx context.Context, prefix []byte, opts *Options) 
 	return list, nil
 }
 
+// generatePrefix returns the "<value>__" search prefix. An empty value has no
+// valid prefix, because Add rejects empty values; returning nil lets callers
+// report "no match" instead of scanning every index key.
 func generatePrefix(value []byte) []byte {
-	prefix := make([]byte, len(value)+2)
-	var i int
-	for i = range value {
-		prefix[i] = value[i]
+	if len(value) == 0 {
+		return nil
 	}
-	prefix[i+1] = '_'
-	prefix[i+2] = '_'
-	return prefix
+	prefix := make([]byte, 0, len(value)+2)
+	prefix = append(prefix, value...)
+	return append(prefix, '_', '_')
 }

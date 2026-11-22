@@ -576,9 +576,8 @@ func newDeleteSink(node Node, kind interface{}) (*deleteSink, error) {
 }
 
 type deleteSink struct {
-	node    Node
-	ref     reflect.Value
-	removed int
+	node Node
+	ref  reflect.Value
 
 	// pending holds the matched records. Deletions are applied in flush so the
 	// bbolt cursor that produced them is never mutated while being walked.
@@ -652,8 +651,6 @@ func (d *deleteSink) flush(ctx context.Context) error {
 		if err := i.bucket.Delete(i.k); err != nil {
 			return err
 		}
-
-		d.removed++
 
 		if err := checkContext(ctx); err != nil {
 			return err

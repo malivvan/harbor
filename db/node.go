@@ -13,7 +13,7 @@ type Node interface {
 	BucketScanner
 
 	// From returns a new Storm node with a new bucket root below the current.
-	// Copy Store operations on the new node will be executed relative to this bucket.
+	// All Store operations on the new node are executed relative to this bucket.
 	From(addend ...string) Node
 
 	// Bucket returns the bucket name as a slice from the root.
@@ -34,7 +34,8 @@ var _ Node = (*node)(nil)
 type node struct {
 	s *Store
 
-	// The root bucket path. In the normal, simple case this is ["db"].
+	// The root bucket path. An empty path is the database root; the storm root
+	// package configures ["db"] explicitly.
 	root [][]byte
 
 	// Transaction object. Nil if not in transaction
@@ -131,14 +132,19 @@ func (n *node) readTx(ctx context.Context, fn func(tx *bolt.Tx) error) error {
 		return err
 	}
 
-	if n.tx != nil {
-		return fn(n.tx)
-	}
-
-	return n.s.bolt.View(func(tx *bolt.Tx) error {
+	run := func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
-		return fn(tx)
-	})
+		if err := fn(tx); err != nil {
+			return err
+		}
+		return checkContext(ctx)
+	}
+
+	if n.tx != nil {
+		return run(n.tx)
+	}
+
+	return n.s.bolt.View(run)
 }
