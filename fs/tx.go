@@ -96,6 +96,34 @@ func (f *fsBucket) InodeInit() error {
 // bucketInit initializes the necessary buckets for fs in the possibly nested
 // path defined by `bucketpath`. `bucketpath` can be an empty string, or a slash
 // delimited path of nested buckets within which to create the fs buckets.
+// splitBucketPath splits a slash-delimited bucket path into its non-empty
+// components.
+func splitBucketPath(bucketpath string) []string {
+	names := strings.Split(strings.Trim(path.Clean(bucketpath), "/"), "/")
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		if name == "" || name == "." {
+			continue
+		}
+		parts = append(parts, name)
+	}
+	return parts
+}
+
+// openBucketParts opens a pre-split bucket path. FS keeps its components once
+// instead of re-splitting the path in every transaction.
+func openBucketParts(tx *bolt.Tx, parts []string) (bucketer, error) {
+	var b bucketer = tx
+	for _, name := range parts {
+		bucket := b.Bucket([]byte(name))
+		if bucket == nil {
+			return nil, os.ErrNotExist
+		}
+		b = bucket
+	}
+	return b, nil
+}
+
 func bucketInit(tx *bolt.Tx, bucketpath string) error {
 	// create top level buckets
 	/*
@@ -115,14 +143,7 @@ func bucketInit(tx *bolt.Tx, bucketpath string) error {
 	b = tx
 
 	// create nested buckets
-	names := strings.Split(strings.Trim(path.Clean(bucketpath), "/"), "/")
-
-	var paths []string
-	for _, name := range names {
-		if name == "" || name == "." {
-			continue
-		}
-		paths = append(paths, name)
+	for _, name := range splitBucketPath(bucketpath) {
 		b, err = b.CreateBucketIfNotExists([]byte(name))
 		if err != nil {
 			return err
@@ -142,23 +163,7 @@ func bucketInit(tx *bolt.Tx, bucketpath string) error {
 // openBucket opens a possibly nested bucket defined as a slash delimited path
 // in bucketpath.
 func openBucket(tx *bolt.Tx, bucketpath string) (bucketer, error) {
-
-	var b bucketer
-	b = tx
-
-	names := strings.Split(strings.Trim(path.Clean(bucketpath), "/"), "/")
-	for _, name := range names {
-		if name == "" || name == "." {
-			continue
-		}
-		bucket := b.Bucket([]byte(name))
-		if bucket == nil {
-			return nil, os.ErrNotExist
-		}
-		b = bucket
-	}
-	return b, nil
-
+	return openBucketParts(tx, splitBucketPath(bucketpath))
 }
 
 // LoadOrSet loads the value stored in `key` from the `state` bucket, or sets

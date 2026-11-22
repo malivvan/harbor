@@ -25,12 +25,13 @@ var errNoData = errors.New("no data")
 
 // FS implements absfs.FileSystem for the boltdb packages `github.com/coreos/bbolt`.
 type FS struct {
-	db        *bolt.DB
-	bucket    string
-	rootIno   uint64
-	cwd       string
-	cache     *inodeCache
-	contentFS absfs.FileSystem // Optional external filesystem for storing file content
+	db          *bolt.DB
+	bucket      string
+	bucketParts []string
+	rootIno     uint64
+	cwd         string
+	cache       *inodeCache
+	contentFS   absfs.FileSystem // Optional external filesystem for storing file content
 
 	// enc holds the encryption state. It is an atomic pointer so that key
 	// rotation (Store.adoptEnc) can swap it while other goroutines are doing
@@ -66,12 +67,13 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FS, error) {
 	// load or initialize
 	rootIno := uint64(1)
 	fs := &FS{
-		db:        db,
-		bucket:    bucketpath,
-		rootIno:   rootIno,
-		cwd:       "/",
-		cache:     newInodeCache(1000), // Default cache size of 1000 inodes
-		contentFS: nil,                 // Use BoltDB by default (backward compatible)
+		db:          db,
+		bucket:      bucketpath,
+		bucketParts: splitBucketPath(bucketpath),
+		rootIno:     rootIno,
+		cwd:         "/",
+		cache:       newInodeCache(1000), // Default cache size of 1000 inodes
+		contentFS:   nil,                 // Use BoltDB by default (backward compatible)
 	}
 	fs.enc.Store(enc)
 	err = db.Update(func(tx *bolt.Tx) error {
@@ -171,7 +173,7 @@ func (fs *FS) SetContentFS(contentFS absfs.FileSystem) {
 // openFsBucket opens the filesystem buckets at the configured bucket path.
 // This ensures proper bucket isolation when a non-empty bucket path is configured.
 func (fs *FS) openFsBucket(tx *bolt.Tx) (*fsBucket, error) {
-	bb, err := openBucket(tx, fs.bucket)
+	bb, err := openBucketParts(tx, fs.bucketParts)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +185,7 @@ func (fs *FS) openFsBucket(tx *bolt.Tx) (*fsBucket, error) {
 // openFsBucketWithCache opens the filesystem buckets with cache support.
 // This ensures proper bucket isolation when a non-empty bucket path is configured.
 func (fs *FS) openFsBucketWithCache(tx *bolt.Tx) (*fsBucket, error) {
-	bb, err := openBucket(tx, fs.bucket)
+	bb, err := openBucketParts(tx, fs.bucketParts)
 	if err != nil {
 		return nil, err
 	}

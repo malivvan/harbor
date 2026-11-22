@@ -391,6 +391,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** High (on-disk format change + migration).
 
 ### 2.11 `resolve`/`resolveFollow` re-split paths and re-open bucket chains per call — LOW-MEDIUM
+
+> **Status:** ✅ FIXED — the configured bucket path is split once into `FS.bucketParts`; every transaction resolves it with `openBucketParts` instead of re-running `path.Clean`/`strings.Split`. Virtual path components are still split per resolution (they are per-call strings).
 - **Location:** `fs/fs.go:1065`, `fs/fs.go:1045-1088`, `fs/tx.go:140-156` (`openBucket`),
   `fs/tx.go:40-62` (`newFsBucketWithCache`, ~5 `Bucket()` lookups).
 - **Problem:** Each resolution allocates a `[]string` of components and every transaction
