@@ -145,7 +145,6 @@ func (s *Store) NewCollectionWithParams(name string, vectorLen int, metric Dista
 // Returns an error if any point has an invalid vector length or if persistence fails.
 func (c *Collection) Upsert(points []PointStruct) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	// 1. Validate and deep-copy: the caller may reuse its vectors/payloads
 	// after Upsert, and Version is store-managed.
@@ -159,6 +158,7 @@ func (c *Collection) Upsert(points []PointStruct) error {
 	for i := range points {
 		p := &points[i]
 		if len(p.Vector) != c.VectorLen {
+			c.mu.Unlock()
 			return fmt.Errorf("point %s has invalid vector length %d, expected %d", p.ID, len(p.Vector), c.VectorLen)
 		}
 		batch[i] = clonePoint(p)
@@ -170,43 +170,62 @@ func (c *Collection) Upsert(points []PointStruct) error {
 	// deep copy per point.
 	if owned, ok := c.index.(interface{ upsertOwned([]PointStruct) error }); ok {
 		if err := owned.upsertOwned(batch); err != nil {
+			c.mu.Unlock()
 			return fmt.Errorf("failed to update memory index: %w", err)
 		}
 	} else if err := c.index.Upsert(batch); err != nil {
+		c.mu.Unlock()
 		return fmt.Errorf("failed to update memory index: %w", err)
 	}
 
-	// 3. Buffer for bbolt persistence（攒批减少 fsync）. Holding the store's
-	// flush lock keeps a concurrent Flush/Close from missing this batch.
-	if c.storage != nil {
-		c.storage.flushMu.Lock()
-		defer c.storage.flushMu.Unlock()
-	}
+	// 3. Buffer for bbolt persistence（攒批减少 fsync）.
 	c.writeBuf = append(c.writeBuf, batch...)
-	if len(c.writeBuf) >= c.flushThreshold {
-		return c.flushUnsafe()
+	if c.storage == nil || len(c.writeBuf) < c.flushThreshold {
+		c.mu.Unlock()
+		return nil
 	}
 
+	// Take the batch out of the collection, then commit it outside c.mu so
+	// searches and counts are not blocked by the bbolt fsync. flushMu is
+	// acquired before releasing c.mu so a concurrent Delete (which takes the
+	// same order) cannot delete the batch's points between the two steps.
+	flush := c.writeBuf
+	c.writeBuf = nil
+	c.storage.flushMu.Lock()
+	c.mu.Unlock()
+
+	err := c.storage.UpsertPoints(c.Name, flush)
+	c.storage.flushMu.Unlock()
+	if err != nil {
+		c.mu.Lock()
+		c.writeBuf = append(flush, c.writeBuf...)
+		c.mu.Unlock()
+		return fmt.Errorf("failed to flush buffer to bbolt: %w", err)
+	}
 	return nil
 }
 
 // Flush 强制将 writeBuf 中所有缓冲点写入 bbolt。
 func (c *Collection) Flush() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.flushUnsafe()
-}
-
-// flushUnsafe 要求调用方已持有 c.mu（写锁）。
-func (c *Collection) flushUnsafe() error {
-	if c.storage == nil || len(c.writeBuf) == 0 {
-		c.writeBuf = nil // 确保 nil 而非空切片，方便 GC
+	flush := c.writeBuf
+	c.writeBuf = nil
+	if c.storage == nil || len(flush) == 0 {
+		c.mu.Unlock()
 		return nil
 	}
-	if err := c.storage.UpsertPoints(c.Name, c.writeBuf); err != nil {
+
+	c.storage.flushMu.Lock()
+	c.mu.Unlock()
+
+	err := c.storage.UpsertPoints(c.Name, flush)
+	c.storage.flushMu.Unlock()
+	if err != nil {
+		c.mu.Lock()
+		c.writeBuf = append(flush, c.writeBuf...)
+		c.mu.Unlock()
 		return fmt.Errorf("failed to flush buffer to bbolt: %w", err)
 	}
-	c.writeBuf = nil
 	return nil
 }
 
@@ -216,9 +235,7 @@ func (c *Collection) flushUnsafe() error {
 // is owned by whoever created it. Call Store.Flush/Store.Close to finish the
 // whole store.
 func (c *Collection) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.flushUnsafe()
+	return c.Flush()
 }
 
 // Search performs a similarity search using the underlying VectorIndex.
@@ -289,9 +306,13 @@ func (c *Collection) Delete(points []string, filter *Filter) (int, error) {
 		targetSet[id] = struct{}{}
 	}
 
-	// 1. Delete from storage first (if configured)
+	// 1. Delete from storage first (if configured). flushMu serializes with an
+	// in-flight flush so a detached batch cannot re-insert deleted points.
 	if c.storage != nil {
-		if err := c.storage.DeletePoints(c.Name, targetIDs); err != nil {
+		c.storage.flushMu.Lock()
+		err := c.storage.DeletePoints(c.Name, targetIDs)
+		c.storage.flushMu.Unlock()
+		if err != nil {
 			return 0, fmt.Errorf("failed to delete from storage: %w", err)
 		}
 	}

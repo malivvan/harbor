@@ -543,8 +543,8 @@ func (s *Store) trackCollection(c *Collection) {
 
 // flushCollections drains the write buffer of every tracked collection.
 func (s *Store) flushCollections() error {
-	s.flushMu.Lock()
-	defer s.flushMu.Unlock()
+	// No store-wide flush lock here: each Collection.Flush serializes its own
+	// commit on the shared flushMu. Taking it here as well would self-deadlock.
 	s.mu.Lock()
 	collections := make([]*Collection, 0, len(s.collections))
 	for _, c := range s.collections {

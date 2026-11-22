@@ -520,6 +520,8 @@ build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 - **Risk:** Low.
 
 ### 3.6 `Collection.Upsert` holds the collection write lock across a synchronous bbolt fsync — MEDIUM-HIGH
+
+> **Status:** ✅ FIXED — a full write buffer is detached under `c.mu`, `flushMu` is acquired before releasing `c.mu`, and the bbolt commit/fsync then runs without `c.mu`; `Flush`/`Close` do the same, and `Delete` serializes its storage delete on `flushMu`, so flushes cannot resurrect deleted points. Store-wide flushing no longer takes the same mutex twice.
 - **Location:** `vec/collection.go:146-191` (`c.mu.Lock` at `:147`, `flushUnsafe` at `:187`),
   `vec/collection.go:201-210` (`flushUnsafe` → `storage.UpsertPoints`).
 - **Problem:** Every `flushThreshold` (64) points the write lock is held while the batch is
