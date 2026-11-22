@@ -28,6 +28,12 @@ type SIVEngine struct {
 	k2       []byte // Second half of key for CTR
 	block    cipher.Block
 	s2vBlock cipher.Block
+
+	// cmacK1 and cmacK2 are the CMAC subkeys of s2vBlock. They depend only on
+	// the key, so they are derived once at construction instead of on every
+	// CMAC call.
+	cmacK1 []byte
+	cmacK2 []byte
 }
 
 // NewSIVEngine creates a new AES-SIV cipher engine.
@@ -59,11 +65,15 @@ func NewSIVEngine(key []byte) (*SIVEngine, error) {
 		return nil, fmt.Errorf("failed to create S2V AES cipher: %w", err)
 	}
 
+	cmacK1, cmacK2 := generateSubkeys(s2vBlock)
+
 	return &SIVEngine{
 		k1:       k1,
 		k2:       k2,
 		block:    block,
 		s2vBlock: s2vBlock,
+		cmacK1:   cmacK1,
+		cmacK2:   cmacK2,
 	}, nil
 }
 
@@ -111,14 +121,12 @@ func (e *SIVEngine) Decrypt(ciphertext []byte, ad ...[]byte) ([]byte, error) {
 
 // s2v implements the S2V (Synthetic IV) algorithm from RFC 5297
 func (e *SIVEngine) s2v(plaintext []byte, ad ...[]byte) []byte {
-	block := e.s2vBlock
-
 	// D = CMAC(zero_block)
-	d := e.cmac(block, make([]byte, 16))
+	d := e.cmac(make([]byte, 16))
 
 	// For each AD[i]: D = dbl(D) xor CMAC(AD[i])
 	for _, a := range ad {
-		d = xor(dbl(d), e.cmac(block, a))
+		d = xor(dbl(d), e.cmac(a))
 	}
 
 	// Handle plaintext
@@ -133,13 +141,13 @@ func (e *SIVEngine) s2v(plaintext []byte, ad ...[]byte) []byte {
 		t = xor(dbl(d), pad(plaintext))
 	}
 
-	return e.cmac(block, t)
+	return e.cmac(t)
 }
 
 // cmac implements CMAC (Cipher-based Message Authentication Code)
-func (e *SIVEngine) cmac(block cipher.Block, data []byte) []byte {
-	// Generate subkeys
-	k1, k2 := generateSubkeys(block)
+func (e *SIVEngine) cmac(data []byte) []byte {
+	block := e.s2vBlock
+	k1, k2 := e.cmacK1, e.cmacK2
 
 	// Process data in 16-byte blocks
 	n := (len(data) + 15) / 16

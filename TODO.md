@@ -148,6 +148,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low.
 
 ### 1.9 AES-SIV `generateSubkeys` is recomputed on every CMAC call — MEDIUM (only with `EncryptKeys`)
+
+> **Status:** ✅ FIXED — the CMAC subkeys are derived once in `NewSIVEngine` and stored on the engine; `cmac` no longer recomputes them. RFC 5297 tests still pass.
 - **Location:** `internal/encryption/siv.go:140-173` (`cmac` → `generateSubkeys` at 142),
   `s2v` `:113-137`, `generateSubkeys` `:239-247`.
 - **Problem:** `s2v` calls `cmac` twice and each `cmac` recomputes `generateSubkeys` (one AES
