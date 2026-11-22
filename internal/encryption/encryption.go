@@ -58,6 +58,15 @@ func (e *AESGCMEngine) Encrypt(nonce, plaintext []byte) ([]byte, error) {
 	return e.aead.Seal(nil, nonce, plaintext, nil), nil
 }
 
+// SealInto appends the ciphertext for plaintext to dst, using nonce. It lets
+// callers lay out nonce||ciphertext in one buffer.
+func (e *AESGCMEngine) SealInto(dst, nonce, plaintext []byte) ([]byte, error) {
+	if len(nonce) != e.NonceSize() {
+		return nil, fmt.Errorf("nonce must be %d bytes, got %d", e.NonceSize(), len(nonce))
+	}
+	return e.aead.Seal(dst, nonce, plaintext, nil), nil
+}
+
 // Decrypt decrypts ciphertext using AES-256-GCM.
 func (e *AESGCMEngine) Decrypt(nonce, ciphertext []byte) ([]byte, error) {
 	if len(nonce) != e.NonceSize() {

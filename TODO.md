@@ -415,6 +415,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low.
 
 ### 2.13 Encryption seal allocates a nonce + copies per seal — LOW-MEDIUM
+
+> **Status:** ✅ FIXED — AES-GCM seals lay out nonce||ciphertext in one pre-sized buffer via the new `SealInto`, and AES-SIV encrypts straight into the result buffer after the 16-byte SIV header. Existing test vectors and round-trips still pass.
 - **Location:** `internal/encryption/keychain.go:62-80`, `internal/encryption/siv.go:77-85`.
 - **Problem:** Each seal allocates the nonce, then allocates+appends `nonce||ciphertext`; for
   SIV an extra buffer. Repeats per 64 KiB chunk / per `Write`.

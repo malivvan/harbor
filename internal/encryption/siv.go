@@ -83,14 +83,10 @@ func (e *SIVEngine) Encrypt(plaintext []byte, ad ...[]byte) ([]byte, error) {
 	// Step 1: Generate SIV using S2V algorithm
 	siv := e.s2v(plaintext, ad...)
 
-	// Step 2: Encrypt plaintext using CTR mode with SIV as IV
-	ciphertext := make([]byte, len(plaintext))
-	e.ctrMode(siv, plaintext, ciphertext)
-
-	// Step 3: Prepend SIV to ciphertext
-	result := make([]byte, 16+len(ciphertext))
+	// Step 2: Encrypt plaintext directly after the SIV header.
+	result := make([]byte, 16+len(plaintext))
 	copy(result[:16], siv)
-	copy(result[16:], ciphertext)
+	e.ctrMode(siv, plaintext, result[16:])
 
 	return result, nil
 }

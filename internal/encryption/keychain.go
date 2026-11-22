@@ -65,19 +65,19 @@ func (k *Keychain) Seal(plain []byte) ([]byte, error) {
 		return plain, nil
 	}
 
-	nonce := make([]byte, k.engine.NonceSize())
-	if err := gcmNonces.read(nonce); err != nil {
+	nonceSize := k.engine.NonceSize()
+	// Lay out nonce||ciphertext in one pre-sized buffer instead of
+	// allocating the nonce, the ciphertext and the combined result.
+	out := make([]byte, nonceSize, nonceSize+len(plain)+k.engine.Overhead())
+	if err := gcmNonces.read(out); err != nil {
 		return nil, fmt.Errorf("generating nonce: %w", err)
 	}
 
-	sealed, err := k.engine.Encrypt(nonce, plain)
+	sealed, err := k.engine.SealInto(out, out[:nonceSize], plain)
 	if err != nil {
 		return nil, err
 	}
-
-	out := make([]byte, 0, len(nonce)+len(sealed))
-	out = append(out, nonce...)
-	return append(out, sealed...), nil
+	return sealed, nil
 }
 
 // Open decrypts raw with the primary key and then any fallback key. A nil
