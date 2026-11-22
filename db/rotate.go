@@ -18,7 +18,8 @@ const listIndexIDsBucket = "storm__ids"
 // withKey returns an encryption state that writes with newKey while keeping the
 // current cipher and flags.
 func (s *Store) withKey(newKey []byte) (*encState, error) {
-	if s.enc == nil {
+	cur := s.enc.Load()
+	if cur == nil {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 	if len(newKey) != KeySize {
@@ -27,9 +28,9 @@ func (s *Store) withKey(newKey []byte) (*encState, error) {
 
 	return resolveConfig(Config{
 		Secret:          append([]byte(nil), newKey...),
-		EncryptValues:   s.enc.encValues,
-		EncryptMetadata: s.enc.encMetadata,
-		EncryptKeys:     s.enc.encKeys,
+		EncryptValues:   cur.encValues,
+		EncryptMetadata: cur.encMetadata,
+		EncryptKeys:     cur.encKeys,
 	})
 }
 
@@ -37,7 +38,7 @@ func (s *Store) withKey(newKey []byte) (*encState, error) {
 // reaches it through the same Store, so derived nodes and transactions see the
 // new key immediately.
 func (s *Store) adoptEnc(next *encState) {
-	s.enc = next
+	s.enc.Store(next)
 }
 
 // ReEncrypt rewrites the whole database under newKey: every record and
@@ -60,6 +61,11 @@ func (s *Store) ReEncrypt(ctx context.Context, newKey []byte) error {
 	if err != nil {
 		return wrapError("reencrypt", err)
 	}
+
+	// Block normal operations for the whole rewrite + adoption: a writer that
+	// starts after the new marker is committed must see the new key.
+	s.rotMu.Lock()
+	defer s.rotMu.Unlock()
 
 	if err := s.rewrite(ctx, next); err != nil {
 		return wrapError("reencrypt", err)
@@ -86,7 +92,7 @@ func (s *Store) rewrite(ctx context.Context, next *encState) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
-		r := &rotation{ctx: ctx, root: root, old: s.enc, next: next}
+		r := &rotation{ctx: ctx, root: root, old: s.enc.Load(), next: next}
 		if err := r.run(tx); err != nil {
 			return err
 		}
@@ -104,13 +110,17 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 	if err := checkContext(ctx); err != nil {
 		return wrapError("verify all", err)
 	}
-	if s.enc == nil {
-		return wrapError("verify all", fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig))
-	}
-
 	root, ok := s.Node.(*node)
 	if !ok {
 		return wrapError("verify all", ErrBadType)
+	}
+
+	s.rotMu.RLock()
+	defer s.rotMu.RUnlock()
+
+	enc := s.enc.Load()
+	if enc == nil {
+		return wrapError("verify all", fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig))
 	}
 
 	return wrapError("verify all", s.bolt.View(func(tx *bolt.Tx) error {
@@ -130,14 +140,14 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if !m.matches(s.enc) {
+		if !m.matches(enc) {
 			return fmt.Errorf("%w: encryption settings do not match the store", ErrWrongMode)
 		}
-		if err := s.enc.verifyCanary(canary); err != nil {
+		if err := enc.verifyCanary(canary); err != nil {
 			return err
 		}
 
-		r := &rotation{ctx: ctx, root: root, old: s.enc}
+		r := &rotation{ctx: ctx, root: root, old: enc}
 		if err := r.run(tx); err != nil {
 			return err
 		}

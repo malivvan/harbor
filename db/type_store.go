@@ -572,16 +572,11 @@ func (n *node) DeleteStruct(ctx context.Context, data any) error {
 		return wrapError("delete struct", err)
 	}
 
-	id, err := n.keyBytes(cfg.ID.Value.Interface(), keyDomainID)
-	if err != nil {
-		return wrapError("delete struct", err)
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return wrapError("delete struct", err)
-	}
-
 	return wrapError("delete struct", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+		id, err := n.keyBytes(cfg.ID.Value.Interface(), keyDomainID)
+		if err != nil {
+			return err
+		}
 		return n.deleteStruct(ctx, tx, cfg, id)
 	}))
 }

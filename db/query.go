@@ -238,6 +238,8 @@ func (q *query) runQuery(ctx context.Context, sink sink) error {
 		return checkContext(ctx)
 	}
 	if sink.readOnly() {
+		q.node.s.rotMu.RLock()
+		defer q.node.s.rotMu.RUnlock()
 		return q.node.s.bolt.View(func(tx *bolt.Tx) error {
 			if err := checkContext(ctx); err != nil {
 				return err
@@ -246,6 +248,8 @@ func (q *query) runQuery(ctx context.Context, sink sink) error {
 			return q.query(ctx, tx, sink)
 		})
 	}
+	q.node.s.rotMu.RLock()
+	defer q.node.s.rotMu.RUnlock()
 	return q.node.s.bolt.Update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err

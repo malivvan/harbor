@@ -8,6 +8,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/malivvan/storm/internal/absfs"
 	bolt "go.etcd.io/bbolt"
@@ -28,7 +29,10 @@ var (
 type Store struct {
 	db   *bolt.DB
 	root [][]byte
-	enc  *encState // nil when encryption is disabled
+
+	// enc is the optional encryption state; an atomic pointer so a rotation
+	// can swap it without racing Open/VerifyAll.
+	enc atomic.Pointer[encState]
 
 	mu          sync.Mutex
 	filesystems []*FS
@@ -64,11 +68,12 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		return nil, err
 	}
 
-	return &Store{
+	store := &Store{
 		db:   bdb,
 		root: cloneRoot(cfg.Root),
-		enc:  enc,
-	}, nil
+	}
+	store.enc.Store(enc)
+	return store, nil
 }
 
 // validateBucketName rejects names that would make the literal-bucket and
@@ -115,7 +120,7 @@ func (s *Store) Open(name string) (*FS, error) {
 		return nil, err
 	}
 
-	filesystem, err := newFS(s.db, s.bucketPath(name), s.enc)
+	filesystem, err := newFS(s.db, s.bucketPath(name), s.enc.Load())
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +142,7 @@ func (s *Store) OpenWithContentFS(name string, contentFS absfs.FileSystem) (*FS,
 		return nil, err
 	}
 
-	filesystem, err := newFS(s.db, s.bucketPath(name), s.enc)
+	filesystem, err := newFS(s.db, s.bucketPath(name), s.enc.Load())
 	if err != nil {
 		return nil, err
 	}
@@ -251,17 +256,18 @@ func (s *Store) checkMode(name string) error {
 		return err
 	}
 
+	enc := s.enc.Load()
 	if found {
-		if s.enc == nil {
+		if enc == nil {
 			return fmt.Errorf("%w: filesystem is encrypted", ErrWrongMode)
 		}
-		if !m.matches(s.enc) {
+		if !m.matches(enc) {
 			return fmt.Errorf("%w: encryption settings do not match the filesystem", ErrWrongMode)
 		}
-		return s.enc.verifyCanary(canary)
+		return enc.verifyCanary(canary)
 	}
 
-	if s.enc == nil {
+	if enc == nil {
 		return nil
 	}
 
@@ -340,11 +346,24 @@ func (s *Store) track(filesystem *FS) {
 // adoptEnc switches the store and every file system it opened to next.
 func (s *Store) adoptEnc(next *encState) {
 	s.mu.Lock()
-	s.enc = next
+	s.enc.Store(next)
 	for _, filesystem := range s.filesystems {
 		filesystem.enc.Store(next)
 	}
 	s.mu.Unlock()
+}
+
+// trackedFS returns the open FS wrapper for name, if this Store opened it.
+func (s *Store) trackedFS(name string) *FS {
+	path := s.bucketPath(name)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, filesystem := range s.filesystems {
+		if filesystem.bucket == path {
+			return filesystem
+		}
+	}
+	return nil
 }
 
 func (s *Store) bucketPath(name string) string {

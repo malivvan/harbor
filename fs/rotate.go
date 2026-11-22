@@ -24,7 +24,8 @@ func (s *Store) withKeyKeepingFallbacks(newKey []byte) (*encState, error) {
 }
 
 func (s *Store) newKeyState(newKey []byte, keepFallbacks bool) (*encState, error) {
-	if s.enc == nil {
+	cur := s.enc.Load()
+	if cur == nil {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 	if len(newKey) != KeySize {
@@ -36,9 +37,9 @@ func (s *Store) newKeyState(newKey []byte, keepFallbacks bool) (*encState, error
 		err error
 	)
 	if keepFallbacks {
-		kc, err = s.enc.kc.WithKeyKeepingFallbacks(newKey)
+		kc, err = cur.kc.WithKeyKeepingFallbacks(newKey)
 	} else {
-		kc, err = s.enc.kc.WithKey(newKey)
+		kc, err = cur.kc.WithKey(newKey)
 	}
 	if err != nil {
 		return nil, err
@@ -46,57 +47,93 @@ func (s *Store) newKeyState(newKey []byte, keepFallbacks bool) (*encState, error
 
 	return &encState{
 		kc:          kc,
-		encContent:  s.enc.encContent,
-		encMetadata: s.enc.encMetadata,
-		chunkSize:   s.enc.chunkSize,
+		encContent:  cur.encContent,
+		encMetadata: cur.encMetadata,
+		chunkSize:   cur.chunkSize,
 	}, nil
 }
 
-// reEncryptFS rewrites one filesystem with next's key, using s.enc for reads.
-func (s *Store) reEncryptFS(ctx context.Context, name string, next *encState) error {
+// reEncryptFSTx rewrites one filesystem with next's key inside tx, using old
+// for reads.
+func (s *Store) reEncryptFSTx(ctx context.Context, tx *bolt.Tx, name string, old, next *encState) error {
 	path := s.bucketPath(name)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
-	return s.db.Update(func(tx *bolt.Tx) error {
-		if err := ctx.Err(); err != nil {
+	bb, err := openBucket(tx, path)
+	if err != nil {
+		return err
+	}
+	oldB := newFsBucket(bb)
+	if oldB == nil {
+		return os.ErrNotExist
+	}
+	oldB.enc = old
+
+	newB := newFsBucket(bb)
+	newB.enc = next
+
+	inodeKeys, err := encryption.KeysOf(oldB.inodes)
+	if err != nil {
+		return err
+	}
+	for _, key := range inodeKeys {
+		if len(key) != 8 {
+			continue
+		}
+		node := new(iNode)
+		if err := oldB.decodeNode(b2i(key), node); err != nil {
 			return err
 		}
+		if err := newB.encodeNode(b2i(key), node); err != nil {
+			return err
+		}
+	}
 
-		bb, err := openBucket(tx, path)
+	dataKeys, err := encryption.KeysOf(oldB.data)
+	if err != nil {
+		return err
+	}
+	for _, key := range dataKeys {
+		plain, err := old.openContent(oldB.data.Get(key))
 		if err != nil {
 			return err
 		}
-		oldB := newFsBucket(bb)
-		if oldB == nil {
-			return os.ErrNotExist
-		}
-		oldB.enc = s.enc
-
-		newB := newFsBucket(bb)
-		newB.enc = next
-
-		inodeKeys, err := encryption.KeysOf(oldB.inodes)
+		sealed, err := next.sealContent(plain)
 		if err != nil {
 			return err
 		}
-		for _, key := range inodeKeys {
-			if len(key) != 8 {
-				continue
-			}
-			node := new(iNode)
-			if err := oldB.decodeNode(b2i(key), node); err != nil {
-				return err
-			}
-			if err := newB.encodeNode(b2i(key), node); err != nil {
-				return err
-			}
+		if err := newB.data.Put(key, sealed); err != nil {
+			return err
 		}
+	}
 
-		dataKeys, err := encryption.KeysOf(oldB.data)
+	symlinkKeys, err := encryption.KeysOf(oldB.symlinks)
+	if err != nil {
+		return err
+	}
+	for _, key := range symlinkKeys {
+		plain, err := old.openContent(oldB.symlinks.Get(key))
 		if err != nil {
 			return err
 		}
-		for _, key := range dataKeys {
-			plain, err := s.enc.openContent(oldB.data.Get(key))
+		sealed, err := next.sealContent(plain)
+		if err != nil {
+			return err
+		}
+		if err := newB.symlinks.Put(key, sealed); err != nil {
+			return err
+		}
+	}
+
+	if oldB.chunks != nil {
+		chunkKeys, err := encryption.KeysOf(oldB.chunks)
+		if err != nil {
+			return err
+		}
+		for _, key := range chunkKeys {
+			plain, err := old.openContent(oldB.chunks.Get(key))
 			if err != nil {
 				return err
 			}
@@ -104,63 +141,27 @@ func (s *Store) reEncryptFS(ctx context.Context, name string, next *encState) er
 			if err != nil {
 				return err
 			}
-			if err := newB.data.Put(key, sealed); err != nil {
+			if err := newB.chunks.Put(key, sealed); err != nil {
 				return err
 			}
 		}
+	}
 
-		symlinkKeys, err := encryption.KeysOf(oldB.symlinks)
-		if err != nil {
-			return err
-		}
-		for _, key := range symlinkKeys {
-			plain, err := s.enc.openContent(oldB.symlinks.Get(key))
-			if err != nil {
-				return err
-			}
-			sealed, err := next.sealContent(plain)
-			if err != nil {
-				return err
-			}
-			if err := newB.symlinks.Put(key, sealed); err != nil {
-				return err
-			}
-		}
-
-		if oldB.chunks != nil {
-			chunkKeys, err := encryption.KeysOf(oldB.chunks)
-			if err != nil {
-				return err
-			}
-			for _, key := range chunkKeys {
-				plain, err := s.enc.openContent(oldB.chunks.Get(key))
-				if err != nil {
-					return err
-				}
-				sealed, err := next.sealContent(plain)
-				if err != nil {
-					return err
-				}
-				if err := newB.chunks.Put(key, sealed); err != nil {
-					return err
-				}
-			}
-		}
-
-		marker, err := next.encodeMarker()
-		if err != nil {
-			return err
-		}
-		return newB.state.Put([]byte(markerKey), marker)
-	})
+	marker, err := next.encodeMarker()
+	if err != nil {
+		return err
+	}
+	return newB.state.Put([]byte(markerKey), marker)
 }
 
 // ReEncryptFS rewrites one filesystem's inodes, content, chunks, symlinks and
-// marker under newKey, then installs newKey as the write key.
+// marker under newKey, then installs newKey as the write key for that
+// filesystem.
 //
 // The previous key stays available for decryption, so the filesystems that were
-// not rotated yet keep working. RotateAll rewrites all of them and drops the old
-// key once it is done.
+// not rotated yet keep working. This is a partial rotation: the store is not
+// self-consistent for a fresh process until RotateAll completes the migration.
+// Do not close a store between ReEncryptFS and RotateAll.
 func (s *Store) ReEncryptFS(ctx context.Context, name string, newKey []byte) error {
 	if s == nil || s.db == nil {
 		return ErrNilParam
@@ -176,7 +177,20 @@ func (s *Store) ReEncryptFS(ctx context.Context, name string, newKey []byte) err
 	if err != nil {
 		return err
 	}
-	if err := s.reEncryptFS(ctx, name, next); err != nil {
+
+	// Serialize writers on the target filesystem with the rewrite. The
+	// in-process state then uses next as the primary key with the old key as a
+	// decryption fallback; a fresh process still needs RotateAll to complete
+	// the migration.
+	filesystem := s.trackedFS(name)
+	if filesystem != nil {
+		filesystem.mu.Lock()
+		defer filesystem.mu.Unlock()
+	}
+	old := s.enc.Load()
+	if err := s.db.Update(func(tx *bolt.Tx) error {
+		return s.reEncryptFSTx(ctx, tx, name, old, next)
+	}); err != nil {
 		return err
 	}
 	s.adoptEnc(next)
@@ -202,13 +216,35 @@ func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 	if err != nil {
 		return err
 	}
-	for _, name := range names {
-		if err := ctx.Err(); err != nil {
-			return err
+
+	// Block writes to every filesystem this Store opened for the duration of
+	// the rotation. All filesystems are rewritten in one transaction, so a
+	// failure or cancellation leaves the whole store under the old key.
+	s.mu.Lock()
+	filesystems := append([]*FS(nil), s.filesystems...)
+	s.mu.Unlock()
+	for _, filesystem := range filesystems {
+		filesystem.mu.Lock()
+	}
+	defer func() {
+		for _, filesystem := range filesystems {
+			filesystem.mu.Unlock()
 		}
-		if err := s.reEncryptFS(ctx, name, next); err != nil {
-			return err
+	}()
+
+	old := s.enc.Load()
+	if err := s.db.Update(func(tx *bolt.Tx) error {
+		for _, name := range names {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := s.reEncryptFSTx(ctx, tx, name, old, next); err != nil {
+				return err
+			}
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	s.adoptEnc(next)
@@ -250,9 +286,10 @@ func (s *Store) verifyFS(name string) error {
 		if b == nil {
 			return os.ErrNotExist
 		}
-		b.enc = s.enc
+		enc := s.enc.Load()
+		b.enc = enc
 
-		if s.enc != nil {
+		if enc != nil {
 			m, canary, found, err := readMarker(b)
 			if err != nil {
 				return err
@@ -260,10 +297,10 @@ func (s *Store) verifyFS(name string) error {
 			if !found {
 				return fmt.Errorf("%w: missing encryption marker", ErrWrongMode)
 			}
-			if !m.matches(s.enc) {
+			if !m.matches(enc) {
 				return fmt.Errorf("%w: encryption settings do not match the filesystem", ErrWrongMode)
 			}
-			if err := s.enc.verifyCanary(canary); err != nil {
+			if err := enc.verifyCanary(canary); err != nil {
 				return err
 			}
 		}
@@ -291,7 +328,7 @@ func (s *Store) verifyFS(name string) error {
 				return err
 			}
 			for _, key := range bucketKeys {
-				if _, err := s.enc.openContent(bucket.Get(key)); err != nil {
+				if _, err := enc.openContent(bucket.Get(key)); err != nil {
 					return err
 				}
 			}

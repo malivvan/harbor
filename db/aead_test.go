@@ -185,7 +185,7 @@ func TestAEADOptionalityKeepsPlaintextFormat(t *testing.T) {
 
 	bdb := aeadOpenBolt(t, path)
 	st := aeadOpenStore(t, bdb, Config{})
-	require.Nil(t, st.enc)
+	require.Nil(t, st.enc.Load())
 
 	u := &aeadUser{ID: 7, Name: "alice", Email: "alice@example.com", Group: "staff", Age: 30}
 	require.NoError(t, st.Save(ctx, u))
@@ -219,7 +219,7 @@ func TestAEADOptionalityKeepsPlaintextFormat(t *testing.T) {
 	bdb = aeadOpenBolt(t, path)
 	defer bdb.Close()
 	st = aeadOpenStore(t, bdb, Config{})
-	require.Nil(t, st.enc)
+	require.Nil(t, st.enc.Load())
 
 	records = aeadRawEntries(t, bdb, "aeadUser")
 	require.Equal(t, rawUser, records[string(rawID)])

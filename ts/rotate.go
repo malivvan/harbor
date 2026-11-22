@@ -148,12 +148,24 @@ func (s *Store) writeMarker(tx *bolt.Tx) error {
 // hold old-key ciphertext, and a restart with the old key must be able to read
 // them. Run RotateAll to finish the migration.
 func (s *Store) reEncryptSeries(ctx context.Context, name string, next *Store) error {
-	return s.b.Update(func(tx *bolt.Tx) error {
+	old := s.encState()
+	err := s.b.Update(func(tx *bolt.Tx) error {
 		if err := s.reEncryptSeriesTx(ctx, tx, name, next); err != nil {
 			return err
 		}
-		return s.writeMarker(tx)
+		if err := s.writeMarker(tx); err != nil {
+			return err
+		}
+		// Adopt under the write lock: a writer that acquires the lock after
+		// this transaction commits must see the new key.
+		s.adopt(next)
+		return nil
 	})
+	if err != nil {
+		s.enc.Store(old)
+		return err
+	}
+	return nil
 }
 
 // reEncryptSeriesTx rewrites one series with next's key inside tx, using s for
@@ -268,11 +280,7 @@ func (s *Store) ReEncryptSeries(ctx context.Context, name string, newKey []byte)
 	if err != nil {
 		return err
 	}
-	if err := s.reEncryptSeries(ctx, name, next); err != nil {
-		return err
-	}
-	s.adopt(next)
-	return nil
+	return s.reEncryptSeries(ctx, name, next)
 }
 
 // RotateAll re-encrypts every known series under newKey, adopts it and drops
@@ -300,7 +308,10 @@ func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 	}
 
 	// Rotate every series and publish the new marker in one transaction, so a
-	// crash or cancellation leaves the whole store under the old key.
+	// crash or cancellation leaves the whole store under the old key. The key
+	// state is adopted inside the transaction for the same reason: a writer
+	// that acquires the bbolt write lock after the commit sees the new key.
+	old := s.encState()
 	if err := s.b.Update(func(tx *bolt.Tx) error {
 		for _, name := range names {
 			if err := checkContext(ctx); err != nil {
@@ -310,12 +321,15 @@ func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 				return err
 			}
 		}
-		return next.writeMarker(tx)
+		if err := next.writeMarker(tx); err != nil {
+			return err
+		}
+		s.adopt(next)
+		return nil
 	}); err != nil {
+		s.enc.Store(old)
 		return err
 	}
-
-	s.adopt(next)
 	return nil
 }
 

@@ -38,8 +38,28 @@ type Store struct {
 	closeMu     sync.Mutex
 	collections map[string]*Collection
 
-	// enc is the optional encryption state. nil means a plaintext store.
-	enc *encState
+	// enc is the optional encryption state. It is an atomic pointer so a
+	// rotation can swap the keys without racing readers.
+	enc atomic.Pointer[encState]
+
+	// rotMu serializes rotation against normal operations. Normal view/update
+	// transactions take RLock; rotation takes Lock across the rewrite and the
+	// adoption of the new key state.
+	rotMu sync.RWMutex
+}
+
+// view runs a read-only transaction while excluding rotation.
+func (s *Store) view(fn func(tx *bbolt.Tx) error) error {
+	s.rotMu.RLock()
+	defer s.rotMu.RUnlock()
+	return s.db.View(fn)
+}
+
+// update runs a write transaction while excluding rotation.
+func (s *Store) update(fn func(tx *bbolt.Tx) error) error {
+	s.rotMu.RLock()
+	defer s.rotMu.RUnlock()
+	return s.db.Update(fn)
 }
 
 func toStoredPoint(p *PointStruct) (*StoredPoint, error) {
@@ -232,8 +252,8 @@ func Open(ctx context.Context, bdb *bbolt.DB, cfg Config) (*Store, error) {
 		useQuant:    useQuant,
 		root:        cloneRoot(cfg.Root),
 		collections: make(map[string]*Collection),
-		enc:         enc,
 	}
+	store.enc.Store(enc)
 
 	if err := store.checkMode(ctx); err != nil {
 		return nil, err
@@ -272,7 +292,8 @@ func (s *Store) checkMode(ctx context.Context) error {
 		return err
 	}
 
-	if s.enc == nil {
+	enc := s.enc.Load()
+	if enc == nil {
 		if found {
 			return fmt.Errorf("%w: store is encrypted", ErrWrongMode)
 		}
@@ -280,10 +301,10 @@ func (s *Store) checkMode(ctx context.Context) error {
 	}
 
 	if found {
-		if !m.matches(s.enc) {
+		if !m.matches(enc) {
 			return fmt.Errorf("%w: encryption settings do not match the store", ErrWrongMode)
 		}
-		return s.enc.verifyCanary(canary)
+		return enc.verifyCanary(canary)
 	}
 
 	// No marker: only a store without data may be initialized as encrypted.
@@ -295,7 +316,7 @@ func (s *Store) checkMode(ctx context.Context) error {
 		return fmt.Errorf("%w: store already contains plaintext data", ErrWrongMode)
 	}
 
-	return s.storeMarker(s.enc)
+	return s.storeMarker(enc)
 }
 
 var ErrNilContext = fmt.Errorf("context is nil")
@@ -506,7 +527,7 @@ func (s *Store) EnsureCollection(colName string) error {
 		return err
 	}
 
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	return s.update(func(tx *bbolt.Tx) error {
 		_, err := s.createCollectionBucket(tx, colName)
 		return err
 	})
@@ -521,7 +542,7 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 		return err
 	}
 
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	return s.update(func(tx *bbolt.Tx) error {
 		b, err := s.collectionBucket(tx, colName)
 		if err != nil {
 			return err
@@ -585,7 +606,7 @@ func (s *Store) LoadCollection(colName string) (map[string]*PointStruct, error) 
 
 	points := make(map[string]*PointStruct)
 
-	err := s.db.View(func(tx *bbolt.Tx) error {
+	err := s.view(func(tx *bbolt.Tx) error {
 		b, err := s.collectionBucket(tx, colName)
 		if err != nil {
 			return err
@@ -651,7 +672,7 @@ func (s *Store) ListCollections() ([]string, error) {
 		return nil
 	}
 
-	err := s.db.View(func(tx *bbolt.Tx) error {
+	err := s.view(func(tx *bbolt.Tx) error {
 		if len(s.root) > 0 {
 			root := s.rootBucket(tx)
 			if root == nil {
@@ -681,7 +702,7 @@ func (s *Store) SaveCollectionMeta(name string, meta CollectionMeta) error {
 		return err
 	}
 
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	return s.update(func(tx *bbolt.Tx) error {
 		b, err := s.metaBucket(tx, true)
 		if err != nil {
 			return err
@@ -713,7 +734,7 @@ func (s *Store) LoadCollectionMeta(name string) (*CollectionMeta, error) {
 	}
 
 	var meta CollectionMeta
-	err := s.db.View(func(tx *bbolt.Tx) error {
+	err := s.view(func(tx *bbolt.Tx) error {
 		b, err := s.metaBucket(tx, false)
 		if err != nil {
 			return err
@@ -753,7 +774,7 @@ func (s *Store) ListCollectionMetas() ([]CollectionMeta, error) {
 	}
 
 	var metas []CollectionMeta
-	err := s.db.View(func(tx *bbolt.Tx) error {
+	err := s.view(func(tx *bbolt.Tx) error {
 		b, err := s.metaBucket(tx, false)
 		if err != nil {
 			return err
@@ -795,7 +816,7 @@ func (s *Store) DeletePoints(colName string, ids []string) error {
 		return err
 	}
 
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	return s.update(func(tx *bbolt.Tx) error {
 		b, err := s.collectionBucket(tx, colName)
 		if err != nil {
 			return err
@@ -828,7 +849,7 @@ func (s *Store) DropCollection(name string) error {
 		return fmt.Errorf("failed to derive the bucket key for collection %q: %w", name, err)
 	}
 
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	return s.update(func(tx *bbolt.Tx) error {
 		// Delete collection bucket under the configured root.
 		if len(s.root) > 0 {
 			if root := s.rootBucket(tx); root != nil {

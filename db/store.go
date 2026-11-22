@@ -9,6 +9,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -68,14 +70,12 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		return nil, wrapError("open", err)
 	}
 
-	s := Store{
-		bolt: bdb,
-		enc:  enc,
-	}
+	s := &Store{bolt: bdb}
+	s.enc.Store(enc)
 
 	root := cloneBucketPath(cfg.Root)
 	n := node{
-		s:     &s,
+		s:     s,
 		codec: c,
 		root:  cloneBucketPath(root),
 	}
@@ -90,7 +90,7 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		return nil, wrapError("open", err)
 	}
 
-	return &s, nil
+	return s, nil
 }
 
 // Store is the wrapper around BoltDB. It contains an instance of BoltDB and uses it to perform all the
@@ -102,8 +102,14 @@ type Store struct {
 	// bolt is the underlying bbolt database. It is owned by the caller.
 	bolt *bolt.DB
 
-	// enc is the optional encryption state. nil means a plaintext store.
-	enc *encState
+	// enc is the optional encryption state. It is an atomic pointer so a
+	// rotation can swap the keys without racing readers.
+	enc atomic.Pointer[encState]
+
+	// rotMu serializes rotation against normal operations. Top-level
+	// transactions take RLock; ReEncrypt/RotateAll take Lock across the
+	// rewrite and the adoption of the new key state.
+	rotMu sync.RWMutex
 }
 
 // Close releases the Storm wrapper. The underlying bbolt database is owned by
@@ -170,7 +176,8 @@ func (s *Store) checkMode(ctx context.Context) error {
 		return err
 	}
 
-	if s.enc == nil {
+	enc := s.enc.Load()
+	if enc == nil {
 		if found {
 			return fmt.Errorf("%w: store is encrypted", ErrWrongMode)
 		}
@@ -178,10 +185,10 @@ func (s *Store) checkMode(ctx context.Context) error {
 	}
 
 	if found {
-		if !m.matches(s.enc) {
+		if !m.matches(enc) {
 			return fmt.Errorf("%w: encryption settings do not match the store", ErrWrongMode)
 		}
-		return s.enc.verifyCanary(canary)
+		return enc.verifyCanary(canary)
 	}
 
 	// No marker: only a brand-new store may be initialized as encrypted.
@@ -193,7 +200,7 @@ func (s *Store) checkMode(ctx context.Context) error {
 		return fmt.Errorf("%w: store already contains plaintext data", ErrWrongMode)
 	}
 
-	return root.storeMarker(ctx, s.enc)
+	return root.storeMarker(ctx, enc)
 }
 
 // toBytes turns an interface into a slice of bytes

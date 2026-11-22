@@ -102,16 +102,11 @@ func (n *node) One(ctx context.Context, fieldName string, value any, to any) err
 		return wrapError("one", sink.flush(ctx))
 	}
 
-	val, err := n.keyBytes(value, fieldKeyDomain(field))
-	if err != nil {
-		return wrapError("one", err)
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return wrapError("one", err)
-	}
-
 	return wrapError("one", n.readTx(ctx, func(tx *bolt.Tx) error {
+		val, err := n.keyBytes(value, fieldKeyDomain(field))
+		if err != nil {
+			return err
+		}
 		return n.one(ctx, tx, bucketName, fieldName, cfg, to, val, field.IsID)
 	}))
 }
@@ -240,16 +235,11 @@ func (n *node) Find(ctx context.Context, fieldName string, value any, to any, op
 		return wrapError("find", sink.flush(ctx))
 	}
 
-	val, err := n.keyBytes(value, fieldKeyDomain(field))
-	if err != nil {
-		return wrapError("find", err)
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return wrapError("find", err)
-	}
-
 	return wrapError("find", n.readTx(ctx, func(tx *bolt.Tx) error {
+		val, err := n.keyBytes(value, fieldKeyDomain(field))
+		if err != nil {
+			return err
+		}
 		return n.find(ctx, tx, bucketName, fieldName, cfg, sink, val, opts)
 	}))
 }
@@ -543,25 +533,15 @@ func (n *node) Range(ctx context.Context, fieldName string, min any, max any, to
 		return wrapError("range", sink.flush(ctx))
 	}
 
-	mn, err := n.keyBytes(min, keyDomainIndex)
-	if err != nil {
-		return wrapError("range", err)
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return wrapError("range", err)
-	}
-
-	mx, err := n.keyBytes(max, keyDomainIndex)
-	if err != nil {
-		return wrapError("range", err)
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return wrapError("range", err)
-	}
-
 	return wrapError("range", n.readTx(ctx, func(tx *bolt.Tx) error {
+		mn, err := n.keyBytes(min, keyDomainIndex)
+		if err != nil {
+			return err
+		}
+		mx, err := n.keyBytes(max, keyDomainIndex)
+		if err != nil {
+			return err
+		}
 		return n.rnge(ctx, tx, bucketName, fieldName, cfg, sink, mn, mx, opts)
 	}))
 }
@@ -690,16 +670,11 @@ func (n *node) Prefix(ctx context.Context, fieldName string, prefix string, to a
 		return wrapError("prefix", sink.flush(ctx))
 	}
 
-	prfx, err := n.keyBytes(prefix, keyDomainIndex)
-	if err != nil {
-		return wrapError("prefix", err)
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return wrapError("prefix", err)
-	}
-
 	return wrapError("prefix", n.readTx(ctx, func(tx *bolt.Tx) error {
+		prfx, err := n.keyBytes(prefix, keyDomainIndex)
+		if err != nil {
+			return err
+		}
 		return n.prefix(ctx, tx, bucketName, fieldName, cfg, sink, prfx, opts)
 	}))
 }

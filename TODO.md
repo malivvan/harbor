@@ -39,95 +39,27 @@ revision and may shift; use the named symbols and files to locate the code.
 
 ---
 
-# 1. Concurrency and rotation integrity
+# 1. Concurrency and rotation integrity — RESOLVED
 
-## H1. [High] `db` rotation races every reader/writer of `Store.enc`
-**Location:** `db/store.go:106` (`enc *encState`), `db/rotate.go:39-40`
-(`adoptEnc`), readers in `db/aead.go:390` (`encFromNode`), `seal`/`open`/
-`keyBytes`, `db/metadata.go:46`.
-**Problem:** `ReEncrypt`/`RotateAll` assigns `s.enc` while other goroutines read
-it. A targeted `go run -race` probe that saves records during `ReEncrypt`
-prints:
-```
-WARNING: DATA RACE
-Read ... db.encFromNode -> db.newMeta -> (*node).save
-Write ... db.(*Store).adoptEnc -> (*Store).ReEncrypt
-```
-The documentation says rotation must not run concurrently, but nothing
-enforces it and the read side is the normal store API.
-**Fix:** Store the state in `atomic.Pointer[encState]` (as `ts` and `fs.FS`
-already do) and load it once per operation; additionally guard rotation with an
-`RWMutex` (see H4).
-
-## H2. [High] `vec` rotation races `bucketKey`/seal/open
-**Location:** `vec/store.go:42` (`enc *encState`), `vec/rotate.go:49-50`,
-readers in `vec/aead.go:394` (`bucketKey`), `sealBytes`, `openBytes`.
-**Problem:** Same data race as H1. Probe output:
-```
-WARNING: DATA RACE
-Write ... vec.(*Store).adoptEnc
-Read  ... vec.(*Store).bucketKey -> collectionBucket -> UpsertPoints
-```
-**Fix:** `atomic.Pointer[encState]` + operation-level locking.
-
-## H3. [High] `fs.Store.enc` is a plain pointer while rotation swaps it
-**Location:** `fs/store.go:31`, `fs/store.go:341` (`adoptEnc`), readers in
-`fs/rotate.go:27` (`newKeyState`), `fs/store.go:255/264` (`checkMode`),
-`fs/rotate.go:250` (`verifyFS`).
-**Problem:** `FS` uses an atomic pointer, but the owning `Store` does not.
-`Store.Open` (which calls `checkMode`/`newFS`) and `Store.RotateAll`/
-`VerifyAll` can run concurrently, racing on `Store.enc`.
-**Fix:** Make `Store.enc` atomic too, or protect it with `Store.mu` and take
-`Store.mu.RLock` in those readers.
-
-## H4. [High] Rotation adoption window lets old-key writes follow the new marker
-**Location:** `db/rotate.go:64-68`, `ts/rotate.go:305-315`,
-`fs/rotate.go:180-183/208-215`, `vec/rotate.go:108-113/151-156`.
-**Problem:** Every rotation commits a transaction that writes the new marker
-(and re-encrypts data), and only afterwards calls `adoptEnc`/`adopt`. A
-concurrent write that starts after the commit but before the adoption loads the
-old key and writes old-key data into a store whose marker now says "new key".
-After a restart with the new key that data fails authentication (or is
-silently unreadable). For `ts` the state is atomic, so there is no data race,
-but the logical window remains. `db` documents "rotation must not run
-concurrently"; `ts`, `fs` and `vec` do not document it and do not enforce it.
-**Fix:** Hold a store-level `RWMutex`: normal operations take `RLock` for the
-duration of the transaction and load the key state only under that lock;
-rotation takes `Lock` across the rewrite *and* `adoptEnc`. Alternatively set a
-`rotating` flag that makes writes return `ErrRotating`.
-
-## H5. [High] `fs.RotateAll` is not atomic across file systems and can brick a running store
-**Location:** `fs/rotate.go:188-216`, `reEncryptFS` in `fs/rotate.go:56-160`.
-**Problem:** `RotateAll` loops over `FileSystems()` and calls `reEncryptFS`
-once per file system, each in its own bbolt transaction, then calls
-`adoptEnc(next)` at the end. A failure or cancellation after the first file
-system leaves:
-- the already-rotated file systems with a new-key marker and new-key data,
-- the remaining file systems old-key,
-- the in-memory `Store` and every `FS` still using the old key (because
-  `adoptEnc` was not reached), so the already-rotated file systems are
-  immediately unreadable in the running process.
-After restart no single key opens everything.
-**Fix:** Rewrite all file systems in one `bolt.Update` transaction (as `ts` and
-`vec` do), or at minimum stage the marker and adopt the next state only after
-every file system succeeds, and keep the old key for fallback reads on failure.
-Add a test that cancels mid-rotation and asserts the old key still opens and
-reads every file system.
-
-## H6. [Medium] `ReEncryptFS`/`ReEncryptSeries` partial rotations are footguns without a closing guard
-**Location:** `fs/rotate.go:167-184`, `ts/rotate.go:214-262`,
-`vec/rotate.go:62-113`, `db/rotate.go:50-69`.
-**Problem:** `fs.ReEncryptFS` and `vec.ReEncryptCollection` keep the marker
-under the old key while re-encrypting one entity; `ts.ReEncryptSeries` does the
-same. If the process closes after a partial rotation, a fresh process with the
-old key can read the un-rotated entities but not the rotated ones; the new key
-cannot verify the old marker. `ts` documents the constraint; `fs` does not, and
-`vec`/`db` docs are thin. There is no runtime guard.
-**Fix:** Document the constraint on every per-entity rotation, and consider
-recording an in-progress-rotation marker that refuses `Close`/reopen until
-`RotateAll` completes (or that lists the remaining old-key entities).
-
----
+- **H1/H2/H3** — `db`, `vec` and `fs.Store` now hold the encryption state in an
+  `atomic.Pointer[encState]`; all readers use `Load()` and rotation uses
+  `Store()`. `db` and `vec` additionally serialize top-level transactions with
+  `rotMu` (`RLock` for operations, `Lock` for rotation).
+- **H4** — the rotation adoption window is closed for writes:
+  - `db`/`vec` hold `rotMu.Lock` across the rewrite and adoption, and keys are
+    computed inside the top-level transaction (KV, finder, type-store and
+    delete paths were moved inside the callbacks).
+  - `ts` adopts the new state inside the rotation transaction (restoring the
+    old state if the transaction fails).
+  - `fs` blocks writes on every tracked file system while `RotateAll` runs, and
+    `ReEncryptFS` holds the target file system's lock across rewrite + adopt.
+- **H5** — `fs.RotateAll` rewrites every file system in a single `bolt.Update`
+  and adopts the new state only after the transaction commits.
+- **H6** — the partial-rotation contract is documented on `fs.ReEncryptFS`,
+  `ts.ReEncryptSeries`, `vec.ReEncryptCollection` and in the README.
+- Regression tests: `db/rotate_concurrency_test.go`,
+  `vec/rotate_concurrency_test.go`, `fs/rotate_concurrency_test.go`,
+  `ts/rotate_concurrency_test.go`; all pass under `-race`.
 
 # 2. Silent wrong results
 

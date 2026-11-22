@@ -85,7 +85,7 @@ func aeadTestPoints() []PointStruct {
 func TestAEADOptionalityKeepsPlaintextFormat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plain.db")
 	store, bdb := aeadOpenStore(t, path, false, Config{})
-	require.Nil(t, store.enc)
+	require.Nil(t, store.enc.Load())
 
 	require.NoError(t, store.EnsureCollection("docs"))
 	points := aeadTestPoints()
@@ -119,7 +119,7 @@ func TestAEADOptionalityKeepsPlaintextFormat(t *testing.T) {
 	// Reopening with an explicit Config that enables no feature must leave the
 	// bytes untouched.
 	store, bdb = aeadOpenStore(t, path, false, Config{})
-	require.Nil(t, store.enc)
+	require.Nil(t, store.enc.Load())
 	require.Equal(t, rawPoints, aeadRawEntries(t, bdb, "docs"))
 	rawMeta = aeadRawEntries(t, bdb, collectionsMetaBucket)
 	require.NotContains(t, rawMeta, markerKey)
@@ -410,7 +410,7 @@ func TestAEADEmptyStoreAdoptsEncryption(t *testing.T) {
 	require.NoError(t, plain.Close())
 
 	enc, bdb := aeadOpenStore(t, path, false, Config{Secret: aeadKey(9), EncryptPoints: true})
-	require.NotNil(t, enc.enc)
+	require.NotNil(t, enc.enc.Load())
 	require.Contains(t, aeadRawEntries(t, bdb, collectionsMetaBucket), markerKey)
 
 	require.NoError(t, enc.EnsureCollection("docs"))
@@ -446,7 +446,7 @@ func TestAEADInvalidConfig(t *testing.T) {
 		EncryptPoints: true,
 	})
 	require.NoError(t, err)
-	require.NotNil(t, valid.enc)
+	require.NotNil(t, valid.enc.Load())
 	require.NoError(t, valid.EnsureCollection("docs"))
 	require.NoError(t, valid.UpsertPoints("docs", aeadTestPoints()))
 	loaded, err := valid.LoadCollection("docs")

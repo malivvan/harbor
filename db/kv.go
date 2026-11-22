@@ -46,18 +46,14 @@ func (n *node) getBytesRaw(ctx context.Context, bucketName string, key any) ([]b
 		return nil, wrapError("kv get bytes", err)
 	}
 
-	id, err := n.keyBytes(key, keyDomainKV)
-	if err != nil {
-		return nil, wrapError("kv get bytes", err)
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return nil, wrapError("kv get bytes", err)
-	}
-
 	var val []byte
-	err = n.readTx(ctx, func(tx *bolt.Tx) error {
+	err := n.readTx(ctx, func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		id, err := n.keyBytes(key, keyDomainKV)
+		if err != nil {
 			return err
 		}
 
@@ -114,23 +110,17 @@ func (n *node) SetBytes(ctx context.Context, bucketName string, key any, value [
 		return wrapError("kv set bytes", ErrNilParam)
 	}
 
-	id, err := n.keyBytes(key, keyDomainKV)
-	if err != nil {
-		return wrapError("kv set bytes", err)
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return wrapError("kv set bytes", err)
-	}
-
-	// Values are sealed at rest; GetBytes opens them again, so a SetBytes /
-	// GetBytes round trip is unchanged.
-	sealed, err := n.seal(value)
-	if err != nil {
-		return wrapError("kv set bytes", err)
-	}
-
 	return wrapError("kv set bytes", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+		id, err := n.keyBytes(key, keyDomainKV)
+		if err != nil {
+			return err
+		}
+		// Values are sealed at rest; GetBytes opens them again, so a SetBytes /
+		// GetBytes round trip is unchanged.
+		sealed, err := n.seal(value)
+		if err != nil {
+			return err
+		}
 		return n.setBytes(ctx, tx, bucketName, id, sealed)
 	}))
 }
@@ -173,17 +163,13 @@ func (n *node) Get(ctx context.Context, bucketName string, key any, to any) erro
 		return wrapError("kv get", ErrPtrNeeded)
 	}
 
-	id, err := n.keyBytes(key, keyDomainKV)
-	if err != nil {
-		return wrapError("kv get", err)
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return wrapError("kv get", err)
-	}
-
 	return wrapError("kv get", n.readTx(ctx, func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		id, err := n.keyBytes(key, keyDomainKV)
+		if err != nil {
 			return err
 		}
 
@@ -251,16 +237,11 @@ func (n *node) Delete(ctx context.Context, bucketName string, key any) error {
 		return wrapError("kv delete", err)
 	}
 
-	id, err := n.keyBytes(key, keyDomainKV)
-	if err != nil {
-		return wrapError("kv delete", err)
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return wrapError("kv delete", err)
-	}
-
 	return wrapError("kv delete", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+		id, err := n.keyBytes(key, keyDomainKV)
+		if err != nil {
+			return err
+		}
 		return n.delete(ctx, tx, bucketName, id)
 	}))
 }
@@ -290,18 +271,14 @@ func (n *node) KeyExists(ctx context.Context, bucketName string, key any) (bool,
 		return false, wrapError("kv key exists", err)
 	}
 
-	id, err := n.keyBytes(key, keyDomainKV)
-	if err != nil {
-		return false, wrapError("kv key exists", err)
-	}
-
-	if err := checkContext(ctx); err != nil {
-		return false, wrapError("kv key exists", err)
-	}
-
 	var exists bool
-	err = n.readTx(ctx, func(tx *bolt.Tx) error {
+	err := n.readTx(ctx, func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		id, err := n.keyBytes(key, keyDomainKV)
+		if err != nil {
 			return err
 		}
 

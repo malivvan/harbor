@@ -226,7 +226,7 @@ func (s *Store) loadMarker() (marker, []byte, bool, error) {
 		canary []byte
 		found  bool
 	)
-	err := s.db.View(func(tx *bbolt.Tx) error {
+	err := s.view(func(tx *bbolt.Tx) error {
 		b, err := s.metaBucket(tx, false)
 		if err != nil {
 			return err
@@ -255,7 +255,7 @@ func (s *Store) storeMarker(e *encState) error {
 	if err != nil {
 		return err
 	}
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	return s.update(func(tx *bbolt.Tx) error {
 		b, err := s.metaBucket(tx, true)
 		if err != nil {
 			return err
@@ -268,7 +268,7 @@ func (s *Store) storeMarker(e *encState) error {
 // collection metadata written by an earlier open.
 func (s *Store) hasData() (bool, error) {
 	var has bool
-	err := s.db.View(func(tx *bbolt.Tx) error {
+	err := s.view(func(tx *bbolt.Tx) error {
 		if len(s.root) > 0 {
 			root := s.rootBucket(tx)
 			if root == nil {
@@ -311,7 +311,7 @@ func (s *Store) hasData() (bool, error) {
 // metaBucketForRead returns the raw keys of the metadata bucket.
 func (s *Store) metaBucketForRead() ([]string, error) {
 	var keys []string
-	err := s.db.View(func(tx *bbolt.Tx) error {
+	err := s.view(func(tx *bbolt.Tx) error {
 		b, err := s.metaBucket(tx, false)
 		if err != nil {
 			return err
@@ -376,28 +376,28 @@ func newNameCipher(masterKey []byte, domain string) (*encryption.SIVNameCipher, 
 // sealBytes seals a point blob or metadata payload. With no encryption
 // configured it returns p untouched.
 func (s *Store) sealBytes(p []byte) ([]byte, error) {
-	return s.enc.sealPoints(p)
+	return s.enc.Load().sealPoints(p)
 }
 
 // openBytes reverses sealBytes.
 func (s *Store) openBytes(c []byte) ([]byte, error) {
-	return s.enc.openPoints(c)
+	return s.enc.Load().openPoints(c)
 }
 
 // keyBytes returns the stored key for a point ID: the SIV-encrypted ID when
 // point IDs are encrypted, the raw ID otherwise.
 func (s *Store) keyBytes(id string) ([]byte, error) {
-	return s.enc.sealName(id, keyDomainID)
+	return s.enc.Load().sealName(id, keyDomainID)
 }
 
 // bucketKey returns the stored name for a collection: the SIV-encrypted name
 // when collection names are encrypted, the raw name otherwise.
 func (s *Store) bucketKey(name string) ([]byte, error) {
-	return s.enc.sealName(name, keyDomainName)
+	return s.enc.Load().sealName(name, keyDomainName)
 }
 
 // logicalName turns a stored collection name back into the name the caller
 // knows.
 func (s *Store) logicalName(physical []byte) (string, error) {
-	return s.enc.openName(physical, keyDomainName)
+	return s.enc.Load().openName(physical, keyDomainName)
 }

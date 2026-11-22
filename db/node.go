@@ -123,6 +123,11 @@ func (n *node) readWriteTx(ctx context.Context, fn func(tx *bolt.Tx) error) erro
 		return run(n.tx)
 	}
 
+	// Serialize with rotation: the whole top-level write transaction runs under
+	// the read side of rotMu, so a rotation cannot commit between the key load
+	// and the write.
+	n.s.rotMu.RLock()
+	defer n.s.rotMu.RUnlock()
 	return n.s.bolt.Update(run)
 }
 
@@ -146,5 +151,7 @@ func (n *node) readTx(ctx context.Context, fn func(tx *bolt.Tx) error) error {
 		return run(n.tx)
 	}
 
+	n.s.rotMu.RLock()
+	defer n.s.rotMu.RUnlock()
 	return n.s.bolt.View(run)
 }

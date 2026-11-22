@@ -13,24 +13,26 @@ import (
 // previous key stays available for decryption, so the collections that were not
 // rewritten keep working until RotateAll.
 func (s *Store) withRotationKey(newKey []byte) (*encState, error) {
-	if s.enc == nil {
+	cur := s.enc.Load()
+	if cur == nil {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 
-	kc, err := s.enc.kc.WithKeyKeepingFallbacks(newKey)
+	kc, err := cur.kc.WithKeyKeepingFallbacks(newKey)
 	if err != nil {
 		return nil, err
 	}
 	return &encState{
 		kc:        kc,
-		encPoints: s.enc.encPoints,
+		encPoints: cur.encPoints,
 	}, nil
 }
 
 // withKey returns an encryption state that writes with newKey while keeping the
 // current cipher and flags, dropping every current key.
 func (s *Store) withKey(newKey []byte) (*encState, error) {
-	if s.enc == nil {
+	cur := s.enc.Load()
+	if cur == nil {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 	if len(newKey) != KeySize {
@@ -39,15 +41,15 @@ func (s *Store) withKey(newKey []byte) (*encState, error) {
 
 	return resolveConfig(Config{
 		Secret:                 append([]byte(nil), newKey...),
-		EncryptPoints:          s.enc.encPoints,
-		EncryptPointIDs:        s.enc.encIDs,
-		EncryptCollectionNames: s.enc.encNames,
+		EncryptPoints:          cur.encPoints,
+		EncryptPointIDs:        cur.encIDs,
+		EncryptCollectionNames: cur.encNames,
 	})
 }
 
 // adoptEnc installs next as the encryption state of the store.
 func (s *Store) adoptEnc(next *encState) {
-	s.enc = next
+	s.enc.Store(next)
 }
 
 // ReEncryptCollection rewrites one collection and its metadata under newKey and
@@ -76,7 +78,8 @@ func (s *Store) ReEncryptCollection(ctx context.Context, name string, newKey []b
 	if name == "" {
 		return fmt.Errorf("%w: collection name is required", ErrInvalidConfig)
 	}
-	if s.enc != nil && (s.enc.encIDs || s.enc.encNames) {
+	enc := s.enc.Load()
+	if enc != nil && (enc.encIDs || enc.encNames) {
 		return fmt.Errorf("%w: a single collection cannot be rotated when point IDs or collection names are encrypted; use RotateAll", ErrInvalidConfig)
 	}
 
@@ -85,8 +88,11 @@ func (s *Store) ReEncryptCollection(ctx context.Context, name string, newKey []b
 		return err
 	}
 
+	s.rotMu.Lock()
+	defer s.rotMu.Unlock()
+
 	err = s.db.Update(func(tx *bbolt.Tx) error {
-		r := &rotation{ctx: ctx, store: s, old: s.enc, next: next}
+		r := &rotation{ctx: ctx, store: s, old: enc, next: next}
 
 		physical, err := s.bucketKey(name)
 		if err != nil {
@@ -129,8 +135,11 @@ func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 		return err
 	}
 
+	s.rotMu.Lock()
+	defer s.rotMu.Unlock()
+
 	err = s.db.Update(func(tx *bbolt.Tx) error {
-		r := &rotation{ctx: ctx, store: s, old: s.enc, next: next}
+		r := &rotation{ctx: ctx, store: s, old: s.enc.Load(), next: next}
 
 		names, err := r.collectionNames(tx)
 		if err != nil {
@@ -166,11 +175,11 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
-	if s.enc == nil {
-		return fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
-	}
-
-	return s.db.View(func(tx *bbolt.Tx) error {
+	return s.view(func(tx *bbolt.Tx) error {
+		enc := s.enc.Load()
+		if enc == nil {
+			return fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
+		}
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -190,14 +199,14 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if !m.matches(s.enc) {
+		if !m.matches(enc) {
 			return fmt.Errorf("%w: encryption settings do not match the store", ErrWrongMode)
 		}
-		if err := s.enc.verifyCanary(canary); err != nil {
+		if err := enc.verifyCanary(canary); err != nil {
 			return err
 		}
 
-		r := &rotation{ctx: ctx, store: s, old: s.enc}
+		r := &rotation{ctx: ctx, store: s, old: enc}
 
 		names, err := r.collectionNames(tx)
 		if err != nil {

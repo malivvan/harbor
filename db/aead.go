@@ -387,7 +387,7 @@ func encFromNode(n Node) *encState {
 	if !ok || nd.s == nil {
 		return nil
 	}
-	return nd.s.enc
+	return nd.s.enc.Load()
 }
 
 // nodeEnc returns the encryption state of the node, or nil for a plaintext
@@ -396,7 +396,7 @@ func (n *node) nodeEnc() *encState {
 	if n == nil || n.s == nil {
 		return nil
 	}
-	return n.s.enc
+	return n.s.enc.Load()
 }
 
 // seal encrypts p when the store is encrypted, and returns p untouched
