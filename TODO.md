@@ -664,6 +664,8 @@ The big `ts` wins (skip satisfied retention on insert, stream block aggregation,
 `SetNow`, persisted `meta.Count`) already landed in `1a9868d`. Remaining:
 
 ### 4.1 `insertBlocks`/`mergePoints` rebuild a map and re-sort the whole block on every insert — MEDIUM-HIGH
+
+> **Status:** ✅ FIXED — `mergePoints` sorts/dedupes only the incoming list and then does a linear merge; the common append case is a plain append, and the map-plus-full-sort fallback is gone. A regression test pins duplicate/append semantics and caller-slice immutability.
 - **Location:** `ts/block.go:60-76` (`mergePoints`), `ts/block.go:115-145` (`insertBlocks`).
 - **Problem:** Each insert touching a time block creates a `map[int64]float64` of
   `len(existing)+len(incoming)`, copies both lists in, allocates a new slice and sorts the whole

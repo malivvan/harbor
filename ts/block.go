@@ -58,21 +58,61 @@ func unpackBlock(data []byte) ([]Point, error) {
 }
 
 // mergePoints combines two point lists, last write winning per timestamp.
+// Existing blocks are already sorted; incoming points are sorted here. A
+// linear merge replaces the previous map-and-sort approach, which rebuilt and
+// re-sorted the whole block on every insert.
 func mergePoints(existing, incoming []Point) []Point {
-	merged := make(map[int64]float64, len(existing)+len(incoming))
-	for _, point := range existing {
-		merged[point.Timestamp] = point.Value
-	}
-	for _, point := range incoming {
-		merged[point.Timestamp] = point.Value
+	if len(incoming) == 0 {
+		return existing
 	}
 
-	points := make([]Point, 0, len(merged))
-	for ts, value := range merged {
-		points = append(points, Point{Timestamp: ts, Value: value})
+	// Copy before sorting: callers own their input slices.
+	inc := append([]Point(nil), incoming...)
+	sort.SliceStable(inc, func(i, j int) bool {
+		return inc[i].Timestamp < inc[j].Timestamp
+	})
+
+	// Duplicate timestamps in incoming: the last value wins.
+	deduped := inc[:0]
+	for _, point := range inc {
+		if n := len(deduped); n > 0 && deduped[n-1].Timestamp == point.Timestamp {
+			deduped[n-1] = point
+			continue
+		}
+		deduped = append(deduped, point)
 	}
-	sort.Slice(points, func(i, j int) bool { return points[i].Timestamp < points[j].Timestamp })
-	return points
+	inc = deduped
+
+	if len(existing) == 0 {
+		return inc
+	}
+
+	// Common append case: everything is after the last existing timestamp.
+	if inc[0].Timestamp > existing[len(existing)-1].Timestamp {
+		out := make([]Point, 0, len(existing)+len(inc))
+		out = append(out, existing...)
+		return append(out, inc...)
+	}
+
+	out := make([]Point, 0, len(existing)+len(inc))
+	i, j := 0, 0
+	for i < len(existing) && j < len(inc) {
+		switch {
+		case existing[i].Timestamp < inc[j].Timestamp:
+			out = append(out, existing[i])
+			i++
+		case existing[i].Timestamp > inc[j].Timestamp:
+			out = append(out, inc[j])
+			j++
+		default:
+			// Incoming wins for the same timestamp.
+			out = append(out, inc[j])
+			i++
+			j++
+		}
+	}
+	out = append(out, existing[i:]...)
+	return append(out, inc[j:]...)
 }
 
 func (s *Store) sealBlock(points []Point) ([]byte, error) {
