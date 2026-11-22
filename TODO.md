@@ -220,6 +220,8 @@ so "defeating SIMD" is not a concern here.
 - **Risk:** Low.
 
 ### 1.15 Bucket-path helpers allocate name slices / `[]byte` conversions per call — LOW-MEDIUM
+
+> **Status:** ✅ FIXED — `getBucket` and `createBucketIfNotExists` walk the node path and children directly, with no per-call `[][]byte` name slice. `createBucketIfNotExists` also creates the optional child without a second slice.
 - **Location:** `db/bucket.go:7-44` (`getBucket`), `db/bucket.go:47-72`
   (`createBucketIfNotExists`).
 - **Problem:** Each call builds `make([][]byte, …)` and string→bytes conversions to walk the
