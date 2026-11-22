@@ -70,7 +70,7 @@ func (f *File) Read(p []byte) (int, error) {
 	}
 	offset := int(f.offset)
 
-	data, err := f.fs.loadData(f.node.Ino)
+	data, err := f.loadCachedData()
 	if err != nil {
 		return 0, err
 	}

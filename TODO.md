@@ -275,6 +275,8 @@ so "defeating SIMD" is not a concern here.
   visibility).
 
 ### 2.2 Non-chunked `Read` decrypts and copies the whole file on every call — HIGH
+
+> **Status:** ✅ FIXED — non-chunked reads reuse the decrypted buffer cached on the open `File` (`loadCachedData`) instead of decrypting and copying the whole file on every call; the requested bytes are still copied into the caller buffer.
 - **Location:** `fs/file.go:65-93`, `fs/fs.go:560-618`.
 - **Problem:** `Read` calls `loadData`, which `Get`s, decrypts and copies the entire file, then
   copies out only `p`. Reading 1 byte is O(n) + O(n) crypto + O(n) alloc; `io.Copy` over many
