@@ -85,7 +85,7 @@ These are deliberately left as follow-ups; none is a P0 data-loss item.
    `subFS`/`subFiler` types are now detected by staticcheck when tests are
    excluded), document the error-wrapping contract for fs/ts/vec, decide the
    stability of the exported generated codec handles in `vec`, and pin the
-   `binco` dependency policy.
+   dependency policy and a lower Go language floor if adopters need one.
 8. **Integration tests.** Run multipart, rename and ranged reads against a
    real MinIO/S3 endpoint; the in-repo fake now enforces SigV4 header signing
    but is not a backend.

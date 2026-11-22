@@ -60,7 +60,7 @@ const (
 const sivInfoPrefix = "storm/vec/keys/"
 
 // encState is the shared encryption configuration of a Store. A nil encState
-// means plaintext: every helper is then an exact passthrough to the binco,
+// means plaintext: every helper is then an exact passthrough to the point
 // JSON and raw-key paths used today.
 type encState struct {
 	// kc holds the cipher engines: the primary key first, then rotation

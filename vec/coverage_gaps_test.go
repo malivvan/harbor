@@ -5,7 +5,6 @@ import (
 	"math"
 	"testing"
 
-	"github.com/malivvan/binco"
 	"github.com/stretchr/testify/require"
 )
 
@@ -89,30 +88,32 @@ func TestStringAndRegexHelpers(t *testing.T) {
 	require.LessOrEqual(t, regexCacheSize(), 1025)
 }
 
-func TestBincoSkip(t *testing.T) {
-	kindBytes := binco.Encode(ValueKindBinco, KindInt)
-	n, err := ValueKindBinco.Skip(kindBytes)
-	require.NoError(t, err)
-	require.Equal(t, len(kindBytes), n)
-
-	value := Value{Kind: KindString, StringValue: "payload"}
-	valueBytes := binco.Encode(ValueBinco, value)
-	n, err = ValueBinco.Skip(valueBytes)
+func TestStoredPointCodec(t *testing.T) {
+	value := Value{Kind: KindString, StringValue: "payload", BytesValue: []byte{1, 2}}
+	valueBytes := appendValue(nil, value)
+	decodedValue, n, err := decodeValue(valueBytes)
 	require.NoError(t, err)
 	require.Equal(t, len(valueBytes), n)
+	require.Equal(t, value, decodedValue)
 
 	point := StoredPoint{
 		ID:      "p",
 		Vector:  []float32{1, 2},
-		Payload: map[string]*Value{"k": {Kind: KindInt, IntValue: 1}},
+		Payload: map[string]*Value{"k": {Kind: KindInt, IntValue: 1}, "nil": nil},
 		Version: 3,
 	}
-	pointBytes := binco.Encode(StoredPointBinco, point)
-	n, err = StoredPointBinco.Skip(pointBytes)
+	pointBytes := encodeStoredPoint(point)
+	require.Equal(t, len(pointBytes), storedPointSize(point))
+	decoded, err := decodeStoredPoint(pointBytes)
 	require.NoError(t, err)
-	require.Equal(t, len(pointBytes), n)
+	require.Equal(t, point, decoded)
 
-	_, err = StoredPointBinco.Skip(nil)
+	_, err = decodeStoredPoint(nil)
+	require.Error(t, err)
+	_, err = decodeStoredPoint(append(pointBytes, 0))
+	require.Error(t, err)
+	// A truncated length must not panic or allocate wildly.
+	_, err = decodeStoredPoint([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01})
 	require.Error(t, err)
 }
 

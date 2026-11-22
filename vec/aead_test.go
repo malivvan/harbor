@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/binco"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/bbolt"
 )
@@ -80,7 +79,7 @@ func aeadTestPoints() []PointStruct {
 }
 
 // TestAEADOptionalityKeepsPlaintextFormat proves that a store opened without
-// encryption writes byte-for-byte the same data as before: raw binco point
+// encryption writes byte-for-byte the same data as before: raw point
 // blobs, raw JSON metadata, raw ID/name keys and no encryption marker.
 func TestAEADOptionalityKeepsPlaintextFormat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plain.db")
@@ -97,9 +96,9 @@ func TestAEADOptionalityKeepsPlaintextFormat(t *testing.T) {
 		raw, ok := rawPoints[point.ID]
 		require.True(t, ok, "point keys must stay raw IDs")
 
-		// A plaintext store must hold bare binco blobs, so they decode directly.
-		stored, err := binco.DecodeExact(StoredPointBinco, raw)
-		require.NoError(t, err, "stored blobs must be raw binco, not ciphertext")
+		// A plaintext store must hold bare point blobs, so they decode directly.
+		stored, err := decodeStoredPoint(raw)
+		require.NoError(t, err, "stored blobs must be raw point encodings, not ciphertext")
 		converted, err := toStoredPoint(&point)
 		require.NoError(t, err)
 		require.Equal(t, fromStoredPoint(converted), fromStoredPoint(&stored))
@@ -279,7 +278,7 @@ func TestAEADTamperedPointFails(t *testing.T) {
 		"truncated": func(raw []byte) []byte {
 			return append([]byte(nil), raw[:len(raw)-4]...)
 		},
-		// An emptied value stays empty, so it fails the binco decode instead of
+		// An emptied value stays empty, so it fails the point decode instead of
 		// the MAC.
 		"empty": func([]byte) []byte { return []byte{} },
 	}

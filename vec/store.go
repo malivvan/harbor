@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"unicode/utf8"
 
-	"github.com/malivvan/binco"
 	"go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
 )
@@ -663,14 +662,14 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 				return fmt.Errorf("failed to encode point %s: %w", p.ID, err)
 			}
 			storedPoints[i] = stored
-			total += StoredPointBinco.Size(*stored)
+			total += storedPointSize(*stored)
 		}
 
 		arena := make([]byte, 0, total)
 		for i, stored := range storedPoints {
 			p := &points[i]
 			start := len(arena)
-			arena = binco.AppendEncode(arena, StoredPointBinco, *stored)
+			arena = appendStoredPoint(arena, *stored)
 			sealed, err := s.sealBytes(arena[start:])
 			if err != nil {
 				return fmt.Errorf("failed to encrypt point %s: %w", p.ID, err)
@@ -726,7 +725,7 @@ func (s *Store) LoadCollection(colName string) (map[string]*PointStruct, error) 
 				return fmt.Errorf("failed to decrypt point %q: %w", k, err)
 			}
 
-			stored, err := binco.DecodeExact(StoredPointBinco, plain)
+			stored, err := decodeStoredPoint(plain)
 			if err != nil {
 				return err
 			}

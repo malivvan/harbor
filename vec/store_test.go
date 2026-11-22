@@ -9,7 +9,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/malivvan/binco"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -294,7 +293,7 @@ func TestStorageErrorCases(t *testing.T) {
 }
 
 // TestToProtoPointInvalidUTF8 verifies that invalid UTF-8 strings in payload
-// are sanitized (replaced with U+FFFD) before binco encoding.
+// are sanitized (replaced with U+FFFD) before point encoding.
 // This covers the P1 fix: UTF-8 validation in toStoredPoint.
 func TestToProtoPointInvalidUTF8(t *testing.T) {
 	t.Run("InvalidUTF8String_Sanitized", func(t *testing.T) {
@@ -361,15 +360,15 @@ func TestToProtoPointInvalidUTF8(t *testing.T) {
 		if err != nil {
 			t.Fatalf("toStoredPoint: %v", err)
 		}
-		data := binco.Encode(StoredPointBinco, *converted)
+		data := encodeStoredPoint(*converted)
 		if len(data) == 0 {
 			t.Fatal("encoded data is empty")
 		}
 
 		// Round-trip: decode and verify content is valid UTF-8
-		decoded, err := binco.DecodeExact(StoredPointBinco, data)
+		decoded, err := decodeStoredPoint(data)
 		if err != nil {
-			t.Fatalf("binco decode failed: %v", err)
+			t.Fatalf("point decode failed: %v", err)
 		}
 		content := decoded.Payload["raw"].GetStringValue()
 		if !utf8.ValidString(content) {

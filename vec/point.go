@@ -1,7 +1,5 @@
 package vec
 
-//go:generate go run ./gen
-
 // ValueKind identifies the active field in a Value.
 type ValueKind uint8
 

@@ -3,7 +3,6 @@ module github.com/malivvan/storm
 go 1.27.4
 
 require (
-	github.com/malivvan/binco v0.9.0
 	github.com/stretchr/testify v1.12.1
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/crypto v0.59.0

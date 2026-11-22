@@ -286,7 +286,7 @@ A detailed remediation sequence is at the end of this document.
 
 ### P1-11 — `EncryptPointIDs` alone does not hide point IDs
 - **Status:** code-verified.
-- **Location:** `vec/store.go:86-91` (`toStoredPoint` stores `ID: p.ID` plaintext), `vec/binco.gen.go:142-147`; option wiring in `vec/aead.go`/`store.go`.
+- **Location:** `vec/store.go:86-91` (`toStoredPoint` stores `ID: p.ID` plaintext), `vec/point.go` (StoredPoint); option wiring in `vec/aead.go`/`store.go`.
 - **Problem:** With `EncryptPointIDs` enabled but `EncryptPoints` disabled, only the bbolt key is SIV-encrypted; the value is unencrypted and contains the ID in plaintext. The option name promises more than it delivers.
 - **Impact:** Security/compliance expectation gap for users who enable only ID encryption.
 - **Fix:** Encrypt the ID in the value when ID encryption is on, or make `EncryptPointIDs` imply point encryption and document it; add a test that inspects stored bytes.
@@ -345,7 +345,7 @@ A detailed remediation sequence is at the end of this document.
 - **Fix:** Add a security policy with private reporting, contributor guide, changelog, and tag `v0.1.0`/`v1.0.0` after blockers are fixed.
 
 ### P2-10 — No fuzz/property coverage for on-disk and network parsers
-- **Location:** `internal/encryption/marker.go`, `meta.go`, `fs/inode.go` GobDecode/decodeNode, `ts/series.go` decodeMeta, `ts/encode.go`, `vec/binco.gen.go`, `fs/s3fs/http_client.go` XML/SigV4.
+- **Location:** `internal/encryption/marker.go`, `meta.go`, `fs/inode.go` GobDecode/decodeNode, `ts/series.go` decodeMeta, `ts/encode.go`, `vec/binary.go`, `fs/s3fs/http_client.go` XML/SigV4.
 - **Problem:** Only `internal/absfs` has fuzz tests. Corrupt/tampered bytes are exactly what the AEAD markers are meant to detect; panics (P1-3) and silent empty results (P2-7) are untested.
 - **Fix:** Add `FuzzDecodeMarker`, `FuzzDecodeMetadata`, `FuzzGobInode`, `FuzzTSBlock/Point`, `FuzzStoredPoint`, and S3 response/SigV4 fuzz targets with seeds from real records.
 
@@ -358,7 +358,7 @@ A detailed remediation sequence is at the end of this document.
 - **Public API surface:** `vec` exports generated codec handles (`StoredPointBinco`, `ValueBinco`, `ValueKindBinco`, schema fingerprints); `vec/hnsw` panics on dimension/empty-heap misuse. Document as unstable or move to `internal/`; replace reachable panics with errors where practical.
 - **Staticcheck test findings:** 46 warnings are in tests (nil contexts, unused values, deprecated `io/ioutil`, redundant code). CI needs a policy (clean or allowlist) or it will stay red.
 - **`vec/gen`:** `main` writes into the working directory and `run` failure branches are barely tested; add a temp-dir invocation in CI.
-- **Dependency/toolchain:** `github.com/malivvan/binco v0.9.0` is same-author and pre-1.0; `go 1.27.3` is a very new floor. Pin/vendor and consider a lower language floor for adopters (policy decision).
+- **Dependency/toolchain:** the external code generator and its runtime dependency were removed in favour of a hand-written vec codec; `go 1.27.3` is a very new floor (now 1.27.4). Consider a lower language floor for adopters (policy decision).
 
 ---
 
