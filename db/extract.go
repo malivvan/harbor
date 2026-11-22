@@ -346,21 +346,28 @@ func (m *structConfig) refresh() {
 }
 
 func extractSingleField(ref *reflect.Value, fieldName string) (*structConfig, error) {
-	var cfg structConfig
-	cfg.Fields = make(map[string]*fieldConfig)
+	cfg := &structConfig{Fields: make(map[string]*fieldConfig)}
 
-	f, ok := ref.Type().FieldByName(fieldName)
-	if !ok || f.PkgPath != "" {
-		return nil, fmt.Errorf("field %s not found", fieldName)
+	if f, ok := ref.Type().FieldByName(fieldName); ok && f.PkgPath == "" {
+		v := ref.FieldByName(fieldName)
+		if err := extractField(&v, &f, cfg, false); err != nil {
+			return nil, err
+		}
+		return cfg, nil
 	}
 
-	v := ref.FieldByName(fieldName)
-	err := extractField(&v, &f, &cfg, false)
-	if err != nil {
+	// Promoted fields of a named inline struct are not reachable through
+	// reflect.Type.FieldByName; resolve them through the flattened field set.
+	full := &structConfig{Fields: make(map[string]*fieldConfig)}
+	if err := extractFields(ref, full, false); err != nil {
 		return nil, err
 	}
-
-	return &cfg, nil
+	fc, ok := full.Fields[fieldName]
+	if !ok {
+		return nil, fmt.Errorf("field %s not found", fieldName)
+	}
+	cfg.Fields[fieldName] = fc
+	return cfg, nil
 }
 
 func getIndex(bucket *bolt.Bucket, idxKind string, fieldName string) (index.Index, error) {

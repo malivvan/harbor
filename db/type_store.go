@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 
 	"github.com/malivvan/storm/db/index"
 	bolt "go.etcd.io/bbolt"
@@ -401,28 +402,87 @@ func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data in
 // Update a structure
 func (n *node) Update(ctx context.Context, data any) error {
 	return wrapError("update", n.update(ctx, data, func(ref *reflect.Value, current *reflect.Value, cfg *structConfig) error {
-		numfield := ref.NumField()
-		for i := 0; i < numfield; i++ {
-			if err := checkContext(ctx); err != nil {
-				return err
-			}
-			f := ref.Field(i)
-			if ref.Type().Field(i).PkgPath != "" {
+		return mergeUpdateFields(ctx, ref, current, cfg)
+	}))
+}
+
+// mergeUpdateFields copies the non-zero fields of src over dst, the stored
+// record. Inline embedded structs are merged field by field: treating the
+// whole embedded value as one top-level field would replace the stored struct
+// wholesale and zero every subfield the caller did not supply.
+func mergeUpdateFields(ctx context.Context, src, dst *reflect.Value, cfg *structConfig) error {
+	return mergeUpdateStruct(ctx, *src, *dst, cfg)
+}
+
+func mergeUpdateStruct(ctx context.Context, src, dst reflect.Value, cfg *structConfig) error {
+	typ := src.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+		sf := typ.Field(i)
+		if sf.PkgPath != "" {
+			continue
+		}
+
+		sv := src.Field(i)
+		dv := dst.Field(i)
+
+		if strings.Contains(sf.Tag.Get("db"), tagInline) {
+			srcElem, dstElem, ok := inlineValues(sv, dv)
+			if !ok {
 				continue
 			}
-			zero := reflect.Zero(f.Type()).Interface()
-			actual := f.Interface()
-			if !reflect.DeepEqual(actual, zero) {
-				cf := current.Field(i)
-				cf.Set(f)
-				idxInfo, ok := cfg.Fields[ref.Type().Field(i).Name]
-				if ok {
-					idxInfo.Value = &cf
-				}
+			if err := mergeUpdateStruct(ctx, srcElem, dstElem, cfg); err != nil {
+				return err
 			}
+			continue
 		}
-		return nil
-	}))
+
+		zero := reflect.Zero(sv.Type()).Interface()
+		if reflect.DeepEqual(sv.Interface(), zero) {
+			continue
+		}
+		dv.Set(sv)
+		if idxInfo, ok := cfg.Fields[sf.Name]; ok {
+			idxInfo.Value = &dv
+			idxInfo.IsZero = isZero(&dv)
+		}
+	}
+	return nil
+}
+
+// inlineValues resolves the source and destination values of an inline
+// embedded field. A nil source pointer means the caller supplied nothing for
+// that struct; a nil destination pointer is allocated so the merge has
+// somewhere to write.
+func inlineValues(src, dst reflect.Value) (reflect.Value, reflect.Value, bool) {
+	if src.Kind() != reflect.Ptr {
+		if src.Kind() != reflect.Struct {
+			return reflect.Value{}, reflect.Value{}, false
+		}
+		return src, dst, true
+	}
+	if src.IsNil() {
+		return reflect.Value{}, reflect.Value{}, false
+	}
+	srcElem := src.Elem()
+	if srcElem.Kind() != reflect.Struct {
+		return reflect.Value{}, reflect.Value{}, false
+	}
+	if dst.Kind() == reflect.Ptr {
+		if dst.IsNil() {
+			if !dst.CanSet() {
+				return reflect.Value{}, reflect.Value{}, false
+			}
+			dst.Set(reflect.New(dst.Type().Elem()))
+		}
+		return srcElem, dst.Elem(), true
+	}
+	if dst.Kind() != reflect.Struct {
+		return reflect.Value{}, reflect.Value{}, false
+	}
+	return srcElem, dst, true
 }
 
 // UpdateField updates a single field
