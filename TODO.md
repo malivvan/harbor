@@ -588,6 +588,8 @@ build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 - **Risk:** Medium (metric/score semantics).
 
 ### 3.11 `addNeighbor` recomputes the distance to every existing neighbor on each overflow — MEDIUM
+
+> **Status:** ✅ FIXED — each `layerNode` keeps an unexported `neighborDist` cache (recomputed lazily for decoded graphs), so pruning an overflowing edge set compares cached distances instead of recomputing M distances. The cache is maintained on link, eviction and deletion.
 - **Location:** `vec/hnsw/graph.go:53-61`.
 - **Problem:** When a node exceeds M neighbors it scans all M recomputing distances — O(M·D) per
   add; during construction each insert triggers this for ~M neighbors.
@@ -597,6 +599,8 @@ build of 2000 points **1.20 s / 157 MB / 904,035 allocs**.
 - **Risk:** Medium (edge bookkeeping on delete/replenish).
 
 ### 3.12 `replenish` allocates a candidate slice + `seen` map and does O(M²) work + sort per eviction — MEDIUM
+
+> **Status:** ✅ FIXED — the duplicate `seen` map is gone; with M small, candidates are deduplicated by a linear scan, removing one allocation per eviction (the candidate slice remains).
 - **Location:** `vec/hnsw/graph.go:167-213` (`candidates := make(...)` `:179`, `seen :=
   make(map[...]bool)` `:180`, `slices.SortStableFunc` `:199`).
 - **Problem:** Called on every worst-eviction and on delete (`isolate`), i.e. frequently during

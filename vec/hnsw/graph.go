@@ -29,6 +29,11 @@ type layerNode[K cmp.Ordered] struct {
 	// It is a map and not a slice to allow for efficient deletes, esp.
 	// when M is high.
 	neighbors map[K]*layerNode[K]
+
+	// neighborDist caches the distance to each neighbor so pruning an
+	// overflowing edge set does not recompute M distances. It is unexported
+	// and therefore not gob-encoded; missing entries are recomputed lazily.
+	neighborDist map[K]float32
 }
 
 // addNeighbor adds a o neighbor to the node, replacing the neighbor
@@ -36,20 +41,30 @@ type layerNode[K cmp.Ordered] struct {
 func (n *layerNode[K]) addNeighbor(newNode *layerNode[K], m int, dist DistanceFunc) {
 	if n.neighbors == nil {
 		n.neighbors = make(map[K]*layerNode[K], m)
+		n.neighborDist = make(map[K]float32, m)
+	}
+	if n.neighborDist == nil {
+		n.neighborDist = make(map[K]float32, len(n.neighbors)+1)
 	}
 
 	n.neighbors[newNode.Key] = newNode
+	n.neighborDist[newNode.Key] = dist(newNode.Value, n.Value)
 	if len(n.neighbors) <= m {
 		return
 	}
 
-	// Find the neighbor with the worst distance.
+	// Find the neighbor with the worst distance, reusing cached edge
+	// distances where available.
 	var (
 		worstDist = float32(math.Inf(-1))
 		worst     *layerNode[K]
 	)
-	for _, neighbor := range n.neighbors {
-		d := dist(neighbor.Value, n.Value)
+	for key, neighbor := range n.neighbors {
+		d, ok := n.neighborDist[key]
+		if !ok {
+			d = dist(neighbor.Value, n.Value)
+			n.neighborDist[key] = d
+		}
 		// d > worstDist may always be false if the distance function
 		// returns NaN, e.g., when the embeddings are zero.
 		if d > worstDist || worst == nil {
@@ -59,8 +74,10 @@ func (n *layerNode[K]) addNeighbor(newNode *layerNode[K], m int, dist DistanceFu
 	}
 
 	delete(n.neighbors, worst.Key)
+	delete(n.neighborDist, worst.Key)
 	// Delete backlink from the worst neighbor.
 	delete(worst.neighbors, n.Key)
+	delete(worst.neighborDist, n.Key)
 	worst.replenish(m, dist)
 }
 
@@ -372,21 +389,26 @@ func (n *layerNode[K]) replenish(m int, dist DistanceFunc) {
 	}
 
 	candidates := make([]candidate, 0, m)
-	seen := make(map[K]bool, len(n.neighbors))
-	for key := range n.neighbors {
-		// do not add duplicates
-		seen[key] = true
-	}
 
 	for _, neighbor := range n.neighbors {
 		for key, c := range neighbor.neighbors {
-			if seen[key] {
-				continue
-			}
 			if c == nil || c == n {
 				continue
 			}
-			seen[key] = true
+			if _, exists := n.neighbors[key]; exists {
+				continue
+			}
+			// M is small; a linear duplicate check avoids allocating a set.
+			dup := false
+			for _, existing := range candidates {
+				if existing.node == c {
+					dup = true
+					break
+				}
+			}
+			if dup {
+				continue
+			}
 			candidates = append(candidates, candidate{node: c, dist: dist(c.Value, n.Value)})
 		}
 	}
@@ -415,6 +437,7 @@ func (n *layerNode[K]) replenish(m int, dist DistanceFunc) {
 func (n *layerNode[K]) isolate(m int, dist DistanceFunc) {
 	for _, neighbor := range n.neighbors {
 		delete(neighbor.neighbors, n.Key)
+		delete(neighbor.neighborDist, n.Key)
 		neighbor.replenish(m, dist)
 	}
 }
