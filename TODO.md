@@ -79,48 +79,22 @@ All items in this section are resolved:
 
 # 3. `internal/encryption`, `internal/slip10`, `internal/slip21`
 
-## E1. [Medium] AES-SIV has no RFC 5297 known-answer vectors
-**Location:** `internal/encryption/siv_test.go`, implementation `siv.go`.
-**Problem:** Tests cover round-trip, determinism and tamper detection only. A
-non-standard S2V/CMAC/CTR implementation could still pass them.
-**Fix:** Add RFC 5297 §2.6/A test vectors, including empty plaintext and empty
-associated data.
-**Test:** Compare exact ciphertext/MAC bytes against the published vectors.
+All items in this section are resolved:
 
-## E2. [Low] `SIVNameCipher.OpenName` returns a non-sentinel error for short ciphertext
-**Location:** `internal/encryption/siv.go` (`Decrypt` short-ciphertext case,
-`OpenName`).
-**Problem:** `Decrypt` returns a plain `fmt.Errorf("ciphertext too short")`; its
-documented contract says malformed names yield `ErrAuthFailed`. `OpenName` can
-return that non-sentinel error for an empty/short name.
-**Fix:** Wrap the short-ciphertext case (at least in `OpenName`) with
-`ErrAuthFailed`; add tests for empty/short encoded names.
+- **E1** — `siv_test.go` now verifies RFC 5297 appendix A.1 and A.2 byte for
+  byte. `NewSIVEngine` accepts the RFC key sizes (32/48/64) so the published
+  vectors apply directly; storm still derives 64-byte keys. Empty plaintext and
+  empty associated data are covered too.
+- **E2** — a short ciphertext now wraps `ErrAuthFailed`, so
+  `SIVNameCipher.OpenName` returns the documented sentinel for empty/short
+  names (`TestSIVNameCipherRejectsShortNames`).
+- **E3** — `NewSIVEngine` copies the key halves and propagates both
+  `aes.NewCipher` errors; the k1 block is built once; `pad` cannot panic on a
+  full block (`TestSIVKeySizesAndIsolation`, `TestSIVPadNeverPanics`).
+- **E4** — the unreferenced `internal/slip10` package was removed.
+- **E5** — the dead `internal/machine` package (wrong import comment,
+  deprecated `ioutil`) was removed.
 
-## E3. [Low] Defensive gaps in `siv.go`
-**Location:** `internal/encryption/siv.go` key splitting/`NewSIVEngine`,
-ignored `aes.NewCipher` error, `pad`.
-**Problem:** Key halves alias the caller’s slice, the `NewCipher` error is
-ignored, and `pad` indexes `result[len(data)]` without a bound check for a
-full-block input.
-**Fix:** Copy key material, propagate/assert the cipher construction error, and
-bound-check `pad`.
-
-## E4. [Low] `internal/slip10` is unreferenced
-**Location:** `internal/slip10/*`.
-**Problem:** No package imports `slip10`; only `slip21` is used by the root
-package. It is internal, so external users cannot use it.
-**Fix:** Remove it, or wire it into a planned feature with tests/docs.
-
-## E5. [Low] `internal/machine` is dead and has a wrong import comment
-**Location:** `internal/machine/id.go`.
-**Problem:** The package is imported by nothing; the doc says `Package
-machineid` and the import comment points at
-`github.com/denisbrodbeck/machineid`, not its real path. It also uses
-deprecated `io/ioutil`.
-**Fix:** Delete the package, or correct the documentation/import path and
-dependencies.
-
----
 
 # 4. `db` package
 

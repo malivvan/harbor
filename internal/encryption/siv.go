@@ -24,32 +24,46 @@ import (
 //
 // Reference: RFC 5297 - Synthetic Initialization Vector (SIV) Authenticated Encryption
 type SIVEngine struct {
-	k1    []byte // First half of key for S2V
-	k2    []byte // Second half of key for CTR
-	block cipher.Block
+	k1       []byte // First half of key for S2V
+	k2       []byte // Second half of key for CTR
+	block    cipher.Block
+	s2vBlock cipher.Block
 }
 
-// NewSIVEngine creates a new AES-SIV cipher engine
-// Key must be 64 bytes (512 bits) - split into two 32-byte keys
+// NewSIVEngine creates a new AES-SIV cipher engine.
+//
+// RFC 5297 keys are two equal halves: 32 bytes (AES-128-SIV), 48 bytes
+// (AES-192-SIV) or 64 bytes (AES-256-SIV). Storm derives 64-byte keys, but the
+// shorter forms are accepted so the published RFC 5297 test vectors can be
+// verified directly. The key material is copied, so the caller may reuse its
+// buffer.
 func NewSIVEngine(key []byte) (*SIVEngine, error) {
-	if len(key) != 64 {
-		return nil, fmt.Errorf("AES-SIV requires a 64-byte key, got %d bytes", len(key))
+	switch len(key) {
+	case 32, 48, 64:
+	default:
+		return nil, fmt.Errorf("%w: AES-SIV requires a 32-, 48- or 64-byte key, got %d bytes", ErrInvalidKey, len(key))
 	}
 
-	// Split key into two halves
-	k1 := key[:32]
-	k2 := key[32:]
+	half := len(key) / 2
+	k1 := append([]byte(nil), key[:half]...)
+	k2 := append([]byte(nil), key[half:]...)
 
-	// Create AES block cipher with k2 for CTR mode
+	// Create AES block cipher with k2 for CTR mode.
 	block, err := aes.NewCipher(k2)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create AES cipher: %w", err)
+		return nil, fmt.Errorf("failed to create CTR AES cipher: %w", err)
+	}
+	// Create a second AES block cipher with k1 for the S2V/CMAC side.
+	s2vBlock, err := aes.NewCipher(k1)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create S2V AES cipher: %w", err)
 	}
 
 	return &SIVEngine{
-		k1:    k1,
-		k2:    k2,
-		block: block,
+		k1:       k1,
+		k2:       k2,
+		block:    block,
+		s2vBlock: s2vBlock,
 	}, nil
 }
 
@@ -75,7 +89,7 @@ func (e *SIVEngine) Encrypt(plaintext []byte, ad ...[]byte) ([]byte, error) {
 // Additional data (AD) must match what was used during encryption
 func (e *SIVEngine) Decrypt(ciphertext []byte, ad ...[]byte) ([]byte, error) {
 	if len(ciphertext) < 16 {
-		return nil, fmt.Errorf("ciphertext too short")
+		return nil, fmt.Errorf("%w: ciphertext too short", ErrAuthFailed)
 	}
 
 	// Step 1: Extract SIV and ciphertext
@@ -97,8 +111,7 @@ func (e *SIVEngine) Decrypt(ciphertext []byte, ad ...[]byte) ([]byte, error) {
 
 // s2v implements the S2V (Synthetic IV) algorithm from RFC 5297
 func (e *SIVEngine) s2v(plaintext []byte, ad ...[]byte) []byte {
-	// Create CMAC with k1
-	block, _ := aes.NewCipher(e.k1)
+	block := e.s2vBlock
 
 	// D = CMAC(zero_block)
 	d := e.cmac(block, make([]byte, 16))
@@ -193,9 +206,14 @@ func dbl(block []byte) []byte {
 	return result
 }
 
-// pad adds PKCS#7-like padding (10* padding for CMAC)
+// pad adds the CMAC 10* padding to a partial block. A full block has no valid
+// 10* encoding, and cmac never passes one; truncating defensively keeps a
+// future caller from panicking with an out-of-range write.
 func pad(data []byte) []byte {
 	result := make([]byte, 16)
+	if len(data) > len(result)-1 {
+		data = data[:len(result)-1]
+	}
 	copy(result, data)
 	result[len(data)] = 0x80
 	return result
