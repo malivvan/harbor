@@ -288,6 +288,25 @@ err = users.Prefix(ctx, "Name", "al", &prefixed)
 `All` if you want an empty slice contract. Pagination and ordering are
 `FindOption` values: `db.Limit`, `db.Skip` and `db.Reverse`.
 
+### Aggregation
+
+`Aggregate` groups records and computes measures without materializing them:
+
+```go
+res, err := store.DB().From("Sale").Aggregate(ctx, db.AggregateSpec{
+	GroupBy:  []string{"Kind"},
+	Measures: []db.Measure{{Alias: "total", Type: db.MeasureSum, Field: "Amount"}},
+	Having:   []db.Having{{Alias: "total", Op: db.HavingGTE, Value: 100}},
+	OrderBy:  "total",
+	Desc:     true,
+})
+```
+
+Measures include count, sum, average, min/max, median, percentile, and sample
+or population standard deviation. `TimeBucket` groups a timestamp by second,
+minute, hour, day or week; `Missing` and `NonNumeric` choose how unusable values
+are treated. See [db/README.md](db/README.md#aggregation).
+
 ### Matcher queries
 
 ```go

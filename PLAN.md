@@ -500,7 +500,22 @@ pass the result IDs as a filter (or count themselves).
 Tests: counts vs. a manual pass, filter scoping, `MaxValues`, missing fields,
 numeric values, empty collection, concurrent upsert/read; benchmark.
 
-## 6. P1 — metadata aggregation in `db`
+## 6. P1 — metadata aggregation in `db` — DONE
+
+Done: `Node.Aggregate` with `AggregateSpec`, `Measure`, `Having`, `TimeBucket`,
+`AggregateResult` and `Group`. It streams decoded records (holding only group
+accumulators; values are retained per group only for median/percentile),
+supports count/sum/avg/min/max/median/percentile/stddev/stddev_pop, multiple
+group keys, day/week/... time buckets from `time.Time`, RFC 3339 or Unix-second
+fields, explicit missing and non-numeric policies with a `Skipped` count,
+HAVING on measures/count/group keys, ordering by measure or key with
+deterministic ties, and a limit. Invalid specs fail with `ErrInvalidAggregate`
+before any record is read. The `Node` interface gained `Aggregate`, so
+transaction-bound nodes aggregate inside the caller's transaction.
+
+Tests: basic measures, multiple keys/order/limit, HAVING, median/percentile/
+std dev, time buckets, missing and non-numeric policies, empty bucket,
+validation, and cancellation.
 
 ### Current state
 

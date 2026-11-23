@@ -55,6 +55,9 @@ type Node interface {
 
 	// WithCodec returns a copy of the node configured to use the given codec.
 	WithCodec(codec Codec) Node
+
+	// Aggregate computes grouped measures over the records of this bucket.
+	Aggregate(ctx context.Context, spec AggregateSpec) (AggregateResult, error)
 }
 
 // Compile-time assertion that *node implements the final Node interface.

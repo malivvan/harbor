@@ -273,6 +273,47 @@ that transaction and never closes it.
 `Query.Bucket(name)` targets a bucket explicitly, which is useful for
 runtime-generated types.
 
+### Aggregation
+
+`Aggregate` computes grouped measures over a bucket without materializing the
+records:
+
+```go
+res, err := records.From("Sale").Aggregate(ctx, db.AggregateSpec{
+	GroupBy: []string{"Kind"},
+	Measures: []db.Measure{
+		{Alias: "rows", Type: db.MeasureCount},
+		{Alias: "total", Type: db.MeasureSum, Field: "Amount"},
+		{Alias: "avg", Type: db.MeasureAvg, Field: "Amount"},
+	},
+	Having:  []db.Having{{Alias: "total", Op: db.HavingGTE, Value: 100}},
+	OrderBy: "total",
+	Desc:    true,
+	Limit:   10,
+})
+for _, g := range res.Groups {
+	fmt.Println(g.Keys, g.Count, g.Measures)
+}
+```
+
+- Measures are `Count`, `Sum`, `Avg`, `Min`, `Max`, `Median`, `Percentile`
+  (`P` in 0–100), `StdDev` (sample) and `StdDevPop`.
+- Fields are the encoded (JSON) field names of the record; nested paths are not
+  supported in v1.
+- `TimeBucket{Field, Unit}` adds a bucketed timestamp to the group key
+  (`second`, `minute`, `hour`, `day`, `week`). The field may hold a
+  `time.Time`, an RFC 3339 string, or numeric Unix seconds; the result key is a
+  `time.Time` in UTC.
+- `Missing` controls a missing numeric field (`MissingExclude` by default,
+  `MissingZero`), and `NonNumeric` controls a value that is not a number
+  (`NonNumericError` by default, `NonNumericSkip`, `NonNumericZero`).
+  `AggregateResult.Skipped` counts the values a measure ignored.
+- `Having` filters on a measure alias, `count`, or a group key. `OrderBy`
+  names a measure alias or group key; ties order by group key.
+- Only median/percentile values are retained per group; the scan itself holds
+  group accumulators, not the records.
+- An empty bucket returns no groups. Invalid specs return `db.ErrInvalidAggregate`.
+
 ### Update
 
 ```go
