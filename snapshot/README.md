@@ -13,7 +13,7 @@ import (
     "github.com/malivvan/harbor/snapshot/blobstore"
 )
 
-st := blobstore.New(myBlobStore, "canopy-cluster")
+st := blobstore.New(myBlobStore, "app-data")
 snap := snapshot.New(st, snapshot.Config{DataPrefix: "os/"})
 
 idx, err := snap.Create(ctx, snapshot.KindManual, "")   // capture

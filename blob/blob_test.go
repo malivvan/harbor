@@ -36,10 +36,10 @@ func TestPutGetRoundTrip(t *testing.T) {
 	s := newBlob(t)
 	ctx := context.Background()
 
-	if _, err := s.Put(ctx, "canopy-a", "drive/notes.txt", strings.NewReader("hello world"), 11, "text/plain"); err != nil {
+	if _, err := s.Put(ctx, "tenant-a", "drive/notes.txt", strings.NewReader("hello world"), 11, "text/plain"); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	got, err := s.ReadAll(ctx, "canopy-a", "drive/notes.txt")
+	got, err := s.ReadAll(ctx, "tenant-a", "drive/notes.txt")
 	if err != nil {
 		t.Fatalf("ReadAll: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestPutGetRoundTrip(t *testing.T) {
 	}
 
 	// Get must report the size.
-	rc, size, err := s.Get(ctx, "canopy-a", "drive/notes.txt")
+	rc, size, err := s.Get(ctx, "tenant-a", "drive/notes.txt")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -140,36 +140,36 @@ func TestTraversalCannotEscapeBucket(t *testing.T) {
 	ctx := context.Background()
 
 	// Seed a secret in another bucket.
-	if _, err := s.Put(ctx, "canopy-b", "secret.txt", strings.NewReader("SECRET"), 6, ""); err != nil {
+	if _, err := s.Put(ctx, "tenant-b", "secret.txt", strings.NewReader("SECRET"), 6, ""); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
 	bad := []string{
-		"../canopy-b/secret.txt",
-		"a/../../canopy-b/secret.txt",
+		"../tenant-b/secret.txt",
+		"a/../../tenant-b/secret.txt",
 		"..",
 		"a/..",
 	}
 	for _, key := range bad {
-		if _, err := s.Put(ctx, "canopy-a", key, strings.NewReader("x"), 1, ""); !errors.Is(err, ErrInvalidKey) {
+		if _, err := s.Put(ctx, "tenant-a", key, strings.NewReader("x"), 1, ""); !errors.Is(err, ErrInvalidKey) {
 			t.Errorf("Put(%q) err = %v, want ErrInvalidKey", key, err)
 		}
-		if _, _, err := s.Get(ctx, "canopy-a", key); !errors.Is(err, ErrInvalidKey) {
+		if _, _, err := s.Get(ctx, "tenant-a", key); !errors.Is(err, ErrInvalidKey) {
 			t.Errorf("Get(%q) err = %v, want ErrInvalidKey", key, err)
 		}
-		if err := s.Delete(ctx, "canopy-a", key); !errors.Is(err, ErrInvalidKey) {
+		if err := s.Delete(ctx, "tenant-a", key); !errors.Is(err, ErrInvalidKey) {
 			t.Errorf("Delete(%q) err = %v, want ErrInvalidKey", key, err)
 		}
-		if err := s.Move(ctx, "canopy-a", key, "fine.txt"); !errors.Is(err, ErrInvalidKey) {
+		if err := s.Move(ctx, "tenant-a", key, "fine.txt"); !errors.Is(err, ErrInvalidKey) {
 			t.Errorf("Move(%q) err = %v, want ErrInvalidKey", key, err)
 		}
 	}
 
 	// The secret is untouched and unreadable through the other bucket.
-	if got, err := s.ReadAll(ctx, "canopy-b", "secret.txt"); err != nil || string(got) != "SECRET" {
+	if got, err := s.ReadAll(ctx, "tenant-b", "secret.txt"); err != nil || string(got) != "SECRET" {
 		t.Fatalf("secret bucket damaged: %q err=%v", got, err)
 	}
-	if _, err := s.ReadAll(ctx, "canopy-a", "canopy-b/secret.txt"); err == nil {
+	if _, err := s.ReadAll(ctx, "tenant-a", "tenant-b/secret.txt"); err == nil {
 		t.Fatal("a key naming another bucket read across the boundary")
 	}
 }

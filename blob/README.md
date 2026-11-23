@@ -15,8 +15,8 @@ if err != nil {
     log.Fatal(err)
 }
 
-_, err = s.Put(ctx, "canopy-u1", "drive/notes.txt", strings.NewReader("hello"), 5, "text/plain")
-data, err := s.ReadAll(ctx, "canopy-u1", "drive/notes.txt")
+_, err = s.Put(ctx, "tenant-a", "drive/notes.txt", strings.NewReader("hello"), 5, "text/plain")
+data, err := s.ReadAll(ctx, "tenant-a", "drive/notes.txt")
 ```
 
 ## Containment
