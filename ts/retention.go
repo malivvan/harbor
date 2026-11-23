@@ -259,6 +259,17 @@ func (s *Store) nowNanos() int64 {
 	return defaultNow()
 }
 
+// storeNow is the retention reference time for a non-replicated write: the
+// store's current clock. A replicated writer instead pins the proposal-time
+// clock in the command and passes it to InsertAt/InsertManyAt, so every node
+// prunes with the same reference time.
+func (se *Series) storeNow() int64 {
+	if se == nil || se.store == nil {
+		return defaultNow()
+	}
+	return se.store.nowNanos()
+}
+
 func defaultNow() int64 {
 	return time.Now().UnixNano()
 }

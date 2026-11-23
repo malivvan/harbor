@@ -200,7 +200,18 @@ func (se *Series) SetLabels(ctx context.Context, labels map[string]string) error
 
 // Insert stores one point, replacing any point with the same timestamp.
 // It avoids the one-element slice and group map that InsertMany needs.
+//
+// Retention is enforced with the store's current clock. Replicated writers must
+// use InsertAt instead, so every replica prunes with the same reference time.
 func (se *Series) Insert(ctx context.Context, p Point) error {
+	return se.InsertAt(ctx, p, se.storeNow())
+}
+
+// InsertAt is Insert with an explicit retention reference time. A replicated
+// writer pins the proposal-time clock in the command and passes it here, so
+// every node applies the same retention decision instead of each consulting
+// its own wall clock.
+func (se *Series) InsertAt(ctx context.Context, p Point, now int64) error {
 	if se == nil || se.store == nil {
 		return ErrNilParam
 	}
@@ -241,7 +252,7 @@ func (se *Series) Insert(ctx context.Context, p Point) error {
 			}
 		}
 
-		return se.updateMetaAfterInsert(ctx, tx, bucket, added)
+		return se.updateMetaAfterInsert(ctx, tx, bucket, added, now)
 	}); err != nil {
 		return err
 	}
@@ -250,7 +261,17 @@ func (se *Series) Insert(ctx context.Context, p Point) error {
 
 // InsertMany stores multiple points in a single transaction. Out-of-order
 // timestamps are accepted; the last value for a timestamp wins.
+//
+// Retention is enforced with the store's current clock. Replicated writers must
+// use InsertManyAt instead, so every replica prunes with the same reference
+// time.
 func (se *Series) InsertMany(ctx context.Context, points []Point) error {
+	return se.InsertManyAt(ctx, points, se.storeNow())
+}
+
+// InsertManyAt is InsertMany with an explicit retention reference time. See
+// InsertAt for why a replicated writer pins the clock in the command.
+func (se *Series) InsertManyAt(ctx context.Context, points []Point, now int64) error {
 	if se == nil || se.store == nil {
 		return ErrNilParam
 	}
@@ -301,7 +322,7 @@ func (se *Series) InsertMany(ctx context.Context, points []Point) error {
 			}
 		}
 
-		return se.updateMetaAfterInsert(ctx, tx, bucket, added)
+		return se.updateMetaAfterInsert(ctx, tx, bucket, added, now)
 	}); err != nil {
 		return err
 	}
@@ -312,7 +333,10 @@ func (se *Series) InsertMany(ctx context.Context, points []Point) error {
 // Metadata is only rewritten when the count actually changed (or a legacy
 // series first gains a retention policy), so streaming inserts do not decode
 // and re-encode the metadata document on every call.
-func (se *Series) updateMetaAfterInsert(ctx context.Context, tx *bolt.Tx, bucket *bolt.Bucket, added int) error {
+//
+// now is the retention reference time. It is passed in rather than read from
+// the store clock so a replicated write prunes identically on every node.
+func (se *Series) updateMetaAfterInsert(ctx context.Context, tx *bolt.Tx, bucket *bolt.Bucket, added int, now int64) error {
 	meta, err := se.store.readMeta(tx, se.name)
 	if err != nil {
 		return err
@@ -330,7 +354,7 @@ func (se *Series) updateMetaAfterInsert(ctx context.Context, tx *bolt.Tx, bucket
 	removed := 0
 	meta.Count += int64(added)
 	if !meta.Retention.satisfied(meta.Count) {
-		removed, err = se.store.pruneSeriesBucket(ctx, bucket, meta.Retention, se.store.nowNanos())
+		removed, err = se.store.pruneSeriesBucket(ctx, bucket, meta.Retention, now)
 		if err != nil {
 			return err
 		}

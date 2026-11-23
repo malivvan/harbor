@@ -263,3 +263,79 @@ func TestSnapshotRestore(t *testing.T) {
 	require.NoError(t, n4.Store().DB().One(ctx, "ID", "u3", &got))
 	require.Equal(t, "n", got.Name)
 }
+
+// TestReplicatedRetentionIsDeterministic pins the leader's clock into the
+// replicated command, so every replica prunes with the same reference time
+// even when their local clocks disagree.
+func TestReplicatedRetentionIsDeterministic(t *testing.T) {
+	ctx := context.Background()
+	nodes := startCluster(t, 3)
+	defer closeAll(nodes...)
+
+	leader := waitLeader(t, nodes...)
+
+	// Each node runs a wildly different local clock. Only the leader's clock is
+	// pinned into the command, so the outcome must not depend on the others.
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano()
+	leader.SetNow(func() int64 { return base })
+	for i, n := range nodes {
+		if n == leader {
+			continue
+		}
+		skew := int64(i) * int64(365*24*time.Hour)
+		n.SetNow(func() int64 { return base + skew })
+	}
+
+	// MaxAge of one hour with points one minute apart: the leader's clock keeps
+	// all of them, and every replica must agree.
+	require.NoError(t, leader.TS().SetRetention(ctx, "cpu", ts.Retention{MaxAge: time.Hour}))
+	for i := int64(0); i < 5; i++ {
+		require.NoError(t, leader.TS().Insert(ctx, "cpu", ts.Point{
+			Timestamp: base - i*int64(time.Minute),
+			Value:     float64(i),
+		}))
+	}
+	waitApplied(t, leader, nodes...)
+
+	for _, n := range nodes {
+		count, err := n.Store().TS().Series("cpu").Count(ctx)
+		require.NoError(t, err)
+		require.Equal(t, 5, count, "node %s pruned differently", n.cfg.NodeID)
+	}
+}
+
+// TestReplicatedRetentionPrunesIdentically checks the pruning path itself: with
+// the leader's clock far ahead, every replica must drop exactly the same points.
+func TestReplicatedRetentionPrunesIdentically(t *testing.T) {
+	ctx := context.Background()
+	nodes := startCluster(t, 3)
+	defer closeAll(nodes...)
+
+	leader := waitLeader(t, nodes...)
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano()
+	leader.SetNow(func() int64 { return base })
+	for i, n := range nodes {
+		if n == leader {
+			continue
+		}
+		// A clock far in the past would prune everything if it were consulted.
+		_ = i
+		n.SetNow(func() int64 { return base - int64(10*365*24*time.Hour) })
+	}
+
+	require.NoError(t, leader.TS().SetRetention(ctx, "cpu", ts.Retention{MaxAge: time.Hour}))
+	require.NoError(t, leader.TS().InsertMany(ctx, "cpu", []ts.Point{
+		{Timestamp: base - int64(30*time.Minute), Value: 1}, // kept
+		{Timestamp: base - int64(2*time.Hour), Value: 2},    // pruned by MaxAge
+		{Timestamp: base - int64(3*time.Hour), Value: 3},    // pruned by MaxAge
+	}))
+	waitApplied(t, leader, nodes...)
+
+	for _, n := range nodes {
+		pts, err := n.Store().TS().Series("cpu").Range(ctx, base-int64(24*time.Hour), base)
+		require.NoError(t, err)
+		require.Len(t, pts, 1, "node %s kept the wrong points", n.cfg.NodeID)
+		require.Equal(t, 1.0, pts[0].Value)
+	}
+}

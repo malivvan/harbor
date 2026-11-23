@@ -12,11 +12,16 @@ type TS struct{ n *Node }
 type tsInsertArg struct {
 	Series string   `json:"series"`
 	Point  ts.Point `json:"point"`
+	// Now is the leader's clock at proposal time, in unix nanoseconds. It is
+	// pinned into the command so every replica enforces retention with the same
+	// reference time instead of each consulting its own wall clock.
+	Now int64 `json:"now"`
 }
 
 type tsInsertManyArg struct {
 	Series string     `json:"series"`
 	Points []ts.Point `json:"points"`
+	Now    int64      `json:"now"`
 }
 
 type tsRangeArg struct {
@@ -47,21 +52,23 @@ func (n *Node) TS() *TS {
 	return &TS{n: n}
 }
 
-// Insert replicates ts.Series.Insert.
+// Insert replicates ts.Series.Insert. The leader pins its clock into the
+// command so every replica enforces retention with the same reference time.
 func (t *TS) Insert(ctx context.Context, series string, p ts.Point) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	_, err := t.n.apply(opTSInsert, tsInsertArg{Series: series, Point: p})
+	_, err := t.n.apply(opTSInsert, tsInsertArg{Series: series, Point: p, Now: t.n.nowNanos()})
 	return err
 }
 
-// InsertMany replicates ts.Series.InsertMany.
+// InsertMany replicates ts.Series.InsertMany. The leader pins its clock into
+// the command so every replica enforces retention with the same reference time.
 func (t *TS) InsertMany(ctx context.Context, series string, pts []ts.Point) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	_, err := t.n.apply(opTSInsertMany, tsInsertManyArg{Series: series, Points: pts})
+	_, err := t.n.apply(opTSInsertMany, tsInsertManyArg{Series: series, Points: pts, Now: t.n.nowNanos()})
 	return err
 }
 
@@ -120,7 +127,7 @@ func (f *fsm) applyTSInsert(ctx context.Context, a tsInsertArg) any {
 	if st == nil {
 		return ErrClosed
 	}
-	return st.TS().Series(a.Series).Insert(ctx, a.Point)
+	return st.TS().Series(a.Series).InsertAt(ctx, a.Point, a.Now)
 }
 
 func (f *fsm) applyTSInsertMany(ctx context.Context, a tsInsertManyArg) any {
@@ -128,7 +135,7 @@ func (f *fsm) applyTSInsertMany(ctx context.Context, a tsInsertManyArg) any {
 	if st == nil {
 		return ErrClosed
 	}
-	return st.TS().Series(a.Series).InsertMany(ctx, a.Points)
+	return st.TS().Series(a.Series).InsertManyAt(ctx, a.Points, a.Now)
 }
 
 func (f *fsm) applyTSDeleteRange(ctx context.Context, a tsRangeArg) any {

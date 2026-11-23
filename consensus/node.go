@@ -31,9 +31,33 @@ type Node struct {
 	stableStore   raft.StableStore
 	snapshotStore raft.SnapshotStore
 
+	// now is the clock pinned into replicated ts commands. It defaults to the
+	// wall clock; tests override it to model clock divergence between nodes.
+	now func() int64
+
 	mu     sync.RWMutex
 	store  *harbor.Store
 	closed bool
+}
+
+// nowNanos returns the node's clock reading in unix nanoseconds.
+func (n *Node) nowNanos() int64 {
+	if n == nil || n.now == nil {
+		return time.Now().UnixNano()
+	}
+	return n.now()
+}
+
+// SetNow overrides the clock the leader pins into replicated ts commands.
+// Passing nil restores the wall clock. It is intended for tests that model
+// clock divergence between nodes.
+func (n *Node) SetNow(fn func() int64) {
+	if n == nil {
+		return
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.now = fn
 }
 
 // Open starts a cluster node. It opens the harbor store at StorePath, wires up
