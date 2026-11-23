@@ -37,7 +37,13 @@ Steps: run `go mod tidy`; confirm `go build ./...`, `go vet ./...` and
 `go test ./...`; commit the `go.mod`/`go.sum` diff on its own.
 Acceptance: `go mod tidy -diff` is empty.
 
-### 0.2 Make `blob.Put` atomic
+### 0.2 Make `blob.Put` atomic — DONE
+
+Done: `Store.Put` streams into a temporary sibling (`.harbor-put-*`) and
+`fs.Rename`s it into place, removing the temporary key on any error. Tests cover
+a mid-stream reader failure (no final key, no leftover temp, previous content
+intact) and the content-address dedupe path. The `pkg/snapshot/blobstore` suite
+(item 0.6) exercises the adapter end to end.
 
 `blob.Store.Put` (`pkg/blob/blob.go`) opens the destination with `fs.Create` and
 streams the reader straight into it. A reader that fails mid-copy leaves a

@@ -24,16 +24,22 @@ package blob
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/malivvan/harbor/fs"
 )
+
+// tempCounter is the fallback uniqueness source when crypto/rand fails.
+var tempCounter uint64
 
 // Errors returned by the package.
 var (
@@ -132,6 +138,12 @@ func etagOf(info os.FileInfo) string {
 // contentType are accepted for call-site compatibility and ignored: the file
 // system needs no length and carries no content type.
 //
+// The write is atomic: the reader is streamed into a temporary sibling key and
+// renamed into place only after a complete copy. A reader that fails midway
+// therefore leaves no object at the final key and leaves any previous content
+// untouched, so a later existence check cannot mistake a partial upload for a
+// complete one.
+//
 // The returned ETag is empty. Callers that record a version should stat the
 // object afterwards (Stat reports the derived marker) rather than treat the empty
 // string as a failure.
@@ -151,18 +163,53 @@ func (s *Store) Put(ctx context.Context, bucket, key string, r io.Reader, size i
 			return "", fmt.Errorf("blob: create dir for %q: %w", key, err)
 		}
 	}
-	f, err := s.fs.Create(p)
-	if err != nil {
+	if err := s.putAtomic(p, r); err != nil {
 		return "", fmt.Errorf("blob: put %q: %w", key, err)
+	}
+	return "", nil
+}
+
+// tempPrefix marks in-flight uploads. Keys cannot start with a segment holding
+// this prefix because the temporary file lives in the destination directory and
+// is removed before the call returns; a crash can leave one behind, and List
+// would then report it, so callers that need a clean bucket can remove it.
+const tempPrefix = ".harbor-put-"
+
+// putAtomic streams r into a temporary sibling of p and renames it into place.
+// fs.Rename within one store replaces an existing file, so the final key is
+// either the previous content or the complete new content, never a partial copy.
+func (s *Store) putAtomic(p string, r io.Reader) error {
+	tmp := path.Join(path.Dir(p), tempPrefix+randomSuffix())
+	f, err := s.fs.Create(tmp)
+	if err != nil {
+		return err
 	}
 	if _, err := io.Copy(f, r); err != nil {
 		f.Close()
-		return "", fmt.Errorf("blob: write %q: %w", key, err)
+		_ = s.fs.Remove(tmp)
+		return fmt.Errorf("write: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		return "", fmt.Errorf("blob: close %q: %w", key, err)
+		_ = s.fs.Remove(tmp)
+		return fmt.Errorf("close: %w", err)
 	}
-	return "", nil
+	if err := s.fs.Rename(tmp, p); err != nil {
+		_ = s.fs.Remove(tmp)
+		return fmt.Errorf("install: %w", err)
+	}
+	return nil
+}
+
+// randomSuffix returns a process-unique suffix for a temporary upload key.
+func randomSuffix() string {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand never fails on supported platforms; fall back to the clock
+		// and a counter so a failure cannot make uploads collide.
+		n := atomic.AddUint64(&tempCounter, 1)
+		return fmt.Sprintf("%x-%x", time.Now().UnixNano(), n)
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // Get opens bucket/key for reading. The caller must Close the returned reader.

@@ -2,6 +2,8 @@ package blob
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -361,4 +363,98 @@ func TestOpenCreatesNamedFileSystem(t *testing.T) {
 	_ = hfs.Name // keep the fs import meaningful for readers
 	_ = os.ErrNotExist
 	_ = io.EOF
+}
+
+// failingReader yields some bytes and then fails, like a network stream that
+// drops mid-transfer.
+type failingReader struct {
+	sent  int
+	limit int
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	if r.sent >= r.limit {
+		return 0, errors.New("upstream stream failed")
+	}
+	n := len(p)
+	if remaining := r.limit - r.sent; n > remaining {
+		n = remaining
+	}
+	for i := 0; i < n; i++ {
+		p[i] = 'x'
+	}
+	r.sent += n
+	return n, nil
+}
+
+// Rule: a reader that fails mid-copy leaves no object at the final key and no
+// temporary sibling behind, so later existence checks cannot see a partial blob.
+func TestPutIsAtomicOnReaderFailure(t *testing.T) {
+	s := newBlob(t)
+	ctx := context.Background()
+
+	if _, err := s.Put(ctx, "b", "obj", &failingReader{limit: 4096}, 0, ""); err == nil {
+		t.Fatal("Put with a failing reader: want an error")
+	}
+	if s.Exists(ctx, "b", "obj") {
+		t.Fatal("a partial object is visible at the final key")
+	}
+
+	// No leftover temporary keys in the bucket.
+	list, err := s.List(ctx, "b", "")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("bucket holds %v after a failed Put, want nothing", infoKeys(list))
+	}
+}
+
+// Rule: a failed upload leaves a previously stored object byte-for-byte intact.
+func TestPutKeepsPreviousContentOnFailure(t *testing.T) {
+	s := newBlob(t)
+	ctx := context.Background()
+
+	if _, err := s.Put(ctx, "b", "obj", strings.NewReader("original"), 8, ""); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if _, err := s.Put(ctx, "b", "obj", &failingReader{limit: 1024}, 0, ""); err == nil {
+		t.Fatal("Put with a failing reader: want an error")
+	}
+	got, err := s.ReadAll(ctx, "b", "obj")
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(got) != "original" {
+		t.Fatalf("content = %q, want the previous %q", got, "original")
+	}
+}
+
+// Rule: content-addressed callers (snapshot) skip an upload when Stat says the
+// key exists. A failed upload must therefore not publish that key, and the
+// retry must succeed.
+func TestFailedPutDoesNotSatisfyContentAddressLookup(t *testing.T) {
+	s := newBlob(t)
+	ctx := context.Background()
+
+	const content = "snapshot-payload"
+	sum := sha256.Sum256([]byte(content))
+	key := hex.EncodeToString(sum[:])
+
+	if _, err := s.Put(ctx, "blobs", key, &failingReader{limit: 3}, 0, ""); err == nil {
+		t.Fatal("Put with a failing reader: want an error")
+	}
+	if _, ok, err := s.Stat(ctx, "blobs", key); err != nil || ok {
+		t.Fatalf("Stat after a failed upload = ok=%v err=%v, want ok=false err=nil", ok, err)
+	}
+	if _, err := s.Put(ctx, "blobs", key, strings.NewReader(content), int64(len(content)), ""); err != nil {
+		t.Fatalf("retry Put: %v", err)
+	}
+	got, err := s.ReadAll(ctx, "blobs", key)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(got) != content {
+		t.Fatalf("content = %q, want %q", got, content)
+	}
 }
