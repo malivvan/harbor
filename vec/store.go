@@ -3,6 +3,7 @@ package vec
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"sync/atomic"
 	"unicode/utf8"
 
+	"github.com/malivvan/harbor/audit"
 	"go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
 )
@@ -67,6 +69,34 @@ type Store struct {
 	// transactions take RLock; rotation takes Lock across the rewrite and the
 	// adoption of the new key state.
 	rotMu sync.RWMutex
+
+	// audit receives an entry for every committed write, or nil when the store
+	// was opened without audit. It is set once at Open and never mutated.
+	audit audit.Sink
+}
+
+// auditEntry records one committed write in the store's audit trail. It is a
+// no-op when the store has no audit sink. Digest is the SHA-256 of the written
+// payload, or nil for deletes.
+func (s *Store) auditEntry(op, collection string, digest []byte) error {
+	if s == nil || s.audit == nil {
+		return nil
+	}
+	return s.audit.Record(audit.Entry{
+		Store:  audit.StoreVec,
+		Op:     op,
+		Entity: collection,
+		Digest: digest,
+	})
+}
+
+// digestOf returns the SHA-256 of data, or nil when data is empty.
+func digestOf(data []byte) []byte {
+	if len(data) == 0 {
+		return nil
+	}
+	sum := sha256.Sum256(data)
+	return sum[:]
 }
 
 // view runs a read-only transaction while excluding rotation.
@@ -311,6 +341,7 @@ func Open(ctx context.Context, bdb *bbolt.DB, cfg Config) (*Store, error) {
 		useQuant:    useQuant,
 		root:        root,
 		collections: make(map[string]*Collection),
+		audit:       cfg.Audit,
 	}
 	store.enc.Store(enc)
 	store.ownsDB.Store(true)
@@ -605,10 +636,13 @@ func (s *Store) EnsureCollection(colName string) error {
 		return err
 	}
 
-	return s.update(func(tx *bbolt.Tx) error {
+	if err := s.update(func(tx *bbolt.Tx) error {
 		_, err := s.createCollectionBucket(tx, colName)
 		return err
-	})
+	}); err != nil {
+		return err
+	}
+	return s.auditEntry("create_collection", colName, nil)
 }
 
 // UpsertPoints saves or updates a batch of points to disk. Points are encoded
@@ -624,7 +658,7 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 		return err
 	}
 
-	return s.update(func(tx *bbolt.Tx) error {
+	if err := s.update(func(tx *bbolt.Tx) error {
 		b, err := s.collectionBucket(tx, colName)
 		if err != nil {
 			return err
@@ -632,7 +666,6 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 		if b == nil {
 			return fmt.Errorf("%w: %s", ErrCollectionNotFound, colName)
 		}
-
 		// Convert and size every point first, then encode the batch into one
 		// exact-size arena. bbolt keeps the value slices until the transaction
 		// commits, so one shared arena is safe where a reused scratch buffer
@@ -690,7 +723,10 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return s.auditEntry("upsert", colName, digestOf(encodePointsDigest(points)))
 }
 
 // LoadCollection loads all points for a collection from disk into memory.
@@ -814,7 +850,7 @@ func (s *Store) SaveCollectionMeta(name string, meta CollectionMeta) error {
 		return err
 	}
 
-	return s.update(func(tx *bbolt.Tx) error {
+	if err := s.update(func(tx *bbolt.Tx) error {
 		b, err := s.metaBucket(tx, true)
 		if err != nil {
 			return err
@@ -836,7 +872,11 @@ func (s *Store) SaveCollectionMeta(name string, meta CollectionMeta) error {
 		}
 
 		return b.Put(key, sealed)
-	})
+	}); err != nil {
+		return err
+	}
+	raw, _ := json.Marshal(meta)
+	return s.auditEntry("save_collection_meta", name, digestOf(raw))
 }
 
 // LoadCollectionMeta retrieves collection metadata from the special bucket.
@@ -934,7 +974,7 @@ func (s *Store) DeletePoints(colName string, ids []string) error {
 		return err
 	}
 
-	return s.update(func(tx *bbolt.Tx) error {
+	if err := s.update(func(tx *bbolt.Tx) error {
 		b, err := s.collectionBucket(tx, colName)
 		if err != nil {
 			return err
@@ -953,7 +993,10 @@ func (s *Store) DeletePoints(colName string, ids []string) error {
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return s.auditEntry("delete", colName, nil)
 }
 
 // DropCollection removes a collection and its metadata from the storage.
@@ -967,7 +1010,7 @@ func (s *Store) DropCollection(name string) error {
 		return fmt.Errorf("failed to derive the bucket key for collection %q: %w", name, err)
 	}
 
-	return s.update(func(tx *bbolt.Tx) error {
+	if err := s.update(func(tx *bbolt.Tx) error {
 		// Delete collection bucket under the configured root.
 		if len(s.root) > 0 {
 			if root := s.rootBucket(tx); root != nil {
@@ -991,5 +1034,8 @@ func (s *Store) DropCollection(name string) error {
 		}
 
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return s.auditEntry("drop_collection", name, nil)
 }

@@ -229,6 +229,26 @@ func encodeStoredPoint(p StoredPoint) []byte {
 	return appendStoredPoint(make([]byte, 0, storedPointSize(p)), p)
 }
 
+// encodePointsDigest returns a canonical encoding of a point batch, used only
+// to digest a written batch for the audit trail. Points are sorted by ID and
+// encoded with the same positional format as storage, so the digest is stable
+// regardless of the caller's slice order.
+func encodePointsDigest(points []PointStruct) []byte {
+	sorted := make([]PointStruct, len(points))
+	copy(sorted, points)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
+
+	out := make([]byte, 0, len(sorted)*16)
+	for i := range sorted {
+		stored, err := toStoredPoint(&sorted[i])
+		if err != nil {
+			continue
+		}
+		out = appendStoredPoint(out, *stored)
+	}
+	return out
+}
+
 func decodeStoredPoint(data []byte) (StoredPoint, error) {
 	var p StoredPoint
 	n := 0
