@@ -132,7 +132,11 @@ func (s *Store) newCollection(opts CollectionOptions) (*Collection, error) {
 
 	var index VectorIndex
 	if useHNSW {
-		index = NewHNSWIndexWithParams(metric, hnswParams)
+		hnswIndex := NewHNSWIndexWithParams(metric, hnswParams)
+		if s != nil {
+			hnswIndex.obs = s.obs
+		}
+		index = hnswIndex
 	} else {
 		index = NewFlatIndex(metric)
 	}

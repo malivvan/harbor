@@ -107,6 +107,10 @@ const (
 	// scan because the index could not prove enough matches.
 	MetricVecFallbacks = "harbor.vec.search.fallbacks"
 
+	// MetricVecScanSize is the number of points scanned by an exact fallback,
+	// which signals how sparse a filter is.
+	MetricVecScanSize = "harbor.vec.search.scan.size"
+
 	// MetricVecSearchDuration is the duration of a vector search, in
 	// nanoseconds.
 	MetricVecSearchDuration = "harbor.vec.search.duration"

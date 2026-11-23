@@ -6,6 +6,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/malivvan/harbor/metrics"
 	"github.com/malivvan/harbor/vec/hnsw"
 )
 
@@ -52,6 +53,10 @@ type HNSWIndex struct {
 	metric Distance
 	params HNSWParams
 	mu     sync.RWMutex
+
+	// obs receives fallback and scan-size diagnostics, or nil when the owning
+	// store was opened without instrumentation. It is set once at construction.
+	obs metrics.Observer
 }
 
 // NewHNSWIndex creates a new HNSW index engine with the specified distance metric.
@@ -219,8 +224,9 @@ func (h *HNSWIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 	if len(h.points) == 0 {
 		return nil, nil
 	}
-	if topK > len(h.points) {
-		topK = len(h.points)
+	total := len(h.points)
+	if topK > total {
+		topK = total
 	}
 
 	// Without a filter the graph result is already the answer.
@@ -228,26 +234,50 @@ func (h *HNSWIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 		return h.collect(query, nil, topK), nil
 	}
 
-	// Post-filtering over-fetches. Graph search only visits candidates that
-	// are close to the query, so a rare match can sit outside every visited
-	// neighbourhood; when the over-fetch does not yield topK matches, fall back
-	// to an exact scan so filtered results match the Flat index semantics.
-	total := len(h.points)
-	fetchK := topK * 10
+	// Post-filtering over-fetches. Graph search only visits candidates close to
+	// the query, so a selective filter may need a larger candidate set; grow the
+	// fetch geometrically instead of always scanning the whole index. When even
+	// the full candidate set cannot prove topK matches, fall back to an exact
+	// scan so filtered results match the Flat index semantics.
+	fetchK := topK * 4
 	if fetchK < topK {
 		fetchK = topK
 	}
-	if fetchK > total {
-		fetchK = total
+	for {
+		if fetchK > total {
+			fetchK = total
+		}
+		results := h.collect(query, filter, fetchK)
+		if len(results) >= topK {
+			if len(results) > topK {
+				results = results[:topK]
+			}
+			return results, nil
+		}
+		if fetchK >= total {
+			results = h.scan(query, filter)
+			h.observeFallback(total)
+			if len(results) > topK {
+				results = results[:topK]
+			}
+			return results, nil
+		}
+		fetchK *= 2
 	}
-	results := h.collect(query, filter, fetchK)
-	if len(results) < topK {
-		results = h.scan(query, filter)
+}
+
+// observeFallback reports an exact-scan fallback for a filtered search, with
+// the number of points scanned.
+func (h *HNSWIndex) observeFallback(scanned int) {
+	if h == nil || h.obs == nil {
+		return
 	}
-	if len(results) > topK {
-		results = results[:topK]
+	labels := metrics.Labels{
+		metrics.LabelStore: "vec",
+		metrics.LabelOp:    "search",
 	}
-	return results, nil
+	metrics.Counter(h.obs, metrics.MetricVecFallbacks, 1, labels)
+	metrics.Histogram(h.obs, metrics.MetricVecScanSize, float64(scanned), labels)
 }
 
 // graphVector returns the representation stored in the graph. Cosine uses
