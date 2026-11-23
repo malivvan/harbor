@@ -470,3 +470,44 @@ func TestChunkedWriteDoesNotPadTail(t *testing.T) {
 	require.Equal(t, make([]byte, 10), data[10:20])
 	require.Equal(t, byte('X'), data[20])
 }
+
+// TestDeleteChunksMany verifies that rewriting and deleting a file with many
+// chunks removes every chunk exactly once. Chunk keys are deleted while the
+// cursor is iterating the bucket, so this guards that pattern against leaving
+// chunks behind.
+func TestDeleteChunksMany(t *testing.T) {
+	store, db := chunkedStore(t, []byte("ts"), 61, 8)
+	fsys, err := store.Open("fs")
+	require.NoError(t, err)
+
+	// 32 chunks of 8 bytes each.
+	content := ""
+	for i := 0; i < 32; i++ {
+		content += "abcdefgh"
+	}
+	writeTestFile(t, fsys, "/big", content)
+
+	node, err := fsys.resolve("/big")
+	require.NoError(t, err)
+	require.Len(t, chunkEntries(t, db, []byte("ts"), "fs"), 32)
+
+	// Rewriting the whole file deletes all 32 chunks while iterating.
+	require.NoError(t, fsys.db.Update(func(tx *bolt.Tx) error {
+		b, err := fsys.openFsBucketForWrite(tx)
+		if err != nil {
+			return err
+		}
+		return b.writeAllChunks(node.Ino, []byte("short"), 8)
+	}))
+	require.Len(t, chunkEntries(t, db, []byte("ts"), "fs"), 1)
+
+	// Deleting the inode releases the remaining chunk.
+	require.NoError(t, fsys.db.Update(func(tx *bolt.Tx) error {
+		b, err := fsys.openFsBucketForWrite(tx)
+		if err != nil {
+			return err
+		}
+		return b.deleteAllChunks(node.Ino)
+	}))
+	require.Empty(t, chunkEntries(t, db, []byte("ts"), "fs"))
+}

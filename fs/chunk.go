@@ -218,21 +218,14 @@ func (b *fsBucket) truncateData(ino uint64, size, chunkSize int64) error {
 	firstDelete := (size + chunkSize - 1) / chunkSize
 	var prefixBuf [8]byte
 	prefix := chunkPrefix(&prefixBuf, ino)
-	var keys [][]byte
-	cursor := b.chunks.Cursor()
-	for key, _ := cursor.Seek(prefix); key != nil && bytes.HasPrefix(key, prefix); key, _ = cursor.Next() {
+	if err := b.deleteChunks(prefix, func(key []byte) (bool, error) {
 		if len(key) != 16 {
-			return fmt.Errorf("fs: corrupt chunk key for inode %d: %d bytes", ino, len(key))
+			return false, fmt.Errorf("fs: corrupt chunk key for inode %d: %d bytes", ino, len(key))
 		}
 		idx := int64(binary.BigEndian.Uint64(key[8:]))
-		if idx >= firstDelete {
-			keys = append(keys, append([]byte(nil), key...))
-		}
-	}
-	for _, key := range keys {
-		if err := b.chunks.Delete(key); err != nil {
-			return err
-		}
+		return idx >= firstDelete, nil
+	}); err != nil {
+		return err
 	}
 
 	rem := size % chunkSize
@@ -250,24 +243,37 @@ func (b *fsBucket) truncateData(ino uint64, size, chunkSize int64) error {
 	return b.writeChunk(ino, idx, chunk)
 }
 
-// deleteAllChunks removes every chunk belonging to an inode.
-func (b *fsBucket) deleteAllChunks(ino uint64) error {
+// deleteChunks removes every chunk key under prefix for which match reports
+// true. It deletes while iterating the cursor rather than first copying every
+// matching key into memory, so deleting a very large file does not
+// temporarily allocate O(chunks) key slices. Deleting the key the cursor is
+// positioned on is safe: bbolt's Cursor.Delete removes it and leaves the
+// cursor ready for Next.
+func (b *fsBucket) deleteChunks(prefix []byte, match func(key []byte) (bool, error)) error {
 	if b == nil || b.chunks == nil {
 		return nil
 	}
-	var prefixBuf [8]byte
-	prefix := chunkPrefix(&prefixBuf, ino)
-	var keys [][]byte
 	cursor := b.chunks.Cursor()
 	for key, _ := cursor.Seek(prefix); key != nil && bytes.HasPrefix(key, prefix); key, _ = cursor.Next() {
-		keys = append(keys, append([]byte(nil), key...))
-	}
-	for _, key := range keys {
-		if err := b.chunks.Delete(key); err != nil {
+		ok, err := match(key)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		if err := cursor.Delete(); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// deleteAllChunks removes every chunk belonging to an inode.
+func (b *fsBucket) deleteAllChunks(ino uint64) error {
+	var prefixBuf [8]byte
+	prefix := chunkPrefix(&prefixBuf, ino)
+	return b.deleteChunks(prefix, func([]byte) (bool, error) { return true, nil })
 }
 
 // readAllChunks concatenates every chunk of an inode.
@@ -297,15 +303,8 @@ func (b *fsBucket) writeAllChunks(ino uint64, data []byte, chunkSize int64) erro
 
 	var prefixBuf [8]byte
 	prefix := chunkPrefix(&prefixBuf, ino)
-	var keys [][]byte
-	cursor := b.chunks.Cursor()
-	for key, _ := cursor.Seek(prefix); key != nil && bytes.HasPrefix(key, prefix); key, _ = cursor.Next() {
-		keys = append(keys, append([]byte(nil), key...))
-	}
-	for _, key := range keys {
-		if err := b.chunks.Delete(key); err != nil {
-			return err
-		}
+	if err := b.deleteChunks(prefix, func([]byte) (bool, error) { return true, nil }); err != nil {
+		return err
 	}
 
 	for idx := int64(0); len(data) > 0; idx++ {
