@@ -2,7 +2,7 @@ package fs
 
 import (
 	"sync"
-	"time"
+	"sync/atomic"
 
 	"github.com/malivvan/harbor/metrics"
 )
@@ -14,8 +14,11 @@ type inodeCache struct {
 	mu      sync.RWMutex
 	entries map[uint64]*cacheEntry
 	maxSize int
-	hits    uint64
-	misses  uint64
+	hits    atomic.Uint64
+	misses  atomic.Uint64
+	// clock hands out logical access ticks for LRU ordering. A counter is
+	// cheaper than time.Now() and orders accesses exactly.
+	clock   atomic.Uint64
 	enabled bool
 
 	// obs receives cache lookup counters and the current size, or nil when
@@ -41,8 +44,10 @@ func (c *inodeCache) observeLookup(hit bool) {
 
 // cacheEntry represents a cached inode with metadata for cache management.
 type cacheEntry struct {
-	node     *iNode
-	lastUsed time.Time
+	node *iNode
+	// lastUsed is a logical access tick used to order LRU eviction. It is
+	// updated atomically so a cache hit does not need the write lock.
+	lastUsed atomic.Uint64
 	dirty    bool // true if the node has been modified but not persisted
 }
 
@@ -68,18 +73,15 @@ func (c *inodeCache) Get(ino uint64) *iNode {
 	c.mu.RUnlock()
 
 	if !ok {
-		c.mu.Lock()
-		c.misses++
-		c.mu.Unlock()
+		c.misses.Add(1)
 		c.observeLookup(false)
 		return nil
 	}
 
-	// Update access time and hit counter
-	c.mu.Lock()
-	entry.lastUsed = time.Now()
-	c.hits++
-	c.mu.Unlock()
+	// A hit only touches atomics: recency is a logical tick, so the read path
+	// never takes the write lock or calls time.Now().
+	entry.lastUsed.Store(c.clock.Add(1))
+	c.hits.Add(1)
 	c.observeLookup(true)
 
 	// Return a copy to prevent external modifications
@@ -99,21 +101,16 @@ func (c *inodeCache) GetShared(ino uint64) *iNode {
 	c.mu.RUnlock()
 
 	if !ok {
-		c.mu.Lock()
-		c.misses++
-		c.mu.Unlock()
+		c.misses.Add(1)
 		c.observeLookup(false)
 		return nil
 	}
 
-	c.mu.Lock()
-	entry.lastUsed = time.Now()
-	c.hits++
-	node := entry.node
-	c.mu.Unlock()
+	entry.lastUsed.Store(c.clock.Add(1))
+	c.hits.Add(1)
 	c.observeLookup(true)
 
-	return node
+	return entry.node
 }
 
 // Put adds or updates an inode in the cache.
@@ -138,11 +135,12 @@ func (c *inodeCache) Put(ino uint64, node *iNode, dirty bool) {
 	}
 
 	// Store a copy to prevent external modifications
-	c.entries[ino] = &cacheEntry{
-		node:     copyInode(node),
-		lastUsed: time.Now(),
-		dirty:    dirty,
+	entry := &cacheEntry{
+		node:  copyInode(node),
+		dirty: dirty,
 	}
+	entry.lastUsed.Store(c.clock.Add(1))
+	c.entries[ino] = entry
 }
 
 // Invalidate removes an inode from the cache.
@@ -170,7 +168,7 @@ func (c *inodeCache) MarkDirty(ino uint64) {
 
 	if entry, ok := c.entries[ino]; ok {
 		entry.dirty = true
-		entry.lastUsed = time.Now()
+		entry.lastUsed.Store(c.clock.Add(1))
 	}
 }
 
@@ -235,14 +233,18 @@ func (c *inodeCache) Flush() {
 // Stats returns cache statistics.
 func (c *inodeCache) Stats() CacheStats {
 	c.mu.RLock()
-	stats := CacheStats{
-		Size:    len(c.entries),
-		MaxSize: c.maxSize,
-		Hits:    c.hits,
-		Misses:  c.misses,
-		Enabled: c.enabled,
-	}
+	size := len(c.entries)
+	maxSize := c.maxSize
+	enabled := c.enabled
 	c.mu.RUnlock()
+
+	stats := CacheStats{
+		Size:    size,
+		MaxSize: maxSize,
+		Hits:    c.hits.Load(),
+		Misses:  c.misses.Load(),
+		Enabled: enabled,
+	}
 
 	if c.obs != nil {
 		metrics.Gauge(c.obs, metrics.MetricCacheSize, float64(stats.Size), metrics.Labels{
@@ -277,13 +279,14 @@ func (s CacheStats) HitRate() float64 {
 // Must be called with c.mu locked.
 func (c *inodeCache) evictOldest() {
 	var oldestIno uint64
-	var oldestTime time.Time
+	var oldestTick uint64
 	first := true
 
 	for ino, entry := range c.entries {
-		if first || entry.lastUsed.Before(oldestTime) {
+		tick := entry.lastUsed.Load()
+		if first || tick < oldestTick {
 			oldestIno = ino
-			oldestTime = entry.lastUsed
+			oldestTick = tick
 			first = false
 		}
 	}
