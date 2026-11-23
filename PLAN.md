@@ -638,7 +638,14 @@ transaction rollback; docs. Acceptance: an equivalent dangling-reference test
 fails with the new tag and succeeds with a valid parent, with no consumer code in
 the path.
 
-## 8. P2 — vectors and custom scoring in results
+## 8. P2 — vectors and custom scoring in results — DONE
+
+Done: `ScoredPoint.Vector` (nil unless requested), `Collection.SearchWith`,
+`WithVectors` and `WithScorer`. Candidate selection stays with the index metric;
+the scorer replaces the final score and ordering (higher is better), so HNSW
+recall and filtering are unchanged. Tests cover Flat and HNSW vector
+population and copy isolation, scorer ordering, filters, tie ordering, nil
+options and validation. The vec README documents the options.
 
 ### Current state
 

@@ -167,6 +167,27 @@ capped, err := col.RangeSearchN(query, 0.25, filter, 100)
   correctly for an open radius.
 - A non-positive limit (`RangeSearchN`) returns every match; ties order by id.
 
+### Vectors and custom scoring
+
+`SearchWith` adds per-call options to `Search`:
+
+```go
+hits, err := col.SearchWith(query, filter, 10,
+	vec.WithVectors(),
+	vec.WithScorer(func(query, vector []float32) float64 {
+		return customScore(query, vector)
+	}),
+)
+```
+
+- `WithVectors` populates `ScoredPoint.Vector` with a copy of the stored
+  embedding. Without it the field stays nil, so a normal search allocates
+  nothing extra.
+- `WithScorer` replaces the final score (and the ordering) using
+  `fn(query, vector)`; a higher score is better regardless of the metric.
+- Candidate selection still uses the collection's index and metric, so filters
+  and HNSW recall are unchanged.
+
 ### Facet counts
 
 `FacetCounts` counts the string values of payload fields over the points that

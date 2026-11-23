@@ -28,6 +28,10 @@ type ScoredPoint struct {
 	Version uint64  `json:"version"`
 	Score   float32 `json:"score"`
 	Payload Payload `json:"payload,omitempty"`
+	// Vector is the stored embedding, populated only by SearchWith with
+	// WithVectors. It is nil otherwise so a normal search allocates nothing
+	// extra.
+	Vector []float32 `json:"vector,omitempty"`
 }
 
 // Filter defines conditions for querying or deleting points based on their payload.
