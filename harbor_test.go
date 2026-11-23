@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 
+	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/db"
 	"github.com/malivvan/harbor/internal/crypto"
 	"github.com/malivvan/harbor/ts"
@@ -845,4 +846,82 @@ func TestOpenNilReceiverHelpers(t *testing.T) {
 	if s.DB() != nil || s.FS() != nil || s.TS() != nil || s.Vec() != nil {
 		t.Fatal("nil sub-store accessors must return nil")
 	}
+}
+
+func TestAuditTrailEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "harbor-audit.db")
+	const password = "correct horse battery staple"
+
+	opts := testOptions(password)
+	opts.Audit = AuditAll
+	s, err := Open(ctx, path, 0600, opts)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	require.Equal(t, AuditAll, s.AuditFlags())
+	require.NotNil(t, s.Audit())
+
+	// One write per store.
+	require.NoError(t, s.DB().Save(ctx, &harborRecord{Name: "alice"}))
+	require.NoError(t, s.TS().Series("cpu").Insert(ctx, ts.Point{Timestamp: 1, Value: 1}))
+
+	col, err := s.Vec().NewCollection("docs", 3, vec.Cosine, false)
+	require.NoError(t, err)
+	require.NoError(t, col.Upsert([]vec.PointStruct{{ID: "a", Vector: []float32{1, 2, 3}}}))
+	require.NoError(t, col.Flush())
+
+	vfs, err := s.FS().Open("audit_fs")
+	require.NoError(t, err)
+	f, err := vfs.Create("blob.txt")
+	require.NoError(t, err)
+	_, err = f.Write([]byte("hello"))
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	res, err := s.VerifyAudit()
+	require.NoError(t, err)
+	require.Greater(t, res.Count, uint64(0))
+	require.Len(t, res.Tip, 32)
+
+	// The tip matches the recorder's head.
+	count, tip, err := s.Audit().Head()
+	require.NoError(t, err)
+	require.Equal(t, res.Count, count)
+	require.Equal(t, res.Tip, tip)
+}
+
+func TestAuditDisabledHasNoTrail(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "harbor-noaudit.db")
+
+	s := mustOpen(t, path, "pw")
+	t.Cleanup(func() { _ = s.Close() })
+
+	require.Equal(t, AuditNone, s.AuditFlags())
+	require.Nil(t, s.Audit())
+
+	require.NoError(t, s.DB().Save(ctx, &harborRecord{Name: "alice"}))
+
+	_, err := s.VerifyAudit()
+	require.ErrorIs(t, err, audit.ErrNoLog)
+}
+
+func TestAuditWrongPasswordIsRejectedOnOpen(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "harbor-audit-pw.db")
+
+	opts := testOptions("right")
+	opts.Audit = AuditDB
+	s, err := Open(ctx, path, 0600, opts)
+	require.NoError(t, err)
+	require.NoError(t, s.DB().Save(ctx, &harborRecord{Name: "alice"}))
+	require.NoError(t, s.Close())
+
+	// The audit signing keys derive from the same seed as the encryption keys,
+	// so a wrong password is caught by the canary at Open. Verification is
+	// therefore never reachable with a key that could not have signed the
+	// trail: a wrong password cannot even open the store.
+	_, err = Open(ctx, path, 0600, testOptions("wrong"))
+	require.ErrorIs(t, err, ErrInvalidPassword)
 }

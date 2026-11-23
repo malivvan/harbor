@@ -33,6 +33,7 @@ and `Vec()`. Every store can also be used directly with its own `*bolt.DB`.
 - [Vectors with `vec`](#vectors-with-vec)
 - [Clustering](#clustering)
 - [Encryption](#encryption)
+- [Audit trail](#audit-trail)
 - [Database lifecycle](#database-lifecycle)
 - [Error handling](#error-handling)
 - [Contexts and cancellation](#contexts-and-cancellation)
@@ -49,6 +50,9 @@ and `Vec()`. Every store can also be used directly with its own `*bolt.DB`.
 - **Encryption is built in, not bolted on.** AES-256-GCM seals records, files,
   points and documents; deterministic AES-SIV keeps exact lookups working when
   keys themselves must be hidden.
+- **Tamper-evident audit trail.** Optionally record every write as an Ed25519
+  signed, hash-linked event, so the history cannot be forged, altered or
+  reordered without the store key.
 - **Context-aware.** Database operations accept `context.Context` and honor
   cancellation at operation boundaries and loop checkpoints.
 - **Transactional.** Managed read/write transactions, plus `Attach` for mixing
@@ -801,6 +805,59 @@ For the key-derivation pipeline, canary design, ciphertext format and
 store-specific encryption internals, see
 [AGENTS.md](AGENTS.md#encryption-internals).
 
+## Audit trail
+
+Harbor can record every mutating operation as a **tamper-evident, append-only
+audit trail**. Each event is signed with an Ed25519 key derived from the store
+password (SLIP-0010, one key per sub-store) and linked to its predecessor by a
+hash chain, so the history cannot be forged, altered, reordered or spliced
+without the key material.
+
+Auditing is enabled per open with `Options.Audit`, mirroring the encryption
+flags:
+
+```go
+store, err := harbor.Open(ctx, "app.db", 0o600, &harbor.Options{
+	Password: "correct horse battery staple",
+	Audit:    harbor.AuditAll, // or AuditDB | AuditTS, …
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+// … writes through the sub-stores are recorded automatically …
+
+res, err := store.VerifyAudit()
+if err != nil {
+	log.Fatal(err) // forged signature, broken link, or no trail
+}
+log.Printf("audit: %d events, tip %x", res.Count, res.Tip)
+```
+
+| Flag | Records |
+|------|---------|
+| `AuditNone` | nothing (default) |
+| `AuditDB` | `db` writes |
+| `AuditFS` | `fs` writes |
+| `AuditTS` | `ts` writes |
+| `AuditVec` | `vec` writes |
+| `AuditAll` | all four |
+
+Unlike encryption flags, audit flags are **not persisted**: they are a per-open
+runtime choice, so enabling or disabling auditing never changes the on-disk
+format. The trail lives in an `audit/` bucket in the same file, so it travels
+with snapshots and backups.
+
+The trail detects interior tampering but **cannot by itself detect tail
+truncation** — deleting the last N events leaves a self-consistent prefix.
+Anchor `store.Audit().Head()` out of band on a schedule to detect that. The
+signing keys derive from the password, so anyone holding it can produce valid
+events; the trail proves integrity against an attacker *without* the key, the
+same trust boundary as the encryption itself.
+
+See [audit/README.md](audit/README.md) for the event model, the recorded
+operations, the full threat model and how to use the `audit` package directly.
+
 ## Database lifecycle
 
 The two entry points differ in who owns the bbolt handle:
@@ -877,6 +934,8 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
 - [vec/README.md](vec/README.md) — collections, indexes, filters, quantization,
   and buffering.
 - [fs/s3fs/README.md](fs/s3fs/README.md) — the S3-backed `absfs.Filer`.
+- [audit/README.md](audit/README.md) — the tamper-evident audit trail: event
+  model, recorded operations, threat model, and direct package use.
 - [AGENTS.md](AGENTS.md) — architecture, on-disk layout, encryption internals,
   development workflow, and repository conventions for contributors and coding
   agents.

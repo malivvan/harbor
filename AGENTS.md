@@ -18,7 +18,9 @@ separate `docs/` tree.
 | `.../fs/s3fs` | An `absfs.Filer` backed by S3-compatible object storage. |
 | `.../vec/hnsw` | The vendored HNSW graph implementation used by `vec`. |
 | `.../vec/hnsw/heap` | The heap used on the HNSW search hot path. |
-| `.../internal/...` | Shared bbolt helpers, AEAD primitives, Argon2id/BLAKE2b and CPU detection. Not public API. |
+| `.../audit` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write. |
+| `.../consensus` | Raft-backed cluster replication of a whole store. |
+| `.../internal/...` | Shared bbolt helpers, AEAD primitives, Argon2id/BLAKE2b, SLIP-0010/0021 and CPU detection. Not public API. |
 
 The four stores are independent. The root package is a convenience composition,
 not a required layer: each store can be opened directly with a caller-owned
@@ -611,8 +613,9 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 - `AGENTS.md` (this file) is developer/agent-facing: architecture, on-disk
   layouts, encryption internals, invariants, development workflow.
 - Per-package guides live in `db/README.md`, `fs/README.md`, `ts/README.md`,
-  `vec/README.md` and `fs/s3fs/README.md`. Package doc comments are the source
-  of truth for behavior; package guides are the source of truth for usage.
+  `vec/README.md`, `fs/s3fs/README.md`, `audit/README.md` and
+  `consensus/README.md`. Package doc comments are the source of truth for
+  behavior; package guides are the source of truth for usage.
 - Every public package has a package-level doc comment, and every exported
   identifier is documented. Keep comments in English.
 - Code examples must compile against the current public API. The `db` package
@@ -654,6 +657,8 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 - [ts/README.md](ts/README.md)
 - [vec/README.md](vec/README.md)
 - [fs/s3fs/README.md](fs/s3fs/README.md)
+- [audit/README.md](audit/README.md)
+- [consensus/README.md](consensus/README.md)
 
 Generated API documentation:
 
@@ -662,6 +667,8 @@ Generated API documentation:
 - [github.com/malivvan/harbor/fs](https://pkg.go.dev/github.com/malivvan/harbor/fs)
 - [github.com/malivvan/harbor/ts](https://pkg.go.dev/github.com/malivvan/harbor/ts)
 - [github.com/malivvan/harbor/vec](https://pkg.go.dev/github.com/malivvan/harbor/vec)
+- [github.com/malivvan/harbor/audit](https://pkg.go.dev/github.com/malivvan/harbor/audit)
+- [github.com/malivvan/harbor/consensus](https://pkg.go.dev/github.com/malivvan/harbor/consensus)
 
 ## Pre-release checklist
 
