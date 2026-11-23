@@ -119,7 +119,9 @@ func resultLabel(err error) string {
 	return metrics.ResultOK
 }
 
-// readDataRange reads n bytes at off, zero-filling missing chunks.
+// readDataRange reads n bytes at off, zero-filling missing chunks. It walks
+// the inode's chunks with a single cursor, so a sequential read does one seek
+// and then advances forward instead of looking up each chunk separately.
 func (b *fsBucket) readDataRange(ino uint64, off, n, chunkSize int64) ([]byte, error) {
 	if n <= 0 {
 		return nil, nil
@@ -129,15 +131,45 @@ func (b *fsBucket) readDataRange(ino uint64, off, n, chunkSize int64) ([]byte, e
 	}
 
 	out := make([]byte, n)
+	if b == nil || b.chunks == nil {
+		return out, nil
+	}
+
 	first := off / chunkSize
 	last := (off + n - 1) / chunkSize
+
+	var prefixBuf [8]byte
+	prefix := chunkPrefix(&prefixBuf, ino)
+	var keyBuf [16]byte
+
+	cursor := b.chunks.Cursor()
+	key, raw := cursor.Seek(chunkKey(&keyBuf, ino, first))
 	for idx := first; idx <= last; idx++ {
-		chunk, err := b.readChunk(ino, idx)
+		// Skip over chunks that were never written, and stop once the cursor
+		// leaves this inode.
+		for key != nil && (len(key) != 16 || !bytes.HasPrefix(key, prefix) ||
+			int64(binary.BigEndian.Uint64(key[8:])) < idx) {
+			if len(key) != 16 || !bytes.HasPrefix(key, prefix) {
+				key = nil
+				break
+			}
+			key, raw = cursor.Next()
+		}
+		if key == nil {
+			break
+		}
+		ci := int64(binary.BigEndian.Uint64(key[8:]))
+		if ci > last {
+			break
+		}
+		if ci != idx {
+			continue // gap: this chunk was never written, leave zeros
+		}
+
+		chunk, err := b.enc.openContent(raw)
+		b.observeChunk("read", len(chunk), err)
 		if err != nil {
 			return nil, err
-		}
-		if len(chunk) == 0 {
-			continue
 		}
 
 		start := idx * chunkSize
@@ -152,10 +184,10 @@ func (b *fsBucket) readDataRange(ino uint64, off, n, chunkSize int64) ([]byte, e
 		if end := start + int64(len(chunk)); to > end {
 			to = end
 		}
-		if to <= from {
-			continue
+		if to > from {
+			copy(out[from-off:to-off], chunk[from-start:to-start])
 		}
-		copy(out[from-off:to-off], chunk[from-start:to-start])
+		key, raw = cursor.Next()
 	}
 	return out, nil
 }
@@ -173,11 +205,6 @@ func (b *fsBucket) writeDataRange(ino uint64, off int64, data []byte, chunkSize 
 	last := (off + int64(len(data)) - 1) / chunkSize
 	end := off + int64(len(data))
 	for idx := first; idx <= last; idx++ {
-		chunk, err := b.readChunk(ino, idx)
-		if err != nil {
-			return err
-		}
-
 		start := idx * chunkSize
 		from := off
 		if from < start {
@@ -189,6 +216,21 @@ func (b *fsBucket) writeDataRange(ino uint64, off int64, data []byte, chunkSize 
 		}
 		if to <= from {
 			continue
+		}
+
+		// A write that covers the whole chunk replaces it outright, so there
+		// is no existing content to read back and merge. This skips a decrypt
+		// and a re-encrypt of the old chunk on every full-chunk overwrite.
+		if from == start && to == start+chunkSize {
+			if err := b.writeChunk(ino, idx, data[from-off:to-off]); err != nil {
+				return err
+			}
+			continue
+		}
+
+		chunk, err := b.readChunk(ino, idx)
+		if err != nil {
+			return err
 		}
 
 		// Grow only to the end of the written range, not to a full chunk: a

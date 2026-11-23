@@ -511,3 +511,33 @@ func TestDeleteChunksMany(t *testing.T) {
 	}))
 	require.Empty(t, chunkEntries(t, db, []byte("ts"), "fs"))
 }
+
+// TestFullChunkOverwriteFastPath verifies that a write replacing a whole chunk
+// produces the same bytes as a partial write, and does not leave extra chunks
+// behind.
+func TestFullChunkOverwriteFastPath(t *testing.T) {
+	store, db := chunkedStore(t, []byte("ts"), 61, 8)
+	fsys, err := store.Open("fs")
+	require.NoError(t, err)
+
+	writeTestFile(t, fsys, "/f", "0123456789ABCDEF") // two 8-byte chunks
+	node, err := fsys.resolve("/f")
+	require.NoError(t, err)
+	require.Len(t, chunkEntries(t, db, []byte("ts"), "fs"), 2)
+
+	// Overwrite the first chunk exactly.
+	require.NoError(t, fsys.writeRange(node.Ino, 0, []byte("abcdefgh")))
+
+	got, err := fsys.readRange(node.Ino, 0, 16)
+	require.NoError(t, err)
+	require.Equal(t, "abcdefgh89ABCDEF", string(got))
+	require.Len(t, chunkEntries(t, db, []byte("ts"), "fs"), 2)
+
+	// Overwrite the second chunk exactly as well.
+	require.NoError(t, fsys.writeRange(node.Ino, 8, []byte("IJKLMNOP")))
+
+	got, err = fsys.readRange(node.Ino, 0, 16)
+	require.NoError(t, err)
+	require.Equal(t, "abcdefghIJKLMNOP", string(got))
+	require.Len(t, chunkEntries(t, db, []byte("ts"), "fs"), 2)
+}
