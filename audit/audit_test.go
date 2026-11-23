@@ -1,0 +1,152 @@
+package audit
+
+import (
+	"crypto/ed25519"
+	"encoding/json"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	bolt "go.etcd.io/bbolt"
+)
+
+func testSeed() []byte {
+	return []byte("000102030405060708090a0b0c0d0e0f")
+}
+
+func testKey(t *testing.T, path string) (ed25519.PublicKey, ed25519.PrivateKey) {
+	t.Helper()
+	pub, priv, err := DeriveKey(testSeed(), path)
+	require.NoError(t, err)
+	return pub, priv
+}
+
+func testDB(t *testing.T) *bolt.DB {
+	t.Helper()
+	b, err := bolt.Open(filepath.Join(t.TempDir(), "audit.db"), 0o600, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = b.Close() })
+	return b
+}
+
+func TestRecordAndVerify(t *testing.T) {
+	pub, priv := testKey(t, "m/0'")
+	b := testDB(t)
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
+
+	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "users:u1", Digest: []byte("0123456789abcdef0123456789abcdef")}))
+	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "delete", Entity: "users:u1"}))
+
+	res, err := Verify(b, map[string]ed25519.PublicKey{StoreDB: pub})
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), res.Count)
+
+	count, tip, err := rec.Head()
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), count)
+	require.Equal(t, res.Tip, tip)
+}
+
+func TestVerifyRejectsForgery(t *testing.T) {
+	pub, priv := testKey(t, "m/0'")
+	b := testDB(t)
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
+	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "a"}))
+
+	// Tamper with the stored event payload without re-signing.
+	require.NoError(t, b.Update(func(tx *bolt.Tx) error {
+		root := tx.Bucket([]byte(auditBucket))
+		events := root.Bucket([]byte(eventsBucket))
+		v := events.Get(seqKey(0))
+		copy(v, []byte("x")) // corrupt the encoded JSON
+		return events.Put(seqKey(0), v)
+	}))
+
+	_, err := Verify(b, map[string]ed25519.PublicKey{StoreDB: pub})
+	require.Error(t, err)
+}
+
+func TestVerifyRejectsMissingEvent(t *testing.T) {
+	pub, priv := testKey(t, "m/0'")
+	b := testDB(t)
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
+	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "a"}))
+	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "b"}))
+	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "c"}))
+
+	// Delete the middle event; the chain link must break.
+	require.NoError(t, b.Update(func(tx *bolt.Tx) error {
+		root := tx.Bucket([]byte(auditBucket))
+		events := root.Bucket([]byte(eventsBucket))
+		return events.Delete(seqKey(1))
+	}))
+
+	_, err := Verify(b, map[string]ed25519.PublicKey{StoreDB: pub})
+	require.Error(t, err)
+}
+
+func TestVerifyTruncatedTailStillVerifiesPrefix(t *testing.T) {
+	pub, priv := testKey(t, "m/0'")
+	b := testDB(t)
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
+	for i := 0; i < 3; i++ {
+		require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "e"}))
+	}
+
+	// Delete the last event: the remaining prefix is internally consistent, so
+	// Verify succeeds but reports a shorter chain. Tail anchoring is external.
+	require.NoError(t, b.Update(func(tx *bolt.Tx) error {
+		root := tx.Bucket([]byte(auditBucket))
+		events := root.Bucket([]byte(eventsBucket))
+		return events.Delete(seqKey(2))
+	}))
+
+	res, err := Verify(b, map[string]ed25519.PublicKey{StoreDB: pub})
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), res.Count)
+}
+
+func TestRecordUnknownStoreFails(t *testing.T) {
+	_, priv := testKey(t, "m/0'")
+	b := testDB(t)
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
+	err := rec.Record(Entry{Store: "nope", Op: "save"})
+	require.Error(t, err)
+}
+
+func TestDeriveKeyDeterministic(t *testing.T) {
+	pub1, priv1, err := DeriveKey(testSeed(), "m/1'")
+	require.NoError(t, err)
+	pub2, priv2, err := DeriveKey(testSeed(), "m/1'")
+	require.NoError(t, err)
+	require.Equal(t, pub1, pub2)
+	require.Equal(t, priv1, priv2)
+
+	// Different paths derive different keys.
+	pub3, _, err := DeriveKey(testSeed(), "m/2'")
+	require.NoError(t, err)
+	require.NotEqual(t, pub1, pub3)
+
+	// A different seed derives a different key.
+	pub4, _, err := DeriveKey([]byte("different-seed"), "m/1'")
+	require.NoError(t, err)
+	require.NotEqual(t, pub1, pub4)
+}
+
+func TestRecordFillsTime(t *testing.T) {
+	_, priv := testKey(t, "m/0'")
+	b := testDB(t)
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
+	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "a"}))
+
+	var ev Event
+	require.NoError(t, b.View(func(tx *bolt.Tx) error {
+		events := tx.Bucket([]byte(auditBucket)).Bucket([]byte(eventsBucket))
+		v := events.Get(seqKey(0))
+		encoded := v[:len(v)-ed25519.SignatureSize]
+		return json.Unmarshal(encoded, &ev)
+	}))
+	require.True(t, ev.At > 0)
+	require.WithinDuration(t, time.Unix(0, ev.At), time.Now(), 10*time.Second)
+}
