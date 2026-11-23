@@ -385,6 +385,31 @@ func (g *Graph) NodeHistory(ctx context.Context, nodeID string) ([]RecordVersion
 	if err := g.base.Select(q.Eq("NodeID", nodeID)).Find(ctx, &versions); err != nil && !errors.Is(err, hdb.ErrNotFound) {
 		return nil, err
 	}
+	return g.nodeVersions(ctx, versions)
+}
+
+// AllNodeVersions returns every closed node version in the graph, oldest first:
+// the whole-history companion of NodeHistory, for the questions that ask what
+// churn a store has seen without naming an id first.
+func (g *Graph) AllNodeVersions(ctx context.Context) ([]RecordVersion, error) {
+	var versions []*NodeVersion
+	if err := g.base.All(ctx, &versions); err != nil && !errors.Is(err, hdb.ErrNotFound) {
+		return nil, err
+	}
+	return g.nodeVersions(ctx, versions)
+}
+
+// AllEdgeVersions returns every closed edge version in the graph, oldest first.
+func (g *Graph) AllEdgeVersions(ctx context.Context) ([]RecordVersion, error) {
+	var versions []*EdgeVersion
+	if err := g.base.All(ctx, &versions); err != nil && !errors.Is(err, hdb.ErrNotFound) {
+		return nil, err
+	}
+	return g.edgeVersions(ctx, versions)
+}
+
+// nodeVersions decodes and orders node versions.
+func (g *Graph) nodeVersions(ctx context.Context, versions []*NodeVersion) ([]RecordVersion, error) {
 	sort.SliceStable(versions, func(i, j int) bool {
 		if !versions[i].RecordedAt.Equal(versions[j].RecordedAt) {
 			return versions[i].RecordedAt.Before(versions[j].RecordedAt)
@@ -537,7 +562,9 @@ func (g *Graph) Purge(ctx context.Context, before time.Time, dryRun bool) (*Purg
 	})
 }
 
-// RetractNodeAt withdraws a live node as of an instant.
+// RetractNodeAt withdraws a live node as of an instant, and every live edge
+// touching it with it: an edge left behind would answer a traversal with an
+// endpoint that is no longer there. DeleteNode is this at the store clock.
 func (g *Graph) RetractNodeAt(ctx context.Context, nodeID string, at time.Time) error {
 	if at.IsZero() {
 		at = g.now()
@@ -546,6 +573,15 @@ func (g *Graph) RetractNodeAt(ctx context.Context, nodeID string, at time.Time) 
 		var record NodeRecord
 		if err := n.One(ctx, "ID", nodeID, &record); err != nil {
 			return nodeErr(nodeID, err)
+		}
+		edges, err := g.liveEdgesTouching(ctx, n, nodeID)
+		if err != nil {
+			return err
+		}
+		for _, edge := range edges {
+			if err := g.archiveEdge(ctx, n, edge, at.UTC(), at.UTC(), true, InvalidationFrom(ctx)); err != nil {
+				return err
+			}
 		}
 		return g.archiveNode(ctx, n, &record, at.UTC(), at.UTC(), true, InvalidationFrom(ctx))
 	})
@@ -562,6 +598,26 @@ func (g *Graph) RetractEdgeAt(ctx context.Context, edgeID string, at time.Time) 
 			return edgeErr(edgeID, err)
 		}
 		return g.archiveEdge(ctx, n, &record, at.UTC(), at.UTC(), true, InvalidationFrom(ctx))
+	})
+}
+
+// EndEdge closes a live edge's validity at an instant without retracting it:
+// the version stays readable as of every instant before at, and the record says
+// why it ended (InvalidationFrom). It is the correction path behind a
+// single-valued link, where the old value was replaced rather than withdrawn.
+func (g *Graph) EndEdge(ctx context.Context, edgeID string, at time.Time) error {
+	if edgeID == "" {
+		return fmt.Errorf("%w: edge id is required", ErrInvalidRequest)
+	}
+	if at.IsZero() {
+		at = g.now()
+	}
+	return g.write(ctx, func(n hdb.Node) error {
+		var record EdgeRecord
+		if err := n.One(ctx, "ID", edgeID, &record); err != nil {
+			return edgeErr(edgeID, err)
+		}
+		return g.archiveEdge(ctx, n, &record, at.UTC(), g.now(), false, InvalidationFrom(ctx))
 	})
 }
 

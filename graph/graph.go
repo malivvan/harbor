@@ -362,7 +362,8 @@ func (g *Graph) write(ctx context.Context, fn func(n hdb.Node) error) error {
 }
 
 // UpsertNode inserts or updates a node. An unchanged write is a no-op: it
-// creates no version and rewrites nothing.
+// creates no version and rewrites nothing. CreatedAt is the store's unless the
+// caller sets it, which an import does to keep the time a record first existed.
 func (g *Graph) UpsertNode(ctx context.Context, node *Node) error {
 	if node == nil || node.ID == "" {
 		return fmt.Errorf("%w: node id is required", ErrInvalidRequest)
@@ -405,6 +406,11 @@ func (g *Graph) UpsertNode(ctx context.Context, node *Node) error {
 		created := recorded
 		if !existing.CreatedAt.IsZero() {
 			created = existing.CreatedAt
+		}
+		// A caller-supplied CreatedAt is kept: it is how an import preserves
+		// the time the record first existed rather than the time it landed.
+		if !node.CreatedAt.IsZero() {
+			created = node.CreatedAt.UTC()
 		}
 		record := &NodeRecord{
 			ID: node.ID, Vector: append([]float32(nil), node.Vector...),

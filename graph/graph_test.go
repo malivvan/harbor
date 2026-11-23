@@ -316,3 +316,133 @@ func TestPrefixesShareOneStoreWithoutMixing(t *testing.T) {
 		t.Fatalf("one lost its node: %v", err)
 	}
 }
+
+func TestEndEdgeClosesWithoutRetracting(t *testing.T) {
+	g, c := newTestGraph(t)
+	ctx := context.Background()
+	for _, id := range []string{"a", "b"} {
+		if err := g.UpsertNode(ctx, node(id, "person")); err != nil {
+			t.Fatalf("upsert node %s: %v", id, err)
+		}
+	}
+	if err := g.UpsertEdge(ctx, edge("e1", "a", "b", "knows")); err != nil {
+		t.Fatalf("upsert edge: %v", err)
+	}
+	c.Advance(time.Hour)
+	at := c.Now()
+	ctx = WithInvalidation(ctx, Invalidation{Reason: "superseded", SupersededBy: "e2", Producer: "test"})
+	if err := g.EndEdge(ctx, "e1", at); err != nil {
+		t.Fatalf("end edge: %v", err)
+	}
+	// The live edge is gone...
+	if edges, err := g.GetEdges(ctx, "a", "out"); err != nil || len(edges) != 0 {
+		t.Fatalf("live edges after EndEdge = %d, err %v", len(edges), err)
+	}
+	// ...and it was not retracted: its version says it was superseded, at the
+	// instant the caller named.
+	history, err := g.EdgeHistory(ctx, "e1")
+	if err != nil || len(history) != 1 {
+		t.Fatalf("edge history = %+v, err %v", history, err)
+	}
+	if history[0].Status() != "superseded" || !history[0].RetractedAt.IsZero() {
+		t.Fatalf("ended version = %+v (status %s)", history[0], history[0].Status())
+	}
+	if !history[0].ValidTo.Equal(at) || history[0].Reason != "superseded" || history[0].SupersededBy != "e2" {
+		t.Fatalf("ended version = %+v", history[0])
+	}
+	// As of before the closure it is still in force.
+	before := AsOf(ctx, at.Add(-time.Minute))
+	if edges, err := g.GetEdges(before, "a", "out"); err != nil || len(edges) != 1 || edges[0].ID != "e1" {
+		t.Fatalf("as-of edges before EndEdge = %d, err %v", len(edges), err)
+	}
+	if err := g.EndEdge(ctx, "missing", at); !errors.Is(err, ErrEdgeNotFound) {
+		t.Fatalf("EndEdge(unknown id) = %v, want ErrEdgeNotFound", err)
+	}
+}
+
+func TestAllVersionsAndCallerCreatedAt(t *testing.T) {
+	g, c := newTestGraph(t)
+	ctx := context.Background()
+	created := c.Now().Add(-24 * time.Hour)
+	first := node("a", "person")
+	first.CreatedAt = created
+	if err := g.UpsertNode(ctx, first); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if !first.CreatedAt.Equal(created) {
+		t.Fatalf("CreatedAt = %s, want the caller's %s", first.CreatedAt, created)
+	}
+	if err := g.UpsertNode(ctx, node("b", "person")); err != nil {
+		t.Fatalf("upsert b: %v", err)
+	}
+
+	c.Advance(time.Hour)
+	changed := node("a", "person")
+	changed.Content = "changed"
+	if err := g.UpsertNode(WithInvalidation(ctx, Invalidation{Reason: "superseded"}), changed); err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+	if err := g.UpsertEdge(ctx, edge("e1", "a", "b", "knows")); err != nil {
+		t.Fatalf("upsert edge: %v", err)
+	}
+	c.Advance(time.Hour)
+	if err := g.DeleteEdge(ctx, "e1"); err != nil {
+		t.Fatalf("delete edge: %v", err)
+	}
+
+	// The whole history, oldest first, with each closure's reason.
+	nodes, err := g.AllNodeVersions(ctx)
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("AllNodeVersions = %d versions, err %v", len(nodes), err)
+	}
+	if nodes[0].ID != "a" || nodes[0].Content != "content of a" || nodes[0].Status() != "superseded" ||
+		nodes[0].Reason != "superseded" {
+		t.Fatalf("node version = %+v (status %s)", nodes[0], nodes[0].Status())
+	}
+	edges, err := g.AllEdgeVersions(ctx)
+	if err != nil || len(edges) != 1 {
+		t.Fatalf("AllEdgeVersions = %d versions, err %v", len(edges), err)
+	}
+	if edges[0].ID != "e1" || edges[0].From != "a" || edges[0].To != "b" || edges[0].Status() != "retracted" {
+		t.Fatalf("edge version = %+v (status %s)", edges[0], edges[0].Status())
+	}
+
+	// The rewrite kept the instant the record first existed.
+	got, err := g.GetNode(ctx, "a")
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	if !got.CreatedAt.Equal(created) {
+		t.Fatalf("CreatedAt after rewrite = %s, want %s", got.CreatedAt, created)
+	}
+}
+
+func TestRetractNodeAtCascadesToEdges(t *testing.T) {
+	g, c := newTestGraph(t)
+	ctx := context.Background()
+	for _, id := range []string{"a", "b"} {
+		if err := g.UpsertNode(ctx, node(id, "person")); err != nil {
+			t.Fatalf("upsert node %s: %v", id, err)
+		}
+	}
+	if err := g.UpsertEdge(ctx, edge("e1", "a", "b", "knows")); err != nil {
+		t.Fatalf("upsert edge: %v", err)
+	}
+	c.Advance(time.Hour)
+	at := c.Now()
+	if err := g.RetractNodeAt(ctx, "a", at); err != nil {
+		t.Fatalf("retract node: %v", err)
+	}
+	// The edge went with the node, so the far end no longer reads it either.
+	if edges, err := g.GetEdges(ctx, "b", "both"); err != nil || len(edges) != 0 {
+		t.Fatalf("edges at the far end = %d, err %v", len(edges), err)
+	}
+	history, err := g.EdgeHistory(ctx, "e1")
+	if err != nil || len(history) != 1 || history[0].Status() != "retracted" {
+		t.Fatalf("edge history = %+v, err %v", history, err)
+	}
+	before := AsOf(ctx, at.Add(-time.Minute))
+	if edges, err := g.GetEdges(before, "b", "both"); err != nil || len(edges) != 1 {
+		t.Fatalf("as-of edges before the retraction = %d, err %v", len(edges), err)
+	}
+}

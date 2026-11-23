@@ -33,8 +33,8 @@ old, _ := g.GetNode(graph.AsOf(ctx, time.Now().Add(-365*24*time.Hour)), "leo")
 | Whole-graph reads | `GetAllNodes`, `GetAllEdges`, `CountNodes`, `NodeTypeCounts`, `EdgeTypeCounts`, `Statistics`, `ExistingNodeIDs` |
 | Batches | `UpsertNodesBatch`, `DeleteNodesBatch`, `UpsertEdgesBatch`, `DeleteEdgesBatch`, `ExecuteBatch` (partial success, per-record errors) |
 | Traversal | `Neighbors`, `ShortestPath`, `ShortestPathAdmitting`, `Connected` |
-| Bitemporal history | `AsOf`, `ReadOptionsFrom`, `NodeHistory`, `EdgeHistory`, `NodeEdgeHistory`, `EndedEdgeVersions`, `Diff` |
-| Retention and withdrawal | `Purge`, `RetractNodeAt`, `RetractEdgeAt`, `RetractNodes` |
+| Bitemporal history | `AsOf`, `ReadOptionsFrom`, `NodeHistory`, `EdgeHistory`, `NodeEdgeHistory`, `AllNodeVersions`, `AllEdgeVersions`, `EndedEdgeVersions`, `Diff` |
+| Retention and withdrawal | `Purge`, `RetractNodeAt`, `RetractEdgeAt`, `RetractNodes`, `EndEdge` |
 | Vocabulary | `NodeLabels`, `EdgeShapes`, `PropertyCounts`, `RecordsWithProperties` |
 | Interchange | `ExportDocument`, `ExportJSON`, `ImportDocument`, `ImportJSON` |
 
@@ -69,15 +69,24 @@ having been known earlier. Writing under an as-of context is refused
 (`ErrAsOfWrite`): writing "now" while the caller believes it is working at
 another instant corrupts the record rather than the answer.
 
-A node delete cascades: its live edges are retracted with it. Retraction closes
-a version at an instant the caller names, so a fact found wrong can be withdrawn
-as of when it was wrong.
+A node delete cascades: its live edges are retracted with it, and so does a
+backdated `RetractNodeAt`. Retraction closes a version at an instant the caller
+names, so a fact found wrong can be withdrawn as of when it was wrong.
+
+`EndEdge` is the other way a version can end: a correction rather than a
+withdrawal. It closes a live edge's interval at an instant without retracting
+it, and the history row says why (`InvalidationFrom`), which is what an
+application's single-valued link — one current value per subject — writes when a
+newer value replaces an older one. Whether a link is single-valued is the
+application's rule, not this package's.
 
 ## Lifecycle and limits
 
 - `New` borrows the store; the caller closes it. `Init` is a no-op — buckets are
   created by the first write.
 - Reads and writes honour `context.Context` cancellation through Harbour.
+- `CreatedAt` is the store's unless the caller sets it, which an import does to
+  keep the time a record first existed.
 - Ids are not generated: a caller names records. Results are returned in id
   order; `Diff` and history are ordered by recorded time, then valid time.
 - Upserts, deletes (with their cascade) and archives run in one write
