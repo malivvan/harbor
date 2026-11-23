@@ -25,17 +25,28 @@ var _ raft.FSM = (*fsm)(nil)
 
 // Apply applies one committed log entry to the local harbor store. It returns
 // the operation result (or an error) as the raft future's response.
+//
+// A corrupt, incompatible, or manually edited log entry is reported as an
+// ApplyError instead of panicking: the FSM is a replicated state machine, so
+// terminating the process would take down a node that is otherwise healthy.
+// The error carries the log index and operation so an operator can pinpoint
+// the offending entry. Panic recovery stays as an outer safety net for
+// unexpected failures in the store layer.
 func (f *fsm) Apply(l *raft.Log) any {
 	f.applyMu.Lock()
 	defer f.applyMu.Unlock()
 
+	defer func() {
+		if r := recover(); r != nil {
+			f.node.logf("[ERROR] consensus: panic applying log index %d: %v", l.Index, r)
+		}
+	}()
+
 	c, err := decodeCommand(l.Data)
 	if err != nil {
-		// An undecodable entry means a corrupt or tampered log, which cannot be
-		// recovered from silently.
-		panic(err)
+		return &ApplyError{Index: l.Index, Err: err}
 	}
-	return f.applyCommand(c)
+	return f.applyCommand(l.Index, c)
 }
 
 // Snapshot returns a serialized snapshot of the harbor database.
@@ -64,108 +75,161 @@ func (f *fsm) Restore(rc io.ReadCloser) error {
 	return f.node.restoreStore(data)
 }
 
-func (f *fsm) applyCommand(c Command) any {
+func (f *fsm) applyCommand(index uint64, c Command) any {
 	ctx := context.Background()
 	switch c.Op {
 	// db
 	case opDBSave, opDBUpdate:
 		var a dbChange
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyDBUpsert(ctx, a, c.Op == opDBUpdate)
 	case opDBUpdateField:
 		var a dbFieldChange
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyDBUpdateField(ctx, a)
 	case opDBDelete:
 		var a dbChange
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyDBDelete(ctx, a)
 	case opDBDrop:
 		var a dbChange
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyDBDrop(ctx, a)
 
 	// ts
 	case opTSInsert:
 		var a tsInsertArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyTSInsert(ctx, a)
 	case opTSInsertMany:
 		var a tsInsertManyArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyTSInsertMany(ctx, a)
 	case opTSDeleteRange:
 		var a tsRangeArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyTSDeleteRange(ctx, a)
 	case opTSDrop:
 		var a tsNameArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyTSDrop(ctx, a)
 	case opTSSetLabels:
 		var a tsLabelsArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyTSSetLabels(ctx, a)
 	case opTSSetRetention:
 		var a tsRetentionArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyTSSetRetention(ctx, a)
 	case opTSDeleteSeries:
 		var a tsNameArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyTSDeleteSeries(ctx, a)
 
 	// vec
 	case opVecCreateCollection:
 		var a vecCreateArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyVecCreate(ctx, a)
 	case opVecUpsert:
 		var a vecUpsertArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyVecUpsert(ctx, a)
 	case opVecDelete:
 		var a vecDeleteArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyVecDelete(ctx, a)
 	case opVecDropCollection:
 		var a vecDropArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyVecDrop(ctx, a)
 
 	// fs
 	case opFSMkdir:
 		var a fsPathArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyFSMkdir(a)
 	case opFSRemove:
 		var a fsPathArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyFSRemove(a)
 	case opFSRename:
 		var a fsPathArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyFSRename(a)
 	case opFSRemoveAll:
 		var a fsPathArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyFSRemoveAll(a)
 	case opFSWrite:
 		var a fsPathArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyFSWrite(a)
 	case opFSDeleteFS:
 		var a fsPathArg
-		mustDecode(c.Arg, &a)
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
 		return f.applyFSDeleteFS(a)
 
 	default:
-		panic(fmt.Sprintf("consensus: unknown command op %q", c.Op))
+		return &ApplyError{
+			Index: index,
+			Op:    c.Op,
+			Err:   fmt.Errorf("unknown command op"),
+		}
 	}
 }
 
-func mustDecode(raw json.RawMessage, v any) {
-	if err := json.Unmarshal(raw, v); err != nil {
-		panic(fmt.Sprintf("consensus: decode %T argument: %v", v, err))
+// decodeArg unmarshals a command argument, reporting a malformed payload as a
+// structured apply failure instead of panicking.
+func decodeArg(index uint64, c Command, v any) error {
+	if err := json.Unmarshal(c.Arg, v); err != nil {
+		return &ApplyError{
+			Index: index,
+			Op:    c.Op,
+			Err:   fmt.Errorf("decode %T argument: %w", v, err),
+		}
 	}
+	return nil
 }

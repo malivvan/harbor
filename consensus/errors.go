@@ -8,7 +8,10 @@
 // design and the consistency model.
 package consensus
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var (
 	// ErrClosed is returned by operations on a closed Node.
@@ -24,3 +27,33 @@ var (
 	// ErrInvalidConfig reports a nil or unusable Config.
 	ErrInvalidConfig = errors.New("consensus: invalid config")
 )
+
+// ApplyError reports a committed log entry the FSM could not apply: an
+// undecodable command, a malformed argument, or an operation this build does
+// not know. It carries the raft log index and operation so an operator can
+// locate the offending entry.
+//
+// A corrupt or incompatible log is not recoverable by retrying, so the entry
+// is reported rather than applied: the node keeps serving reads and the rest
+// of the log, and the error surfaces to the proposing caller.
+type ApplyError struct {
+	// Index is the raft log index of the failed entry.
+	Index uint64
+
+	// Op is the command operation, empty when the entry could not be decoded.
+	Op string
+
+	// Err is the underlying cause.
+	Err error
+}
+
+// Error implements the error interface.
+func (e *ApplyError) Error() string {
+	if e.Op == "" {
+		return fmt.Sprintf("consensus: apply log index %d: %v", e.Index, e.Err)
+	}
+	return fmt.Sprintf("consensus: apply log index %d op %q: %v", e.Index, e.Op, e.Err)
+}
+
+// Unwrap returns the underlying cause.
+func (e *ApplyError) Unwrap() error { return e.Err }

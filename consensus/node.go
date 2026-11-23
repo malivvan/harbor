@@ -40,6 +40,18 @@ type Node struct {
 	closed bool
 }
 
+// logf writes a diagnostic line to the configured raft log output, if any.
+func (n *Node) logf(format string, args ...any) {
+	if n == nil {
+		return
+	}
+	w := n.cfg.LogOutput
+	if w == nil {
+		return
+	}
+	fmt.Fprintf(w, format+"\n", args...)
+}
+
 // nowNanos returns the node's clock reading in unix nanoseconds.
 func (n *Node) nowNanos() int64 {
 	if n == nil || n.now == nil {

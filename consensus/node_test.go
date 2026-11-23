@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"path/filepath"
 	"testing"
@@ -338,4 +339,53 @@ func TestReplicatedRetentionPrunesIdentically(t *testing.T) {
 		require.Len(t, pts, 1, "node %s kept the wrong points", n.cfg.NodeID)
 		require.Equal(t, 1.0, pts[0].Value)
 	}
+}
+
+// TestApplyErrorsAreStructured checks that a corrupt, unknown, or malformed log
+// entry is reported as an ApplyError instead of panicking the process, and that
+// the node keeps serving writes afterwards.
+func TestApplyErrorsAreStructured(t *testing.T) {
+	node, err := Open(context.Background(), testConfig("node-1", freeAddr(t), true, t))
+	require.NoError(t, err)
+	defer closeAll(node)
+
+	// A single-node cluster elects itself; wait for that before writing.
+	_ = waitLeader(t, node)
+
+	f := &fsm{node: node}
+
+	t.Run("undecodable command", func(t *testing.T) {
+		resp := f.Apply(&raft.Log{Index: 7, Data: []byte("not json")})
+		var ae *ApplyError
+		require.ErrorAs(t, resp.(error), &ae)
+		require.Equal(t, uint64(7), ae.Index)
+		require.Empty(t, ae.Op)
+	})
+
+	t.Run("unknown op", func(t *testing.T) {
+		data, err := encodeCommand("nope.do_thing", struct{}{})
+		require.NoError(t, err)
+		resp := f.Apply(&raft.Log{Index: 8, Data: data})
+		var ae *ApplyError
+		require.ErrorAs(t, resp.(error), &ae)
+		require.Equal(t, uint64(8), ae.Index)
+		require.Equal(t, "nope.do_thing", ae.Op)
+	})
+
+	t.Run("malformed argument", func(t *testing.T) {
+		data, err := json.Marshal(Command{Op: opTSInsert, Arg: json.RawMessage(`{"series":42}`)})
+		require.NoError(t, err)
+		resp := f.Apply(&raft.Log{Index: 9, Data: data})
+		var ae *ApplyError
+		require.ErrorAs(t, resp.(error), &ae)
+		require.Equal(t, uint64(9), ae.Index)
+		require.Equal(t, opTSInsert, ae.Op)
+	})
+
+	t.Run("node stays usable", func(t *testing.T) {
+		require.NoError(t, node.TS().Insert(context.Background(), "cpu", ts.Point{Timestamp: 1, Value: 1}))
+		count, err := node.Store().TS().Series("cpu").Count(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, 1, count)
+	})
 }
