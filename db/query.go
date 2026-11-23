@@ -339,6 +339,10 @@ func (q *query) query(ctx context.Context, tx *bolt.Tx, sink sink) error {
 
 	bucket := q.node.getBucket(tx, bucketName)
 
+	if ta, ok := sink.(interface{ setTx(*bolt.Tx) }); ok {
+		ta.setTx(tx)
+	}
+
 	if err := checkContext(ctx); err != nil {
 		return err
 	}

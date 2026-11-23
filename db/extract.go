@@ -31,6 +31,12 @@ type fieldConfig struct {
 	IsInteger      bool
 	Value          *reflect.Value
 	ForceUpdate    bool
+
+	// Ref names the bucket whose record this field references, and OnDelete
+	// selects what happens when that record is deleted: "restrict" (the
+	// default) or "cascade". See references.go.
+	Ref      string
+	OnDelete string
 }
 
 // structConfig is a structure gathering all the relevant informations about a model
@@ -94,6 +100,8 @@ type fieldMeta struct {
 	increment      bool
 	incrementStart int64
 	isInteger      bool
+	ref            string
+	onDelete       string
 	// path locates the field inside the struct (supporting promoted fields).
 	path []int
 }
@@ -182,6 +190,8 @@ func (m *structMeta) bind(s *reflect.Value, nameSrc *reflect.Value) *structConfi
 			Increment:      fm.increment,
 			IncrementStart: fm.incrementStart,
 			IsInteger:      fm.isInteger,
+			Ref:            fm.ref,
+			OnDelete:       fm.onDelete,
 			Value:          &v,
 		}
 		fc.IsZero = v.IsZero()
@@ -212,6 +222,8 @@ func makeStructMeta(typ reflect.Type, cfg *structConfig) *structMeta {
 			increment:      fc.Increment,
 			incrementStart: fc.IncrementStart,
 			isInteger:      fc.IsInteger,
+			ref:            fc.Ref,
+			onDelete:       fc.OnDelete,
 			path:           sf.Index,
 		}
 	}
@@ -283,7 +295,26 @@ func extractField(value *reflect.Value, field *reflect.StructField, m *structCon
 				// we don't need to save this field
 				return nil
 			default:
-				if strings.HasPrefix(tag, tagIncrement) {
+				switch {
+				case strings.HasPrefix(tag, "ref="):
+					target := strings.TrimPrefix(tag, "ref=")
+					if target == "" {
+						return ErrUnknownTag
+					}
+					f.Ref = target
+					if f.Index == "" {
+						// Referencing fields are looked up during cascades, so
+						// index them automatically.
+						f.Index = tagIdx
+					}
+				case strings.HasPrefix(tag, "ondelete="):
+					switch strings.TrimPrefix(tag, "ondelete=") {
+					case "cascade", "restrict":
+						f.OnDelete = strings.TrimPrefix(tag, "ondelete=")
+					default:
+						return ErrUnknownTag
+					}
+				case strings.HasPrefix(tag, tagIncrement):
 					f.Increment = true
 					parts := strings.Split(tag, "=")
 					if parts[0] != tagIncrement {
@@ -295,10 +326,14 @@ func extractField(value *reflect.Value, field *reflect.StructField, m *structCon
 							return err
 						}
 					}
-				} else {
+				default:
 					return ErrUnknownTag
 				}
 			}
+		}
+
+		if f.OnDelete != "" && f.Ref == "" {
+			return ErrUnknownTag
 		}
 
 		if _, ok := m.Fields[f.Name]; !ok || !isChild {

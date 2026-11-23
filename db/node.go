@@ -58,6 +58,10 @@ type Node interface {
 
 	// Aggregate computes grouped measures over the records of this bucket.
 	Aggregate(ctx context.Context, spec AggregateSpec) (AggregateResult, error)
+
+	// ValidateSchema checks that the reference fields of the sample records
+	// name buckets that exist.
+	ValidateSchema(ctx context.Context, samples ...any) error
 }
 
 // Compile-time assertion that *node implements the final Node interface.

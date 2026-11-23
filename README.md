@@ -288,6 +288,23 @@ err = users.Prefix(ctx, "Name", "al", &prefixed)
 `All` if you want an empty slice contract. Pagination and ordering are
 `FindOption` values: `db.Limit`, `db.Skip` and `db.Reverse`.
 
+### References
+
+A `ref` tag ties a record to another bucket's primary key:
+
+```go
+type Chunk struct {
+	ID    string `db:"id"`
+	DocID string `db:"index,ref=Doc,ondelete=cascade"`
+}
+```
+
+Saving a chunk requires the referenced `Doc` to exist. Deleting or dropping a
+`Doc` is blocked by default (`ErrReferenceViolation`) or cascades to the
+referencing records when `ondelete=cascade` is set; `ValidateSchema` catches a
+misspelled target at startup. See
+[db/README.md](db/README.md#references-and-cascades).
+
 ### Aggregation
 
 `Aggregate` groups records and computes measures without materializing them:
@@ -558,6 +575,23 @@ Timestamps are Unix nanoseconds and ranges are inclusive on both ends. Points
 are stored in chronological key order, so `Range` and `RangeEach` stream in
 time order without an index. `Insert` replaces a point with the same timestamp;
 `InsertMany` accepts out-of-order timestamps and the last value wins.
+
+### References
+
+A `ref` tag ties a record to another bucket's primary key:
+
+```go
+type Chunk struct {
+	ID    string `db:"id"`
+	DocID string `db:"index,ref=Doc,ondelete=cascade"`
+}
+```
+
+Saving a chunk requires the referenced `Doc` to exist. Deleting or dropping a
+`Doc` is blocked by default (`ErrReferenceViolation`) or cascades to the
+referencing records when `ondelete=cascade` is set; `ValidateSchema` catches a
+misspelled target at startup. See
+[db/README.md](db/README.md#references-and-cascades).
 
 ### Aggregation
 

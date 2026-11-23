@@ -666,6 +666,10 @@ type deleteSink struct {
 	node Node
 	ref  reflect.Value
 
+	// tx is the transaction q.query is running in; enforcement needs it to
+	// consult the reference registry.
+	tx *bolt.Tx
+
 	// pending holds the matched records. Deletions are applied in flush so the
 	// bbolt cursor that produced them is never mutated while being walked.
 	pending []item
@@ -718,6 +722,36 @@ func (d *deleteSink) flush(ctx context.Context) error {
 			return err
 		}
 
+		// Enforce inbound references for the record about to be deleted. The
+		// registry is consulted first so a bucket with no inbound references
+		// never pays for a decode.
+		if n, ok := d.node.(*node); ok && d.tx != nil {
+			hasRefs := false
+			if relations, err := n.inboundRefs(d.tx, info.Name); err != nil {
+				return err
+			} else {
+				hasRefs = len(relations) > 0
+			}
+			if hasRefs {
+				raw := i.bucket.Get(i.k)
+				if raw != nil {
+					decoded := reflect.New(reflect.Indirect(d.ref).Type())
+					if err := n.unmarshal(raw, decoded.Interface()); err != nil {
+						return err
+					}
+					recordCfg, err := extract(&decoded)
+					if err != nil {
+						return err
+					}
+					if recordCfg.ID != nil {
+						if err := n.enforceDeleteRefs(ctx, d.tx, info.Name, recordCfg.ID.Value.Interface(), map[string]bool{}, 0); err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}
+
 		byField, ok := indexes[i.bucket]
 		if !ok {
 			var err error
@@ -762,6 +796,9 @@ func (d *deleteSink) flush(ctx context.Context) error {
 
 	return nil
 }
+
+// setTx records the executing transaction.
+func (d *deleteSink) setTx(tx *bolt.Tx) { d.tx = tx }
 
 func (d *deleteSink) readOnly() bool {
 	return false

@@ -275,6 +275,12 @@ func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data in
 		return err
 	}
 
+	// A reference field must name an existing record; the check runs inside the
+	// same transaction so a dangling save rolls back completely.
+	if err := n.validateRefFields(tx, cfg); err != nil {
+		return err
+	}
+
 	id, err := n.keyBytes(cfg.ID.Value.Interface(), keyDomainID)
 	if err != nil {
 		return err
@@ -401,6 +407,9 @@ func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data in
 	}
 
 	if err := bucket.Put(id, raw); err != nil {
+		return err
+	}
+	if err := n.registerRefSchema(tx, cfg); err != nil {
 		return err
 	}
 	return checkContext(ctx)
@@ -622,6 +631,11 @@ func (n *node) drop(ctx context.Context, tx *bolt.Tx, bucketName string) error {
 		return err
 	}
 
+	// Enforce inbound references before the bucket (and its records) vanishes.
+	if err := n.enforceDropRefs(ctx, tx, bucketName, map[string]bool{}, 0); err != nil {
+		return err
+	}
+
 	bucket := n.getBucket(tx)
 	var err error
 	if bucket == nil {
@@ -657,6 +671,11 @@ func (n *node) DeleteStruct(ctx context.Context, data any) error {
 	}
 
 	if err := n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+		// Restrict references block the delete; cascade references are removed
+		// in the same transaction.
+		if err := n.enforceDeleteRefs(ctx, tx, cfg.Name, cfg.ID.Value.Interface(), map[string]bool{}, 0); err != nil {
+			return err
+		}
 		id, err := n.keyBytes(cfg.ID.Value.Interface(), keyDomainID)
 		if err != nil {
 			return err

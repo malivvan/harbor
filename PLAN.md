@@ -582,7 +582,23 @@ on a large fixture.
 
 New API; no format change. Do not change existing matcher semantics.
 
-## 7. P1 — references and cascades in `db`
+## 7. P1 — references and cascades in `db` — DONE
+
+Done: `ref=<bucket>` and `ondelete=cascade|restrict` tags are parsed (and
+carried through the struct-meta cache), `ref` implies an index, and saves
+validate that a non-zero reference names an existing record
+(`ErrReferenceTargetMissing`, `ErrDanglingReference`). A per-store registry
+(`__harbor_refs__`, metadata only) records referencing fields so
+`DeleteStruct`, `Select(...).Delete` and `Drop` can enforce `restrict` or
+cascade in the same transaction, recursively, with a cycle/depth guard
+(`ErrReferenceCycle`). Cascaded deletes remove index entries generically.
+`Node.ValidateSchema` checks sample records' reference targets at startup.
+References are single scalar keys; zero values mean "no reference".
+
+Tests: dangling/missing target, zero references, restrict, cascade, recursive
+cascade, bulk delete, drop (restrict and cascade), schema validation and a bad
+`ondelete` tag. The existing db suite is green, including the tests that assert
+`Select.Delete` does not decode records when nothing references the bucket.
 
 ### Current state
 

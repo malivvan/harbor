@@ -92,6 +92,21 @@ var (
 	// that does not match what is stored on disk.
 	ErrWrongMode = crypto.ErrWrongMode
 
+	// ErrDanglingReference reports a save whose reference field names a record
+	// that does not exist.
+	ErrDanglingReference = errors.New("db: referenced record does not exist")
+
+	// ErrReferenceViolation reports a delete or drop blocked by a restrict
+	// reference.
+	ErrReferenceViolation = errors.New("db: referenced record is still in use")
+
+	// ErrReferenceTargetMissing reports a reference to a bucket that does not
+	// exist.
+	ErrReferenceTargetMissing = errors.New("db: reference target bucket does not exist")
+
+	// ErrReferenceCycle reports a cascade deeper than the guard allows.
+	ErrReferenceCycle = errors.New("db: reference cascade is too deep")
+
 	// ErrEncryptedOrdering is returned by ordered or prefix lookups on a store
 	// that encrypts keys: ciphertext ordering is meaningless, so these queries
 	// fail loud instead of silently returning wrong results.

@@ -273,6 +273,44 @@ that transaction and never closes it.
 `Query.Bucket(name)` targets a bucket explicitly, which is useful for
 runtime-generated types.
 
+### References and cascades
+
+A field can declare a reference to a record in another bucket:
+
+```go
+type Doc struct {
+	ID    string `db:"id"`
+	Title string `db:"index"`
+}
+
+type Chunk struct {
+	ID    string `db:"id"`
+	DocID string `db:"index,ref=Doc,ondelete=cascade"`
+	Body  string
+}
+```
+
+- `ref=<bucket>` names the target bucket (the target type's bucket name), and
+  `ondelete=cascade|restrict` selects the delete behaviour. `restrict` is the
+  default: deleting a referenced record fails with `db.ErrReferenceViolation`.
+  `cascade` deletes the referencing records in the same transaction, recursively.
+- Referencing fields are indexed automatically, so `Find(ctx, "DocID", id, &out)`
+  works without an explicit `index` tag.
+- `Save` requires a non-zero reference to name an existing record: a missing
+  target bucket returns `ErrReferenceTargetMissing`, a missing record
+  `ErrDanglingReference`. A zero value (empty string, 0, nil) means "no
+  reference" and is not validated.
+- The same rules apply to `DeleteStruct`, `Select(...).Delete`, and `Drop`.
+  `Drop` with `cascade` deletes the referencing records before dropping the
+  bucket; with `restrict` it fails if any remain. Cascades are guarded against
+  cycles and stop after 32 levels with `ErrReferenceCycle`.
+- References are single scalar keys in v1; slices, maps and composite keys are
+  not supported.
+- `Node.ValidateSchema(ctx, &Doc{}, &Chunk{})` checks at startup that every
+  reference names an existing bucket, catching a typo before the first save.
+- The relation registry (`__harbor_refs__`) is metadata: it stores bucket and
+  field names, not record values.
+
 ### Aggregation
 
 `Aggregate` computes grouped measures over a bucket without materializing the
