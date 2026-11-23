@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/internal/crypto"
 	bolt "go.etcd.io/bbolt"
 )
@@ -45,6 +46,9 @@ type Config struct {
 	// seals every point separately. A duration around a few seconds to a
 	// minute is a good default for streaming metrics.
 	BlockDuration int64
+
+	// Audit, when non-nil, receives an entry for every committed write.
+	Audit audit.Sink
 }
 
 func (c Config) encryptionEnabled() bool {

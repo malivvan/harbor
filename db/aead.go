@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/internal/crypto"
 	bolt "go.etcd.io/bbolt"
 )
@@ -42,6 +43,9 @@ type Config struct {
 	// stored keys no longer reveal the indexed data. Ordered and prefix
 	// lookups that rely on index ordering return ErrEncryptedOrdering.
 	EncryptKeys bool
+
+	// Audit, when non-nil, receives an entry for every committed write.
+	Audit audit.Sink
 }
 
 func (c Config) encryptionEnabled() bool {

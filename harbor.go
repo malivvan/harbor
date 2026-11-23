@@ -14,12 +14,14 @@ package harbor
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"os"
 	"runtime"
 	"sync"
 
+	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/db"
 	"github.com/malivvan/harbor/fs"
 	"github.com/malivvan/harbor/internal/crypto"
@@ -40,6 +42,15 @@ const (
 	labelFS  = "harbor/fs/v1"
 	labelTS  = "harbor/ts/v1"
 	labelVec = "harbor/vec/v1"
+)
+
+// SLIP-10 (Ed25519) hardened paths for the per-store audit signing keys. They
+// mirror the per-store SLIP-21 keys above, hanging off the same Argon2id seed.
+const (
+	auditPathDB  = "m/0'"
+	auditPathFS  = "m/1'"
+	auditPathTS  = "m/2'"
+	auditPathVec = "m/3'"
 )
 
 // Errors returned by the package.
@@ -93,6 +104,11 @@ type Options struct {
 	// non-zero Encrypt. It is ignored when opening an existing store.
 	Plaintext bool
 
+	// Audit selects which sub-stores record a tamper-evident audit trail. The
+	// zero value (AuditNone) disables it. It is a per-open runtime choice, not
+	// persisted; see the Audit* flag constants in the package docs.
+	Audit uint16
+
 	// UseQuant enables vector quantization in the vec sub-store.
 	UseQuant bool
 
@@ -110,6 +126,23 @@ type Store struct {
 	fs  *fs.Store
 	ts  *ts.Store
 	vec *vec.Store
+
+	// audit records events for the enabled stores, or nil when disabled.
+	audit *audit.Recorder
+	// auditFlags remembers which stores are enabled, for verification.
+	auditFlags uint16
+	// auditPubs holds the public keys matching the recorder's private keys, so
+	// VerifyAudit can check the chain without re-deriving from the password.
+	auditPubs auditPublicKeys
+}
+
+// auditPublicKeys holds the per-store Ed25519 public keys used to verify the
+// audit trail.
+type auditPublicKeys struct {
+	auditDB  ed25519.PublicKey
+	auditFS  ed25519.PublicKey
+	auditTS  ed25519.PublicKey
+	auditVec ed25519.PublicKey
 }
 
 // storeKeys holds the per-component keys derived for one Open call. They are
@@ -120,13 +153,18 @@ type storeKeys struct {
 	fs     []byte
 	ts     []byte
 	vec    []byte
+
+	auditDB  ed25519.PrivateKey
+	auditFS  ed25519.PrivateKey
+	auditTS  ed25519.PrivateKey
+	auditVec ed25519.PrivateKey
 }
 
 func (k *storeKeys) wipe() {
 	if k == nil {
 		return
 	}
-	for _, b := range [][]byte{k.canary, k.db, k.fs, k.ts, k.vec} {
+	for _, b := range [][]byte{k.canary, k.db, k.fs, k.ts, k.vec, k.auditDB, k.auditFS, k.auditTS, k.auditVec} {
 		wipe(b)
 	}
 }
@@ -171,6 +209,38 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 
 	s := &Store{bs: bdb}
 
+	// Build the audit recorder for the enabled stores, copying the derived
+	// private keys so they survive storeKeys.wipe below.
+	if options.Audit != 0 {
+		recKeys := make(map[string]ed25519.PrivateKey, 4)
+		if hasFlag(options.Audit, AuditDB) {
+			recKeys[audit.StoreDB] = append(ed25519.PrivateKey(nil), keys.auditDB...)
+		}
+		if hasFlag(options.Audit, AuditFS) {
+			recKeys[audit.StoreFS] = append(ed25519.PrivateKey(nil), keys.auditFS...)
+		}
+		if hasFlag(options.Audit, AuditTS) {
+			recKeys[audit.StoreTS] = append(ed25519.PrivateKey(nil), keys.auditTS...)
+		}
+		if hasFlag(options.Audit, AuditVec) {
+			recKeys[audit.StoreVec] = append(ed25519.PrivateKey(nil), keys.auditVec...)
+		}
+		s.audit = audit.NewRecorder(bdb, recKeys)
+		s.auditFlags = options.Audit
+		s.auditPubs = auditPublicKeys{
+			auditDB:  publicOf(keys.auditDB),
+			auditFS:  publicOf(keys.auditFS),
+			auditTS:  publicOf(keys.auditTS),
+			auditVec: publicOf(keys.auditVec),
+		}
+	}
+	auditSink := func(flag uint16) audit.Sink {
+		if s.audit == nil || !hasFlag(options.Audit, flag) {
+			return nil
+		}
+		return s.audit
+	}
+
 	// Bind each sub-store to its own derived key and explicit bucket root.
 	// The persisted flags decide which features are encrypted, so the on-disk
 	// mode cannot drift between runs.
@@ -181,6 +251,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptKeys:     hasFlag(md.Flags, EncryptDBKeys),
 		EncryptValues:   hasFlag(md.Flags, EncryptDBValues),
 		EncryptMetadata: hasFlag(md.Flags, EncryptDBMetadata),
+		Audit:           auditSink(AuditDB),
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open db store: %w", err)
 	}
@@ -189,6 +260,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Secret:          keys.fs,
 		EncryptMetadata: hasFlag(md.Flags, EncryptFSMetadata),
 		EncryptContent:  hasFlag(md.Flags, EncryptFSContent),
+		Audit:           auditSink(AuditFS),
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open fs store: %w", err)
 	}
@@ -197,6 +269,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Secret:             keys.ts,
 		EncryptValues:      hasFlag(md.Flags, EncryptTSValues),
 		EncryptSeriesNames: hasFlag(md.Flags, EncryptTSSeriesNames),
+		Audit:              auditSink(AuditTS),
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open ts store: %w", err)
 	}
@@ -208,6 +281,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptPoints:          hasFlag(md.Flags, EncryptVecPoints),
 		EncryptPointIDs:        hasFlag(md.Flags, EncryptVecPointIDs),
 		EncryptCollectionNames: hasFlag(md.Flags, EncryptVecCollectionNames),
+		Audit:                  auditSink(AuditVec),
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open vec store: %w", err)
 	}
@@ -395,6 +469,27 @@ func deriveKeys(password string, salt []byte, time, memory uint32, threads uint8
 			return nil, err
 		}
 	}
+
+	// Derive the audit Ed25519 signing keys from the same seed, one per store,
+	// mirroring the per-store SLIP-21 keys. SLIP-10 derives via hardened
+	// integer indices, so the store order is fixed by the auditPath constants.
+	auditPaths := []struct {
+		path string
+		dst  *ed25519.PrivateKey
+	}{
+		{auditPathDB, &keys.auditDB},
+		{auditPathFS, &keys.auditFS},
+		{auditPathTS, &keys.auditTS},
+		{auditPathVec, &keys.auditVec},
+	}
+	for _, item := range auditPaths {
+		_, priv, err := audit.DeriveKey(seed, item.path)
+		if err != nil {
+			keys.wipe()
+			return nil, err
+		}
+		*item.dst = priv
+	}
 	return keys, nil
 }
 
@@ -405,6 +500,15 @@ func wipe(b []byte) {
 		b[i] = 0
 	}
 	runtime.KeepAlive(b)
+}
+
+// publicOf returns the Ed25519 public key matching priv. A nil private key
+// yields a nil public key, so a disabled store contributes nothing to verify.
+func publicOf(priv ed25519.PrivateKey) ed25519.PublicKey {
+	if len(priv) != ed25519.PrivateKeySize {
+		return nil
+	}
+	return append(ed25519.PublicKey(nil), priv.Public().(ed25519.PublicKey)...)
 }
 
 // storeComponent returns one sub-store while holding the read lock, or nil
@@ -449,6 +553,62 @@ func (s *Store) Flags() uint16 {
 		return EncryptNone
 	}
 	return flags
+}
+
+// AuditFlags returns the audit flags the store was opened with. They are a
+// per-open runtime choice and are not persisted, so a closed store returns
+// AuditNone.
+func (s *Store) AuditFlags() uint16 {
+	if s == nil {
+		return AuditNone
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil {
+		return AuditNone
+	}
+	return s.auditFlags
+}
+
+// Audit returns the recorder backing the audit trail, or nil when the store
+// was opened with AuditNone. Callers use it to record out-of-band events and
+// to anchor the chain tip with Head.
+func (s *Store) Audit() *audit.Recorder {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.audit
+}
+
+// VerifyAudit replays the audit trail and checks every signature and chain
+// link. It returns the event count and chain tip. Keys are derived from the
+// store password, so a store opened with a different password fails
+// verification. It returns audit.ErrNoLog when no trail exists.
+func (s *Store) VerifyAudit() (audit.Result, error) {
+	if s == nil {
+		return audit.Result{}, ErrClosed
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil {
+		return audit.Result{}, ErrClosed
+	}
+	keys := make(map[string]ed25519.PublicKey, 4)
+	if hasFlag(s.auditFlags, AuditDB) {
+		keys[audit.StoreDB] = s.auditPubs.auditDB
+	}
+	if hasFlag(s.auditFlags, AuditFS) {
+		keys[audit.StoreFS] = s.auditPubs.auditFS
+	}
+	if hasFlag(s.auditFlags, AuditTS) {
+		keys[audit.StoreTS] = s.auditPubs.auditTS
+	}
+	if hasFlag(s.auditFlags, AuditVec) {
+		keys[audit.StoreVec] = s.auditPubs.auditVec
+	}
+	return audit.Verify(s.bs, keys)
 }
 
 // withDB runs fn with the open database while holding the read lock. The lock

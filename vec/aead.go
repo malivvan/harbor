@@ -3,6 +3,7 @@ package vec
 import (
 	"fmt"
 
+	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/internal/crypto"
 	"go.etcd.io/bbolt"
 )
@@ -43,6 +44,9 @@ type Config struct {
 	// EncryptCollectionNames deterministically encrypts collection bucket and
 	// metadata names with AES-SIV. Listing still returns the original names.
 	EncryptCollectionNames bool
+
+	// Audit, when non-nil, receives an entry for every committed write.
+	Audit audit.Sink
 }
 
 func (c Config) encryptionEnabled() bool {

@@ -3,6 +3,7 @@ package fs
 import (
 	"fmt"
 
+	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/internal/crypto"
 )
 
@@ -31,6 +32,9 @@ type Config struct {
 	// ChunkSize enables chunked content encryption with chunks of this many
 	// plaintext bytes. A positive value implies EncryptContent.
 	ChunkSize int
+
+	// Audit, when non-nil, receives an entry for every committed write.
+	Audit audit.Sink
 }
 
 func (c Config) encryptionEnabled() bool {

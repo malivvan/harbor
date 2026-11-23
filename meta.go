@@ -51,6 +51,28 @@ const (
 	EncryptAll = EncryptDB | EncryptFS | EncryptTS | EncryptVec
 )
 
+// Audit flags. Every bit enables the audit trail for one sub-store. Unlike
+// encryption flags they are a per-open runtime choice and are not persisted:
+// opening a store with a flag set records events, opening without it simply
+// stops recording. The signing keys are derived from Password, so a store
+// opened with a different password fails verification.
+const (
+	// AuditNone disables the audit trail.
+	AuditNone uint16 = 0
+
+	// AuditDB records db writes.
+	AuditDB uint16 = 1 << iota
+	// AuditFS records fs writes.
+	AuditFS
+	// AuditTS records ts writes.
+	AuditTS
+	// AuditVec records vec writes.
+	AuditVec
+
+	// AuditAll records writes for every sub-store.
+	AuditAll = AuditDB | AuditFS | AuditTS | AuditVec
+)
+
 // hasFlag reports whether all bits in other are set in flags.
 func hasFlag(flags, other uint16) bool {
 	return flags&other == other
