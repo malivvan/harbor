@@ -117,6 +117,12 @@ func (c *inodeCache) GetShared(ino uint64) *iNode {
 }
 
 // Put adds or updates an inode in the cache.
+//
+// The cache never exceeds maxSize: when it is full the least recently used
+// entry is dropped, dirty or not. Dropping a dirty entry is safe because the
+// store persists inodes synchronously (see fsBucket.PutInode) and a later
+// lookup simply re-reads the node from disk; keeping the entry would let the
+// cache grow without bound once every entry is dirty.
 func (c *inodeCache) Put(ino uint64, node *iNode, dirty bool) {
 	if !c.enabled || node == nil {
 		return
@@ -125,8 +131,9 @@ func (c *inodeCache) Put(ino uint64, node *iNode, dirty bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Evict old entries if cache is full
-	if len(c.entries) >= c.maxSize {
+	// Evict old entries if the cache is full. A re-put of an existing inode
+	// replaces its entry and does not need room.
+	if _, exists := c.entries[ino]; !exists && len(c.entries) >= c.maxSize {
 		c.evictOldest()
 	}
 
@@ -263,7 +270,10 @@ func (s CacheStats) HitRate() float64 {
 	return float64(s.Hits) / float64(total) * 100
 }
 
-// evictOldest removes the least recently used entry from the cache.
+// evictOldest removes the least recently used entry from the cache. Dirty
+// entries are eligible: the store persists inodes synchronously, so dropping
+// one only costs a re-read, whereas skipping them would let the cache grow
+// without bound once every entry is dirty.
 // Must be called with c.mu locked.
 func (c *inodeCache) evictOldest() {
 	var oldestIno uint64
@@ -271,11 +281,6 @@ func (c *inodeCache) evictOldest() {
 	first := true
 
 	for ino, entry := range c.entries {
-		// Don't evict dirty entries
-		if entry.dirty {
-			continue
-		}
-
 		if first || entry.lastUsed.Before(oldestTime) {
 			oldestIno = ino
 			oldestTime = entry.lastUsed

@@ -154,31 +154,65 @@ func TestInodeCache_Eviction(t *testing.T) {
 	}
 }
 
-func TestInodeCache_NoDirtyEviction(t *testing.T) {
+func TestInodeCache_EvictsDirtyWhenFull(t *testing.T) {
+	// A cache whose entries are all dirty must still respect maxSize. Before
+	// the fix, evictOldest skipped dirty entries and Put inserted anyway, so
+	// the cache grew without bound.
+	cache := newInodeCache(3)
+
+	for i := uint64(1); i <= 3; i++ {
+		node := newInode(0644)
+		node.Ino = i
+		cache.Put(i, node, true)
+		time.Sleep(time.Millisecond) // Ensure distinct access times
+	}
+
+	if got := cache.Stats().Size; got != 3 {
+		t.Fatalf("expected cache size 3, got %d", got)
+	}
+
+	// Adding a fourth dirty entry must evict the oldest (node 1) rather than
+	// exceed the bound.
+	node4 := newInode(0644)
+	node4.Ino = 4
+	cache.Put(4, node4, true)
+
+	stats := cache.Stats()
+	if stats.Size != 3 {
+		t.Errorf("cache exceeded maxSize: got %d, want 3", stats.Size)
+	}
+	if cache.Get(1) != nil {
+		t.Error("oldest dirty node 1 should have been evicted")
+	}
+	if cache.Get(4) == nil {
+		t.Error("node 4 should be in cache")
+	}
+}
+
+func TestInodeCache_PutExistingDoesNotEvict(t *testing.T) {
+	// Re-putting an inode already in the cache replaces its entry in place and
+	// must not evict a different, unrelated entry.
 	cache := newInodeCache(2)
 
-	// Add dirty node
-	node1 := newInode(0644)
-	node1.Ino = 1
-	cache.Put(1, node1, true)
-
-	// Add clean node
-	node2 := newInode(0644)
-	node2.Ino = 2
-	cache.Put(2, node2, false)
-
-	time.Sleep(time.Millisecond)
-
-	// Try to add another node - should evict node 2, not dirty node 1
-	node3 := newInode(0644)
-	node3.Ino = 3
-	cache.Put(3, node3, false)
-
-	if cache.Get(1) == nil {
-		t.Error("dirty node 1 should not have been evicted")
+	for i := uint64(1); i <= 2; i++ {
+		node := newInode(0644)
+		node.Ino = i
+		cache.Put(i, node, false)
+		time.Sleep(time.Millisecond)
 	}
-	if cache.Get(2) != nil {
-		t.Error("clean node 2 should have been evicted")
+
+	updated := newInode(0755)
+	updated.Ino = 1
+	cache.Put(1, updated, false)
+
+	if got := cache.Stats().Size; got != 2 {
+		t.Errorf("expected cache size 2, got %d", got)
+	}
+	if cache.Get(2) == nil {
+		t.Error("node 2 should not have been evicted by an in-place update")
+	}
+	if node := cache.Get(1); node == nil || node.Mode != 0755 {
+		t.Error("node 1 should have been updated in place")
 	}
 }
 
