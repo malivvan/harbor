@@ -28,4 +28,12 @@ var (
 
 	// ErrPointNotFound is returned when a point ID is not present.
 	ErrPointNotFound = errors.New("vec: point not found")
+
+	// ErrInvalidOptions is returned for invalid list options or a nil iteration
+	// callback.
+	ErrInvalidOptions = errors.New("vec: invalid options")
+
+	// ErrStopIteration can be returned from a ForEachPoint callback to stop the
+	// iteration without reporting an error.
+	ErrStopIteration = errors.New("vec: stop iteration")
 )

@@ -3,6 +3,7 @@ package vec
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -337,6 +338,97 @@ func (c *Collection) Get(id string) (*PointStruct, error) {
 		return nil, ErrPointNotFound
 	}
 	return point, nil
+}
+
+// ListOptions controls ListPoints and, when applied by the caller, pagination
+// of ForEachPoint.
+type ListOptions struct {
+	// Offset skips this many matching points, in ascending ID order.
+	Offset int
+	// Limit caps the number of points returned. Zero means unlimited.
+	Limit int
+}
+
+func (o ListOptions) validate() error {
+	if o.Offset < 0 || o.Limit < 0 {
+		return ErrInvalidOptions
+	}
+	return nil
+}
+
+// sortedFilterIDs returns the IDs matching filter in ascending order. Sorting by
+// ID gives pagination a stable order independent of the index's map iteration.
+func (c *Collection) sortedFilterIDs(filter *Filter) []string {
+	ids := c.index.GetIDsByFilter(filter)
+	sort.Strings(ids)
+	return ids
+}
+
+// ListPoints returns points matching filter in ascending ID order, honoring
+// Offset and Limit. Only the selected page is materialized; the matching IDs
+// are sorted to make pagination stable.
+func (c *Collection) ListPoints(filter *Filter, opts ListOptions) ([]PointStruct, error) {
+	if err := opts.validate(); err != nil {
+		return nil, err
+	}
+
+	c.mu.RLock()
+	ids := c.sortedFilterIDs(filter)
+	c.mu.RUnlock()
+
+	start := opts.Offset
+	if start > len(ids) {
+		start = len(ids)
+	}
+	end := len(ids)
+	if opts.Limit > 0 && start+opts.Limit < end {
+		end = start + opts.Limit
+	}
+
+	out := make([]PointStruct, 0, end-start)
+	for _, id := range ids[start:end] {
+		point, err := c.index.Get(id)
+		if err != nil {
+			return nil, err
+		}
+		if point == nil {
+			continue // deleted concurrently
+		}
+		out = append(out, *point)
+	}
+	return out, nil
+}
+
+// ForEachPoint streams points matching filter in ascending ID order, calling fn
+// for each. The matching IDs are materialized and sorted so the order is
+// stable; only one point is held at a time. Returning ErrStopIteration from fn
+// stops the iteration without an error. The collection lock is not held while
+// fn runs, so fn may call back into the collection.
+func (c *Collection) ForEachPoint(filter *Filter, fn func(PointStruct) error) error {
+	if fn == nil {
+		return ErrInvalidOptions
+	}
+
+	c.mu.RLock()
+	ids := c.sortedFilterIDs(filter)
+	c.mu.RUnlock()
+
+	for _, id := range ids {
+		point, err := c.index.Get(id)
+		if err != nil {
+			return err
+		}
+		if point == nil {
+			continue // deleted concurrently
+		}
+		if err := fn(*point); err != nil {
+			if errors.Is(err, ErrStopIteration) {
+				return nil
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 // Delete removes points either by explicit IDs or by a filter match.
