@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -149,4 +150,51 @@ func TestRecordFillsTime(t *testing.T) {
 	}))
 	require.True(t, ev.At > 0)
 	require.WithinDuration(t, time.Unix(0, ev.At), time.Now(), 10*time.Second)
+}
+
+// TestRecordConcurrentSequence verifies that concurrent writers keep the chain
+// contiguous: bbolt serializes Record, and each event links to the one before
+// it. Run with -race.
+func TestRecordConcurrentSequence(t *testing.T) {
+	_, priv := testKey(t, "m/0'")
+	b := testDB(t)
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
+
+	const records = 32
+	var wg sync.WaitGroup
+	for i := 0; i < records; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "e"}); err != nil {
+				t.Errorf("concurrent Record: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	pub, _ := testKey(t, "m/0'")
+	res, err := Verify(b, map[string]ed25519.PublicKey{StoreDB: pub})
+	require.NoError(t, err)
+	require.Equal(t, uint64(records), res.Count)
+
+	count, tip, err := rec.Head()
+	require.NoError(t, err)
+	require.Equal(t, res.Count, count)
+	require.Equal(t, res.Tip, tip)
+}
+
+// TestVerifyRejectsWrongKeys covers the wrong-password case at the audit layer:
+// a verifier holding keys derived from another seed cannot validate the
+// signatures, even if it has the trail.
+func TestVerifyRejectsWrongKeys(t *testing.T) {
+	_, priv := testKey(t, "m/0'")
+	b := testDB(t)
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
+	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "a"}))
+
+	wrongPub, _, err := DeriveKey([]byte("different-seed"), "m/0'")
+	require.NoError(t, err)
+	_, err = Verify(b, map[string]ed25519.PublicKey{StoreDB: wrongPub})
+	require.Error(t, err)
 }

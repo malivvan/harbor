@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/malivvan/harbor/metrics"
+	"github.com/malivvan/harbor/pkg/metrics"
 )
 
 // Collection represents a single logical group of vectors, similar to a table in SQL databases.

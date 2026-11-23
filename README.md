@@ -684,7 +684,7 @@ Every node in a cluster must use the same password. A second node opens with
 `Bootstrap: false` and joins the leader with `Join`; nodes leave with `Leave`.
 Off-leader writes return `consensus.ErrNotLeader`, and `Leader` reports the
 current leader's address for client-side redirect. See
-[consensus/README.md](consensus/README.md) for the full API, the consistency
+[pkg/consensus/README.md](pkg/consensus/README.md) for the full API, the consistency
 model and deployment notes.
 
 ## Encryption
@@ -860,7 +860,7 @@ signing keys derive from the password, so anyone holding it can produce valid
 events; the trail proves integrity against an attacker *without* the key, the
 same trust boundary as the encryption itself.
 
-See [audit/README.md](audit/README.md) for the event model, the recorded
+See [pkg/audit/README.md](pkg/audit/README.md) for the event model, the recorded
 operations, the full threat model and how to use the `audit` package directly.
 
 ## Database lifecycle
@@ -1013,8 +1013,14 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
 - [vec/README.md](vec/README.md) — collections, indexes, filters, quantization,
   and buffering.
 - [fs/s3fs/README.md](fs/s3fs/README.md) — the S3-backed `absfs.Filer`.
-- [audit/README.md](audit/README.md) — the tamper-evident audit trail: event
-  model, recorded operations, threat model, and direct package use.
+- [pkg/audit/README.md](pkg/audit/README.md) — the tamper-evident audit trail:
+  event model, recorded operations, threat model, and direct package use.
+- [pkg/store/README.md](pkg/store/README.md) — the process-wide database
+  manager, directory layout, and password file.
+- [pkg/blob/README.md](pkg/blob/README.md) — the flat object store, containment,
+  and grants.
+- [pkg/snapshot/README.md](pkg/snapshot/README.md) — content-addressed
+  incremental snapshots, restore, retention, and scheduling.
 - [AGENTS.md](AGENTS.md) — architecture, on-disk layout, encryption internals,
   development workflow, and repository conventions for contributors and coding
   agents.
@@ -1026,6 +1032,15 @@ Generated API documentation is published on pkg.go.dev:
 - [github.com/malivvan/harbor/fs](https://pkg.go.dev/github.com/malivvan/harbor/fs)
 - [github.com/malivvan/harbor/ts](https://pkg.go.dev/github.com/malivvan/harbor/ts)
 - [github.com/malivvan/harbor/vec](https://pkg.go.dev/github.com/malivvan/harbor/vec)
+- [github.com/malivvan/harbor/pkg/audit](https://pkg.go.dev/github.com/malivvan/harbor/pkg/audit)
+- [github.com/malivvan/harbor/pkg/blob](https://pkg.go.dev/github.com/malivvan/harbor/pkg/blob)
+- [github.com/malivvan/harbor/pkg/consensus](https://pkg.go.dev/github.com/malivvan/harbor/pkg/consensus)
+- [github.com/malivvan/harbor/pkg/id](https://pkg.go.dev/github.com/malivvan/harbor/pkg/id)
+- [github.com/malivvan/harbor/pkg/metrics](https://pkg.go.dev/github.com/malivvan/harbor/pkg/metrics)
+- [github.com/malivvan/harbor/pkg/sign/canonical](https://pkg.go.dev/github.com/malivvan/harbor/pkg/sign/canonical)
+- [github.com/malivvan/harbor/pkg/snapshot](https://pkg.go.dev/github.com/malivvan/harbor/pkg/snapshot)
+- [github.com/malivvan/harbor/pkg/snapshot/blobstore](https://pkg.go.dev/github.com/malivvan/harbor/pkg/snapshot/blobstore)
+- [github.com/malivvan/harbor/pkg/store](https://pkg.go.dev/github.com/malivvan/harbor/pkg/store)
 
 Where to start:
 
@@ -1036,6 +1051,10 @@ Where to start:
   [fs/s3fs/README.md](fs/s3fs/README.md).
 - **Metrics and time series:** [ts/README.md](ts/README.md).
 - **Embeddings and similarity search:** [vec/README.md](vec/README.md).
+- **Process-wide database, blobs or object snapshots:**
+  [pkg/store/README.md](pkg/store/README.md),
+  [pkg/blob/README.md](pkg/blob/README.md) and
+  [pkg/snapshot/README.md](pkg/snapshot/README.md).
 - **Security review or operations:** [Encryption](#encryption) and
   [AGENTS.md](AGENTS.md#architecture).
 

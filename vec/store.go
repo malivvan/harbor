@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"unicode/utf8"
 
-	"github.com/malivvan/harbor/audit"
-	"github.com/malivvan/harbor/metrics"
+	"github.com/malivvan/harbor/pkg/audit"
+	"github.com/malivvan/harbor/pkg/metrics"
 	"go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
 )

@@ -8,7 +8,7 @@ bucket is a top-level directory, a key is the path beneath it, and the pair maps
 exactly one file.
 
 ```go
-import "github.com/malivvan/harbor/blob"
+import "github.com/malivvan/harbor/pkg/blob"
 
 s, err := blob.Open(st.FS(), "objects") // st is a *harbor.Store
 if err != nil {

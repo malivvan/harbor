@@ -181,12 +181,10 @@ err := leader.Leave(id)            // remove a voter (leader only)
 
 - fs directory mtimes set by `Remove`/`Rename` use each node's wall clock; file
   content, names and explicit `Chtimes` converge. Full determinism needs a
-  `SetNow` clock in fs (see PLAN.md).
+  `SetNow` clock in fs (tracked in TODO.md).
 - vec replicated writes update the durable point store but not the in-memory
   search index; reload the collection to refresh search results.
 - Large file writes are single raft entries; a chunked command is a follow-up.
 - Streaming `OpenFile`+`Write` and `db` raw key/value (`Set`/`SetBytes`) writes
   are not yet covered by the facades; use the path-level and record-level
   facades above.
-
-Full design: [../PLAN.md](../PLAN.md).

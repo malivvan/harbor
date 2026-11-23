@@ -8,7 +8,7 @@ import (
 
 	"github.com/hashicorp/raft"
 	"github.com/malivvan/harbor"
-	"github.com/malivvan/harbor/metrics"
+	"github.com/malivvan/harbor/pkg/metrics"
 )
 
 const (

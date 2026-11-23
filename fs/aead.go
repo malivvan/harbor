@@ -3,9 +3,9 @@ package fs
 import (
 	"fmt"
 
-	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/metrics"
+	"github.com/malivvan/harbor/pkg/audit"
+	"github.com/malivvan/harbor/pkg/metrics"
 )
 
 // KeySize is the required key length in bytes (256 bits).

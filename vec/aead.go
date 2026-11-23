@@ -3,9 +3,9 @@ package vec
 import (
 	"fmt"
 
-	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/metrics"
+	"github.com/malivvan/harbor/pkg/audit"
+	"github.com/malivvan/harbor/pkg/metrics"
 	"go.etcd.io/bbolt"
 )
 

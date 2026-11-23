@@ -18,9 +18,9 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/internal/absfs"
-	"github.com/malivvan/harbor/metrics"
+	"github.com/malivvan/harbor/pkg/audit"
+	"github.com/malivvan/harbor/pkg/metrics"
 )
 
 var errNilIno = errors.New("ino is nil")
@@ -1487,6 +1487,10 @@ func (fs *FS) openFile(name string, flag int, perm os.FileMode, depth int) (absf
 			pathErr.Err = err
 			return file, pathErr
 		}
+		if err := fs.auditEntry("create", path.Join(dir, filename), nil); err != nil {
+			pathErr.Err = err
+			return file, pathErr
+		}
 	} else { // child exists
 		if flag&os.O_CREATE != 0 && flag&os.O_EXCL != 0 {
 			pathErr.Err = syscall.EEXIST
@@ -1517,6 +1521,10 @@ func (fs *FS) openFile(name string, flag int, perm os.FileMode, depth int) (absf
 		// if we must truncate the file
 		if flag&os.O_TRUNC != 0 {
 			if err := fs.resizeContent(child, 0); err != nil {
+				pathErr.Err = err
+				return file, pathErr
+			}
+			if err := fs.auditEntry("truncate", path.Join(dir, filename), nil); err != nil {
 				pathErr.Err = err
 				return file, pathErr
 			}

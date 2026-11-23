@@ -16,7 +16,7 @@ import (
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
 	"github.com/malivvan/harbor"
-	"github.com/malivvan/harbor/metrics"
+	"github.com/malivvan/harbor/pkg/metrics"
 )
 
 // Node is one member of a Harbor cluster. It owns the local *harbor.Store

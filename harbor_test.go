@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/db"
 	"github.com/malivvan/harbor/internal/crypto"
+	"github.com/malivvan/harbor/pkg/audit"
 	"github.com/malivvan/harbor/ts"
 	"github.com/malivvan/harbor/vec"
 )

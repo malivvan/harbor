@@ -4,7 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/malivvan/harbor/metrics"
+	"github.com/malivvan/harbor/pkg/metrics"
 )
 
 // inodeCache provides a thread-safe in-memory cache for inodes to improve

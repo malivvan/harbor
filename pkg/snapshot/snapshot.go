@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	harborid "github.com/malivvan/harbor/id"
+	harborid "github.com/malivvan/harbor/pkg/id"
 )
 
 // Snapshot kinds recorded on the index.

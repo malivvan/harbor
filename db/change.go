@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/malivvan/harbor/audit"
+	"github.com/malivvan/harbor/pkg/audit"
 )
 
 // ChangeOp is the kind of mutation a record bucket saw.

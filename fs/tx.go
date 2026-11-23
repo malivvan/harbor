@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/malivvan/harbor/metrics"
+	"github.com/malivvan/harbor/pkg/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 

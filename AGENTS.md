@@ -18,8 +18,15 @@ separate `docs/` tree.
 | `.../fs/s3fs` | An `absfs.Filer` backed by S3-compatible object storage. |
 | `.../vec/hnsw` | The vendored HNSW graph implementation used by `vec`. |
 | `.../vec/hnsw/heap` | The heap used on the HNSW search hot path. |
-| `.../audit` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write. |
-| `.../consensus` | Raft-backed cluster replication of a whole store. |
+| `.../pkg/metrics` | Dependency-free observer interface and nil-safe metric helpers used by every store. |
+| `.../pkg/audit` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write. |
+| `.../pkg/consensus` | Raft-backed cluster replication of a whole store. |
+| `.../pkg/store` | Process-wide database manager: resolves a directory, reads or creates the password file, and opens one handle. |
+| `.../pkg/blob` | Flat, contained object store over a named file system. |
+| `.../pkg/snapshot` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`. |
+| `.../pkg/snapshot/blobstore` | Adapter from `snapshot.ObjectStore` to `blob`. |
+| `.../pkg/id` | ULID generation. |
+| `.../pkg/sign/canonical` | Deterministic JSON encoding for signatures and content addressing. |
 | `.../internal/...` | Shared bbolt helpers, AEAD primitives, Argon2id/BLAKE2b, SLIP-0010/0021 and CPU detection. Not public API. |
 
 The four stores are independent. The root package is a convenience composition,
@@ -623,8 +630,9 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 - `AGENTS.md` (this file) is developer/agent-facing: architecture, on-disk
   layouts, encryption internals, invariants, development workflow.
 - Per-package guides live in `db/README.md`, `fs/README.md`, `ts/README.md`,
-  `vec/README.md`, `fs/s3fs/README.md`, `audit/README.md` and
-  `consensus/README.md`. Package doc comments are the source of truth for
+  `vec/README.md`, `fs/s3fs/README.md`, `pkg/audit/README.md`,
+  `pkg/consensus/README.md`, `pkg/store/README.md`, `pkg/blob/README.md` and
+  `pkg/snapshot/README.md`. Package doc comments are the source of truth for
   behavior; package guides are the source of truth for usage.
 - Every public package has a package-level doc comment, and every exported
   identifier is documented. Keep comments in English.
@@ -667,8 +675,11 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 - [ts/README.md](ts/README.md)
 - [vec/README.md](vec/README.md)
 - [fs/s3fs/README.md](fs/s3fs/README.md)
-- [audit/README.md](audit/README.md)
-- [consensus/README.md](consensus/README.md)
+- [pkg/audit/README.md](pkg/audit/README.md)
+- [pkg/consensus/README.md](pkg/consensus/README.md)
+- [pkg/store/README.md](pkg/store/README.md)
+- [pkg/blob/README.md](pkg/blob/README.md)
+- [pkg/snapshot/README.md](pkg/snapshot/README.md)
 
 Generated API documentation:
 
@@ -677,8 +688,15 @@ Generated API documentation:
 - [github.com/malivvan/harbor/fs](https://pkg.go.dev/github.com/malivvan/harbor/fs)
 - [github.com/malivvan/harbor/ts](https://pkg.go.dev/github.com/malivvan/harbor/ts)
 - [github.com/malivvan/harbor/vec](https://pkg.go.dev/github.com/malivvan/harbor/vec)
-- [github.com/malivvan/harbor/audit](https://pkg.go.dev/github.com/malivvan/harbor/audit)
-- [github.com/malivvan/harbor/consensus](https://pkg.go.dev/github.com/malivvan/harbor/consensus)
+- [github.com/malivvan/harbor/pkg/audit](https://pkg.go.dev/github.com/malivvan/harbor/pkg/audit)
+- [github.com/malivvan/harbor/pkg/blob](https://pkg.go.dev/github.com/malivvan/harbor/pkg/blob)
+- [github.com/malivvan/harbor/pkg/consensus](https://pkg.go.dev/github.com/malivvan/harbor/pkg/consensus)
+- [github.com/malivvan/harbor/pkg/id](https://pkg.go.dev/github.com/malivvan/harbor/pkg/id)
+- [github.com/malivvan/harbor/pkg/metrics](https://pkg.go.dev/github.com/malivvan/harbor/pkg/metrics)
+- [github.com/malivvan/harbor/pkg/sign/canonical](https://pkg.go.dev/github.com/malivvan/harbor/pkg/sign/canonical)
+- [github.com/malivvan/harbor/pkg/snapshot](https://pkg.go.dev/github.com/malivvan/harbor/pkg/snapshot)
+- [github.com/malivvan/harbor/pkg/snapshot/blobstore](https://pkg.go.dev/github.com/malivvan/harbor/pkg/snapshot/blobstore)
+- [github.com/malivvan/harbor/pkg/store](https://pkg.go.dev/github.com/malivvan/harbor/pkg/store)
 
 ## Pre-release checklist
 

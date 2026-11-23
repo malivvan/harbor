@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/malivvan/harbor/internal/absfs"
-	"github.com/malivvan/harbor/metrics"
+	"github.com/malivvan/harbor/pkg/metrics"
 )
 
 // FastWalkFunc is the callback function type for FastWalk.

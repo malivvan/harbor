@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/malivvan/harbor/metrics"
+	"github.com/malivvan/harbor/pkg/metrics"
 )
 
 // fsm adapts a Node's harbor store to raft.FSM. Apply dispatches commands to

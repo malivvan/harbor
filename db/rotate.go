@@ -10,7 +10,7 @@ import (
 
 	"github.com/malivvan/harbor/db/index"
 	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/metrics"
+	"github.com/malivvan/harbor/pkg/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 

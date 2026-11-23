@@ -5,9 +5,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/db"
 	"github.com/malivvan/harbor/fs"
+	"github.com/malivvan/harbor/pkg/audit"
 	"github.com/malivvan/harbor/ts"
 	"github.com/malivvan/harbor/vec"
 )

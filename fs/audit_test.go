@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/harbor/audit"
+	"github.com/malivvan/harbor/pkg/audit"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -50,7 +50,7 @@ func TestAuditRecordsFSWrites(t *testing.T) {
 
 	res, err := audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreFS: pub})
 	require.NoError(t, err)
-	require.Equal(t, uint64(10), res.Count)
+	require.Equal(t, uint64(11), res.Count)
 }
 
 func TestAuditDisabledRecordsNothing(t *testing.T) {

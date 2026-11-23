@@ -10,8 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/malivvan/harbor/audit"
-	"github.com/malivvan/harbor/metrics"
+	"github.com/malivvan/harbor/pkg/audit"
+	"github.com/malivvan/harbor/pkg/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 

@@ -11,7 +11,7 @@ again. This package owns that convention.
 import (
     "context"
 
-    "github.com/malivvan/harbor/store"
+    "github.com/malivvan/harbor/pkg/store"
 )
 
 func main() {

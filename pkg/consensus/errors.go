@@ -4,7 +4,7 @@
 // A Node owns one *harbor.Store replica and the raft machinery that keeps it in
 // sync with the rest of the cluster. Writes are proposed through raft on the
 // leader and applied, in raft-log order, to the local store on every node;
-// reads are served directly from the local store. See PLAN.md for the full
+// reads are served directly from the local store. See README.md for the full
 // design and the consistency model.
 package consensus
 

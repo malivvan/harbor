@@ -13,8 +13,8 @@ import (
 	"context"
 	"io"
 
-	"github.com/malivvan/harbor/blob"
-	"github.com/malivvan/harbor/snapshot"
+	"github.com/malivvan/harbor/pkg/blob"
+	"github.com/malivvan/harbor/pkg/snapshot"
 )
 
 // Store is a snapshot.ObjectStore over one bucket of a blob store.
