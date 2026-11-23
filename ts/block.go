@@ -116,15 +116,127 @@ func mergePoints(existing, incoming []Point) []Point {
 }
 
 func (s *Store) sealBlock(points []Point) ([]byte, error) {
-	return s.sealBytes(packBlock(points))
+	return s.encodeBlock(points)
 }
 
 func (s *Store) openBlock(raw []byte) ([]Point, error) {
-	plain, err := s.openBytes(raw)
-	if err != nil {
-		return nil, err
+	_, points, err := s.decodeBlock(raw)
+	return points, err
+}
+
+// blockSummarySize is the encoded size of a blockSummary: an int64 count
+// followed by five float64 values.
+const blockSummarySize = 8 + 5*8
+
+// blockSummary is the per-block aggregate stored alongside the points. It lets
+// a compatible Aggregate answer from the summary instead of decoding every
+// point.
+type blockSummary struct {
+	Count int64
+	Sum   float64
+	Min   float64
+	Max   float64
+	First float64
+	Last  float64
+}
+
+// summarize computes the summary of a time-ordered point list.
+func summarize(points []Point) blockSummary {
+	if len(points) == 0 {
+		return blockSummary{}
 	}
-	return unpackBlock(plain)
+	s := blockSummary{
+		Count: int64(len(points)),
+		Min:   points[0].Value,
+		Max:   points[0].Value,
+		First: points[0].Value,
+	}
+	for _, p := range points {
+		s.Sum += p.Value
+		if p.Value < s.Min {
+			s.Min = p.Value
+		}
+		if p.Value > s.Max {
+			s.Max = p.Value
+		}
+	}
+	s.Last = points[len(points)-1].Value
+	return s
+}
+
+// packSummary encodes a summary in a fixed-size little-endian record.
+func packSummary(s blockSummary) []byte {
+	out := make([]byte, blockSummarySize)
+	binary.LittleEndian.PutUint64(out[0:], uint64(s.Count))
+	binary.LittleEndian.PutUint64(out[8:], math.Float64bits(s.Sum))
+	binary.LittleEndian.PutUint64(out[16:], math.Float64bits(s.Min))
+	binary.LittleEndian.PutUint64(out[24:], math.Float64bits(s.Max))
+	binary.LittleEndian.PutUint64(out[32:], math.Float64bits(s.First))
+	binary.LittleEndian.PutUint64(out[40:], math.Float64bits(s.Last))
+	return out
+}
+
+// unpackSummary decodes a summary produced by packSummary.
+func unpackSummary(data []byte) (blockSummary, error) {
+	if len(data) != blockSummarySize {
+		return blockSummary{}, errCorruptPoint
+	}
+	return blockSummary{
+		Count: int64(binary.LittleEndian.Uint64(data[0:])),
+		Sum:   math.Float64frombits(binary.LittleEndian.Uint64(data[8:])),
+		Min:   math.Float64frombits(binary.LittleEndian.Uint64(data[16:])),
+		Max:   math.Float64frombits(binary.LittleEndian.Uint64(data[24:])),
+		First: math.Float64frombits(binary.LittleEndian.Uint64(data[32:])),
+		Last:  math.Float64frombits(binary.LittleEndian.Uint64(data[40:])),
+	}, nil
+}
+
+// encodeBlock builds the stored block value: the summary followed by the point
+// records, sealed as one blob. Sealing them together keeps tamper detection
+// intact: corrupting any byte, including the point payload, fails the AEAD
+// open. The summary still lets an aggregate skip per-point parsing.
+func (s *Store) encodeBlock(points []Point) ([]byte, error) {
+	plain := make([]byte, 0, blockSummarySize+blockHeaderSize+len(points)*16)
+	plain = append(plain, packSummary(summarize(points))...)
+	plain = append(plain, packBlock(points)...)
+	return s.sealBytes(plain)
+}
+
+// decodeBlock opens a stored block value into its summary and points.
+func (s *Store) decodeBlock(value []byte) (blockSummary, []Point, error) {
+	plain, err := s.openBytes(value)
+	if err != nil {
+		return blockSummary{}, nil, err
+	}
+	if len(plain) < blockSummarySize {
+		return blockSummary{}, nil, errCorruptPoint
+	}
+	sum, err := unpackSummary(plain[:blockSummarySize])
+	if err != nil {
+		return blockSummary{}, nil, err
+	}
+	points, err := unpackBlock(plain[blockSummarySize:])
+	if err != nil {
+		return blockSummary{}, nil, err
+	}
+	return sum, points, nil
+}
+
+// decodeBlockSummaryValue opens a stored block value and returns only its
+// summary, skipping the per-point parse and aggregate work.
+func (s *Store) decodeBlockSummaryValue(value []byte) (blockSummary, bool, error) {
+	plain, err := s.openBytes(value)
+	if err != nil {
+		return blockSummary{}, false, err
+	}
+	if len(plain) < blockSummarySize {
+		return blockSummary{}, false, errCorruptPoint
+	}
+	sum, err := unpackSummary(plain[:blockSummarySize])
+	if err != nil {
+		return blockSummary{}, false, err
+	}
+	return sum, true, nil
 }
 
 func (s *Store) readBlock(bucket *bolt.Bucket, start int64) ([]Point, bool, error) {
@@ -244,6 +356,52 @@ func (s *Store) scanBlocks(ctx context.Context, bucket *bolt.Bucket, start, end 
 			if err := fn(point); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// scanBlocksAggregate walks the blocks covering [start, end]. For a block that
+// lies wholly inside the range and does not cross an aggregate-window boundary,
+// it yields the block's summary (points == nil) so the aggregate can answer
+// without decoding every point. Otherwise it yields the decoded points, which
+// the caller must still filter to [start, end].
+func (s *Store) scanBlocksAggregate(ctx context.Context, bucket *bolt.Bucket, start, end, step int64, fn func(window int64, sum blockSummary, points []Point) error) error {
+	dur := s.blockDuration()
+	firstKey := encodeKey(blockStart(start, dur))
+	cursor := bucket.Cursor()
+	for key, raw := cursor.Seek(firstKey[:]); key != nil; key, raw = cursor.Next() {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+		if len(key) != recordSize {
+			continue
+		}
+		block := decodeKey(key)
+		if block > end {
+			break
+		}
+
+		blockEnd := block + dur - 1
+		if block >= start && blockEnd <= end && bucketStart(block, step) == bucketStart(blockEnd, step) {
+			sum, ok, err := s.decodeBlockSummaryValue(raw)
+			if err != nil {
+				return err
+			}
+			if ok {
+				if err := fn(bucketStart(block, step), sum, nil); err != nil {
+					return err
+				}
+				continue
+			}
+		}
+
+		points, err := s.openBlock(raw)
+		if err != nil {
+			return err
+		}
+		if err := fn(0, blockSummary{}, points); err != nil {
+			return err
 		}
 	}
 	return nil

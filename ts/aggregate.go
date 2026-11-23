@@ -79,7 +79,6 @@ func (a *aggregator) flush() {
 	if !a.have || a.count == 0 {
 		return
 	}
-
 	var value float64
 	switch a.fn {
 	case AggMin:
@@ -98,6 +97,41 @@ func (a *aggregator) flush() {
 		value = a.last
 	}
 	a.samples = append(a.samples, Sample{Timestamp: a.current, Value: value})
+}
+
+// addBlockSummary merges a whole block's summary into the current window. The
+// caller guarantees every point in the block falls in window and that blocks
+// arrive in ascending time order.
+func (a *aggregator) addBlockSummary(window int64, s blockSummary) {
+	if s.Count == 0 {
+		return
+	}
+	if !a.have || window != a.current {
+		a.flush()
+		a.have = true
+		a.current = window
+		a.count = 0
+		a.sum = 0
+		a.min = 0
+		a.max = 0
+		a.first = 0
+		a.last = 0
+	}
+	if a.count == 0 {
+		a.first = s.First
+		a.min = s.Min
+		a.max = s.Max
+	} else {
+		if s.Min < a.min {
+			a.min = s.Min
+		}
+		if s.Max > a.max {
+			a.max = s.Max
+		}
+	}
+	a.last = s.Last
+	a.sum += s.Sum
+	a.count += s.Count
 }
 
 // Aggregate buckets [start, end] into windows of width step and computes fn
@@ -135,10 +169,19 @@ func (se *Series) Aggregate(ctx context.Context, start, end int64, step int64, f
 		}
 
 		if se.store.blockDuration() > 0 {
-			// Stream points from the sealed blocks instead of materializing the
-			// whole range before aggregating.
-			err := se.store.scanBlocks(ctx, bucket, start, end, func(point Point) error {
-				agg.add(point)
+			// Answer from block summaries where the block lies wholly in range
+			// and does not cross a window boundary; otherwise decode its points.
+			err := se.store.scanBlocksAggregate(ctx, bucket, start, end, step, func(window int64, sum blockSummary, points []Point) error {
+				if points == nil {
+					agg.addBlockSummary(window, sum)
+					return nil
+				}
+				for _, point := range points {
+					if point.Timestamp < start || point.Timestamp > end {
+						continue
+					}
+					agg.add(point)
+				}
 				return nil
 			})
 			if err != nil {
