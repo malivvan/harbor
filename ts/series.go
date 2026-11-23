@@ -169,7 +169,7 @@ func (se *Series) SetLabels(ctx context.Context, labels map[string]string) error
 		labels = make(map[string]string)
 	}
 
-	return se.store.b.Update(func(tx *bolt.Tx) error {
+	if err := se.store.b.Update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -191,7 +191,11 @@ func (se *Series) SetLabels(ctx context.Context, labels map[string]string) error
 			return err
 		}
 		return checkContext(ctx)
-	})
+	}); err != nil {
+		return err
+	}
+	raw, _ := json.Marshal(labels)
+	return se.store.auditEntry("set_labels", se.name, digestOf(raw))
 }
 
 // Insert stores one point, replacing any point with the same timestamp.
@@ -204,7 +208,7 @@ func (se *Series) Insert(ctx context.Context, p Point) error {
 		return err
 	}
 
-	return se.store.b.Update(func(tx *bolt.Tx) error {
+	if err := se.store.b.Update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -238,7 +242,10 @@ func (se *Series) Insert(ctx context.Context, p Point) error {
 		}
 
 		return se.updateMetaAfterInsert(ctx, tx, bucket, added)
-	})
+	}); err != nil {
+		return err
+	}
+	return se.store.auditEntry("insert", se.name, digestOf(encodePoints([]Point{p})))
 }
 
 // InsertMany stores multiple points in a single transaction. Out-of-order
@@ -254,7 +261,7 @@ func (se *Series) InsertMany(ctx context.Context, points []Point) error {
 		return nil
 	}
 
-	return se.store.b.Update(func(tx *bolt.Tx) error {
+	if err := se.store.b.Update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -295,7 +302,10 @@ func (se *Series) InsertMany(ctx context.Context, points []Point) error {
 		}
 
 		return se.updateMetaAfterInsert(ctx, tx, bucket, added)
-	})
+	}); err != nil {
+		return err
+	}
+	return se.store.auditEntry("insert_many", se.name, digestOf(encodePoints(points)))
 }
 
 // updateMetaAfterInsert adjusts the persisted count and applies retention.
@@ -804,6 +814,9 @@ func (se *Series) DeleteRange(ctx context.Context, start, end int64) (int, error
 		return se.store.writeMeta(tx, se.name, meta)
 	})
 	if err != nil {
+		return 0, err
+	}
+	if err := se.store.auditEntry("delete_range", se.name, nil); err != nil {
 		return 0, err
 	}
 	return deleted, nil

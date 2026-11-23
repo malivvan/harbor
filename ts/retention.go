@@ -2,6 +2,7 @@ package ts
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"time"
 
@@ -43,7 +44,7 @@ func (se *Series) SetRetention(ctx context.Context, r Retention) error {
 		return err
 	}
 
-	return se.store.b.Update(func(tx *bolt.Tx) error {
+	if err := se.store.b.Update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -69,7 +70,11 @@ func (se *Series) SetRetention(ctx context.Context, r Retention) error {
 			return err
 		}
 		return checkContext(ctx)
-	})
+	}); err != nil {
+		return err
+	}
+	raw, _ := json.Marshal(r)
+	return se.store.auditEntry("set_retention", se.name, digestOf(raw))
 }
 
 // Retention returns the persisted policy; the zero value when unset.

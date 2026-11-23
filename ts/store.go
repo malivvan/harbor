@@ -2,10 +2,12 @@ package ts
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"sync"
 	"sync/atomic"
 
+	"github.com/malivvan/harbor/audit"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -37,6 +39,34 @@ type Store struct {
 	// enc is the optional encryption state. It is an atomic pointer so a
 	// rotation can swap the keys while readers are serving queries.
 	enc atomic.Pointer[encState]
+
+	// audit receives an entry for every committed write, or nil when the store
+	// was opened without audit. It is set once at Open and never mutated.
+	audit audit.Sink
+}
+
+// auditEntry records one committed write in the store's audit trail. It is a
+// no-op when the store has no audit sink. Digest is the SHA-256 of the written
+// payload, or nil for deletes.
+func (s *Store) auditEntry(op, series string, digest []byte) error {
+	if s == nil || s.audit == nil {
+		return nil
+	}
+	return s.audit.Record(audit.Entry{
+		Store:  audit.StoreTS,
+		Op:     op,
+		Entity: series,
+		Digest: digest,
+	})
+}
+
+// digestOf returns the SHA-256 of data, or nil when data is empty.
+func digestOf(data []byte) []byte {
+	if len(data) == 0 {
+		return nil
+	}
+	sum := sha256.Sum256(data)
+	return sum[:]
 }
 
 // encState returns the current encryption state, or nil for a plaintext store.
@@ -201,6 +231,9 @@ func (s *Store) DeleteSeries(ctx context.Context, name string) error {
 	}
 	s.mu.Unlock()
 
+	if err := s.auditEntry("delete_series", name, nil); err != nil {
+		return err
+	}
 	return nil
 }
 

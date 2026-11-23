@@ -36,6 +36,21 @@ func decodeValue(b []byte) float64 {
 	return math.Float64frombits(binary.BigEndian.Uint64(b))
 }
 
+// encodePoints returns a canonical 16-byte-per-point encoding of points, used
+// only to digest a written batch for the audit trail. Each point contributes
+// its chronological key followed by its value bits, so the digest is stable
+// regardless of the caller's slice order.
+func encodePoints(points []Point) []byte {
+	out := make([]byte, 0, len(points)*2*recordSize)
+	for _, p := range points {
+		k := encodeKey(p.Timestamp)
+		v := encodeValue(p.Value)
+		out = append(out, k[:]...)
+		out = append(out, v[:]...)
+	}
+	return out
+}
+
 // sealBytes seals plain with the store's primary key, prepending a fresh nonce.
 func (s *Store) sealBytes(plain []byte) ([]byte, error) {
 	if s == nil {

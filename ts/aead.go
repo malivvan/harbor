@@ -352,6 +352,7 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		b:      bdb,
 		root:   root,
 		series: make(map[string]*Series),
+		audit:  cfg.Audit,
 	}
 	s.now.Store(&nowProvider{fn: defaultNow})
 
