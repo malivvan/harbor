@@ -14,7 +14,7 @@ import (
 	"github.com/malivvan/harbor/store/fstree"
 )
 
-// File is the replicated write view of a named file system in the fs sub-store.
+// File is the replicated write view of a named file system in the fstree sub-store.
 type File struct {
 	n        *Node
 	fileName string
@@ -33,7 +33,7 @@ type filePathArg struct {
 	Gid   int         `json:"gid,omitempty"`
 }
 
-// File returns the replicated fs sub-store root.
+// File returns the replicated fstree sub-store root.
 func (n *Node) File() *File {
 	if n == nil {
 		return nil

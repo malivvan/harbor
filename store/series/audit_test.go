@@ -8,7 +8,7 @@ import (
 	"time"
 
 	hstore "github.com/malivvan/harbor/store"
-	audit "github.com/malivvan/harbor/store/ledger"
+	"github.com/malivvan/harbor/store/ledger"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -19,14 +19,14 @@ func auditSeed() []byte {
 
 func openAuditedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	t.Helper()
-	pub, priv, err := audit.DeriveKey(auditSeed(), "m/2'")
+	pub, priv, err := ledger.DeriveKey(auditSeed(), "m/2'")
 	require.NoError(t, err)
 
-	db, err := bolt.Open(filepath.Join(t.TempDir(), "ts-audit.db"), 0o600, &bolt.Options{Timeout: time.Second})
+	db, err := bolt.Open(filepath.Join(t.TempDir(), "ts-ledger.db"), 0o600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	rec := audit.NewRecorder(db, map[string]ed25519.PrivateKey{audit.StoreSeries: priv})
+	rec := ledger.NewRecorder(db, map[string]ed25519.PrivateKey{ledger.StoreSeries: priv})
 	store, err := openStore(context.Background(), db, []byte(hstore.SERIES), Config{Audit: rec})
 	require.NoError(t, err)
 	return store, db, pub
@@ -45,7 +45,7 @@ func TestAuditRecordsSeriesWrites(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.DeleteSeries(ctx, "cpu"))
 
-	res, err := audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreSeries: pub})
+	res, err := ledger.Verify(db, map[string]ed25519.PublicKey{ledger.StoreSeries: pub})
 	require.NoError(t, err)
 	require.Equal(t, uint64(6), res.Count)
 }
@@ -54,8 +54,8 @@ func TestAuditDisabledRecordsNothing(t *testing.T) {
 	store, db := openTestStore(t, []byte(hstore.SERIES))
 	require.NoError(t, store.Series("cpu").Insert(context.Background(), Point{Timestamp: 1, Value: 1}))
 
-	_, err := audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreSeries: nil})
-	require.ErrorIs(t, err, audit.ErrNoLog)
+	_, err := ledger.Verify(db, map[string]ed25519.PublicKey{ledger.StoreSeries: nil})
+	require.ErrorIs(t, err, ledger.ErrNoLog)
 }
 
 func TestAuditDigestStableAcrossOrder(t *testing.T) {

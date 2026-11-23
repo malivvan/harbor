@@ -9,6 +9,6 @@
 // format.
 //
 // The package is derived from github.com/coder/hnsw and keeps that project's
-// graph semantics. It is vendored here so that the vec store depends only on
+// graph semantics. It is vendored here so that the vector store depends only on
 // this module.
 package hnsw

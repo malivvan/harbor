@@ -18,7 +18,7 @@ type Command struct {
 
 // Operation identifiers. Each is handled by the FSM dispatcher.
 const (
-	// db store
+	// record store
 	opRecordSave        = "record.save"
 	opRecordUpdate      = "record.update"
 	opRecordUpdateField = "record.update_field"
@@ -27,7 +27,7 @@ const (
 	opRecordSet         = "record.set"
 	opRecordDeleteKey   = "record.delete_key"
 
-	// ts store
+	// series store
 	opSeriesInsert       = "series.insert"
 	opSeriesInsertMany   = "series.insert_many"
 	opSeriesDeleteRange  = "series.delete_range"
@@ -36,7 +36,7 @@ const (
 	opSeriesSetRetention = "series.set_retention"
 	opSeriesDeleteSeries = "series.delete_series"
 
-	// vec store
+	// vector store
 	opVectorCreateCollection        = "vector.create_collection"
 	opVectorCreateCollectionOptions = "vector.create_collection_options"
 	opVectorEnsureCollection        = "vector.ensure_collection"
@@ -45,7 +45,7 @@ const (
 	opVectorDropCollection          = "vector.drop_collection"
 	opVectorFlush                   = "vector.flush"
 
-	// fs store
+	// fstree store
 	opFileMkdir            = "file.mkdir"
 	opFileMkdirAll         = "file.mkdir_all"
 	opFileRemove           = "file.remove"

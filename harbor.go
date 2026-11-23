@@ -7,9 +7,10 @@
 // Metadata detects a wrong password even for stores created with encryption
 // disabled.
 //
-// The sub-stores are reached through DB, FS, TS, Vec and FTS. Flags reports the
-// persisted encryption flags and Meta reports the KDF parameters. Use
-// EncryptNone/Plaintext to create an unencrypted store.
+// The sub-stores are reached through Record, File, Series, Vector, Search,
+// Graphs and Objects. Flags reports the persisted encryption flags and Meta
+// reports the KDF parameters. Use EncryptNone/Plaintext to create an
+// unencrypted store.
 package harbor
 
 import (
@@ -22,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/malivvan/harbor/pkg/metrics"
 	"github.com/malivvan/harbor/store"
 	"github.com/malivvan/harbor/store/fstree"
 	"github.com/malivvan/harbor/store/graphs"
@@ -104,7 +106,7 @@ const (
 	StrongKDFThreads             = system.StrongKDFThreads
 )
 
-// Store is a single bbolt database that hosts the db, fs, ts, vec and fts stores.
+// Store is a single bbolt database that hosts the record, fstree, series, vector, search, graphs and object stores.
 // Each sub-store uses its own domain-separated key derived from Password.
 type Store struct {
 	mu sync.RWMutex
@@ -136,7 +138,7 @@ type Store struct {
 type Options struct {
 	bolt.Options
 
-	// Codec encodes entities for the db sub-store. A nil Codec selects the
+	// Codec encodes entities for the record sub-store. A nil Codec selects the
 	// default JSON codec.
 	Codec record.Codec
 
@@ -170,7 +172,7 @@ type Options struct {
 	// persisted; see the Audit* flag constants in the package docs.
 	Audit uint16
 
-	// UseQuant enables vector quantization in the vec sub-store.
+	// UseQuant enables vector quantization in the vector sub-store.
 	UseQuant bool
 
 	// Quantizer compresses vectors when UseQuant is enabled. A nil Quantizer
@@ -190,7 +192,7 @@ type Options struct {
 // Validate checks the options that apply when a store is created: the password,
 // the Argon2id parameter set, the encryption selection and the audit flags.
 // Open ignores the KDF costs and the encryption selection for an existing
-// store; this method validates them as they would apply to a new fstree, so
+// store; this method validates them as they would apply to a new store, so
 // callers can check their configuration before creating one.
 func (o *Options) Validate() error {
 	if o == nil {
@@ -395,7 +397,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptCollectionNames: system.HasFlag(md.Flags, EncryptVectorCollectionNames),
 		Audit:                  auditSink(AuditVector),
 		Metrics:                options.Metrics,
-		// The vec store shares this handle with db, fs and ts; Close must only
+		// The vector store shares this handle with db, fs and ts; Close must only
 		// flush its buffers and never close the handle.
 		SharedDB: true,
 	}); err != nil {
@@ -685,7 +687,7 @@ func (s *Store) Backup(ctx context.Context, w io.Writer) error {
 		return ErrClosed
 	}
 
-	// The vec store buffers points in memory; drain them so the snapshot is
+	// The vector store buffers points in memory; drain them so the snapshot is
 	// consistent with what the store has accepted.
 	if s.vector != nil {
 		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
@@ -826,7 +828,7 @@ func (s *Store) Close() error {
 	if s.bs == nil {
 		return nil
 	}
-	// The vec store buffers points in memory; drain them before closing the
+	// The vector store buffers points in memory; drain them before closing the
 	// shared handle. A flush failure must not keep the bbolt handle (and its
 	// fstree lock) open forever: close it anyway and return the flush error.
 	var flushErr error

@@ -47,8 +47,9 @@ type Labels map[string]string
 // Well-known label keys. Using constants keeps the cardinality of the metric
 // series predictable for an exporter.
 const (
-	// LabelStore is the sub-store that produced the metric: "db", "fs",
-	// "ts", "vec", or "consensus".
+	// LabelStore is the sub-store that produced the metric, named by the
+	// store registry ("record", "fstree", "series", "vector", "search",
+	// "graphs", "object") or "consensus".
 	LabelStore = "store"
 
 	// LabelOp is the operation name, for example "insert" or "range".

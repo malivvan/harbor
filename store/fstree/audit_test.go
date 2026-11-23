@@ -8,7 +8,7 @@ import (
 	"time"
 
 	hstore "github.com/malivvan/harbor/store"
-	audit "github.com/malivvan/harbor/store/ledger"
+	"github.com/malivvan/harbor/store/ledger"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -19,14 +19,14 @@ func auditSeed() []byte {
 
 func openAuditedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	t.Helper()
-	pub, priv, err := audit.DeriveKey(auditSeed(), "m/1'")
+	pub, priv, err := ledger.DeriveKey(auditSeed(), "m/1'")
 	require.NoError(t, err)
 
-	db, err := bolt.Open(filepath.Join(t.TempDir(), "fs-audit.db"), 0o600, &bolt.Options{Timeout: time.Second})
+	db, err := bolt.Open(filepath.Join(t.TempDir(), "fs-ledger.db"), 0o600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	rec := audit.NewRecorder(db, map[string]ed25519.PrivateKey{audit.StoreFile: priv})
+	rec := ledger.NewRecorder(db, map[string]ed25519.PrivateKey{ledger.StoreFile: priv})
 	store, err := Open(context.Background(), db, Config{Root: [][]byte{[]byte(hstore.FSTREE)}, Audit: rec})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
@@ -49,7 +49,7 @@ func TestAuditRecordsFSWrites(t *testing.T) {
 	require.NoError(t, fsys.RemoveAll("/dir"))
 	require.NoError(t, store.DeleteFS("fs"))
 
-	res, err := audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreFile: pub})
+	res, err := ledger.Verify(db, map[string]ed25519.PublicKey{ledger.StoreFile: pub})
 	require.NoError(t, err)
 	require.Equal(t, uint64(11), res.Count)
 }
@@ -60,8 +60,8 @@ func TestAuditDisabledRecordsNothing(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, fsys.Mkdir("/dir", 0o755))
 
-	_, err = audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreFile: nil})
-	require.ErrorIs(t, err, audit.ErrNoLog)
+	_, err = ledger.Verify(db, map[string]ed25519.PublicKey{ledger.StoreFile: nil})
+	require.ErrorIs(t, err, ledger.ErrNoLog)
 }
 
 // writeFile creates a file and writes content through the absfs file API, which
@@ -89,7 +89,7 @@ func TestAuditRecordsCopy(t *testing.T) {
 	require.NoError(t, writeFile(t, fsys, "/src.txt", "hello"))
 	require.NoError(t, fsys.Copy("/src.txt", "/dst.txt"))
 
-	res, err := audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreFile: pub})
+	res, err := ledger.Verify(db, map[string]ed25519.PublicKey{ledger.StoreFile: pub})
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), res.Count, "write, close and copy must be recorded")
 

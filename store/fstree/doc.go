@@ -1,4 +1,4 @@
-// Package file implements a complete file system on top of bbolt, including
+// Package fstree implements a complete file system on top of bbolt, including
 // symbolic links, a concurrency-friendly walker, snapshots and optional
 // encryption.
 //

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	hstore "github.com/malivvan/harbor/store"
+	"github.com/malivvan/harbor/store/graphs"
 	"github.com/malivvan/harbor/store/search"
 	"github.com/malivvan/harbor/store/series"
 	"github.com/malivvan/harbor/store/vector"

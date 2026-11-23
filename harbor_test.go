@@ -3,6 +3,7 @@ package harbor
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -16,7 +17,7 @@ import (
 
 	"github.com/malivvan/harbor/internal/crypto"
 	hstore "github.com/malivvan/harbor/store"
-	audit "github.com/malivvan/harbor/store/ledger"
+	"github.com/malivvan/harbor/store/ledger"
 	"github.com/malivvan/harbor/store/series"
 	"github.com/malivvan/harbor/store/system"
 	"github.com/malivvan/harbor/store/vector"
@@ -854,7 +855,7 @@ func TestOpenNilReceiverHelpers(t *testing.T) {
 
 func TestAuditTrailEndToEnd(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "harbor-audit.db")
+	path := filepath.Join(t.TempDir(), "harbor-ledger.db")
 	const password = "correct horse battery staple"
 
 	opts := testOptions(password)
@@ -908,7 +909,7 @@ func TestAuditDisabledHasNoTrail(t *testing.T) {
 	require.NoError(t, s.Record().Save(ctx, &harborRecord{Name: "alice"}))
 
 	_, err := s.VerifyAudit()
-	require.ErrorIs(t, err, audit.ErrNoLog)
+	require.ErrorIs(t, err, ledger.ErrNoLog)
 }
 
 func TestAuditWrongPasswordIsRejectedOnOpen(t *testing.T) {
@@ -1042,7 +1043,7 @@ func TestSingleVersionOnePolicy(t *testing.T) {
 	require.Equal(t, uint64(1), file.FormatVersion)
 	require.Equal(t, uint64(1), series.FormatVersion)
 	require.Equal(t, uint32(1), vector.CollectionFormatVersion)
-	require.Equal(t, 1, audit.FormatVersion)
+	require.Equal(t, 1, ledger.FormatVersion)
 }
 
 // TestOptionsValidate covers the creation-time option checks exposed by

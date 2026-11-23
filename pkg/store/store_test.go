@@ -290,7 +290,7 @@ func TestAllFourStoresAreExposed(t *testing.T) {
 			m.Record() != nil, m.File() != nil, m.Series() != nil, m.Vector() != nil)
 	}
 	if m.Series() != m.Store().Series() {
-		t.Fatal("Manager.TS does not return the store's ts store")
+		t.Fatal("Manager.TS does not return the store's series store")
 	}
 
 	// The process-wide singleton follows the same shape.

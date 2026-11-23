@@ -57,7 +57,7 @@ func newValue(name string, raw json.RawMessage) (any, error) {
 	return ptr, nil
 }
 
-// Record is the replicated write view of the db sub-store. Reads should use
+// Record is the replicated write view of the record sub-store. Reads should use
 // Node.Store().Record() directly; writes go through the methods here so they are
 // proposed through raft and applied on every node.
 type Record struct {
@@ -92,7 +92,7 @@ type recordKVArg struct {
 	Value  []byte   `json:"value,omitempty"`
 }
 
-// Record returns the replicated db sub-store.
+// Record returns the replicated record sub-store.
 func (n *Node) Record() *Record {
 	if n == nil {
 		return nil

@@ -175,7 +175,7 @@ func (s *Store) changeStore() *Store {
 // view shares the bbolt handle, encryption state, rotation guard and change
 // hooks with the receiver; it has its own root node and codec selection.
 // Passing no segments roots the view at the database root, so callers that
-// want to keep the conventional root pass it explicitly (for example "db").
+// want to keep the conventional root pass it explicitly (for example store.RECORD).
 func (s *Store) WithRoot(parts ...string) *Store {
 	if s == nil {
 		return nil

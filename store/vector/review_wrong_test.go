@@ -41,7 +41,7 @@ func TestListCollectionsSkipsForeignHarborBuckets(t *testing.T) {
 	_, err = store.NewCollection("docs", 2, Cosine, false)
 	require.NoError(t, err)
 
-	// Another sub-store joins the same database after the vec store was opened.
+	// Another sub-store joins the same database after the vector store was opened.
 	require.NoError(t, bdb.Update(func(tx *bbolt.Tx) error {
 		for _, name := range []string{hstore.RECORD, hstore.FSTREE, hstore.SERIES} {
 			if _, err := tx.CreateBucket([]byte(name)); err != nil {

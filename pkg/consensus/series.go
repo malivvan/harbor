@@ -6,7 +6,7 @@ import (
 	"github.com/malivvan/harbor/store/series"
 )
 
-// Series is the replicated write view of the ts sub-store.
+// Series is the replicated write view of the series sub-store.
 type Series struct{ n *Node }
 
 type seriesInsertArg struct {
@@ -44,7 +44,7 @@ type seriesRetentionArg struct {
 	Retention series.Retention `json:"retention"`
 }
 
-// Series returns the replicated ts sub-store.
+// Series returns the replicated series sub-store.
 func (n *Node) Series() *Series {
 	if n == nil {
 		return nil

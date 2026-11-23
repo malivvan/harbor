@@ -339,7 +339,7 @@ See [Encryption](../../README.md#encryption) and [AGENTS.md](../../AGENTS.md#enc
 
 ## Persistence format
 
-- Point values use the hand-written positional format in `vec/binary.go`.
+- Point values use the hand-written positional format in `store/vector/binary.go`.
   Payload keys are sorted, so identical points encode identically.
 - Collection metadata stores the format version and schema fingerprints.
   Reopening detects a reordered or incompatible codec instead of misreading old

@@ -214,10 +214,11 @@ Important properties:
 - `Store.Close` flushes buffered vector writes and closes the database that
   `Open` created. It is safe to call twice, and the sub-store accessors return
   `nil` afterwards.
-- The accessors are `Record`, `File`, `Series`, `Vector` and `Search`. Each
-  takes optional bucket-path segments: `store.Record("tenant", "records")`
-  returns a rooted view of the already-open store, while `store.Record()` keeps
-  the conventional `record` root so existing databases stay readable.
+- The accessors are `Record`, `File`, `Series`, `Vector`, `Search`, `Graphs`
+  and `Objects`. Each takes optional bucket-path segments:
+  `store.Record("tenant", "records")` returns a rooted view of the already-open
+  store, while `store.Record()` keeps the conventional `record` root so existing
+  databases stay readable.
 
 `Options.Validate()` performs the checks `Open` applies when creating a store —
 password, complete and bounded Argon2id parameters, encryption-flag conflicts
@@ -585,7 +586,7 @@ vfs, err := fsStore.Open("vault")
 ### The `absfs` interface and paths
 
 `file` implements the module's internal `absfs` interfaces (`Filer`,
-`FileSystem` and `SymlinkFileSystem`). The in-tree `fs/s3fs` adapter implements
+`FileSystem` and `SymlinkFileSystem`). The in-tree `store/fstree/s3fs` adapter implements
 the `Filer` subset, and the interfaces make file systems work with standard
 `io/fs` functions. The interface package itself is internal and cannot be
 imported by other modules.
@@ -1134,7 +1135,7 @@ events; the trail proves integrity against an attacker *without* the key, the
 same trust boundary as the encryption itself.
 
 See [store/ledger/README.md](store/ledger/README.md) for the event model, the recorded
-operations, the full threat model and how to use the `audit` package directly.
+operations, the full threat model and how to use the `ledger` package directly.
 
 ## Cross-store transactions
 
@@ -1471,7 +1472,7 @@ code where they are most useful (for the `record` package, see
 Harbor is preparing its first public release (`v0.1.x`). The on-disk formats
 are versioned and refuse data from an incompatible build instead of misreading
 it. Every persisted format is version 1 (`record.Version`, `file.FormatVersion`,
-`series.FormatVersion`, `vector.CollectionFormatVersion`, `audit.FormatVersion`);
+`series.FormatVersion`, `vector.CollectionFormatVersion`, `ledger.FormatVersion`);
 there is no v2 or dual-version compatibility path. Pin a module version, and
 treat pre-1.0 API changes as potentially breaking.
 

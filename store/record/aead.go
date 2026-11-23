@@ -21,7 +21,7 @@ type Config struct {
 	// Root is the bucket path below which all Harbor data lives. Each element
 	// is one nested bucket name. A nil or empty Root means the database root,
 	// so Harbor's buckets are top-level. The harbor root package passes
-	// [][]byte{[]byte("db")} explicitly.
+	// [][]byte{[]byte(store.RECORD)} explicitly.
 	Root [][]byte
 
 	// Codec encodes and decodes entities. A nil Codec selects the default JSON

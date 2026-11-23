@@ -73,7 +73,7 @@ type node struct {
 	s *Store
 
 	// The root bucket path. An empty path is the database root; the harbor root
-	// package configures ["db"] explicitly.
+	// package configures [store.RECORD] explicitly.
 	root [][]byte
 
 	// Transaction object. Nil if not in transaction

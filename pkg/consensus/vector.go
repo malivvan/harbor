@@ -6,7 +6,7 @@ import (
 	"github.com/malivvan/harbor/store/vector"
 )
 
-// Vector is the replicated write view of the vec sub-store.
+// Vector is the replicated write view of the vector sub-store.
 type Vector struct{ n *Node }
 
 type vectorCreateArg struct {
@@ -40,7 +40,7 @@ type vectorCreateOptionsArg struct {
 	Options vector.CollectionOptions `json:"options"`
 }
 
-// Vector returns the replicated vec sub-store.
+// Vector returns the replicated vector sub-store.
 func (n *Node) Vector() *Vector {
 	if n == nil {
 		return nil

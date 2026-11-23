@@ -29,7 +29,7 @@ separate `docs/` tree.
 | `.../pkg/store` | Process-wide database manager: resolves a directory, reads or creates the password file (`O_EXCL`, mode 0600, never logged), and opens one handle. |
 | `.../store/object` | Independent flat object store with buckets, path containment and atomic `Put`; works without the file store and migrates file-backed blobs explicitly. |
 | `.../pkg/snapshot` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore. |
-| `.../pkg/snapshot/blobstore` | Adapter from `snapshot.ObjectStore` to `blob`. |
+| `.../pkg/snapshot/blobstore` | Adapter from `snapshot.ObjectStore` to one bucket of the object store. |
 | `.../pkg/id` | ULID generation: 26-character Crockford base32, time-sortable. |
 | `.../pkg/sign/canonical` | Deterministic JSON encoding for signatures and content addressing: sorted keys, stable numbers, no whitespace. |
 | `.../pkg/fusion` | Reciprocal rank fusion for combining full-text and vector result lists. |
@@ -164,7 +164,7 @@ __collections_meta__/         collection metadata records
 ```
 
 - Point values use the hand-written, positional binary format documented in
-  `vec/binary.go`. Payload keys are sorted so the encoding is deterministic.
+  `store/vector/binary.go`. Payload keys are sorted so the encoding is deterministic.
 - Each point carries a store-managed `Version`; caller-provided versions are
   not trusted.
 - `CollectionMeta` persists the vector dimension, metric, index type, HNSW
@@ -285,7 +285,7 @@ Every bbolt commit is an fsync. Harbor batches where it can:
 - The first release has exactly one on-disk version, number 1, and no v2 or
   dual-version compatibility path. The exported constants are `record.Version`
   (`"1.0.0"`), `fstree.FormatVersion`, `series.FormatVersion`,
-  `vector.CollectionFormatVersion` and `audit.FormatVersion`; all are 1.
+  `vector.CollectionFormatVersion` and `ledger.FormatVersion`; all are 1.
 - `record.Version` is stored in `__database`. Opening a different version returns
   `ErrIncompatibleVersion`; file, series and vector likewise check their persisted
   revision on open and fail closed.
@@ -755,7 +755,7 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 - Every public package has a package-level doc comment, and every exported
   identifier is documented. Keep comments in English.
 - Code examples must compile against the current public API. The `record` package
-  has compile-checked examples in `db/examples_test.go`; add examples there
+  has compile-checked examples in `store/record/examples_test.go`; add examples there
   when behavior is easier to demonstrate than to describe.
 - When behavior changes, update the affected package guide and user-facing
   README section in the same change. Do not add a `docs/` directory again;

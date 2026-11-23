@@ -157,7 +157,8 @@ func TestBoltStoreReadsLegacyTimeEncoding(t *testing.T) {
 
 	appended := time.Date(2024, 1, 2, 3, 4, 5, 6, time.UTC)
 	buf := bytes.NewBuffer(nil)
-	handle := codec.MsgpackHandle{BasicHandle: codec.BasicHandle{TimeNotBuiltin: true}}
+	var handle codec.MsgpackHandle
+	handle.TimeNotBuiltin = true // the extension-based encoding raft-boltdb wrote
 	require.NoError(t, codec.NewEncoder(buf, &handle).Encode(&raft.Log{
 		Index:      9,
 		Term:       2,

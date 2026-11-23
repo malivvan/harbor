@@ -18,7 +18,7 @@ const KeySize = crypto.KeySize
 type Config struct {
 	// Root is the bucket path below which all collections live. Each element
 	// is one nested bucket name. A nil or empty Root means the database root;
-	// the harbor root package passes [][]byte{[]byte("vec")} explicitly.
+	// the harbor root package passes [][]byte{[]byte(store.VECTOR)} explicitly.
 	Root [][]byte
 
 	// UseQuant enables vector quantization. When true and Quantizer is nil,

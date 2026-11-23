@@ -20,7 +20,7 @@ const KeySize = crypto.KeySize
 type Config struct {
 	// Root is the bucket path below which all series live. Each element is one
 	// nested bucket name. A nil or empty Root means the database root; the
-	// harbor root package passes [][]byte{[]byte("ts")} explicitly.
+	// harbor root package passes [][]byte{[]byte(store.SERIES)} explicitly.
 	//
 	// Encryption requires a non-empty Root: at the database root the store
 	// cannot distinguish its own series buckets from unrelated top-level

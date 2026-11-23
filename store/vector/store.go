@@ -25,7 +25,7 @@ var ErrClosed = errors.New("vector: storage is closed")
 const collectionsMetaBucket = "__collections_meta__"
 
 // reservedTopLevelBuckets are the top-level buckets Harbor itself creates in a
-// shared database. They are never vector collections, even when a vec Store is
+// shared database. They are never vector collections, even when a vector Store is
 // opened at the database root.
 var reservedTopLevelBuckets = map[string]bool{
 	collectionsMetaBucket: true,
@@ -61,7 +61,7 @@ type Store struct {
 	readOnly bool
 
 	// root is the parent bucket path for collections and collection metadata.
-	// The default is the "vec" bucket.
+	// The default is the bucket the store registry names (store.VECTOR).
 	root [][]byte
 
 	// closed reports whether Close has been called. It is an atomic so that
@@ -183,7 +183,7 @@ func (s *Store) rotMuOf() *sync.RWMutex {
 // view shares the handle, encryption state, quantization settings and flush
 // registry with the receiver; collections opened through it are kept apart.
 // Repeated calls with the same path return the same view. No segments means
-// the database root; pass the conventional root explicitly (for example "vec")
+// the database root; pass the conventional root explicitly (for example store.VECTOR)
 // to keep it.
 func (s *Store) WithRoot(parts ...string) *Store {
 	if s == nil {

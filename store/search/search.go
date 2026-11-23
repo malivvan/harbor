@@ -64,7 +64,7 @@ var (
 // Config configures a Store or an Index.
 type Config struct {
 	// Root is an optional bucket path for all indexes; empty means the
-	// database root. The root package sets ["fts"].
+	// database root. The root package sets [store.SEARCH].
 	Root [][]byte
 
 	// Tokenizer splits text into terms. A nil Tokenizer selects Words.

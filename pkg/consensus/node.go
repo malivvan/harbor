@@ -379,26 +379,41 @@ func (n *Node) serializeStore() ([]byte, error) {
 // restoreStore atomically replaces the harbor database with the snapshot
 // contents and reopens it, rebuilding the in-memory caches from disk.
 func (n *Node) restoreStore(data []byte) error {
-	n.mu.Lock()
-	st := n.store
-	n.store = nil
-	n.mu.Unlock()
-
-	if st != nil {
-		_ = st.Close()
-	}
-
+	// Stage the snapshot first: a failed write leaves the running store alone.
 	tmp := n.cfg.StorePath + ".restore"
 	if err := os.WriteFile(tmp, data, n.cfg.storeMode()); err != nil {
 		return fmt.Errorf("consensus: write restored store: %w", err)
 	}
+
+	n.mu.Lock()
+	st := n.store
+	n.store = nil
+	n.mu.Unlock()
+	if st != nil {
+		_ = st.Close()
+	}
+
+	// The handle is gone from here on, so every failure path reopens the file
+	// at StorePath instead of leaving the node with no store at all.
+	failed := func(err error) error {
+		reopened, rerr := harbor.Open(context.Background(), n.cfg.StorePath, n.cfg.storeMode(), n.cfg.StoreOpts)
+		if rerr != nil {
+			return fmt.Errorf("%w (reopen: %v)", err, rerr)
+		}
+		n.mu.Lock()
+		n.store = reopened
+		n.mu.Unlock()
+		return err
+	}
+
 	if err := os.Rename(tmp, n.cfg.StorePath); err != nil {
-		return fmt.Errorf("consensus: replace store: %w", err)
+		_ = os.Remove(tmp)
+		return failed(fmt.Errorf("consensus: replace store: %w", err))
 	}
 
 	newStore, err := harbor.Open(context.Background(), n.cfg.StorePath, n.cfg.storeMode(), n.cfg.StoreOpts)
 	if err != nil {
-		return fmt.Errorf("consensus: reopen restored store: %w", err)
+		return failed(fmt.Errorf("consensus: reopen restored store: %w", err))
 	}
 
 	n.mu.Lock()

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	hstore "github.com/malivvan/harbor/store"
-	audit "github.com/malivvan/harbor/store/ledger"
+	"github.com/malivvan/harbor/store/ledger"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -19,14 +19,14 @@ func auditSeed() []byte {
 
 func openAuditedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	t.Helper()
-	pub, priv, err := audit.DeriveKey(auditSeed(), "m/3'")
+	pub, priv, err := ledger.DeriveKey(auditSeed(), "m/3'")
 	require.NoError(t, err)
 
-	bdb, err := bolt.Open(filepath.Join(t.TempDir(), "vec-audit.db"), 0o600, &bolt.Options{Timeout: time.Second})
+	bdb, err := bolt.Open(filepath.Join(t.TempDir(), "vec-ledger.db"), 0o600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bdb.Close() })
 
-	rec := audit.NewRecorder(bdb, map[string]ed25519.PrivateKey{audit.StoreVector: priv})
+	rec := ledger.NewRecorder(bdb, map[string]ed25519.PrivateKey{ledger.StoreVector: priv})
 	store, err := openStore(context.Background(), bdb, []byte(hstore.VECTOR), Config{Audit: rec})
 	require.NoError(t, err)
 	return store, bdb, pub
@@ -43,7 +43,7 @@ func TestAuditRecordsCollectionWrites(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.DropCollection("docs"))
 
-	res, err := audit.Verify(bdb, map[string]ed25519.PublicKey{audit.StoreVector: pub})
+	res, err := ledger.Verify(bdb, map[string]ed25519.PublicKey{ledger.StoreVector: pub})
 	require.NoError(t, err)
 	// create_collection (EnsureCollection) + save_collection_meta + upsert +
 	// delete + drop_collection.
@@ -57,8 +57,8 @@ func TestAuditDisabledRecordsNothing(t *testing.T) {
 	require.NoError(t, col.Upsert([]PointStruct{{ID: "a", Vector: []float32{1, 2, 3}}}))
 	require.NoError(t, col.Flush())
 
-	_, err = audit.Verify(store.db, map[string]ed25519.PublicKey{audit.StoreVector: nil})
-	require.ErrorIs(t, err, audit.ErrNoLog)
+	_, err = ledger.Verify(store.db, map[string]ed25519.PublicKey{ledger.StoreVector: nil})
+	require.ErrorIs(t, err, ledger.ErrNoLog)
 }
 
 func TestAuditDigestStableAcrossOrder(t *testing.T) {

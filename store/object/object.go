@@ -410,7 +410,9 @@ func (s *Store) checkMeta(root *bolt.Bucket, readOnly bool) error {
 		if err := root.Put([]byte(modeKey), []byte{want}); err != nil {
 			return err
 		}
-	} else if len(mode) != 1 || mode[0] != want {
+	} else if len(mode) != 1 {
+		return fmt.Errorf("%w: malformed mode record (%d bytes)", ErrWrongMode, len(mode))
+	} else if mode[0] != want {
 		return fmt.Errorf("%w: stored mode %#x, configured %#x", ErrWrongMode, mode[0], want)
 	}
 

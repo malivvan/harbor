@@ -217,7 +217,10 @@ func (s *Store) checkMode(b *bolt.Bucket, readOnly bool) error {
 		}
 		return b.Put([]byte(modeKey), []byte{want})
 	}
-	if len(raw) != 1 || raw[0] != want {
+	if len(raw) != 1 {
+		return fmt.Errorf("%w: malformed mode record (%d bytes)", ErrWrongMode, len(raw))
+	}
+	if raw[0] != want {
 		return fmt.Errorf("%w: stored mode %#x, configured %#x", ErrWrongMode, raw[0], want)
 	}
 	return nil

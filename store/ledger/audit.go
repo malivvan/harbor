@@ -1,4 +1,4 @@
-// Package audit provides a tamper-evident, append-only audit trail for Harbor.
+// Package ledger provides a tamper-evident, append-only audit trail for Harbor.
 //
 // A Recorder appends signed, hash-linked events to a bbolt database: each event
 // carries the store, operation, entity and a SHA-256 digest of the written

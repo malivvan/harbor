@@ -150,9 +150,9 @@ bytes to the canonical form.
 
 `record.Set` records `set` and `record.SetBytes` records `set_bytes`: both write the same
 encoded value, but the operation name preserves the caller's intent. Higher-level
-packages are audited at the layer that performs the write: `blob` and
-`snapshot` write through `file`, so their writes appear as `file` events; the
-`store` manager only opens stores and records nothing itself.
+packages are audited at the layer that performs the write: `snapshot` writes
+through the object store, so its writes appear as `object` events; the `store`
+manager only opens stores and records nothing itself.
 
 **Not recorded:** reads (`Get`, `Find`, `Range`, `Search`, `Stat`, `ReadFile`,
 …), key/material lifecycle operations (`ReEncrypt`, `RotateAll`, `VerifyAll`,

@@ -17,7 +17,7 @@ import (
 	"github.com/malivvan/harbor/store/object"
 )
 
-// Store is a snapshot.ObjectStore over one bucket of a blob store.
+// Store is a snapshot.ObjectStore over one bucket of the object store.
 type Store struct {
 	objects *object.Store
 	bucket  string

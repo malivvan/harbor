@@ -193,7 +193,7 @@ func (s *Store) nowOf() *nowProvider {
 // WithRoot returns a view of the store rooted at the given bucket path. The
 // view shares the handle, clock and encryption state with the receiver. No
 // segments means the database root; pass the conventional root explicitly
-// (for example "ts") to keep it.
+// (for example store.SERIES) to keep it.
 func (s *Store) WithRoot(parts ...string) *Store {
 	if s == nil {
 		return nil

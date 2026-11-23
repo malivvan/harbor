@@ -9,7 +9,7 @@ import (
 	"time"
 
 	hstore "github.com/malivvan/harbor/store"
-	audit "github.com/malivvan/harbor/store/ledger"
+	"github.com/malivvan/harbor/store/ledger"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -28,14 +28,14 @@ func auditSeed() []byte {
 
 func openAudited(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	t.Helper()
-	pub, priv, err := audit.DeriveKey(auditSeed(), "m/0'")
+	pub, priv, err := ledger.DeriveKey(auditSeed(), "m/0'")
 	require.NoError(t, err)
 
-	bdb, err := bolt.Open(filepath.Join(t.TempDir(), "audit.db"), 0o600, &bolt.Options{Timeout: time.Second})
+	bdb, err := bolt.Open(filepath.Join(t.TempDir(), "ledger.db"), 0o600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bdb.Close() })
 
-	rec := audit.NewRecorder(bdb, map[string]ed25519.PrivateKey{audit.StoreRecord: priv})
+	rec := ledger.NewRecorder(bdb, map[string]ed25519.PrivateKey{ledger.StoreRecord: priv})
 	st, err := Open(context.Background(), bdb, Config{Audit: rec})
 	require.NoError(t, err)
 	return st, bdb, pub
@@ -52,7 +52,7 @@ func TestAuditRecordsStructWrites(t *testing.T) {
 	require.NoError(t, st.UpdateField(ctx, &u, "Name", "carol"))
 	require.NoError(t, st.DeleteStruct(ctx, &u))
 
-	res, err := audit.Verify(bdb, map[string]ed25519.PublicKey{audit.StoreRecord: pub})
+	res, err := ledger.Verify(bdb, map[string]ed25519.PublicKey{ledger.StoreRecord: pub})
 	require.NoError(t, err)
 	require.Equal(t, uint64(4), res.Count)
 }
@@ -65,7 +65,7 @@ func TestAuditRecordsKeyValueWrites(t *testing.T) {
 	require.NoError(t, st.SetBytes(ctx, "cfg", "raw", []byte("bytes")))
 	require.NoError(t, st.Delete(ctx, "cfg", "k"))
 
-	res, err := audit.Verify(bdb, map[string]ed25519.PublicKey{audit.StoreRecord: pub})
+	res, err := ledger.Verify(bdb, map[string]ed25519.PublicKey{ledger.StoreRecord: pub})
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), res.Count)
 }
@@ -81,8 +81,8 @@ func TestAuditDisabledRecordsNothing(t *testing.T) {
 	u := auditUser{ID: "u1", Name: "alice"}
 	require.NoError(t, st.Save(context.Background(), &u))
 
-	_, err = audit.Verify(bdb, map[string]ed25519.PublicKey{audit.StoreRecord: nil})
-	require.ErrorIs(t, err, audit.ErrNoLog)
+	_, err = ledger.Verify(bdb, map[string]ed25519.PublicKey{ledger.StoreRecord: nil})
+	require.ErrorIs(t, err, ledger.ErrNoLog)
 }
 
 func TestAuditDigestMatchesPayload(t *testing.T) {
@@ -92,7 +92,7 @@ func TestAuditDigestMatchesPayload(t *testing.T) {
 	u := auditUser{ID: "u1", Name: "alice"}
 	require.NoError(t, st.Save(ctx, &u))
 
-	var ev audit.Event
+	var ev ledger.Event
 	require.NoError(t, bdb.View(func(tx *bolt.Tx) error {
 		events := tx.Bucket([]byte(hstore.LEDGER)).Bucket([]byte("events"))
 		v := events.Get([]byte{0, 0, 0, 0, 0, 0, 0, 0})
@@ -124,7 +124,7 @@ func TestAuditSetOperationNames(t *testing.T) {
 		root := tx.Bucket([]byte(hstore.LEDGER))
 		events := root.Bucket([]byte("events"))
 		return events.ForEach(func(_, v []byte) error {
-			var event audit.Event
+			var event ledger.Event
 			if err := json.Unmarshal(v[:len(v)-ed25519.SignatureSize], &event); err != nil {
 				return err
 			}

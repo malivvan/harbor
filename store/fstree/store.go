@@ -194,7 +194,7 @@ func (s *Store) encState() *encState {
 // WithRoot returns a view of the store rooted at the given bucket path. The
 // view shares the handle, encryption state and tracked file systems with the
 // receiver. No segments means the database root; pass the conventional root
-// explicitly (for example "fs") to keep it.
+// explicitly (for example store.FSTREE) to keep it.
 func (s *Store) WithRoot(parts ...string) *Store {
 	if s == nil {
 		return nil

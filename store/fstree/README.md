@@ -273,7 +273,7 @@ if err != nil {
 }
 ```
 
-The same method works on snapshots and on an S3-backed `*file.FS`. `fs/s3fs`
+The same method works on snapshots and on an S3-backed `*fstree.FS`. `store/fstree/s3fs`
 itself is an `absfs.Filer`; implement `ContentFS` directly over your object
 store, or mount S3 through this package, when content should go to S3.
 `EncryptContent` seals content before it reaches the backend, so the backend

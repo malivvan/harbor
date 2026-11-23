@@ -17,7 +17,7 @@ const KeySize = crypto.KeySize
 type Config struct {
 	// Root is the bucket path below which all file systems live. Each element
 	// is one nested bucket name. A nil or empty Root means the database root;
-	// the harbor root package passes [][]byte{[]byte("fs")} explicitly.
+	// the harbor root package passes [][]byte{[]byte(store.FSTREE)} explicitly.
 	Root [][]byte
 
 	// Secret is a raw 32-byte master key. It must be set when encryption is

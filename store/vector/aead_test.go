@@ -16,7 +16,7 @@ import (
 // aeadKey returns a deterministic 32-byte test key.
 func aeadKey(fill byte) []byte { return bytes.Repeat([]byte{fill}, KeySize) }
 
-// aeadOpenStore opens a vec Store on a temporary database file.
+// aeadOpenStore opens a vector Store on a temporary database file.
 func aeadOpenStore(t *testing.T, path string, useQuant bool, cfg Config) (*Store, *bbolt.DB) {
 	t.Helper()
 
