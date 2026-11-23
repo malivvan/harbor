@@ -543,68 +543,47 @@ func (se *Series) Last(ctx context.Context) (Point, error) {
 	return point, nil
 }
 
+// RangeOptions controls RangeWithOptions and RangeEachWithOptions.
+type RangeOptions struct {
+	// Descending returns points newest first instead of oldest first.
+	Descending bool
+	// Limit caps the number of points returned. Zero means unlimited.
+	Limit int
+	// Offset skips this many points in the requested order before returning.
+	Offset int
+}
+
+func (o RangeOptions) validate() error {
+	if o.Limit < 0 || o.Offset < 0 {
+		return ErrInvalidOptions
+	}
+	return nil
+}
+
 // Range returns points with start <= Timestamp <= end, in time order.
 func (se *Series) Range(ctx context.Context, start, end int64) ([]Point, error) {
+	return se.RangeWithOptions(ctx, start, end, RangeOptions{})
+}
+
+// RangeWithOptions returns points with start <= Timestamp <= end in the order
+// selected by opts, honoring Offset and Limit. It materializes the result;
+// RangeEachWithOptions streams instead.
+func (se *Series) RangeWithOptions(ctx context.Context, start, end int64, opts RangeOptions) ([]Point, error) {
 	if se == nil || se.store == nil {
 		return nil, ErrNilParam
 	}
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
-	if start > end {
-		return nil, ErrInvalidRange
+
+	capacity := 0
+	if opts.Limit > 0 {
+		capacity = opts.Limit
 	}
-
-	points := make([]Point, 0)
-	err := se.store.b.View(func(tx *bolt.Tx) error {
-		if err := checkContext(ctx); err != nil {
-			return err
-		}
-
-		bucket, err := se.store.seriesBucket(tx, se.name)
-		if err != nil {
-			return err
-		}
-		if bucket == nil {
-			return nil
-		}
-
-		// Pre-size from the persisted count when available; otherwise the
-		// bucket key count is a reasonable hint.
-		hint := bucket.Stats().KeyN
-		if se.store.blockDuration() > 0 {
-			if meta, metaErr := se.store.readMeta(tx, se.name); metaErr == nil && meta.Count > 0 {
-				hint = int(meta.Count)
-			}
-		}
-		points = make([]Point, 0, hint)
-
-		if se.store.blockDuration() > 0 {
-			return se.store.scanBlocks(ctx, bucket, start, end, func(point Point) error {
-				points = append(points, point)
-				return nil
-			})
-		}
-
-		startKey := encodeKey(start)
-		cursor := bucket.Cursor()
-		for key, value := cursor.Seek(startKey[:]); key != nil; key, value = cursor.Next() {
-			if err := checkContext(ctx); err != nil {
-				return err
-			}
-			point, ok, err := se.store.decodePoint(key, value)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue
-			}
-			if point.Timestamp > end {
-				break
-			}
-			points = append(points, point)
-		}
-		return checkContext(ctx)
+	points := make([]Point, 0, capacity)
+	err := se.rangeScan(ctx, start, end, opts, func(p Point) (bool, error) {
+		points = append(points, p)
+		return false, nil
 	})
 	if err != nil {
 		return nil, err
@@ -615,21 +594,55 @@ func (se *Series) Range(ctx context.Context, start, end int64) ([]Point, error) 
 // RangeEach streams points with start <= Timestamp <= end in time order,
 // calling fn for each point. Iteration stops at the first fn error.
 func (se *Series) RangeEach(ctx context.Context, start, end int64, fn func(Point) error) error {
+	return se.RangeEachWithOptions(ctx, start, end, RangeOptions{}, fn)
+}
+
+// RangeEachWithOptions streams points in the order selected by opts, honoring
+// Offset and Limit, calling fn for each selected point. It stops at the first
+// fn error and never materializes the full range.
+func (se *Series) RangeEachWithOptions(ctx context.Context, start, end int64, opts RangeOptions, fn func(Point) error) error {
 	if se == nil || se.store == nil || fn == nil {
 		return ErrNilParam
 	}
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
+	return se.rangeScan(ctx, start, end, opts, func(p Point) (bool, error) {
+		if err := fn(p); err != nil {
+			return false, err
+		}
+		return false, nil
+	})
+}
+
+// rangeScan walks [start, end] in opts order, applying Offset and Limit, and
+// calls visit for each selected point. visit returns stop=true to end early.
+func (se *Series) rangeScan(ctx context.Context, start, end int64, opts RangeOptions, visit func(Point) (bool, error)) error {
 	if start > end {
 		return ErrInvalidRange
+	}
+	if err := opts.validate(); err != nil {
+		return err
+	}
+
+	skipped := 0
+	emitted := 0
+	filter := func(p Point) (bool, error) {
+		if skipped < opts.Offset {
+			skipped++
+			return false, nil
+		}
+		if opts.Limit > 0 && emitted >= opts.Limit {
+			return true, nil
+		}
+		emitted++
+		return visit(p)
 	}
 
 	return se.store.b.View(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
-
 		bucket, err := se.store.seriesBucket(tx, se.name)
 		if err != nil {
 			return err
@@ -637,32 +650,7 @@ func (se *Series) RangeEach(ctx context.Context, start, end int64, fn func(Point
 		if bucket == nil {
 			return nil
 		}
-
-		if se.store.blockDuration() > 0 {
-			return se.store.scanBlocks(ctx, bucket, start, end, fn)
-		}
-
-		startKey := encodeKey(start)
-		cursor := bucket.Cursor()
-		for key, value := cursor.Seek(startKey[:]); key != nil; key, value = cursor.Next() {
-			if err := checkContext(ctx); err != nil {
-				return err
-			}
-			point, ok, err := se.store.decodePoint(key, value)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue
-			}
-			if point.Timestamp > end {
-				break
-			}
-			if err := fn(point); err != nil {
-				return err
-			}
-		}
-		return checkContext(ctx)
+		return se.store.scanRangeOrdered(ctx, bucket, start, end, opts.Descending, filter)
 	})
 }
 

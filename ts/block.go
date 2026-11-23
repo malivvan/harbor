@@ -331,31 +331,154 @@ func mergePoint(existing []Point, point Point) []Point {
 	return append(out, existing[i:]...)
 }
 
-// scanBlocks calls fn for every point in [start, end] in time order.
-func (s *Store) scanBlocks(ctx context.Context, bucket *bolt.Bucket, start, end int64, fn func(Point) error) error {
-	firstKey := encodeKey(blockStart(start, s.blockDuration()))
+// scanRangeOrdered walks points in [start, end] in ascending or descending
+// time order, calling fn for each until fn returns stop=true. It dispatches to
+// the block or plain scanner for the store's mode.
+func (s *Store) scanRangeOrdered(ctx context.Context, bucket *bolt.Bucket, start, end int64, descending bool, fn func(Point) (bool, error)) error {
+	if s.blockDuration() > 0 {
+		return s.scanBlocksOrdered(ctx, bucket, start, end, descending, fn)
+	}
+	return s.scanPlainOrdered(ctx, bucket, start, end, descending, fn)
+}
+
+// scanBlocksOrdered walks the encrypted blocks in either direction, filtering
+// to [start, end] and stopping early when fn returns stop=true.
+func (s *Store) scanBlocksOrdered(ctx context.Context, bucket *bolt.Bucket, start, end int64, descending bool, fn func(Point) (bool, error)) error {
+	dur := s.blockDuration()
 	cursor := bucket.Cursor()
-	for key, raw := cursor.Seek(firstKey[:]); key != nil; key, raw = cursor.Next() {
+
+	if !descending {
+		firstKey := encodeKey(blockStart(start, dur))
+		for key, raw := cursor.Seek(firstKey[:]); key != nil; key, raw = cursor.Next() {
+			if err := checkContext(ctx); err != nil {
+				return err
+			}
+			if len(key) != recordSize {
+				continue
+			}
+			if decodeKey(key) > end {
+				break
+			}
+			points, err := s.openBlock(raw)
+			if err != nil {
+				return err
+			}
+			for _, point := range points {
+				if point.Timestamp < start || point.Timestamp > end {
+					continue
+				}
+				stop, err := fn(point)
+				if err != nil {
+					return err
+				}
+				if stop {
+					return nil
+				}
+			}
+		}
+		return nil
+	}
+
+	// Descending: start at the last block whose start is <= end.
+	endBlock := blockStart(end, dur)
+	endKey := encodeKey(endBlock)
+	key, raw := cursor.Seek(endKey[:])
+	if key == nil {
+		key, raw = cursor.Last()
+	} else if len(key) == recordSize && decodeKey(key) > endBlock {
+		key, raw = cursor.Prev()
+	}
+	for ; key != nil; key, raw = cursor.Prev() {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
 		if len(key) != recordSize {
 			continue
 		}
-		if decodeKey(key) > end {
+		block := decodeKey(key)
+		if block+dur <= start {
 			break
 		}
 		points, err := s.openBlock(raw)
 		if err != nil {
 			return err
 		}
-		for _, point := range points {
+		for i := len(points) - 1; i >= 0; i-- {
+			point := points[i]
 			if point.Timestamp < start || point.Timestamp > end {
 				continue
 			}
-			if err := fn(point); err != nil {
+			stop, err := fn(point)
+			if err != nil {
 				return err
 			}
+			if stop {
+				return nil
+			}
+		}
+	}
+	return nil
+}
+
+// scanPlainOrdered walks unencrypted point records in either direction,
+// filtering to [start, end] and stopping early when fn returns stop=true.
+func (s *Store) scanPlainOrdered(ctx context.Context, bucket *bolt.Bucket, start, end int64, descending bool, fn func(Point) (bool, error)) error {
+	cursor := bucket.Cursor()
+
+	if !descending {
+		startKey := encodeKey(start)
+		for key, value := cursor.Seek(startKey[:]); key != nil; key, value = cursor.Next() {
+			if err := checkContext(ctx); err != nil {
+				return err
+			}
+			point, ok, err := s.decodePoint(key, value)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+			if point.Timestamp > end {
+				break
+			}
+			stop, err := fn(point)
+			if err != nil {
+				return err
+			}
+			if stop {
+				return nil
+			}
+		}
+		return nil
+	}
+
+	endKey := encodeKey(end)
+	key, value := cursor.Seek(endKey[:])
+	if key == nil {
+		key, value = cursor.Last()
+	} else if len(key) == recordSize && decodeKey(key) > end {
+		key, value = cursor.Prev()
+	}
+	for ; key != nil; key, value = cursor.Prev() {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+		point, ok, err := s.decodePoint(key, value)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		if point.Timestamp < start {
+			break
+		}
+		stop, err := fn(point)
+		if err != nil {
+			return err
+		}
+		if stop {
+			return nil
 		}
 	}
 	return nil

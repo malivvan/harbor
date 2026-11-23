@@ -20,6 +20,10 @@ var (
 	// ErrInvalidRange is returned when start is greater than end.
 	ErrInvalidRange = errors.New("ts: invalid range")
 
+	// ErrInvalidOptions is returned for range options with a negative limit or
+	// offset.
+	ErrInvalidOptions = errors.New("ts: invalid options")
+
 	// ErrInvalidStep is returned when an aggregation step is not positive.
 	ErrInvalidStep = errors.New("ts: invalid step")
 
