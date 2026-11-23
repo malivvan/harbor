@@ -12,6 +12,7 @@ separate `docs/` tree.
 |---------|----------------|
 | `github.com/malivvan/harbor` | Opens one bbolt file, derives per-store keys from a password, and exposes `DB()`, `FS()`, `TS()`, `Vec()`, `Flags()` and `Meta()`. |
 | `.../db` | Struct-to-bucket mapping, indexes, matchers, managed transactions, key/value access, codecs. |
+| `.../graph` | A reusable bitemporal property graph over `db`: nodes, directed edges, adjacency and traversal, counts, history/as-of/diff/purge, JSON interchange. |
 | `.../fs` | Named file systems implementing the `absfs` interfaces, with symlinks, snapshots, inode cache and chunked content. |
 | `.../ts` | Named time series with ordered scans, aggregation, labels and retention. |
 | `.../vec` | Vector collections with Flat/HNSW indexes, payload filters and quantization. |
