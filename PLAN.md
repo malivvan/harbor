@@ -929,20 +929,27 @@ aggregation knobs instead), application schema meaning (migrations run steps,
 but steps are application code), and facade-specific document scoping. Harbor
 owns the primitive; the application owns the meaning.
 
-## 20. Release checklist
+## 20. Release checklist — COMPLETE
 
-- [ ] `go mod tidy` clean (0.1).
-- [ ] `gofmt -l .`, `go vet ./...`, `go build ./...` clean.
-- [ ] `go test ./...`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...` green.
-- [ ] staticcheck and govulncheck clean (AGENTS.md workflow).
-- [ ] New packages documented and linked; README snippets compile.
-- [ ] `blob.Put` atomicity (0.2) and `pkg/snapshot/blobstore` tests (0.6) done.
-- [ ] `store.TS()` parity (0.4); `pkg/sign/canonical` decision (0.5).
-- [ ] Internal planning documents removed (`HARBOR.md`, `PLAN.md`); this file is
-      the single backlog.
-- [ ] On-disk version 1 and encryption markers unchanged, or bumped with a
-      compatibility plan.
-- [ ] Tag from a commit whose CI is green.
+- [x] `go mod tidy` clean (0.1).
+- [x] `gofmt -l .`, `go vet ./...`, `go build ./...` clean.
+- [x] `go test ./...`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...` green.
+- [x] staticcheck and govulncheck clean (AGENTS.md workflow).
+- [x] New packages documented and linked; README snippets compile.
+- [x] `blob.Put` atomicity (0.2) and `pkg/snapshot/blobstore` tests (0.6) done.
+- [x] `store.TS()` parity (0.4); `pkg/sign/canonical` decision (0.5).
+- [x] Internal planning documents: `HARBOR.md` is absent; `PLAN.md` is retained
+      as the single backlog/record at the user's request.
+- [x] On-disk versions: every pre-existing format stays at version 1 with its
+      markers unchanged. FTS is a new root with its own version 1 and a new
+      `harbor/fts/v1` key label; no existing key or record changed.
+- [ ] Tag from a commit whose CI is green. Not tagged here: the local gate is
+      green, but CI has not run on this working tree. See `POST.md`.
+
+Execution summary: all blockers and P0/P1 items are implemented; P2 items 8–15
+are implemented or documented with a decision; P3 item 16 is implemented; item
+17 needed no action; item 18 is implemented. The follow-ups that remain are
+listed in `POST.md`.
 
 ## Appendix A — append-only history design note
 
