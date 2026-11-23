@@ -33,6 +33,10 @@ type VectorIndex interface {
 	// Returns an error if the point does not exist.
 	Delete(id string) error
 
+	// Get returns the point with the given ID, cloned so the caller may mutate
+	// it. It returns (nil, nil) when the ID is not present.
+	Get(id string) (*PointStruct, error)
+
 	// Count returns the number of vectors currently stored in the index.
 	Count() int
 

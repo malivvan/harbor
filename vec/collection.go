@@ -322,6 +322,23 @@ func (c *Collection) GetPointsByFilter(filter *Filter) ([]PointStruct, error) {
 	return c.index.GetPointsByFilter(filter), nil
 }
 
+// Get returns the point with the given ID, or ErrPointNotFound. It reads the
+// in-memory index, so it also sees upserts that are buffered but not yet
+// flushed to disk.
+func (c *Collection) Get(id string) (*PointStruct, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	point, err := c.index.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	if point == nil {
+		return nil, ErrPointNotFound
+	}
+	return point, nil
+}
+
 // Delete removes points either by explicit IDs or by a filter match.
 // If points slice is provided, those specific points are deleted.
 // If filter is provided, all points matching the filter are deleted.

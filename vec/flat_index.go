@@ -194,6 +194,20 @@ func (f *FlatIndex) GetIDsByFilter(filter *Filter) []string {
 	return ids
 }
 
+// Get returns a clone of the point with the given ID, or (nil, nil) when it is
+// absent.
+func (f *FlatIndex) Get(id string) (*PointStruct, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	point, ok := f.points[id]
+	if !ok {
+		return nil, nil
+	}
+	clone := clonePoint(point)
+	return &clone, nil
+}
+
 // GetPointsByFilter returns all points with full payload matching the given filter.
 func (f *FlatIndex) GetPointsByFilter(filter *Filter) []PointStruct {
 	f.mu.RLock()

@@ -19,6 +19,10 @@ func (m *MockIndex) Delete(id string) error {
 	return nil
 }
 
+func (m *MockIndex) Get(id string) (*PointStruct, error) {
+	return nil, nil
+}
+
 func (m *MockIndex) Count() int {
 	return 0
 }

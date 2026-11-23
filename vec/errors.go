@@ -25,4 +25,7 @@ var (
 
 	// ErrMetadataNotFound is returned when a collection has no stored metadata.
 	ErrMetadataNotFound = errors.New("vec: collection metadata not found")
+
+	// ErrPointNotFound is returned when a point ID is not present.
+	ErrPointNotFound = errors.New("vec: point not found")
 )

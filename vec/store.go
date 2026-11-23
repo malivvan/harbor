@@ -776,29 +776,10 @@ func (s *Store) LoadCollection(colName string) (map[string]*PointStruct, error) 
 		}
 
 		return b.ForEach(func(k, v []byte) error {
-			plain, err := s.openBytes(v)
+			p, err := s.decodePointValue(v)
 			if err != nil {
-				return fmt.Errorf("failed to decrypt point %q: %w", k, err)
+				return fmt.Errorf("failed to decode point %q: %w", k, err)
 			}
-
-			stored, err := decodeStoredPoint(plain)
-			if err != nil {
-				return err
-			}
-
-			p := fromStoredPoint(&stored)
-
-			// Dequantize vector if enabled and quantized vector exists
-			if s.useQuant && s.quantizer != nil {
-				if quantizedData, ok := p.Payload["__quantized_vector"]; ok {
-					if data, ok := quantizedData.([]byte); ok {
-						p.Vector = s.quantizer.Dequantize(data)
-						// Remove quantized vector from payload to save memory
-						delete(p.Payload, "__quantized_vector")
-					}
-				}
-			}
-
 			points[p.ID] = p
 			return nil
 		})
@@ -808,6 +789,112 @@ func (s *Store) LoadCollection(colName string) (map[string]*PointStruct, error) 
 		return nil, fmt.Errorf("failed to load points from bbolt: %w", err)
 	}
 	return points, nil
+}
+
+// decodePointValue decrypts and decodes one stored point value, dequantizing
+// the vector when the store uses quantization.
+func (s *Store) decodePointValue(raw []byte) (*PointStruct, error) {
+	plain, err := s.openBytes(raw)
+	if err != nil {
+		return nil, err
+	}
+	stored, err := decodeStoredPoint(plain)
+	if err != nil {
+		return nil, err
+	}
+	point := fromStoredPoint(&stored)
+	if s.useQuant && s.quantizer != nil {
+		if quantizedData, ok := point.Payload["__quantized_vector"]; ok {
+			if data, ok := quantizedData.([]byte); ok {
+				point.Vector = s.quantizer.Dequantize(data)
+				delete(point.Payload, "__quantized_vector")
+			}
+		}
+	}
+	return point, nil
+}
+
+// GetPoint returns the point with the given ID from the collection's durable
+// storage. It reads bbolt, so it does not see upserts still buffered in a
+// loaded Collection; use Collection.Get for the in-memory view. It returns
+// ErrPointNotFound when the point is absent and ErrCollectionNotFound when the
+// collection does not exist.
+func (s *Store) GetPoint(colName, id string) (*PointStruct, error) {
+	if err := s.checkOpen(); err != nil {
+		return nil, err
+	}
+
+	var point *PointStruct
+	err := s.view(func(tx *bbolt.Tx) error {
+		b, err := s.collectionBucket(tx, colName)
+		if err != nil {
+			return err
+		}
+		if b == nil {
+			return ErrCollectionNotFound
+		}
+		key, err := s.keyBytes(id)
+		if err != nil {
+			return err
+		}
+		raw := b.Get(key)
+		if raw == nil {
+			return ErrPointNotFound
+		}
+		point, err = s.decodePointValue(raw)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return point, nil
+}
+
+// GetPoints returns the points with the given IDs from a collection's durable
+// storage. found maps each present ID to its point; missing lists, in request
+// order, the IDs that were absent. Duplicate requested IDs are returned once.
+// It returns ErrCollectionNotFound when the collection does not exist.
+func (s *Store) GetPoints(colName string, ids []string) (found map[string]*PointStruct, missing []string, err error) {
+	if err := s.checkOpen(); err != nil {
+		return nil, nil, err
+	}
+
+	found = make(map[string]*PointStruct, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	err = s.view(func(tx *bbolt.Tx) error {
+		b, err := s.collectionBucket(tx, colName)
+		if err != nil {
+			return err
+		}
+		if b == nil {
+			return ErrCollectionNotFound
+		}
+		for _, id := range ids {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			key, err := s.keyBytes(id)
+			if err != nil {
+				return err
+			}
+			raw := b.Get(key)
+			if raw == nil {
+				missing = append(missing, id)
+				continue
+			}
+			point, err := s.decodePointValue(raw)
+			if err != nil {
+				return err
+			}
+			found[id] = point
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return found, missing, nil
 }
 
 // ListCollections returns all collection names (bucket names) in the storage.
