@@ -401,7 +401,23 @@ manifest optional.
 Additive. The backup bytes are unchanged; the manifest is a sidecar. `VerifyBackup`
 is read-only and does not modify the copy.
 
-## 4. P1 — vector radius search
+## 4. P1 — vector radius search — DONE
+
+Done: `Collection.RangeSearch` and `RangeSearchN` in `vec/range.go`. The radius
+is a distance in the metric space, the returned score is the same value
+`Search` reports, filters apply before scoring, results are ordered by score
+then id, a non-positive limit returns every match, negative radius/limit return
+`ErrInvalidOptions`, and a dimension mismatch uses the existing error.
+
+Deviation: the scan is exact for both Flat and HNSW collections rather than an
+approximate HNSW over-fetch. An open radius has no bounded candidate set, and
+exactness is the documented trade-off for `RangeSearch`; a future `RangeOptions`
+can add an approximate mode without changing this API.
+
+Tests: Flat/HNSW Cosine parity, Euclid and Dot distances and ordering, filters,
+limits, zero and empty radii, negative arguments, dimension mismatch, score
+agreement with `Search`, and deterministic tie ordering. `go test -race ./vec`
+is green.
 
 ### Current state
 

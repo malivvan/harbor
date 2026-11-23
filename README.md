@@ -626,6 +626,19 @@ types are `MatchTypeExact`, `MatchTypeRange`, `MatchTypePrefix`,
 Go types, so a filter built with `5` keeps matching after a round-trip that
 returns `int64`.
 
+### Radius search
+
+`RangeSearch` returns every point within a distance rather than a fixed top-K:
+
+```go
+hits, err := docs.RangeSearch(query, 0.25, nil)
+capped, err := docs.RangeSearchN(query, 0.25, nil, 100)
+```
+
+The radius is a distance in the collection's metric space (Euclidean distance,
+`1 - cosine similarity`, or `-dot`), the score is the same value `Search`
+reports, and the scan is exact for both Flat and HNSW collections.
+
 ### Buffering and lifecycle
 
 `Upsert` updates the in-memory index immediately and buffers points for bbolt.

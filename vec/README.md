@@ -148,6 +148,25 @@ HNSW search uses post-filtering: it over-fetches candidates, applies the
 payload filter, then returns up to `topK` matches. The Flat index is exhaustive
 and exact.
 
+### Range search
+
+`RangeSearch` returns every point within a distance instead of a fixed top-K:
+
+```go
+hits, err := col.RangeSearch(query, 0.25, filter)
+capped, err := col.RangeSearchN(query, 0.25, filter, 100)
+```
+
+- `radius` is a distance in the collection's metric space: Euclidean distance,
+  `1 - cosine similarity`, or `-dot` product. A negative radius is
+  `ErrInvalidOptions`.
+- `Score` is the same public score `Search` reports (cosine similarity, dot
+  product, or Euclidean distance), and results are ordered the same way.
+- The scan is exact for both index types: it evaluates the filter against every
+  indexed point instead of walking the HNSW graph. That bounds the result set
+  correctly for an open radius.
+- A non-positive limit (`RangeSearchN`) returns every match; ties order by id.
+
 ## Filters
 
 ```go
