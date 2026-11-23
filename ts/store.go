@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -188,6 +189,127 @@ func (s *Store) SeriesNames() []string {
 	names := make([]string, len(s.order))
 	copy(names, s.order)
 	return names
+}
+
+// SeriesInfo describes one persisted series.
+type SeriesInfo struct {
+	// Name is the logical series name.
+	Name string
+	// Labels are the series labels, when a metadata record exists.
+	Labels map[string]string
+	// Retention is the persisted retention policy, when a metadata record
+	// exists.
+	Retention Retention
+	// Count is the live point count recorded in metadata; zero when no
+	// metadata record exists.
+	Count int64
+}
+
+// ListSeries returns every persisted series in the store, sorted by name. It
+// scans the metadata bucket and, when the store has a configured Root, the
+// series buckets under it, so a series created by a plain Insert (which writes
+// no metadata record) is still found. Labels, retention and count are filled
+// in when a metadata record exists.
+//
+// At the database root (no configured Root) only series with a metadata record
+// are returned, because unrelated top-level buckets cannot be distinguished
+// from series buckets.
+func (s *Store) ListSeries(ctx context.Context) ([]SeriesInfo, error) {
+	if s == nil || s.b == nil {
+		return nil, ErrNilParam
+	}
+	if err := checkContext(ctx); err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]SeriesInfo)
+	err := s.b.View(func(tx *bolt.Tx) error {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		meta, err := s.metaBucket(tx, false)
+		if err != nil {
+			return err
+		}
+		if meta != nil {
+			if err := meta.ForEach(func(physical, raw []byte) error {
+				if err := checkContext(ctx); err != nil {
+					return err
+				}
+				if string(physical) == markerKey || string(physical) == versionKey {
+					return nil
+				}
+				name, err := s.logicalName(physical)
+				if err != nil {
+					return err
+				}
+				info, err := s.decodeMeta(raw)
+				if err != nil {
+					return err
+				}
+				seen[name] = SeriesInfo{
+					Name:      name,
+					Labels:    info.Labels,
+					Retention: info.Retention,
+					Count:     info.Count,
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+
+		// A series created by a plain Insert has a data bucket but no metadata
+		// record. Include those buckets when the root is configured, where every
+		// child bucket except the metadata bucket is a series.
+		if len(s.root) == 0 {
+			return nil
+		}
+		root := s.rootBucket(tx)
+		if root == nil {
+			return nil
+		}
+		return root.ForEach(func(physical, _ []byte) error {
+			if err := checkContext(ctx); err != nil {
+				return err
+			}
+			if string(physical) == metaBucketName || root.Bucket(physical) == nil {
+				return nil
+			}
+			name, err := s.logicalName(physical)
+			if err != nil {
+				return err
+			}
+			if _, ok := seen[name]; !ok {
+				seen[name] = SeriesInfo{Name: name}
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]SeriesInfo, 0, len(seen))
+	for _, info := range seen {
+		out = append(out, info)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// ListSeriesNames returns the names of every persisted series, sorted.
+func (s *Store) ListSeriesNames(ctx context.Context) ([]string, error) {
+	infos, err := s.ListSeries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(infos))
+	for i, info := range infos {
+		names[i] = info.Name
+	}
+	return names, nil
 }
 
 // DeleteSeries drops a series bucket and its metadata.
