@@ -1,582 +1,416 @@
-# Harbor-wide consensus support — implementation plan
+# Harbor-wide cryptographically sound audit trail — implementation plan
 
-This document is the complete, detailed plan for adding cluster-wide consensus
-to Harbor using [`github.com/hashicorp/raft`](https://github.com/hashicorp/raft).
-It was produced by studying two reference implementations placed in `tmp/` for
-this exercise — [`hraftd`](https://github.com/otoolep/hraftd) (the canonical
-Hashicorp raft key/value example) and [`rqlite`](https://github.com/rqlite/rqlite)
-(the closest production analog: a local single-file B-tree database replicated
-by raft) — and engineering the approach that best fits Harbor's actual
-architecture rather than copying either one.
+This document is the complete plan for adding a **tamper-evident, append-only
+audit trail** to Harbor. Audit events are signed with Ed25519 keys derived from
+the store's own key material using the newly re-added `internal/slip10`
+(SLIP-0010) package — in the same way the data-store sub-keys are derived today
+with `internal/slip21` (SLIP-0021). The feature is configurable per store,
+mirroring how encryption flags are managed.
 
 ---
 
 ## 1. Goal and non-goals
 
-**Goal.** Let several Harbor processes form a cluster in which the four stores
-(`db`, `fs`, `ts`, `vec`) stay in sync: a write accepted by the leader is
-durably replicated to a quorum and applied, in raft-log order, to the same
-logical state on every node. Reads may be served locally from any node's
-replica. Cluster membership can grow and shrink without downtime.
+**Goal.** Give Harbor an optional, cryptographically sound record of every
+mutating operation across the four stores (`db`, `fs`, `ts`, `vec`):
 
-**Non-goals** (deliberately out of scope, documented so they are not assumed):
+- **Authenticity** — each event is signed with an Ed25519 key derived from the
+  store password, so events cannot be forged or silently altered without the
+  key material.
+- **Order and completeness of the interior** — events form a hash chain, so an
+  event cannot be deleted, reordered, or inserted in the middle without
+  breaking the chain.
+- **Harbor wide** — one trail covering all four stores, each signed with its
+  own per-store key.
 
-- Multi-primary / active-active writes. Writes are leader-serialized.
-- Cross-datacenter WAN optimization, TLS transport, or a discovery service.
-  (TCP transport + manual `Join` is the v1 surface; these are listed as
-  follow-ups.)
-- Replacing Harbor's single-file storage. The raft log and the harbor database
-  remain two separate, independent on-disk stores, exactly as rqlite keeps its
-  SQLite database separate from its raft log.
-- In-place plaintext ↔ encrypted migration (unchanged from today).
+**Non-goals** (documented so they are not assumed):
+
+- **Detecting tail truncation** by itself. Deleting the *last* N events leaves a
+  self-consistent prefix. Detection requires anchoring the chain tip outside
+  the store (see §9); the recorder exposes `Head` for exactly that.
+- **Non-repudiation against the password holder.** The signing keys derive from
+  the store password, so anyone who holds the password can produce valid
+  events. The trail proves integrity *against an attacker without the key*, and
+  provides an ordered, verifiable history — the same trust boundary as the
+  encryption itself.
+- **Per-user identity.** Events record *what* happened, not *which human* did
+  it; there is no authentication layer.
+- **Crash-atomic coupling of data and audit writes.** Audit events are appended
+  immediately after a committed store write, in their own transaction (see §8).
 
 ---
 
-## 2. What we learn from the references (and what we reject)
+## 2. Background: SLIP-10 vs SLIP-21
 
-### 2.1 hraftd — the shape to reuse
+Harbor's key pipeline today (see `harbor.go` / `meta.go`):
 
-hraftd is a ~350-line example that shows the *correct* scaffolding:
+```text
+password ──Argon2id──▶ 32-byte seed ──SLIP-0021 master──▶ per-store symmetric keys
+                                                          (db, fs, ts, vec, canary)
+```
 
-- `raft.DefaultConfig()` + `LocalID`.
-- `raft.NewTCPTransport(bindAddr, addr, maxPool, timeout, logOutput)`.
-- `raft.NewFileSnapshotStore(dir, retainCount, logOutput)`.
-- Durable raft log/stable store via `raft-boltdb` (a separate bbolt file
-  `raft.db`).
-- `raft.NewRaft(config, fsm, logStore, stableStore, snapshotStore, transport)`.
-- Single-node bootstrap with `BootstrapCluster` when `enableSingle`.
-- `Join` that re-uses an ID/address by `RemoveServer` + `AddVoter`.
-- A JSON `command` envelope (`Op`, plus fields), an `fsm.Apply` switch, and an
-  `fsmSnapshot` whose `Persist` writes a serialized state to the sink.
+- **`internal/slip21` (SLIP-0021)** derives *symmetric* keys from the seed via
+  HMAC-SHA512 with a per-label derivation. This is what the four sub-stores use
+  to encrypt at rest.
+- **`internal/slip10` (SLIP-0010)** derives *Ed25519* key pairs from the same
+  kind of root seed, using hardened integer indices (`m/0'`, `m/1'`, …) and a
+  per-node 32-byte chain code. Its public surface used here:
 
-Harbor reuses *this shape* (transport, storage wiring, membership, command
-envelope, FSM, snapshot) but not hraftd's in-memory `map[string]string` state
-machine.
+  ```go
+  slip10.NewMasterNode(seed)          // Node
+  slip10.DeriveForPath("m/N'", seed)  // Node
+  node.KeyPair() (ed25519.PublicKey, ed25519.PrivateKey)
+  node.RawSeed() []byte               // 32-byte ed25519 seed
+  ```
 
-### 2.2 rqlite — the proof that local-file replication works
-
-rqlite replicates a local single-writer B-tree (SQLite) via raft:
-
-- Writes flow through `raft.Apply` on the leader; the FSM applies the command
-  to the local database on every node.
-- The snapshot is a byte-copy of the database file (SQLite backup API); restore
-  replaces the local database file and reopens.
-- Raft's own log/stable store lives in a separate `raft-boltdb` file.
-- `ErrNotLeader` is returned by write paths; reads can be served locally with an
-  explicit freshness model (leader vs. stale).
-
-This validates the central decision for Harbor: **replicate logical operations
-through the raft log, keep the local bbolt database as the materialized replica,
-and snapshot it as a byte stream.**
-
-### 2.3 What we reject from both
-
-- **hraftd's in-memory state machine** — Harbor state is durable and shared by
-  four heterogeneous stores; the state machine is the harbor database itself.
-- **rqlite's SQL/text-wire protocol and its cluster service/HTTP mux** — Harbor
-  is a *library*, not a server. v1 exposes a Go API, not a wire protocol.
-- **rqlite's statement-level determinism hazards** (SQL `time('now')`, random)
-  — handled explicitly for Harbor in §6.
+Both schemes consume the **same 32-byte Argon2id seed**. SLIP-10 and SLIP-21
+are domain-separated (different HMAC keys: `"ed25519 seed"` vs
+`"Symmetric key seed"`), so deriving signing keys and encryption keys from one
+seed does not couple them. This is the "similar way than the datastore sub
+keys" requirement: the audit Ed25519 keys hang off the exact same seed that
+already produces the per-store encryption keys.
 
 ---
 
 ## 3. Architectural decision
 
-### 3.1 The problem, stated precisely
+### 3.1 What is captured
 
-Harbor's entire state is **one bbolt file** (`*bolt.DB`) with four stores on
-top, each opened under its own top-level bucket (`db/`, `fs/`, `ts/`, `vec/`)
-plus the unencrypted `harbor.Metadata` record. There is no intermediate
-"statement" layer: `db.Save` performs bbolt puts (records, indexes,
-auto-increment counters); `fs.Write` merges inode and content writes; `ts`
-writes point records; `vec` buffers point writes and flushes.
+Harbor state is one bbolt file with four stores on top. As established for the
+consensus feature, there is no safe way to capture "a bbolt write" generically:
+`*bolt.Tx`/`*bolt.Bucket` are concrete types and cannot be wrapped without
+rewriting every closure in the stores. The audit trail therefore captures
+**at the store-API level**, exactly like consensus: each store emits a
+normalized event on every committed write.
 
-To replicate, we must choose a **replication unit** and a **capture point**.
+### 3.2 Where the trail lives
 
-### 3.2 Options considered
-
-| Option | Capture point | Verdict |
-|---|---|---|
-| A. Replicate raw bbolt pages | bbolt mmap / page cache | Rejected. No public diff API; leaks encryption layout; fragile across bbolt versions. |
-| B. Replicate the whole bbolt file per write | `Tx.WriteTo` | Rejected as the *log* unit: O(database size) per write; correct only as the *snapshot* unit. |
-| C. Capture bbolt write transactions as `(bucket,key,value)` ops via a `*bolt.DB` wrapper | `DB.Update/Batch` | Rejected for v1. bbolt exposes concrete `*bolt.Tx`/`*bolt.Bucket` types with value-returning methods; Go has no covariance, so a wrapper cannot satisfy the stores' call sites without rewriting every `func(tx *bolt.Tx)` closure in all four stores. Too invasive/risky. |
-| D. **Replicate logical operations (command log)** | Harbor store API | **Chosen.** Matches rqlite's proven model; the apply path re-uses the exact store code, so it cannot diverge from the direct path. |
-
-### 3.3 The chosen model — command-log replication at the store-API level
+The trail is a new top-level bucket `audit/` in the **same bbolt file**, next to
+`db/`, `fs/`, `ts/`, `vec/` and the unencrypted `harbor.Metadata` record:
 
 ```text
-                        ┌──────────────────────────────┐
-caller ── write ───────▶│ consensus.Node (leader only) │
-                        │  encode command              │
-                        │  raft.Apply(cmd)             │
-                        └──────────────┬───────────────┘
-                                       │ replicated log
-                        ┌──────────────▼───────────────┐
-                        │ raft.FSM.Apply  (all nodes)  │
-                        │  dispatch to db/fs/ts/vec    │
-                        │  call the SAME store method  │
-                        └──────────────┬───────────────┘
-                        ┌──────────────▼───────────────┐
-                        │ local *harbor.Store (bbolt)  │
-                        └──────────────────────────────┘
-
-caller ── read ────────▶ local *harbor.Store  (any node, no raft round-trip)
+audit/
+  head        record: current event count + chain tip hash + format version
+  events/     one record per event, keyed by 8-byte big-endian sequence number
 ```
 
-- **Leader** is the only writer. A write API on the leader encodes the
-  operation into a `Command`, calls `raft.Apply`, and returns the `ApplyFuture`
-  error.
-- **Every node** (leader included) applies the command through the FSM, which
-  dispatches to the *same* `db/fs/ts/vec` method the caller would have invoked
-  directly. There is exactly one implementation of each operation — the store's
-  own — so direct and replicated behavior cannot drift.
-- **Reads** bypass raft entirely and hit the local `*harbor.Store` (eventual on
-  followers; linearizable on the leader). The consistency contract is spelled
-  out in §7.
+Storing it in the same file keeps the single-file model intact and makes the
+trail travel with snapshots/backups automatically.
 
-This satisfies "complete and harbor wide": because the apply path is the store
-path, *every* mutation the stores can perform is replicable; no per-store state
-machine is duplicated.
-
----
-
-## 4. Package and module layout
-
-```
-harbor/
-  consensus/            # NEW — raft-backed cluster over a *harbor.Store
-    config.go           #   Config, defaults, validation
-    node.go             #   Node: lifecycle, leader/state, Apply, membership
-    errors.go           #   sentinel errors
-    command.go          #   Command envelope, Op constants, marshal/unmarshal
-    fsm.go              #   raft.FSM implementation (Apply/Snapshot/Restore)
-    snapshot.go         #   snapshot format + Persist/Release
-    db.go               #   db store command dispatch + write wrappers
-    ts.go               #   ts store command dispatch + write wrappers
-    vec.go              #   vec store command dispatch + write wrappers
-    fs.go               #   fs store command dispatch + write wrappers
-    *_test.go
-  harbor.go             # unchanged (consensus imports harbor, not vice versa)
-  README.md             # new "Clustering" section
-```
-
-Dependencies added to `go.mod`:
-
-```text
-github.com/hashicorp/raft           v1.8.0
-github.com/hashicorp/raft-boltdb/v2 v2.3.0   # durable raft log/stable store
-github.com/hashicorp/go-hclog       (transitive, for raft's logger)
-```
-
-`raft-boltdb/v2` depends on `go.etcd.io/bbolt` (already a direct dependency),
-so it does not pull a second storage engine. `consensus` imports `harbor` (and
-the four store packages) one-way; the root package does **not** import
-`consensus`, so there is no cycle and no coupling for non-clustered users.
-
----
-
-## 5. Public API (draft)
+### 3.3 Data model
 
 ```go
-package consensus
-
-// Config configures one cluster node.
-type Config struct {
-    NodeID      raft.ServerID      // required, stable across restarts
-    BindAddr    string             // "host:port" raft transport binds
-    Dir         string             // raft log/stable/snapshot directory
-    Bootstrap   bool               // true on the first node to form the cluster
-    StorePath   string             // harbor database file path
-    StoreMode   os.FileMode
-    StoreOpts   *harbor.Options    // password, KDF, encryption, codec
-    ApplyTimeout time.Duration     // raft.Apply timeout (default 10s)
+// Entry is what a store reports; it is the raw material, unsigned.
+type Entry struct {
+    Store  string    // "db" | "fs" | "ts" | "vec"
+    Op     string    // e.g. "save", "write", "insert", "upsert"
+    Entity string    // bucket path / file path / series / collection
+    Digest []byte    // SHA-256 of the written payload; nil for deletes
+    At     time.Time // when the write committed
 }
 
-func Open(ctx context.Context, cfg Config) (*Node, error)
-func (n *Node) Close() error
-
-// Replicated writes (leader only; each returns ErrNotLeader off-leader).
-func (n *Node) DB() *DBFacade
-func (n *Node) TS() *TSFacade
-func (n *Node) Vec() *VecFacade
-func (n *Node) FS() *FSFacade
-
-// Local reads (any node).
-func (n *Node) Store() *harbor.Store
-
-// Cluster management.
-func (n *Node) Join(id raft.ServerID, addr raft.ServerAddress) error
-func (n *Node) Leave(id raft.ServerID) error
-func (n *Node) Leader() (raft.ServerAddress, raft.ServerID)
-func (n *Node) State() raft.RaftState
-func (n *Node) Stats() map[string]string
-func (n *Node) Snapshot() error              // force a raft snapshot now
-func (n *Node) Barrier(timeout time.Duration) error
-```
-
-The four `*Facade` types expose **write** methods mirroring the stores' write
-APIs; `Store()` returns the live `*harbor.Store` for **reads** (and is
-documented as read-only — direct writes to it do not replicate).
-
----
-
-## 6. Command model
-
-### 6.1 Envelope
-
-```go
-type Command struct {
-    Op  string          // one of the Op constants below
-    Arg json.RawMessage // operation-specific, deterministic, JSON
+// Event is the signed, hash-linked unit persisted to disk.
+type Event struct {
+    Seq      uint64   // monotonic, 0-based
+    Store    string
+    Op       string
+    Entity   string
+    Digest   []byte   // SHA-256 payload digest
+    At       int64    // unix nanos (canonical, not time.Time)
+    PrevHash []byte   // SHA-256 of the previous encoded Event (32 bytes)
 }
 ```
 
-`Command` marshals to a single length-prefixed byte slice for the raft log.
-JSON is chosen for the *envelope* because the four stores' default codec is
-JSON; the command layer is independent of any store's at-rest codec (a store
-may still store the record with a custom codec — the command carries the
-logical record, the store re-encodes it). This mirrors how hraftd uses JSON
-for its command envelope.
+The stored record is `encode(Event) ‖ signature` where `encode` is a canonical,
+deterministic encoding (JSON with a fixed field order), `signature =
+ed25519.Sign(key, encode(Event))`, and `PrevHash = SHA-256(encode(prevEvent))`.
+Signing the *encoded event including `PrevHash` and `Seq`* binds an event to its
+position and predecessor.
 
-### 6.2 Determinism contract
+### 3.4 Why this is sound
 
-Raft applies commands in identical order on every node, so the state converges
-iff `Apply` is a **pure function of (current state, command)**. Audit results:
-
-- **db** — deterministic under ordered replay. `NextSequence`-based
-  auto-increment counters advance identically because every prior command was
-  applied identically.
-- **ts** — deterministic. `Insert`/`InsertMany` use the caller's explicit
-  `Point.Timestamp`; the pluggable `now` is only used by retention maintenance
-  (`EnforceRetention`), which is not a replicated write (see §6.7).
-- **vec** — replicated through the **durable** store path. `Store.UpsertPoints`
-  / `Store.DeletePoints` are deterministic (they encode the caller's points
-  verbatim and write them to bbolt; no wall clock is consulted), so the facade
-  uses those rather than `Collection.Upsert`, which stamps a `time.Now()`-based
-  `Version` and therefore cannot be replayed deterministically. Trade-off: the
-  in-memory search index (Flat/HNSW) is not updated by replicated writes — a
-  node's search index reflects the state at collection-load time and is
-  refreshed by reloading the collection. A deterministic-version
-  `Collection.Upsert` (e.g. carrying the version in the command, or a `SetNow`
-  clock) is the documented follow-up for index-aware replication.
-- **fs** — **the one non-deterministic store**: `inode.go` calls `time.Now()`
-  for atime/mtime on create/write/chmod/chtimes. To keep apply pure, fs
-  commands carry the leader's chosen times explicitly (the leader records them
-  during the operation and encodes them in the command; followers use the
-  carried values). Alternatively fs gains a `SetNow` clock hook (like ts
-  already has); the plan recommends **carrying explicit times in the command**
-  because it also removes the need to change fs internals.
-
-Rule for future commands: **any value that would differ across nodes (wall
-time, random nonces, process-local IDs) must be carried in the command**, not
-computed during apply.
-
-### 6.3 db command set
-
-| Op | Args | Store call applied |
-|---|---|---|
-| `db.save` | `{Bucket, From, Data}` | `store.DB().From(...).Save(ctx, data)` |
-| `db.update` | `{Bucket, From, Data}` | `Update` |
-| `db.update_field` | `{Bucket, From, Data, Field, Value}` | `UpdateField` |
-| `db.delete_struct` | `{Bucket, From, Data}` | `DeleteStruct` |
-| `db.drop` | `{Bucket, From, Data}` | `Drop` |
-| `db.set` | `{Bucket, From, KV, Key, Value}` | `Set` |
-| `db.set_bytes` | `{Bucket, From, KV, Key, Value}` | `SetBytes` |
-| `db.delete` | `{Bucket, From, KV, Key}` | `Delete` |
-| `db.init` | `{Bucket, From, Data}` | `Init` |
-| `db.reindex` | `{Bucket, From, Data}` | `ReIndex` |
-
-`Data`/`Value` are JSON-marshaled in the leader wrapper and unmarshaled into the
-caller's struct type in `Apply` (the facade remembers the destination type via
-generics or a decode hook). Because the default codec is JSON, this round-trips
-losslessly for the default configuration.
-
-### 6.4 ts command set
-
-| Op | Args | Store call applied |
-|---|---|---|
-| `ts.insert` | `{Series, Point}` | `store.TS().Series(name).Insert(ctx, p)` |
-| `ts.insert_many` | `{Series, Points}` | `InsertMany` |
-| `ts.delete_range` | `{Series, Start, End}` | `DeleteRange` |
-| `ts.drop_series` | `{Series}` | `Drop` |
-| `ts.set_labels` | `{Series, Labels}` | `SetLabels` |
-| `ts.set_retention` | `{Series, Retention}` | `SetRetention` |
-| `ts.delete_series` | `{Name}` | `Store.DeleteSeries` |
-
-### 6.5 vec command set
-
-| Op | Args | Store call applied |
-|---|---|---|
-| `vec.create_collection` | `{Name, VectorLen, Metric, UseHNSW, Params}` | `NewCollection(WithParams)` |
-| `vec.upsert` | `{Collection, Points}` | `Collection.Upsert` |
-| `vec.delete` | `{Collection, IDs, Filter}` | `Collection.Delete` |
-| `vec.drop_collection` | `{Name}` | `DropCollection` |
-
-### 6.6 fs command set
-
-| Op | Args | Store call applied |
-|---|---|---|
-| `fs.create` | `{FS, Name, Perm, Atime, Mtime}` | `OpenFile(O_CREATE)` + carried times |
-| `fs.write` | `{FS, Name, Offset, Data, Mtime}` | `OpenFile`+`Write` + carried mtime |
-| `fs.truncate` | `{FS, Name, Size, Mtime}` | `Truncate` |
-| `fs.remove` | `{FS, Name}` | `Remove` |
-| `fs.rename` | `{FS, Old, New}` | `Rename` |
-| `fs.mkdir` | `{FS, Name, Perm, Times}` | `Mkdir` |
-| `fs.chmod` | `{FS, Name, Mode}` | `Chmod` |
-| `fs.chtimes` | `{FS, Name, Atime, Mtime}` | `Chtimes` |
-| `fs.chown` | `{FS, Name, UID, GID}` | `Chown` |
-| `fs.symlink` | `{FS, Old, New}` | `Symlink` |
-| `fs.write_at` | `{FS, Name, Off, Data, Mtime}` | `WriteAt` (chunked path) |
-| `fs.delete_fs` | `{Name}` | `Store.DeleteFS` |
-
-Content (`Data`) is carried inline; for large blobs the facade can stream a
-single command as one raft entry (v1) with a documented size ceiling, and a
-future "chunked command" extension splits large writes (see §12).
-
-### 6.7 Explicitly NOT replicated (maintenance, run on the leader only)
-
-- `db.ReEncrypt`/`RotateAll`/`VerifyAll`, `fs.RotateAll`, `ts.RotateAll`,
-  `vec.RotateAll`: key rotation is a per-node, key-material operation and stays
-  outside the log (documented; requires the operator to run it on every node or
-  rotate keys out-of-band).
-- `ts.EnforceRetention`, `Store.SetNow`: local maintenance/clock plumbing.
-- `vec.Flush`/`SetOwnsDB`/`Close`: in-memory buffer lifecycle, managed by the
-  node.
+- **Forge resistance:** `signature` can only be produced by the Ed25519 key
+  derived from the password; there is no way to inject or alter an event.
+- **Interior integrity:** `PrevHash` chains every event to its predecessor;
+  deleting, reordering, or splicing events breaks a hash and thus verification.
+- **Start anchoring:** the first event links to a fixed genesis hash
+  (`SHA-256("harbor/audit/v1/genesis")`), so the beginning of the chain is
+  anchored.
+- **End anchoring (deployment):** the recorder exposes `Head()` returning the
+  tip; operators periodically record the tip outside the store to detect tail
+  truncation (§9).
 
 ---
 
-## 7. Consistency model
+## 4. Key derivation
 
-- **Writes** are linearizable at the leader: `raft.Apply` returns only after the
-  entry is committed to a quorum and applied.
-- **Leader reads** are linearizable: the leader serves its own committed state.
-- **Follower reads** are eventually consistent (last applied index). `Node`
-  exposes `Barrier` and the FSM index so callers can implement read-your-writes
-  by waiting for an applied index. Strong/linearizable reads from a follower
-  require a `raft.Barrier`-style round-trip to the leader; this is documented
-  and left as an explicit opt-in, matching rqlite's `freshness` semantics.
-- **Not leader** writes return `ErrNotLeader` (with the leader's address via
-  `Leader()` for client-side redirect). Harbor does **not** auto-forward; the
-  caller redirects, which keeps the library honest and transport-free.
+`harbor.deriveKeys` is extended so that, from the same `seed`, it also derives
+one Ed25519 key per store via SLIP-10. The mapping is positional (SLIP-10 only
+supports hardened integer indices; there is no string-label API):
 
----
-
-## 8. Encryption interaction
-
-Encryption is **per-node at-rest** and orthogonal to replication:
-
-- The command log carries **logical plaintext** (records, points, vectors,
-  file content). Each node's `*harbor.Store` seals it at rest with its **own**
-  derived keys.
-- The Argon2id **salt is generated per store creation** and stored in
-  `harbor.Metadata`; two nodes therefore have different salts and different
-  ciphertexts for the same logical record. That is fine: each node decrypts its
-  own bytes, and raft guarantees the logical state converges.
-- **Deployment requirement:** every node in a cluster must be opened with the
-  **same password** (and the same `Encrypt` flags for a *new* store), so each
-  node can open its own replica. This is the only cross-node secret; the raft
-  transport itself is unauthenticated in v1 (documented in §13).
-- A node that joins late receives a snapshot of the harbor database's
-  **at-rest bytes** (see below).
-
-**Snapshot format decision.** The FSM snapshot serializes the harbor database
-via `bbolt.Tx.WriteTo`, i.e. the *encrypted-at-rest bytes* (or plaintext bytes
-for a plaintext store). A raw byte snapshot **is** restorable across nodes
-because it is self-describing:
-
-1. The snapshot carries the leader's `harbor.Metadata` record — salt, KDF
-   parameters, flags and canary — so a follower that restores it adopts the
-   leader's salt. With the shared password it derives the leader's keys and
-   verifies the canary, then reads the leader's ciphertext correctly.
-2. After restore the node reopens its store, which rebuilds the in-memory
-   caches (fs inode cache, vec search indexes) from disk.
-
-**Chosen:** the snapshot is the **raw `Tx.WriteTo` byte stream + reopen**,
-exactly the rqlite "swap the database file and reopen" model. It needs no
-logical export/import, no per-store serialization, and is byte-accurate for
-both plaintext and encrypted stores. The one requirement is the shared
-password (§8 above). This is detailed in §9.4.
-
----
-
-## 9. FSM, snapshot and restore
-
-### 9.1 `Apply`
+| Store | SLIP-10 path | Purpose |
+|---|---|---|
+| db  | `m/0'` | signs db audit events |
+| fs  | `m/1'` | signs fs audit events |
+| ts  | `m/2'` | signs ts audit events |
+| vec | `m/3'` | signs vec audit events |
 
 ```go
-func (f *fsm) Apply(l *raft.Log) any {
-    var c Command
-    if err := json.Unmarshal(l.Data, &c); err != nil {
-        panic(err) // log corruption is unrecoverable, like hraftd
-    }
-    switch c.Op {
-    case "db.save": /* decode args, call f.node.Store().DB()...Save */
-    ...
-    }
-    return nil
+node, _ := slip10.DeriveForPath("m/0'", seed)
+pub, priv := node.KeyPair()   // ed25519.PublicKey / ed25519.PrivateKey
+```
+
+The resulting private keys are added to the existing `storeKeys` struct and
+wiped alongside the symmetric keys in `storeKeys.wipe`. The `storeKeys` fields:
+
+```go
+type storeKeys struct {
+    canary, db, fs, ts, vec []byte           // SLIP-0021 symmetric (existing)
+    auditDB, auditFS, auditTS, auditVec ed25519.PrivateKey // SLIP-0010 (new)
 }
 ```
 
-The FSM holds a reference to the node's `*harbor.Store`. Dispatching calls the
-store's own method, so index maintenance, unique enforcement, and counters are
-identical to the direct path. **The db store's change hooks are the one
-replication recursion risk** (§9.3).
-
-### 9.2 `Snapshot` / `Persist`
-
-`Snapshot()` acquires the node's apply lock, serializes the harbor database
-with `bbolt.Tx.WriteTo` (via `*harbor.Store.View`), and returns an
-`fsmSnapshot`. `Persist` writes the bytes to the `raft.SnapshotSink` and
-`Close`s it; on error it `Cancel`s — the exact hraftd contract. `Release` is a
-no-op (the snapshot holds no locks).
-
-### 9.3 Recursion guard
-
-The `db` store emits `ChangeHook`s on committed writes. If the FSM applies a
-`db.save` command by calling `store.DB().Save`, that would emit a hook, and if
-the node also uses the hook to *drive* replication, it would recurse. v1 avoids
-the whole problem: **replication is driven by the explicit facade API, never by
-change hooks.** The FSM applies via the store methods and ignores hooks (it
-registers none). Change hooks remain a caller convenience and are simply not
-used for consensus. (A future "transparent" mode may use them; that is a
-separate, opt-in layer.)
-
-### 9.4 Restore and reopen
-
-`Restore(rc)` reads the snapshot bytes, writes them to a sibling temp file, and
-reopens the store over them:
-
-1. Flush and close the current `*harbor.Store` (which closes the bbolt handle).
-2. Replace the store file with the restored bytes.
-3. Reopen `*harbor.Store` with the remembered `Config.StoreOpts`.
-
-Because `vec` buffers points and `fs` caches inodes in memory, restore must
-reopen (not patch) so those caches rebuild from disk. `reopen` also re-sets
-`vec.SetOwnsDB(false)`, exactly as the root package does today. This is the
-rqlite "swap the database file and reopen" model.
+No separate audit canary is needed: the existing canary already proves the seed
+(and therefore the derived audit keys) is correct — a wrong password yields a
+wrong seed and thus wrong audit keys, which verification then rejects.
 
 ---
 
-## 10. Raft lifecycle
+## 5. The `audit` package
 
-Mirrors hraftd §"Open" with Harbor specifics:
+New public package `github.com/malivvan/harbor/audit`:
 
-1. `raft.DefaultConfig()`; set `LocalID`, `ApplyTimeout`, and a logger via
-   `hclog` wired to a configurable `io.Writer`.
-2. `raft.NewTCPTransport(cfg.BindAddr, addr, 3, 10s, logWriter)`.
-3. `raft.NewFileSnapshotStore(filepath.Join(cfg.Dir, "snapshots"), 2, logWriter)`.
-4. `raftboltdb.New(Options{Path: filepath.Join(cfg.Dir, "raft.db")})` for both
-   `LogStore` and `StableStore`.
-5. `raft.NewRaft(...)`.
-6. If `cfg.Bootstrap` (and no existing configuration), `BootstrapCluster` with
-   `{ID: LocalID, Address: transport.LocalAddr()}`. Use `GetConfiguration` and
-   bootstrap only when empty (idempotent restart-safe bootstrap).
-7. Membership: `Join` (`AddVoter`, with hraftd's re-use-ID/address handling),
-   `Leave` (`RemoveServer`), `Leader`/`LeaderWithID`, `State`, `Stats`.
+```go
+package audit
 
-`Close` shuts down raft (`raft.Shutdown()`), the transport, and the local
-`*harbor.Store` (flushing `vec` first, per the root package's contract).
+type Entry struct { Store, Op, Entity string; Digest []byte; At time.Time }
 
----
+type Sink interface { Record(Entry) error }
+type SinkFunc func(Entry) error
 
-## 11. Root-package integration
+// Recorder appends signed, hash-linked events to a bbolt database.
+type Recorder struct { /* b *bolt.DB, keys map[string]ed25519.PrivateKey, now func() time.Time */ }
+func NewRecorder(b *bolt.DB, keys map[string]ed25519.PrivateKey) (*Recorder, error)
+func (r *Recorder) Record(entry Entry) error
+func (r *Recorder) Head() (count uint64, tip []byte, err error)
 
-The root `harbor` package is unchanged. `consensus.Open` constructs the
-`*harbor.Store` it needs by calling the **exported** `harbor.Open` with the
-caller's `harbor.Options`, so:
+// Verifier replays the chain and checks signatures and hashes.
+func Verify(b *bolt.DB, keys map[string]ed25519.PublicKey) (Result, error)
+type Result struct { Count uint64; Tip []byte }
 
-- password/KDF/canary logic stays in `harbor`,
-- `consensus` never touches `harbor.Metadata` or key derivation,
-- the clustered and non-clustered paths share one `harbor.Open`.
+// DeriveKey derives an Ed25519 key pair from the Argon2id seed at a path.
+func DeriveKey(seed []byte, path string) (ed25519.PublicKey, ed25519.PrivateKey, error)
+```
 
-No import cycle results because only `consensus` imports `harbor`.
+`Record` opens its own short bbolt write transaction: it reads the head,
+computes the next `Seq` and `PrevHash`, encodes, signs, stores the event, and
+updates the head. It is safe for concurrent use because bbolt serializes
+writers, and `Record` is only invoked from store write paths.
 
----
-
-## 12. Implementation phases and commit points
-
-Each phase is one commit; the tree builds and tests green after each.
-
-1. **`build: add hashicorp/raft and raft-boltdb`** — update `go.mod`/`go.sum`,
-   `go mod tidy`.
-2. **`consensus: add Config, errors and the command envelope`** —
-   `consensus/config.go`, `errors.go`, `command.go` (+ `command_test.go`).
-3. **`consensus: add the raft FSM and snapshot format`** —
-   `fsm.go`, `snapshot.go` (+ round-trip tests against an in-memory store).
-4. **`consensus: add node lifecycle and membership`** —
-   `node.go`: `Open`/`Close`/`Leader`/`State`/`Stats`/`Join`/`Leave`/`Snapshot`
-   (+ a two-node in-memory-transport test: elect leader, replicate a barrier).
-5. **`consensus: replicate db writes`** — `db.go`: facade + `db.*` commands +
-   apply dispatch (+ a two-node db replication test: save on leader, read on
-   follower after barrier).
-6. **`consensus: replicate ts writes`** — `ts.go` (+ replication test).
-7. **`consensus: replicate vec writes`** — `vec.go` (+ replication test).
-8. **`consensus: replicate fs writes`** — `fs.go` with carried-times commands
-   (+ replication test).
-9. **`consensus: document clustering`** — README section + `consensus` package
-   doc; verify snippets compile.
-10. **`consensus: add an example cluster`** — `examples/consensus/main.go`
-    (three-node demo with join/status/put/get), wired into `Makefile`.
-
-Commit messages are prefixed `consensus:` (or `build:`/`docs:`) following the
-repository's existing convention (`db:`, `fix(db):`, `refactor!:`).
+`Verify` replays every event in sequence and returns the count and tip hash; it
+fails on the first forged signature, broken link, or non-monotonic sequence.
 
 ---
 
-## 13. Security and threat model notes
+## 6. Configuration (mirrors the crypto flags)
 
-- The raft transport is **unauthenticated TCP** in v1: it must be deployed on a
-  private network/VPN. TLS via `raft.NetworkTransport` + a `tls.Config` is a
-  documented follow-up (the transport already supports it).
-- The **password is shared across the cluster** so every node can open its
-  replica. This is the single cross-node secret and is unchanged from Harbor's
-  existing single-node model (one password per store).
-- The **command log carries plaintext** operations. Anyone who can read the
-  raft log directory can read the operations; this is the same trust boundary
-  as the raft log in hraftd/rqlite and is documented, not hidden.
-- `Apply` panics on a malformed command (unrecoverable log corruption), the
-  same stance hraftd takes. Commands are produced only by our own encoder, so
-  a panic indicates tampering/corruption, not a recoverable condition.
-- No new claim is added to README's threat model beyond: *consensus replicates
-  operations to a quorum; encryption at rest remains per-node and unchanged.*
+```go
+// in the harbor root package (meta.go)
+const (
+    AuditNone uint16 = 0
+    AuditDB   uint16 = 1 << iota // 1
+    AuditFS                      // 2
+    AuditTS                      // 4
+    AuditVec                     // 8
+    AuditAll = AuditDB | AuditFS | AuditTS | AuditVec
+)
 
----
+// harbor.Options gains one field:
+type Options struct {
+    // ... existing fields ...
+    Audit uint16 // which stores record audit events; 0 disables
+}
+```
 
-## 14. Testing strategy
+Differences from encryption flags, and why:
 
-- **Unit:** command encode/decode round-trips; snapshot export/import
-  round-trips (including encrypted and plaintext stores); FSM dispatch per op;
-  determinism (apply the same command twice from identical state → identical
-  logical state).
-- **Integration:** a helper that starts N nodes on `raft.NewInmemTransport`
-  (loopback) so tests run without ports, mirroring raft's own test style:
-  - leader election with 1 and 3 nodes,
-  - write on leader → barrier → read on follower (each of db/ts/vec/fs),
-  - leader step-down / `Leave` → new leader → write succeeds,
-  - snapshot + `Restore` → a fresh node catches up from the snapshot alone,
-  - `ErrNotLeader` returned from a follower's write facade.
-- **Determinism:** a test that runs the same command sequence on two
-  independently-bootstrapped nodes and asserts byte-identical *logical* exports
-  (accounting for per-node ciphertext).
-- Run the repository's standard gate: `gofmt`, `go vet`, `go build`, `go test`,
-  `go test -race`, plus `CGO_ENABLED=0 go test` (raft is pure Go).
+- **Not persisted.** Encryption flags *must* be persisted because reopening has
+  to know the mode before it can decrypt. Audit flags are a per-open runtime
+  choice: enabling them records events, disabling them simply stops recording.
+  There is no "open in the wrong mode" hazard. Keeping them out of `Metadata`
+  avoids a format change; the caller re-passes `Audit` on each `Open`.
+- **No canary binding** for the same reason. The audit keys are bound to the
+  seed indirectly through the existing encryption canary.
+- **Default `AuditNone`.** A store is audited only when the caller opts in.
+
+The root `harbor.Open` builds a `map[string]ed25519.PrivateKey` for the enabled
+stores, constructs one `audit.Recorder` over the shared `*bolt.DB`, and passes
+the recorder (as an `audit.Sink`) to the stores whose flag is set.
 
 ---
 
-## 15. Risks, trade-offs and open questions
+## 7. Store integration
 
-- **fs content size.** A large file write is one raft entry. v1 accepts this
-  with a documented ceiling; a chunked-command extension (split a write into
-  N sequential commands) is the follow-up. Chunking must be visible in the
-  command stream so replay is order-stable.
-- **fs determinism** requires carried times; if that proves noisy, fall back to
-  adding `SetNow` to `fs` (mirroring `ts.SetNow`).
-- **Snapshot cost.** Logical export/import is O(database size) but runs only on
-  snapshot/restore (rare), matching bbolt's own `Tx.WriteTo` cost.
-- **Read-your-writes on followers** needs a `Barrier`; the facade API exposes
-  it but does not implicitly add a raft round-trip to every read.
-- **Auto-forwarding** of `ErrNotLeader` is deliberately omitted (library
-  philosophy); a caller-provided redirect is trivial with `Leader()`.
-- **Transparent mode** (auto-replicate existing `harbor.Store` calls via change
-  hooks, no facade) is a possible later layer; it is not v1 because it requires
-  suppression hooks in all four stores and re-entrancy guards.
+Each store's `Config` gains an optional `Audit audit.Sink`. After a write
+transaction commits, the store calls `Audit.Record(Entry{...})` when `Audit`
+is non-nil. The mapping:
+
+### 7.1 db
+
+| Op | Entity | Digest |
+|---|---|---|
+| `save`, `update`, `update_field` | `path/bucket:ID` | SHA-256 of the codec-encoded record |
+| `delete_struct`, `drop` | `path/bucket:ID` | nil |
+| `set`, `set_bytes` | `path/bucket:key` | SHA-256 of the value |
+| `delete` (kv) | `path/bucket:key` | nil |
+
+db already has a post-commit `ChangeHook`; the audit sink is a **parallel**
+path that also covers the key/value and drop operations the change hook does not
+emit. The existing `ChangeHook` semantics are untouched.
+
+### 7.2 ts
+
+| Op | Entity | Digest |
+|---|---|---|
+| `insert`, `insert_many` | `series` | SHA-256 of the encoded points |
+| `delete_range` | `series` | nil |
+| `drop`, `delete_series` | `series` | nil |
+| `set_labels`, `set_retention` | `series` | SHA-256 of the new labels/retention |
+
+### 7.3 vec
+
+| Op | Entity | Digest |
+|---|---|---|
+| `create_collection` | `collection` | SHA-256 of the collection meta |
+| `upsert` | `collection` | SHA-256 of the encoded points |
+| `delete` | `collection` | nil |
+| `drop_collection` | `collection` | nil |
+
+### 7.4 fs
+
+| Op | Entity | Digest |
+|---|---|---|
+| `create`, `write`, `truncate` | path | SHA-256 of the written bytes (streaming: of the resulting file content where cheap) |
+| `mkdir` | path | nil |
+| `remove`, `remove_all`, `rename` | path | nil |
+| `chmod`, `chtimes`, `chown` | path | the new mode/times/uid·gid |
+| `symlink` | path | SHA-256 of the target |
+
+fs is the broadest surface (an `absfs.Filer`). v1 instruments the path-level
+operations (`Create`/`Write`/`Truncate` via `OpenFile`+`Write`, `Mkdir`,
+`Remove`, `RemoveAll`, `Rename`, `Chmod`, `Chtimes`, `Chown`, `Symlink`,
+`DeleteFS`); large streaming writes are digested once at `Close` (documented).
+
+### 7.5 Not recorded
+
+- Reads (`Get`, `Find`, `Range`, `Search`, `Stat`, `ReadFile`, …).
+- Rotation/maintenance (`ReEncrypt`, `RotateAll`, `VerifyAll`,
+  `EnforceRetention`, `Flush`) — these are key/material lifecycle, not
+  application writes, and are listed in the docs as out of scope.
+
+---
+
+## 8. Concurrency and atomicity notes
+
+- `Record` runs after the store's write transaction has committed, in its own
+  transaction. bbolt's single-writer serialization makes the sequence numbers
+  correct under concurrent store writes.
+- A crash between the data write and the audit append loses the *trailing*
+  audit event (the data is present, the event is not). This is the same model
+  as the existing `db.ChangeHook` and is documented; full crash-atomic coupling
+  would require in-transaction recording and is a follow-up.
+- The recorder must never be called inside a store transaction; the stores call
+  it strictly post-commit.
+
+---
+
+## 9. Threat model
+
+Guarantees (for a verifier who derives keys from the correct password):
+
+- Every event is signed → no forging, no altering an existing event.
+- Hash chain → no deleting/reordering/splicing interior events.
+- Genesis anchor → the chain start is fixed.
+
+Not guaranteed (documented, not hidden):
+
+- **Tail truncation** — delete the last N events and the prefix still verifies.
+  Mitigation: record `Head().tip` in an external tamper-resistant place (log,
+  DB, ledger) on a schedule; the `audit` package provides the tip for this.
+- **Password-holder forgery** — the keys derive from the password, so the
+  password holder can sign arbitrary events. This matches the encryption
+  trust model.
+- **Payload-content tampering** beyond what the digest allows: an attacker
+  without the key cannot change a signed digest, so re-hashing current data
+  against `Digest` detects content changes. Full data re-verification is a
+  per-store, opt-in follow-up (`VerifyData`); v1 verifies the *chain*.
+- The raft/consensus layer is unaffected: audit is a local, single-store
+  concern. In a cluster each node records its own trail (documented).
+
+---
+
+## 10. Implementation phases and commit points
+
+Each phase compiles and its tests pass; one commit per phase.
+
+1. **`internal/slip10: add SLIP-0010 ed25519 derivation`** — already staged by
+   the user; commit as-is (`internal/slip10/slip10.go`, `_test.go`).
+2. **`audit: add the entry, event, recorder and verifier`** — `audit/audit.go`
+   (+ `audit_test.go`): event encode/sign, chain append, `Verify`, genesis
+   anchor, `Head`, `DeriveKey`.
+3. **`harbor: derive per-store audit keys and expose audit flags`** —
+   `meta.go` flag constants, `harbor.go` `storeKeys` + `deriveKeys` extension,
+   `Options.Audit`, and recorder wiring in `Open` (behind the flags).
+4. **`db: record audit events on writes`** — `db.Config.Audit` + emit on
+   `Save`/`Update`/`UpdateField`/`DeleteStruct`/`Drop`/`Set`/`SetBytes`/`Delete`.
+5. **`ts: record audit events on writes`** — `ts.Config.Audit` + emit on the
+   series write operations.
+6. **`vec: record audit events on writes`** — `vec.Config.Audit` + emit on
+   collection operations.
+7. **`fs: record audit events on writes`** — `fs.Config.Audit` + emit on the
+   path-level operations.
+8. **`harbor: expose verification`** — a `Store.VerifyAudit()` (or equivalent)
+   plus root-level tests and the `Audit()` accessor.
+9. **`docs: audit trail guide`** — README section + `audit/README.md`, threat
+   model, flag table; verify snippets compile.
+
+Commit messages are prefixed `audit:` (or `harbor:`/`db:`/`ts:`/`vec:`/`fs:`/
+`docs:`) following the repo convention.
+
+---
+
+## 11. Testing strategy
+
+- **Unit (audit):** encode/sign round-trip; `Record` + `Verify` on a fresh
+  store; forged signature is rejected; a deleted middle event is rejected; a
+  truncated tail is (by design) *not* rejected but `Head` reports the reduced
+  tip; unknown store key is rejected; concurrent `Record` keeps a monotonic
+  sequence.
+- **Unit (keys):** the same `seed` + path yields the same Ed25519 pair
+  (deterministic); different store paths yield different keys; a changed seed
+  yields a different key.
+- **Integration (per store):** open a store with `Audit` enabled, perform
+  writes, then `Verify` over the derived public keys and assert the event count
+  and contents; open with `Audit` disabled and assert no events.
+- **Wrong password:** verification with a different password's keys fails.
+- Run the repository gate: `gofmt`, `go vet`, `go build`, `go test`, and
+  `go test -race` (audit touches shared bbolt state).
+
+---
+
+## 12. Risks and open questions
+
+- **SLIP-10 node wiping:** `slip10` does not expose a `Destroy`/wipe like
+  `slip21`. Intermediate SLIP-10 nodes (and the derived private keys) live in
+  memory until GC. The `audit` keys are wiped by `storeKeys.wipe`; the
+  intermediate `slip10.Node` values are not. Documented; adding a wipe to
+  `slip10` is a small follow-up.
+- **fs digest cost:** hashing large file content at `Close` adds work on the
+  write path; acceptable for v1 and documented (the digest is what makes
+  content tampering detectable).
+- **Audit flags are runtime-only:** if this surprises users we can later persist
+  them in `Metadata` with a version bump; deliberately deferred.
+- **Per-store key map:** `map[string]ed25519.PrivateKey` keyed by the `Store`
+  string; a typo in a store's `Entry.Store` fails closed (unknown store).
+- **Tail-truncation anchoring** is a deployment practice, not built-in; the
+  `Head()` API is the seam.
