@@ -91,7 +91,9 @@ func TestSinkHelpers(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "User", ds.bucketName())
 	require.False(t, ds.needsValue())
-	require.ErrorIs(t, ds.flush(ctx), ErrNotFound)
+	// A bulk delete that matched nothing is a no-op, not an error: a cleanup
+	// sweep whose predicate finds nothing is a normal outcome.
+	require.NoError(t, ds.flush(ctx))
 	require.NoError(t, ds.add(ctx, item{k: []byte("k")}))
 	require.Len(t, ds.pending, 1)
 

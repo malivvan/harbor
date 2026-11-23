@@ -693,8 +693,15 @@ func (d *deleteSink) flush(ctx context.Context) error {
 		return err
 	}
 
+	// A bulk delete that matched nothing is a no-op.
+	//
+	// This used to return ErrNotFound, which made `Select(matcher).Delete` fail
+	// whenever the predicate happened to match zero records — a normal outcome for
+	// a cleanup sweep, and inconsistent with DeleteStruct, where deleting an absent
+	// key is not an error. Callers that need "how many rows went away" should use
+	// Count before deleting.
 	if len(d.pending) == 0 {
-		return ErrNotFound
+		return nil
 	}
 
 	info, err := extract(&d.ref)
