@@ -23,7 +23,10 @@ Current review status: `gofmt`, `go vet`, `go build`, `go test ./...`,
 
 ## 0. Release blockers
 
-### 0.1 Tidy the module (CI `lint` job)
+### 0.1 Tidy the module (CI `lint` job) — DONE
+
+Done: `go mod tidy` removed the four unused modules; `go build`, `go vet` and
+the test suite still pass; `go mod tidy -diff` is empty.
 
 `go mod tidy -diff` fails. Tidy removes `github.com/malivvan/jolt`,
 `github.com/MoeForge/moego`, `github.com/MoeForge/moejs` and
