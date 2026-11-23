@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
+	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/internal/absfs"
 )
 
@@ -59,11 +61,42 @@ type FS struct {
 	// the same directory or inode do not lose updates. Read paths take RLock so
 	// a multi-transaction read cannot observe a concurrent mutation.
 	mu sync.RWMutex
+
+	// audit receives an entry for every committed write, or nil when the file
+	// system was opened without audit. It is set once at construction and never
+	// mutated.
+	audit audit.Sink
 }
 
 // encState returns the current encryption state (nil when disabled).
 func (fs *FS) encState() *encState {
 	return fs.enc.Load()
+}
+
+// auditEntry records one committed write in the store's audit trail. It is a
+// no-op when the file system has no audit sink. Digest is the SHA-256 of the
+// written payload, or nil for deletes and metadata-only changes. A sink error
+// is returned so the caller can surface it; the data write has already
+// committed at that point.
+func (fs *FS) auditEntry(op, entity string, digest []byte) error {
+	if fs == nil || fs.audit == nil {
+		return nil
+	}
+	return fs.audit.Record(audit.Entry{
+		Store:  audit.StoreFS,
+		Op:     op,
+		Entity: entity,
+		Digest: digest,
+	})
+}
+
+// digestOf returns the SHA-256 of data, or nil when data is empty.
+func digestOf(data []byte) []byte {
+	if len(data) == 0 {
+		return nil
+	}
+	sum := sha256.Sum256(data)
+	return sum[:]
 }
 
 // newFS creates a new FS in the convention of other `absfs`
@@ -978,7 +1011,7 @@ func (fs *FS) Rename(oldpath, newpath string) error {
 		}
 	}
 
-	return nil
+	return fs.auditEntry("rename", path.Join(dstDir, dstFilename), digestOf([]byte(path.Join(srcDir, srcFilename))))
 }
 
 // Copy is a convenience function that duplicates the `source` path to the
@@ -1575,7 +1608,7 @@ func (fs *FS) mkdir(name string, perm os.FileMode) error {
 		pathErr.Err = err
 		return pathErr
 	}
-	return nil
+	return fs.auditEntry("mkdir", path.Join(dir, filename), nil)
 }
 
 // MkdirAll creates a directory named path, along with any necessary parents,
@@ -1665,10 +1698,12 @@ func (fs *FS) Remove(name string) error {
 		if err != nil {
 			return err
 		}
-		return nil
+		return fs.auditEntry("remove", path.Join(dir, filename), nil)
 	}
-	_, err = fs.saveInode(child)
-	return err
+	if _, err = fs.saveInode(child); err != nil {
+		return err
+	}
+	return fs.auditEntry("remove", path.Join(dir, filename), nil)
 }
 
 // RemoveAll removes path and any children it contains. It removes everything
@@ -1839,7 +1874,7 @@ func (fs *FS) RemoveAll(name string) error {
 		return err
 	}
 
-	return nil
+	return fs.auditEntry("remove_all", path.Join(dir, filename), nil)
 }
 
 // Chtimes changes the access and modification times of the named file
@@ -1856,8 +1891,10 @@ func (fs *FS) Chtimes(name string, atime time.Time, mtime time.Time) error {
 	node.SetAtime(atime)
 	node.SetMtime(mtime)
 
-	_, err = fs.saveInode(node)
-	return err
+	if _, err = fs.saveInode(node); err != nil {
+		return err
+	}
+	return fs.auditEntry("chtimes", path.Join(dir, filename), nil)
 }
 
 // Chown changes the owner and group ids of the named file
@@ -1890,7 +1927,7 @@ func (fs *FS) chown(name string, uid, gid int, depth int) error {
 			pathErr.Err = err
 			return pathErr
 		}
-		return nil
+		return fs.auditEntry("chown", path.Join(dir, filename), digestOf([]byte(fmt.Sprintf("%d:%d", uid, gid))))
 	}
 	link, err := fs.readLink(node.Ino)
 	if err != nil {
@@ -1922,8 +1959,16 @@ func (fs *FS) Chmod(name string, mode os.FileMode) error {
 	// Preserve type bits (e.g. os.ModeDir) and only change permission bits.
 	node.Mode = (node.Mode & os.ModeType) | (mode &^ os.ModeType)
 
-	_, err = fs.saveInode(node)
-	return err
+	if _, err = fs.saveInode(node); err != nil {
+		return err
+	}
+	return fs.auditEntry("chmod", path.Join(dir, filename), modeDigest(mode))
+}
+
+// modeDigest encodes a mode as the digest payload of a metadata-only event, so
+// a chmod/chown/chtimes event records the new value without hashing a payload.
+func modeDigest(mode os.FileMode) []byte {
+	return digestOf([]byte(fmt.Sprintf("%#o", uint32(mode))))
 }
 
 // Lstat returns a FileInfo describing the named file. If the file is a symbolic
@@ -2053,5 +2098,5 @@ func (fs *FS) Symlink(source, destination string) error {
 		return pathErr
 	}
 
-	return nil
+	return fs.auditEntry("symlink", path.Join(dstDir, dstFilename), digestOf([]byte(source)))
 }

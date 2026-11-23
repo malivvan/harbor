@@ -215,6 +215,9 @@ func (f *File) Write(p []byte) (int, error) {
 			return 0, err
 		}
 		f.offset = end
+		if err := f.fs.auditEntry("write", f.name, digestOf(p)); err != nil {
+			return len(p), err
+		}
 		return len(p), nil
 	}
 
@@ -245,10 +248,16 @@ func (f *File) Write(p []byte) (int, error) {
 		if _, err := f.fs.saveInode(f.node); err != nil {
 			return 0, err
 		}
+		if err := f.fs.auditEntry("write", f.name, digestOf(p)); err != nil {
+			return n, err
+		}
 		return n, nil
 	}
 
 	if _, err := f.fs.saveInodeAndData(f.node, data); err != nil {
+		return n, err
+	}
+	if err := f.fs.auditEntry("write", f.name, digestOf(p)); err != nil {
 		return n, err
 	}
 
@@ -467,7 +476,10 @@ func (f *File) Truncate(size int64) error {
 	}
 
 	f.invalidateData()
-	return f.fs.resizeContent(f.node, size)
+	if err := f.fs.resizeContent(f.node, size); err != nil {
+		return err
+	}
+	return f.fs.auditEntry("truncate", f.name, nil)
 }
 
 // WriteString is like Write, but writes the contents of string s rather than a

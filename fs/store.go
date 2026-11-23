@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/internal/absfs"
 	bolt "go.etcd.io/bbolt"
 )
@@ -36,6 +37,10 @@ type Store struct {
 	// enc is the optional encryption state; an atomic pointer so a rotation
 	// can swap it without racing Open/VerifyAll.
 	enc atomic.Pointer[encState]
+
+	// audit receives an entry for every committed write, or nil when the store
+	// was opened without audit. It is copied into each FS at Open.
+	audit audit.Sink
 
 	mu          sync.Mutex
 	filesystems []*FS
@@ -72,8 +77,9 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 	}
 
 	store := &Store{
-		db:   bdb,
-		root: cloneRoot(cfg.Root),
+		db:    bdb,
+		root:  cloneRoot(cfg.Root),
+		audit: cfg.Audit,
 	}
 	store.enc.Store(enc)
 	return store, nil
@@ -127,6 +133,7 @@ func (s *Store) Open(name string) (*FS, error) {
 	if err != nil {
 		return nil, err
 	}
+	filesystem.audit = s.audit
 	s.track(filesystem)
 	return filesystem, nil
 }
@@ -151,6 +158,7 @@ func (s *Store) OpenWithContentFS(name string, contentFS absfs.FileSystem) (*FS,
 		return nil, err
 	}
 	filesystem.contentFS = contentFS
+	filesystem.audit = s.audit
 	s.track(filesystem)
 	return filesystem, nil
 }
@@ -205,7 +213,7 @@ func (s *Store) DeleteFS(name string) error {
 		return err
 	}
 
-	return s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		var parent *bolt.Bucket
 		if len(s.root) > 0 {
 			parent = s.rootBucket(tx)
@@ -229,6 +237,17 @@ func (s *Store) DeleteFS(name string) error {
 		}
 		return parent.DeleteBucket([]byte(name))
 	})
+	if err != nil {
+		return err
+	}
+	if s.audit != nil {
+		return s.audit.Record(audit.Entry{
+			Store:  audit.StoreFS,
+			Op:     "delete_fs",
+			Entity: name,
+		})
+	}
+	return nil
 }
 
 // checkMode verifies the filesystem's encryption marker against the Store
