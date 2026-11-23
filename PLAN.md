@@ -97,7 +97,13 @@ Steps: add `Manager.TS() *ts.Store` and `store.TS()`; add a test; update the
 `store` README table. No lifecycle change.
 Acceptance: manager and singleton expose all four stores.
 
-### 0.5 Decide `pkg/sign/canonical`
+### 0.5 Decide `pkg/sign/canonical` — DONE
+
+Done: `audit` now signs `canonical.Bytes(event)`; the same bytes are stored and
+hashed into the chain. `pkg/audit/README.md` gained an "Event encoding" section,
+and tests pin the stored bytes to the canonical form and prove that a
+map-carrying event has one signature regardless of insertion order. The package
+is no longer unexplained.
 
 `pkg/sign/canonical` (deterministic JSON: sorted keys, stable numbers) has no
 importer. `audit` signs `json.Marshal(event)`; struct field order is stable, but

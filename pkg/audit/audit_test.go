@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/malivvan/harbor/pkg/sign/canonical"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -197,4 +198,52 @@ func TestVerifyRejectsWrongKeys(t *testing.T) {
 	require.NoError(t, err)
 	_, err = Verify(b, map[string]ed25519.PublicKey{StoreDB: wrongPub})
 	require.Error(t, err)
+}
+
+// Rule: the bytes stored for an event are the bytes signed, and they are the
+// canonical encoding of the event rather than encoding/json's struct field order.
+func TestEventEncodingIsCanonical(t *testing.T) {
+	_, priv := testKey(t, "m/0'")
+	b := testDB(t)
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
+	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "users:u1"}))
+
+	var stored []byte
+	require.NoError(t, b.View(func(tx *bolt.Tx) error {
+		events := tx.Bucket([]byte(auditBucket)).Bucket([]byte(eventsBucket))
+		v := events.Get(seqKey(0))
+		stored = append([]byte(nil), v[:len(v)-ed25519.SignatureSize]...)
+		return nil
+	}))
+
+	var ev Event
+	require.NoError(t, json.Unmarshal(stored, &ev))
+	want, err := canonical.Bytes(ev)
+	require.NoError(t, err)
+	require.Equal(t, want, stored, "stored event bytes are not canonical")
+}
+
+// Rule: signing is over a canonical encoding, so a future event field holding a
+// map has one signature per logical value regardless of insertion order.
+func TestCanonicalEncodingIsStableForMapFields(t *testing.T) {
+	type eventWithMap struct {
+		Seq   uint64            `json:"seq"`
+		Extra map[string]string `json:"extra"`
+	}
+	_, priv := testKey(t, "m/0'")
+
+	first := eventWithMap{Seq: 1, Extra: map[string]string{}}
+	first.Extra["b"] = "2"
+	first.Extra["a"] = "1"
+
+	second := eventWithMap{Seq: 1, Extra: map[string]string{}}
+	second.Extra["a"] = "1"
+	second.Extra["b"] = "2"
+
+	a, err := canonical.Bytes(first)
+	require.NoError(t, err)
+	c, err := canonical.Bytes(second)
+	require.NoError(t, err)
+	require.Equal(t, a, c)
+	require.Equal(t, ed25519.Sign(priv, a), ed25519.Sign(priv, c))
 }

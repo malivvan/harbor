@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/malivvan/harbor/internal/slip10"
+	"github.com/malivvan/harbor/pkg/sign/canonical"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -156,7 +157,10 @@ func (r *Recorder) recordTx(tx *bolt.Tx, key ed25519.PrivateKey, entry Entry) er
 		return fmt.Errorf("audit: digest must be %d bytes, got %d", sha256.Size, len(ev.Digest))
 	}
 
-	encoded, err := json.Marshal(ev)
+	// Sign the canonical encoding, not encoding/json's struct order: an event
+	// that later grows a map field must still produce one signature for one
+	// logical value. The bytes stored are the bytes signed.
+	encoded, err := canonical.Bytes(ev)
 	if err != nil {
 		return fmt.Errorf("audit: encode event: %w", err)
 	}
