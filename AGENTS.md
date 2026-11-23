@@ -18,15 +18,16 @@ separate `docs/` tree.
 | `.../fs/s3fs` | An `absfs.Filer` backed by S3-compatible object storage. |
 | `.../vec/hnsw` | The vendored HNSW graph implementation used by `vec`. |
 | `.../vec/hnsw/heap` | The heap used on the HNSW search hot path. |
-| `.../pkg/metrics` | Dependency-free observer interface and nil-safe metric helpers used by every store. |
+| `.../vec/doc` | Document-oriented facade over `vec`: id, content, embedding and string metadata; the collection dimension is taken from the first upsert. |
+| `.../pkg/metrics` | Dependency-free observer interface and nil-safe metric helpers used by every store; a nil observer means no instrumentation. |
 | `.../pkg/audit` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write. |
 | `.../pkg/consensus` | Raft-backed cluster replication of a whole store. |
-| `.../pkg/store` | Process-wide database manager: resolves a directory, reads or creates the password file, and opens one handle. |
-| `.../pkg/blob` | Flat, contained object store over a named file system. |
-| `.../pkg/snapshot` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`. |
+| `.../pkg/store` | Process-wide database manager: resolves a directory, reads or creates the password file (`O_EXCL`, mode 0600, never logged), and opens one handle. |
+| `.../pkg/blob` | Flat, contained object store over a named file system: `..` keys are rejected and `Put` installs through a temporary sibling rename. |
+| `.../pkg/snapshot` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore. |
 | `.../pkg/snapshot/blobstore` | Adapter from `snapshot.ObjectStore` to `blob`. |
-| `.../pkg/id` | ULID generation. |
-| `.../pkg/sign/canonical` | Deterministic JSON encoding for signatures and content addressing. |
+| `.../pkg/id` | ULID generation: 26-character Crockford base32, time-sortable. |
+| `.../pkg/sign/canonical` | Deterministic JSON encoding for signatures and content addressing: sorted keys, stable numbers, no whitespace. |
 | `.../internal/...` | Shared bbolt helpers, AEAD primitives, Argon2id/BLAKE2b, SLIP-0010/0021 and CPU detection. Not public API. |
 
 The four stores are independent. The root package is a convenience composition,

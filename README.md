@@ -31,6 +31,8 @@ and `Vec()`. Every store can also be used directly with its own `*bolt.DB`.
 - [Files with `fs`](#files-with-fs)
 - [Time series with `ts`](#time-series-with-ts)
 - [Vectors with `vec`](#vectors-with-vec)
+- [Object storage: `blob` and `snapshot`](#object-storage-blob-and-snapshot)
+- [Utilities](#utilities)
 - [Clustering](#clustering)
 - [Encryption](#encryption)
 - [Audit trail](#audit-trail)
@@ -653,6 +655,63 @@ use the same one for every process that opens the collection.
 
 Full reference: [vec/README.md](vec/README.md).
 
+## Object storage: `blob` and `snapshot`
+
+Harbor's `fs` is hierarchical. Two optional packages build an object-store
+shape on top of it:
+
+- **`pkg/blob`** is a flat namespace over one named file system. A bucket is a
+  top-level directory and a key is the slash-separated path beneath it. Keys
+  containing a `..` segment are rejected, so a key can never address a sibling
+  bucket. `Put` writes through a temporary sibling and renames the result into
+  place, so a failed upload never leaves a partial object behind.
+- **`pkg/snapshot`** takes content-addressed, incremental point-in-time
+  snapshots of the objects under a prefix and restores them. Uploads dedupe by
+  content hash, each snapshot carries a complete gzipped manifest, and restore
+  verifies the manifest hash before writing anything.
+
+```go
+import (
+	"github.com/malivvan/harbor/pkg/blob"
+	"github.com/malivvan/harbor/pkg/snapshot"
+	"github.com/malivvan/harbor/pkg/snapshot/blobstore"
+)
+
+objects, err := blob.Open(store.FS(), "app-data")
+if err != nil {
+	return err
+}
+_, err = objects.Put(ctx, "tenant-a", "reports/q3.pdf", reader, 0, "application/pdf")
+
+snap := snapshot.New(blobstore.New(objects, "os"), snapshot.Config{DataPrefix: "os/"})
+idx, err := snap.Create(ctx, snapshot.KindManual, "") // capture
+err = snap.Restore(ctx, idx.ID)                      // roll back
+```
+
+Both packages are optional: nothing in the root `Store` depends on them. See
+[pkg/blob/README.md](pkg/blob/README.md) and
+[pkg/snapshot/README.md](pkg/snapshot/README.md).
+
+## Utilities
+
+Small packages shared by applications and by Harbor itself:
+
+- **`pkg/id`** generates ULIDs: 26-character Crockford-base32 strings with a
+  48-bit millisecond timestamp followed by 80 random bits, so they sort
+  lexicographically by creation time. `id.New` uses the clock; `id.NewAt` pins
+  the time. Use them where a time-ordered, collision-resistant record key helps.
+- **`pkg/metrics`** defines the dependency-free `Observer` interface the stores
+  report counters, histograms, gauges and spans to. A nil observer disables
+  instrumentation, and `harbor.Options{Observer: ...}` installs one.
+- **`pkg/sign/canonical`** serialises a Go value to byte-stable JSON: keys
+  sorted at every depth, no insignificant whitespace, numbers passed through
+  unchanged. It is the encoding to sign or hash when a struct may later carry a
+  map.
+- **`vec/doc`** is a document-oriented facade over `vec`: id, content,
+  embedding and string metadata, with the collection dimension taken from the
+  first upsert instead of being known up front. See
+  [vec/doc/README.md](vec/doc/README.md).
+
 ## Clustering
 
 Harbor ships a `consensus` package that replicates a whole store across a
@@ -1021,6 +1080,8 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
   and grants.
 - [pkg/snapshot/README.md](pkg/snapshot/README.md) — content-addressed
   incremental snapshots, restore, retention, and scheduling.
+- [vec/doc/README.md](vec/doc/README.md) — the document-oriented vector
+  facade.
 - [AGENTS.md](AGENTS.md) — architecture, on-disk layout, encryption internals,
   development workflow, and repository conventions for contributors and coding
   agents.
@@ -1041,6 +1102,7 @@ Generated API documentation is published on pkg.go.dev:
 - [github.com/malivvan/harbor/pkg/snapshot](https://pkg.go.dev/github.com/malivvan/harbor/pkg/snapshot)
 - [github.com/malivvan/harbor/pkg/snapshot/blobstore](https://pkg.go.dev/github.com/malivvan/harbor/pkg/snapshot/blobstore)
 - [github.com/malivvan/harbor/pkg/store](https://pkg.go.dev/github.com/malivvan/harbor/pkg/store)
+- [github.com/malivvan/harbor/vec/doc](https://pkg.go.dev/github.com/malivvan/harbor/vec/doc)
 
 Where to start:
 
@@ -1055,6 +1117,8 @@ Where to start:
   [pkg/store/README.md](pkg/store/README.md),
   [pkg/blob/README.md](pkg/blob/README.md) and
   [pkg/snapshot/README.md](pkg/snapshot/README.md).
+- **IDs, metrics or a document vector facade:**
+  [Utilities](#utilities) and [vec/doc/README.md](vec/doc/README.md).
 - **Security review or operations:** [Encryption](#encryption) and
   [AGENTS.md](AGENTS.md#architecture).
 

@@ -62,7 +62,13 @@ test that reuses a blob only after a complete upload.
 Acceptance: fault-injected upload leaves no object and no dedupe entry;
 snapshot create/restore still passes.
 
-### 0.3 Document the new packages
+### 0.3 Document the new packages — DONE
+
+Done: README gained "Object storage: `blob` and `snapshot`" and "Utilities"
+sections (id, metrics, sign/canonical, vec/doc) with a table-of-contents entry,
+a `vec/doc` guide link and pkg.go.dev links. AGENTS.md's repository map now lists
+`vec/doc` and notes the password-file lifecycle, blob atomicity/containment and
+snapshot manifest verification. Relative links resolve.
 
 `pkg/store`, `pkg/blob`, `pkg/snapshot`, `pkg/snapshot/blobstore`, `pkg/id`,
 `pkg/sign/canonical` and `vec/doc` now have AGENTS map entries and pkg.go.dev
