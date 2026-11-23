@@ -704,7 +704,17 @@ it, _ := query.Project("ID").Iter(ctx, &T{})
   enforced, custom codec fallback, missing field error, iterator decode, and an
   allocation benchmark.
 
-## 10. P2 — schema migrations
+## 10. P2 — schema migrations — DONE
+
+Done: `Schema`, `Step` and `Store.Migrate`, with `SchemaVersion`. The
+application schema version lives in a dedicated top-level `harbor.schema`
+bucket rather than changing `harbor.Metadata`, so existing stores open
+unchanged. Steps are validated for contiguity and target version, applied in
+order inside one cross-store transaction, and the version is re-read inside the
+transaction so concurrent calls apply each step once. A newer store is refused
+with `ErrSchemaTooNew`; an equal version is a no-op; a failing step rolls back.
+Tests: forward migration, idempotent re-run, too-new refusal, failing-step
+rollback, malformed schemas and concurrent calls.
 
 ### Current state
 

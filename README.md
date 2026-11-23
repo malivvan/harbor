@@ -1189,6 +1189,28 @@ info, err := harbor.VerifyBackup(ctx, "/backups/harbor-2026-11-24.db", password,
 encryption flags and format versions. `BackupOptions.Overwrite` controls whether
 an existing destination is replaced (`BackupTo` always replaces).
 
+### Schema migrations
+
+`Migrate` applies application schema steps in one cross-store transaction:
+
+```go
+err := store.Migrate(ctx, harbor.Schema{
+	Version: 2,
+	Steps: []harbor.Step{
+		{From: 0, To: 1, Apply: func(ctx context.Context, tx *harbor.Tx) error {
+			return tx.DB().Save(ctx, &Backfill{})
+		}},
+		{From: 1, To: 2, Apply: migrateDocuments},
+	},
+})
+```
+
+The version lives in its own `harbor.schema` bucket, so existing stores open
+unchanged. A failing step rolls back the whole migration; a store written by a
+newer build is refused with `ErrSchemaTooNew` instead of being downgraded; an
+up-to-date store is a no-op. Steps must be deterministic and idempotent.
+`SchemaVersion` reports the current version.
+
 ### Export, import and compaction
 
 `Backup` copies the database file; `Export` writes a versioned, checksummed

@@ -628,6 +628,17 @@ There is no plaintext ↔ encrypted in-place migration. Export and re-import.
 - The root package derives keys from the password and does not expose rotation.
   Rotate only through sub-stores opened with caller-managed keys.
 
+### Application schema migrations
+
+`Store.Migrate` applies a `Schema` of ordered `Step`s inside one
+`WriteTransaction`; the application version lives in its own top-level
+`harbor.schema` bucket (8-byte big-endian), not in `harbor.Metadata`, so
+existing stores keep opening. Steps must be contiguous, end at `Schema.Version`
+and be deterministic/idempotent. A newer stored version fails with
+`ErrSchemaTooNew`; malformed plans fail with `ErrInvalidSchema`. The version is
+re-read inside the transaction, so concurrent `Migrate` calls apply each step
+once.
+
 ### Backup and verification
 
 `Store.Backup`/`BackupTo`/`BackupFile` copy the on-disk database under one bbolt
