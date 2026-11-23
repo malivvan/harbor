@@ -77,14 +77,14 @@ err = node.DB().SetBytes(ctx, "blobs", "raw", raw)     // caller-encoded bytes
 err = node.DB().Delete(ctx, "settings", "theme")
 
 // ts (time series)
-err = node.TS().Insert(ctx, "cpu", ts.Point{Timestamp: now, Value: 42.0})
+err = node.TS().Insert(ctx, "cpu", series.Point{Timestamp: now, Value: 42.0})
 err = node.TS().InsertMany(ctx, "cpu", pts)
 n, err := node.TS().DeleteRange(ctx, "cpu", start, end) // returns removed count
 err = node.TS().SetLabels(ctx, "cpu", map[string]string{"host": "a"})
-err = node.TS().SetRetention(ctx, "cpu", ts.Retention{MaxPoints: 1000})
+err = node.TS().SetRetention(ctx, "cpu", series.Retention{MaxPoints: 1000})
 
 // vec (vectors)
-err = node.Vec().CreateCollection("colors", 2, vec.Dot, false)
+err = node.Vec().CreateCollection("colors", 2, vector.Dot, false)
 err = node.Vec().CreateCollectionWithOptions(ctx, opts)
 err = node.Vec().EnsureCollection(ctx, "colors")
 err = node.Vec().Upsert("colors", points)
@@ -133,11 +133,11 @@ snapshots drain the vector buffer first, so buffered points survive a restore.
 
 ```go
 var u User
-err := node.Store().DB().One(ctx, "ID", "u1", &u)
+err := node.Store().Record().One(ctx, "ID", "u1", &u)
 
-p, err := node.Store().TS().Series("cpu").Get(ctx, ts)
+p, err := node.Store().Series().Series("cpu").Get(ctx, ts)
 
-fsys, _ := node.Store().FS().Open("data")
+fsys, _ := node.Store().File().Open("data")
 b, err := fsys.ReadFile("/docs/README.txt")
 ```
 

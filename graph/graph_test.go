@@ -20,7 +20,7 @@ func newTestGraph(t *testing.T) (*Graph, *clock) {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	return New(store.DB(), WithClock(c.Now)), c
+	return New(store.Record(), WithClock(c.Now)), c
 }
 
 // clock is a clock the tests move by hand.

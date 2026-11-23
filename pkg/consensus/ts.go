@@ -3,15 +3,15 @@ package consensus
 import (
 	"context"
 
-	"github.com/malivvan/harbor/ts"
+	"github.com/malivvan/harbor/store/series"
 )
 
 // TS is the replicated write view of the ts sub-store.
 type TS struct{ n *Node }
 
 type tsInsertArg struct {
-	Series string   `json:"series"`
-	Point  ts.Point `json:"point"`
+	Series string       `json:"series"`
+	Point  series.Point `json:"point"`
 	// Now is the leader's clock at proposal time, in unix nanoseconds. It is
 	// pinned into the command so every replica enforces retention with the same
 	// reference time instead of each consulting its own wall clock.
@@ -19,9 +19,9 @@ type tsInsertArg struct {
 }
 
 type tsInsertManyArg struct {
-	Series string     `json:"series"`
-	Points []ts.Point `json:"points"`
-	Now    int64      `json:"now"`
+	Series string         `json:"series"`
+	Points []series.Point `json:"points"`
+	Now    int64          `json:"now"`
 }
 
 type tsRangeArg struct {
@@ -40,8 +40,8 @@ type tsLabelsArg struct {
 }
 
 type tsRetentionArg struct {
-	Series    string       `json:"series"`
-	Retention ts.Retention `json:"retention"`
+	Series    string           `json:"series"`
+	Retention series.Retention `json:"retention"`
 }
 
 // TS returns the replicated ts sub-store.
@@ -54,7 +54,7 @@ func (n *Node) TS() *TS {
 
 // Insert replicates ts.Series.Insert. The leader pins its clock into the
 // command so every replica enforces retention with the same reference time.
-func (t *TS) Insert(ctx context.Context, series string, p ts.Point) error {
+func (t *TS) Insert(ctx context.Context, series string, p series.Point) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func (t *TS) Insert(ctx context.Context, series string, p ts.Point) error {
 
 // InsertMany replicates ts.Series.InsertMany. The leader pins its clock into
 // the command so every replica enforces retention with the same reference time.
-func (t *TS) InsertMany(ctx context.Context, series string, pts []ts.Point) error {
+func (t *TS) InsertMany(ctx context.Context, series string, pts []series.Point) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -105,7 +105,7 @@ func (t *TS) SetLabels(ctx context.Context, series string, labels map[string]str
 }
 
 // SetRetention replicates ts.Series.SetRetention.
-func (t *TS) SetRetention(ctx context.Context, series string, r ts.Retention) error {
+func (t *TS) SetRetention(ctx context.Context, series string, r series.Retention) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -127,7 +127,7 @@ func (f *fsm) applyTSInsert(ctx context.Context, a tsInsertArg) any {
 	if st == nil {
 		return ErrClosed
 	}
-	return st.TS().Series(a.Series).InsertAt(ctx, a.Point, a.Now)
+	return st.Series().Series(a.Series).InsertAt(ctx, a.Point, a.Now)
 }
 
 func (f *fsm) applyTSInsertMany(ctx context.Context, a tsInsertManyArg) any {
@@ -135,7 +135,7 @@ func (f *fsm) applyTSInsertMany(ctx context.Context, a tsInsertManyArg) any {
 	if st == nil {
 		return ErrClosed
 	}
-	return st.TS().Series(a.Series).InsertManyAt(ctx, a.Points, a.Now)
+	return st.Series().Series(a.Series).InsertManyAt(ctx, a.Points, a.Now)
 }
 
 func (f *fsm) applyTSDeleteRange(ctx context.Context, a tsRangeArg) any {
@@ -143,7 +143,7 @@ func (f *fsm) applyTSDeleteRange(ctx context.Context, a tsRangeArg) any {
 	if st == nil {
 		return ErrClosed
 	}
-	n, err := st.TS().Series(a.Series).DeleteRange(ctx, a.Start, a.End)
+	n, err := st.Series().Series(a.Series).DeleteRange(ctx, a.Start, a.End)
 	if err != nil {
 		return err
 	}
@@ -155,7 +155,7 @@ func (f *fsm) applyTSDrop(ctx context.Context, a tsNameArg) any {
 	if st == nil {
 		return ErrClosed
 	}
-	return st.TS().Series(a.Series).Drop(ctx)
+	return st.Series().Series(a.Series).Drop(ctx)
 }
 
 func (f *fsm) applyTSSetLabels(ctx context.Context, a tsLabelsArg) any {
@@ -163,7 +163,7 @@ func (f *fsm) applyTSSetLabels(ctx context.Context, a tsLabelsArg) any {
 	if st == nil {
 		return ErrClosed
 	}
-	return st.TS().Series(a.Series).SetLabels(ctx, a.Labels)
+	return st.Series().Series(a.Series).SetLabels(ctx, a.Labels)
 }
 
 func (f *fsm) applyTSSetRetention(ctx context.Context, a tsRetentionArg) any {
@@ -171,7 +171,7 @@ func (f *fsm) applyTSSetRetention(ctx context.Context, a tsRetentionArg) any {
 	if st == nil {
 		return ErrClosed
 	}
-	return st.TS().Series(a.Series).SetRetention(ctx, a.Retention)
+	return st.Series().Series(a.Series).SetRetention(ctx, a.Retention)
 }
 
 func (f *fsm) applyTSDeleteSeries(ctx context.Context, a tsNameArg) any {
@@ -179,5 +179,5 @@ func (f *fsm) applyTSDeleteSeries(ctx context.Context, a tsNameArg) any {
 	if st == nil {
 		return ErrClosed
 	}
-	return st.TS().DeleteSeries(ctx, a.Series)
+	return st.Series().DeleteSeries(ctx, a.Series)
 }

@@ -1,3 +1,13 @@
+> **Post-backlog restructure.** After this backlog was completed, the store
+> packages were renamed and moved: `db` → `store/record` (`record`), `ts` →
+> `store/series` (`series`), `fs` → `store/file` (`file`), `vec` →
+> `store/vector` (`vector`), and `fts` → `store/search` (`search`). The
+> `harbor.Store` accessors are now `Record/File/Series/Vector/Search` and take
+> optional bucket-path segments; the no-argument forms keep the original
+> on-disk roots (`db`, `fs`, `ts`, `vec`, `fts`). Historical text below uses
+> the old package and method names; treat those as the names at the time the
+> item was implemented.
+
 # Proposed Improvements — release backlog
 
 This is the working backlog after the final pre-release review. The previous
@@ -245,7 +255,7 @@ transaction is a single-writer unit by bbolt design.
 
 ## 2. P0 — full-text search (`fts`) — DONE
 
-Done: new package `github.com/malivvan/harbor/fts` with `Store`/`Index`,
+Done: new package `github.com/malivvan/harbor/store/search` with `Store`/`Index`,
 `Words`/`WordsWithCJK` tokenizers, BM25 ranking, `Upsert`, `Delete`, `Search`,
 `Count` and `Indexes`. The root store opens it under `fts/`, derives a
 `harbor/fts/v1` key, exposes `Store.FTS()` and `Tx.FTS()`, and value encryption
@@ -268,7 +278,7 @@ tokenizers, re-index and delete).
 ### Proposed API
 
 ```go
-// new package github.com/malivvan/harbor/fts
+// new package github.com/malivvan/harbor/store/search
 type Tokenizer interface{ Tokenize(string) []string }
 func Words() Tokenizer          // Unicode letters/digits, lowercased
 func WordsWithCJK() Tokenizer   // Words + Han/Hiragana/Katakana/Hangul trigrams
@@ -800,7 +810,7 @@ intervals and meanings out of harbor.
 ## 13. P2 — `fs` for application files and sessions — DONE
 
 Done: the pattern is documented in the root README ("Application files and
-sessions") and `fs/README.md`, and `TestFSSessionSurvivesReopen` writes a JSON
+sessions") and `store/file/README.md`, and `TestFSSessionSurvivesReopen` writes a JSON
 session file, closes the store, reopens it and reads the state back. fs
 operations already participate in `tx.FS()`, so no new primitive was needed.
 
@@ -809,7 +819,7 @@ snapshots, symlinks, content encryption and external content. Harbor work:
 
 - Document the pattern (`store.FS().Open("app.fs")`, sessions as JSON files on
   the virtual FS, optional separate database file if the application requires
-  it) in README and `fs/README.md`.
+  it) in README and `store/file/README.md`.
 - Ensure fs operations participate in the cross-store transaction (item 1).
 - Add an example/test that writes a session file, reopens the store and reads it
   back; keep the application's session semantics outside harbor.
@@ -912,9 +922,9 @@ and the internal `*map[string]any` decodes used by aggregation and references;
 the destination is zeroed first. `db/codec_contract_test.go` runs the full
 read/write matrix with a pointer-strict codec (nil and extra indirection
 rejected), so a codec that only breaks `[]*T` reads fails loudly. The matrix is
-also summarised in `db/README.md`.
+also summarised in `store/record/README.md`.
 
-Document in `db.Codec` (and `db/README.md`) exactly what `Marshal` receives and
+Document in `db.Codec` (and `store/record/README.md`) exactly what `Marshal` receives and
 what `Unmarshal` receives for `Save`, `One`, `Find` into `[]T` and `[]*T`, and
 `RawEach`/`Each`. Add a test codec that is pointer-strict (rejects nil/extra
 indirection) and run the full read/write matrix, so a custom codec fails loudly
@@ -937,7 +947,7 @@ owns the primitive; the application owns the meaning.
 - [x] staticcheck and govulncheck clean (AGENTS.md workflow).
 - [x] New packages documented and linked; README snippets compile.
 - [x] `blob.Put` atomicity (0.2) and `pkg/snapshot/blobstore` tests (0.6) done.
-- [x] `store.TS()` parity (0.4); `pkg/sign/canonical` decision (0.5).
+- [x] `store.Series()` parity (0.4); `pkg/sign/canonical` decision (0.5).
 - [x] Internal planning documents: `HARBOR.md` is absent; `PLAN.md` is retained
       as the single backlog/record at the user's request.
 - [x] On-disk versions: every pre-existing format stays at version 1 with its

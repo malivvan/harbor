@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/malivvan/harbor/fs"
+	"github.com/malivvan/harbor/store/file"
 )
 
 // FS is the replicated write view of a named file system in the fs sub-store.
@@ -222,7 +222,7 @@ func (f *FS) newFile(ctx context.Context, name string, perm os.FileMode, appendM
 	}
 	file := &File{n: f.n, fsName: f.fsName, name: name, perm: perm}
 	if appendMode {
-		fsys, err := st.FS().Open(f.fsName)
+		fsys, err := st.File().Open(f.fsName)
 		if err != nil {
 			return nil, err
 		}
@@ -356,12 +356,12 @@ func (n *Node) DeleteFS(ctx context.Context, name string) error {
 	return err
 }
 
-func (f *fsm) openFS(a fsPathArg) (*fs.FS, error) {
+func (f *fsm) openFS(a fsPathArg) (*file.FS, error) {
 	st := f.node.storeHandle()
 	if st == nil {
 		return nil, ErrClosed
 	}
-	fsys, err := st.FS().Open(a.FS)
+	fsys, err := st.File().Open(a.FS)
 	if err != nil {
 		return nil, err
 	}
@@ -505,5 +505,5 @@ func (f *fsm) applyFSDeleteFS(a fsPathArg) any {
 	if st == nil {
 		return ErrClosed
 	}
-	return st.FS().DeleteFS(a.FS)
+	return st.File().DeleteFS(a.FS)
 }

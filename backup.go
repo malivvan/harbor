@@ -12,11 +12,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/malivvan/harbor/db"
-	"github.com/malivvan/harbor/fs"
-	"github.com/malivvan/harbor/fts"
-	"github.com/malivvan/harbor/ts"
-	"github.com/malivvan/harbor/vec"
+	"github.com/malivvan/harbor/store/file"
+	"github.com/malivvan/harbor/store/record"
+	"github.com/malivvan/harbor/store/search"
+	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/harbor/store/vector"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -121,7 +121,7 @@ func (s *Store) BackupFile(ctx context.Context, path string, opts BackupOptions)
 		SHA256:    hex.EncodeToString(hasher.Sum(nil)),
 		CreatedAt: time.Now().UTC(),
 		Flags:     s.Flags(),
-		Version:   db.Version,
+		Version:   record.Version,
 	}
 	if opts.Manifest {
 		if err := writeBackupManifest(path, info); err != nil {
@@ -136,11 +136,11 @@ func writeBackupManifest(path string, info BackupInfo) error {
 	m := backupManifest{
 		BackupInfo: info,
 		Formats: map[string]string{
-			"db":  db.Version,
-			"fs":  fmt.Sprint(fs.FormatVersion),
-			"ts":  fmt.Sprint(ts.FormatVersion),
-			"vec": fmt.Sprint(vec.CollectionFormatVersion),
-			"fts": fmt.Sprint(fts.FormatVersion),
+			"db":  record.Version,
+			"fs":  fmt.Sprint(file.FormatVersion),
+			"ts":  fmt.Sprint(series.FormatVersion),
+			"vec": fmt.Sprint(vector.CollectionFormatVersion),
+			"fts": fmt.Sprint(search.FormatVersion),
 		},
 	}
 	raw, err := json.MarshalIndent(m, "", "  ")
@@ -225,7 +225,7 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		Size:      fi.Size(),
 		SHA256:    sum,
 		CreatedAt: fi.ModTime().UTC(),
-		Version:   db.Version,
+		Version:   record.Version,
 	}
 
 	manifest, hasManifest, err := readBackupManifest(path)
@@ -236,15 +236,15 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		if manifest.Size != info.Size || manifest.SHA256 != info.SHA256 {
 			return info, fmt.Errorf("%w: size or checksum differs", ErrBackupManifest)
 		}
-		if manifest.Version != "" && manifest.Version != db.Version {
-			return info, fmt.Errorf("%w: manifest version %q, this build supports %q", ErrBackupManifest, manifest.Version, db.Version)
+		if manifest.Version != "" && manifest.Version != record.Version {
+			return info, fmt.Errorf("%w: manifest version %q, this build supports %q", ErrBackupManifest, manifest.Version, record.Version)
 		}
 		info.CreatedAt = manifest.CreatedAt
 		info.Flags = manifest.Flags
 	}
 
 	bopts := bolt.Options{ReadOnly: true, Timeout: time.Second}
-	var codec db.Codec
+	var codec record.Codec
 	if opts != nil {
 		bopts = opts.Options
 		bopts.ReadOnly = true
@@ -283,10 +283,10 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 	// Validate every sub-store through its normal open path. A complete backup
 	// needs no writes, so a read-only handle succeeds; an incomplete one fails
 	// instead of being "repaired" during verification.
-	if _, err := db.Open(ctx, bdb, db.Config{
-		Root:            namedRoot(db.Name),
+	if _, err := record.Open(ctx, bdb, record.Config{
+		Root:            namedRoot(record.Name),
 		Codec:           codec,
-		Secret:          keys.db,
+		Secret:          keys.record,
 		EncryptKeys:     hasFlag(md.Flags, EncryptDBKeys),
 		EncryptValues:   hasFlag(md.Flags, EncryptDBValues),
 		EncryptMetadata: hasFlag(md.Flags, EncryptDBMetadata),
@@ -294,9 +294,9 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		return info, fmt.Errorf("harbor: verify backup: db: %w", err)
 	}
 
-	fsStore, err := fs.Open(ctx, bdb, fs.Config{
-		Root:            namedRoot(fs.Name),
-		Secret:          keys.fs,
+	fsStore, err := file.Open(ctx, bdb, file.Config{
+		Root:            namedRoot(file.Name),
+		Secret:          keys.file,
 		EncryptMetadata: hasFlag(md.Flags, EncryptFSMetadata),
 		EncryptContent:  hasFlag(md.Flags, EncryptFSContent),
 	})
@@ -313,18 +313,18 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		}
 	}
 
-	if _, err := ts.Open(ctx, bdb, ts.Config{
-		Root:               namedRoot(ts.Name),
-		Secret:             keys.ts,
+	if _, err := series.Open(ctx, bdb, series.Config{
+		Root:               namedRoot(series.Name),
+		Secret:             keys.series,
 		EncryptValues:      hasFlag(md.Flags, EncryptTSValues),
 		EncryptSeriesNames: hasFlag(md.Flags, EncryptTSSeriesNames),
 	}); err != nil {
 		return info, fmt.Errorf("harbor: verify backup: ts: %w", err)
 	}
 
-	vecStore, err := vec.Open(ctx, bdb, vec.Config{
-		Root:                   namedRoot(vec.Name),
-		Secret:                 keys.vec,
+	vecStore, err := vector.Open(ctx, bdb, vector.Config{
+		Root:                   namedRoot(vector.Name),
+		Secret:                 keys.vector,
 		EncryptPoints:          hasFlag(md.Flags, EncryptVecPoints),
 		EncryptPointIDs:        hasFlag(md.Flags, EncryptVecPointIDs),
 		EncryptCollectionNames: hasFlag(md.Flags, EncryptVecCollectionNames),
@@ -338,14 +338,14 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		return info, fmt.Errorf("harbor: verify backup: vec: %w", err)
 	}
 	for _, name := range collections {
-		if _, err := vecStore.LoadCollectionMeta(name); err != nil && !errors.Is(err, vec.ErrMetadataNotFound) {
+		if _, err := vecStore.LoadCollectionMeta(name); err != nil && !errors.Is(err, vector.ErrMetadataNotFound) {
 			return info, fmt.Errorf("harbor: verify backup: vec %q: %w", name, err)
 		}
 	}
 
-	ftsStore, err := fts.OpenReadOnly(ctx, bdb, fts.Config{
-		Root:          namedRoot(fts.Name),
-		Secret:        keys.fts,
+	ftsStore, err := search.OpenReadOnly(ctx, bdb, search.Config{
+		Root:          namedRoot(search.Name),
+		Secret:        keys.search,
 		EncryptValues: hasFlag(md.Flags, EncryptDBValues),
 	})
 	if err != nil {
@@ -356,7 +356,7 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		return info, fmt.Errorf("harbor: verify backup: fts: %w", err)
 	}
 	for _, name := range indexes {
-		if _, err := ftsStore.Open(name, fts.Config{}); err != nil {
+		if _, err := ftsStore.Open(name, search.Config{}); err != nil {
 			return info, fmt.Errorf("harbor: verify backup: fts %q: %w", name, err)
 		}
 	}

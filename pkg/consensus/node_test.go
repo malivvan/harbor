@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/malivvan/harbor"
-	"github.com/malivvan/harbor/ts"
-	"github.com/malivvan/harbor/vec"
+	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/harbor/store/vector"
 )
 
 // testUser is a db record with a string primary key and an indexed field.
@@ -149,7 +149,7 @@ func TestReplicateDB(t *testing.T) {
 
 	for _, n := range nodes {
 		var got testUser
-		require.NoError(t, n.Store().DB().One(ctx, "ID", "u1", &got), "read on %s", n.cfg.NodeID)
+		require.NoError(t, n.Store().Record().One(ctx, "ID", "u1", &got), "read on %s", n.cfg.NodeID)
 		require.Equal(t, "alice", got.Name)
 	}
 
@@ -160,9 +160,9 @@ func TestReplicateDB(t *testing.T) {
 
 	for _, n := range nodes {
 		var got testUser
-		require.NoError(t, n.Store().DB().One(ctx, "ID", "u1", &got))
+		require.NoError(t, n.Store().Record().One(ctx, "ID", "u1", &got))
 		require.Equal(t, "alicia", got.Name)
-		require.Error(t, n.Store().DB().One(ctx, "ID", "u2", &got))
+		require.Error(t, n.Store().Record().One(ctx, "ID", "u2", &got))
 	}
 }
 
@@ -172,19 +172,19 @@ func TestReplicateTS(t *testing.T) {
 	defer closeAll(nodes...)
 
 	leader := waitLeader(t, nodes...)
-	require.NoError(t, leader.TS().Insert(ctx, "cpu", ts.Point{Timestamp: 1, Value: 1.5}))
-	require.NoError(t, leader.TS().InsertMany(ctx, "cpu", []ts.Point{
+	require.NoError(t, leader.TS().Insert(ctx, "cpu", series.Point{Timestamp: 1, Value: 1.5}))
+	require.NoError(t, leader.TS().InsertMany(ctx, "cpu", []series.Point{
 		{Timestamp: 2, Value: 2.5},
 		{Timestamp: 3, Value: 3.5},
 	}))
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
-		p, err := n.Store().TS().Series("cpu").Get(ctx, 2)
+		p, err := n.Store().Series().Series("cpu").Get(ctx, 2)
 		require.NoError(t, err)
 		require.Equal(t, 2.5, p.Value)
 
-		count, err := n.Store().TS().Series("cpu").Count(ctx)
+		count, err := n.Store().Series().Series("cpu").Count(ctx)
 		require.NoError(t, err)
 		require.Equal(t, 3, count)
 	}
@@ -195,15 +195,15 @@ func TestReplicateVec(t *testing.T) {
 	defer closeAll(nodes...)
 
 	leader := waitLeader(t, nodes...)
-	require.NoError(t, leader.Vec().CreateCollection("colors", 2, vec.Dot, false))
-	require.NoError(t, leader.Vec().Upsert("colors", []vec.PointStruct{
+	require.NoError(t, leader.Vec().CreateCollection("colors", 2, vector.Dot, false))
+	require.NoError(t, leader.Vec().Upsert("colors", []vector.PointStruct{
 		{ID: "red", Vector: []float32{1, 0}},
 		{ID: "blue", Vector: []float32{0, 1}},
 	}))
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
-		points, err := n.Store().Vec().LoadCollection("colors")
+		points, err := n.Store().Vector().LoadCollection("colors")
 		require.NoError(t, err)
 		require.Len(t, points, 2)
 		require.Contains(t, points, "red")
@@ -223,7 +223,7 @@ func TestReplicateFS(t *testing.T) {
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
-		fsys, err := n.Store().FS().Open("data")
+		fsys, err := n.Store().File().Open("data")
 		require.NoError(t, err)
 		data, err := fsys.ReadFile("/docs/readme.txt")
 		require.NoError(t, err)
@@ -261,7 +261,7 @@ func TestSnapshotRestore(t *testing.T) {
 	}, 15*time.Second, 100*time.Millisecond)
 
 	var got testUser
-	require.NoError(t, n4.Store().DB().One(ctx, "ID", "u3", &got))
+	require.NoError(t, n4.Store().Record().One(ctx, "ID", "u3", &got))
 	require.Equal(t, "n", got.Name)
 }
 
@@ -289,9 +289,9 @@ func TestReplicatedRetentionIsDeterministic(t *testing.T) {
 
 	// MaxAge of one hour with points one minute apart: the leader's clock keeps
 	// all of them, and every replica must agree.
-	require.NoError(t, leader.TS().SetRetention(ctx, "cpu", ts.Retention{MaxAge: time.Hour}))
+	require.NoError(t, leader.TS().SetRetention(ctx, "cpu", series.Retention{MaxAge: time.Hour}))
 	for i := int64(0); i < 5; i++ {
-		require.NoError(t, leader.TS().Insert(ctx, "cpu", ts.Point{
+		require.NoError(t, leader.TS().Insert(ctx, "cpu", series.Point{
 			Timestamp: base - i*int64(time.Minute),
 			Value:     float64(i),
 		}))
@@ -299,7 +299,7 @@ func TestReplicatedRetentionIsDeterministic(t *testing.T) {
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
-		count, err := n.Store().TS().Series("cpu").Count(ctx)
+		count, err := n.Store().Series().Series("cpu").Count(ctx)
 		require.NoError(t, err)
 		require.Equal(t, 5, count, "node %s pruned differently", n.cfg.NodeID)
 	}
@@ -325,8 +325,8 @@ func TestReplicatedRetentionPrunesIdentically(t *testing.T) {
 		n.SetNow(func() int64 { return base - int64(10*365*24*time.Hour) })
 	}
 
-	require.NoError(t, leader.TS().SetRetention(ctx, "cpu", ts.Retention{MaxAge: time.Hour}))
-	require.NoError(t, leader.TS().InsertMany(ctx, "cpu", []ts.Point{
+	require.NoError(t, leader.TS().SetRetention(ctx, "cpu", series.Retention{MaxAge: time.Hour}))
+	require.NoError(t, leader.TS().InsertMany(ctx, "cpu", []series.Point{
 		{Timestamp: base - int64(30*time.Minute), Value: 1}, // kept
 		{Timestamp: base - int64(2*time.Hour), Value: 2},    // pruned by MaxAge
 		{Timestamp: base - int64(3*time.Hour), Value: 3},    // pruned by MaxAge
@@ -334,7 +334,7 @@ func TestReplicatedRetentionPrunesIdentically(t *testing.T) {
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
-		pts, err := n.Store().TS().Series("cpu").Range(ctx, base-int64(24*time.Hour), base)
+		pts, err := n.Store().Series().Series("cpu").Range(ctx, base-int64(24*time.Hour), base)
 		require.NoError(t, err)
 		require.Len(t, pts, 1, "node %s kept the wrong points", n.cfg.NodeID)
 		require.Equal(t, 1.0, pts[0].Value)
@@ -383,8 +383,8 @@ func TestApplyErrorsAreStructured(t *testing.T) {
 	})
 
 	t.Run("node stays usable", func(t *testing.T) {
-		require.NoError(t, node.TS().Insert(context.Background(), "cpu", ts.Point{Timestamp: 1, Value: 1}))
-		count, err := node.Store().TS().Series("cpu").Count(context.Background())
+		require.NoError(t, node.TS().Insert(context.Background(), "cpu", series.Point{Timestamp: 1, Value: 1}))
+		count, err := node.Store().Series().Series("cpu").Count(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, 1, count)
 	})

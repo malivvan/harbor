@@ -14,9 +14,9 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/malivvan/harbor/fs"
-	"github.com/malivvan/harbor/ts"
-	"github.com/malivvan/harbor/vec"
+	"github.com/malivvan/harbor/store/file"
+	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/harbor/store/vector"
 )
 
 // ImportOptions controls Import.
@@ -80,8 +80,8 @@ func Import(ctx context.Context, dest *Store, r io.Reader, opts ImportOptions) (
 		opts:        opts,
 		dryRun:      opts.DryRun,
 		types:       make(map[string]reflect.Type, len(opts.RecordTypes)),
-		fsystems:    make(map[string]*fs.FS),
-		collections: make(map[string]*vec.Collection),
+		fsystems:    make(map[string]*file.FS),
+		collections: make(map[string]*vector.Collection),
 	}
 	for _, sample := range opts.RecordTypes {
 		t, err := recordType(sample)
@@ -205,8 +205,8 @@ type importer struct {
 	opts        ImportOptions
 	dryRun      bool
 	types       map[string]reflect.Type
-	fsystems    map[string]*fs.FS
-	collections map[string]*vec.Collection
+	fsystems    map[string]*file.FS
+	collections map[string]*vector.Collection
 }
 
 func (im *importer) apply(rec exportRecord) error {
@@ -249,17 +249,17 @@ func (im *importer) applyDBRecord(rec exportRecord) error {
 	if im.dryRun {
 		return nil
 	}
-	return im.dest.DB().Save(im.ctx, ptr)
+	return im.dest.Record().Save(im.ctx, ptr)
 }
 
-func (im *importer) fsFor(name string) (*fs.FS, error) {
+func (im *importer) fsFor(name string) (*file.FS, error) {
 	if name == "" {
 		return nil, fmt.Errorf("%w: fs record without container", ErrExportFormat)
 	}
 	if filesystem, ok := im.fsystems[name]; ok {
 		return filesystem, nil
 	}
-	filesystem, err := im.dest.FS().Open(name)
+	filesystem, err := im.dest.File().Open(name)
 	if err != nil {
 		return nil, fmt.Errorf("harbor: import fs %q: %w", name, err)
 	}
@@ -344,7 +344,7 @@ func (im *importer) applyTSPoints(rec exportRecord) error {
 	if im.dryRun {
 		return nil
 	}
-	if err := im.dest.TS().Series(rec.Container).InsertMany(im.ctx, rec.Points); err != nil {
+	if err := im.dest.Series().Series(rec.Container).InsertMany(im.ctx, rec.Points); err != nil {
 		return fmt.Errorf("harbor: import series %q: %w", rec.Container, err)
 	}
 	return nil
@@ -357,7 +357,7 @@ func (im *importer) applyTSLabels(rec exportRecord) error {
 	if im.dryRun {
 		return nil
 	}
-	if err := im.dest.TS().Series(rec.Container).SetLabels(im.ctx, rec.Labels); err != nil {
+	if err := im.dest.Series().Series(rec.Container).SetLabels(im.ctx, rec.Labels); err != nil {
 		return fmt.Errorf("harbor: import series %q: %w", rec.Container, err)
 	}
 	return nil
@@ -370,18 +370,18 @@ func (im *importer) applyTSRetention(rec exportRecord) error {
 	if im.dryRun {
 		return nil
 	}
-	retention := ts.Retention{MaxAge: time.Duration(rec.MaxAge), MaxPoints: rec.MaxPoints}
-	if err := im.dest.TS().Series(rec.Container).SetRetention(im.ctx, retention); err != nil {
+	retention := series.Retention{MaxAge: time.Duration(rec.MaxAge), MaxPoints: rec.MaxPoints}
+	if err := im.dest.Series().Series(rec.Container).SetRetention(im.ctx, retention); err != nil {
 		return fmt.Errorf("harbor: import series %q: %w", rec.Container, err)
 	}
 	return nil
 }
 
 func (im *importer) applyVecCollection(rec exportRecord) error {
-	options := vec.CollectionOptions{
+	options := vector.CollectionOptions{
 		Name:      rec.Container,
 		VectorLen: rec.VectorLen,
-		Metric:    vec.Distance(rec.Metric),
+		Metric:    vector.Distance(rec.Metric),
 		UseHNSW:   rec.UseHNSW,
 	}
 	if rec.HNSW != nil {
@@ -393,7 +393,7 @@ func (im *importer) applyVecCollection(rec exportRecord) error {
 	if im.dryRun {
 		return nil
 	}
-	collection, err := im.dest.Vec().NewCollectionWithOptions(options)
+	collection, err := im.dest.Vector().NewCollectionWithOptions(options)
 	if err != nil {
 		return fmt.Errorf("harbor: import collection %q: %w", rec.Container, err)
 	}
@@ -442,10 +442,10 @@ func (im *importer) finish() error {
 // decodeVectorBatch decodes an exported vector batch. json.Number is converted
 // back to int64 (or float64 when it does not fit), so payload integers survive
 // the JSON round trip.
-func decodeVectorBatch(raw json.RawMessage) ([]vec.PointStruct, error) {
+func decodeVectorBatch(raw json.RawMessage) ([]vector.PointStruct, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
-	var batch []vec.PointStruct
+	var batch []vector.PointStruct
 	if err := decoder.Decode(&batch); err != nil {
 		return nil, fmt.Errorf("decode vector batch: %w", err)
 	}

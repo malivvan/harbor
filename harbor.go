@@ -22,15 +22,15 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/malivvan/harbor/db"
-	"github.com/malivvan/harbor/fs"
-	"github.com/malivvan/harbor/fts"
 	"github.com/malivvan/harbor/internal/crypto"
 	"github.com/malivvan/harbor/internal/slip21"
 	"github.com/malivvan/harbor/pkg/audit"
 	"github.com/malivvan/harbor/pkg/metrics"
-	"github.com/malivvan/harbor/ts"
-	"github.com/malivvan/harbor/vec"
+	"github.com/malivvan/harbor/store/file"
+	"github.com/malivvan/harbor/store/record"
+	"github.com/malivvan/harbor/store/search"
+	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/harbor/store/vector"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -81,7 +81,7 @@ type Options struct {
 
 	// Codec encodes entities for the db sub-store. A nil Codec selects the
 	// default JSON codec.
-	Codec db.Codec
+	Codec record.Codec
 
 	// Password protects the store. It is required.
 	//
@@ -118,7 +118,7 @@ type Options struct {
 
 	// Quantizer compresses vectors when UseQuant is enabled. A nil Quantizer
 	// selects the default SQ8 quantizer.
-	Quantizer vec.Quantizer
+	Quantizer vector.Quantizer
 
 	// Metrics, when non-nil, receives operation counters, latency histograms
 	// and tracing spans from every sub-store. A nil Observer disables
@@ -184,13 +184,13 @@ func (o *Options) creationParams() (time, memory uint32, threads uint8, flags ui
 type Store struct {
 	mu sync.RWMutex
 	// txMu serializes explicit cross-store write transactions.
-	txMu sync.Mutex
-	bs   *bolt.DB
-	db   *db.Store
-	fs   *fs.Store
-	ts   *ts.Store
-	vec  *vec.Store
-	fts  *fts.Store
+	txMu   sync.Mutex
+	bs     *bolt.DB
+	record *record.Store
+	file   *file.Store
+	series *series.Store
+	vector *vector.Store
+	search *search.Store
 
 	// audit records events for the enabled stores, or nil when disabled.
 	audit *audit.Recorder
@@ -214,11 +214,11 @@ type auditPublicKeys struct {
 // wiped as soon as the sub-stores have copied them.
 type storeKeys struct {
 	canary []byte
-	db     []byte
-	fs     []byte
-	ts     []byte
-	vec    []byte
-	fts    []byte
+	record []byte
+	file   []byte
+	series []byte
+	vector []byte
+	search []byte
 
 	auditDB  ed25519.PrivateKey
 	auditFS  ed25519.PrivateKey
@@ -230,7 +230,7 @@ func (k *storeKeys) wipe() {
 	if k == nil {
 		return
 	}
-	for _, b := range [][]byte{k.canary, k.db, k.fs, k.ts, k.vec, k.fts, k.auditDB, k.auditFS, k.auditTS, k.auditVec} {
+	for _, b := range [][]byte{k.canary, k.record, k.file, k.series, k.vector, k.search, k.auditDB, k.auditFS, k.auditTS, k.auditVec} {
 		wipe(b)
 	}
 }
@@ -313,10 +313,10 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	// Bind each sub-store to its own derived key and explicit bucket root.
 	// The persisted flags decide which features are encrypted, so the on-disk
 	// mode cannot drift between runs.
-	if s.db, err = db.Open(ctx, bdb, db.Config{
-		Root:            namedRoot(db.Name),
+	if s.record, err = record.Open(ctx, bdb, record.Config{
+		Root:            namedRoot(record.Name),
 		Codec:           options.Codec,
-		Secret:          keys.db,
+		Secret:          keys.record,
 		EncryptKeys:     hasFlag(md.Flags, EncryptDBKeys),
 		EncryptValues:   hasFlag(md.Flags, EncryptDBValues),
 		EncryptMetadata: hasFlag(md.Flags, EncryptDBMetadata),
@@ -325,9 +325,9 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open db store: %w", err)
 	}
-	if s.fs, err = fs.Open(ctx, bdb, fs.Config{
-		Root:            namedRoot(fs.Name),
-		Secret:          keys.fs,
+	if s.file, err = file.Open(ctx, bdb, file.Config{
+		Root:            namedRoot(file.Name),
+		Secret:          keys.file,
 		EncryptMetadata: hasFlag(md.Flags, EncryptFSMetadata),
 		EncryptContent:  hasFlag(md.Flags, EncryptFSContent),
 		Audit:           auditSink(AuditFS),
@@ -335,9 +335,9 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open fs store: %w", err)
 	}
-	if s.ts, err = ts.Open(ctx, bdb, ts.Config{
-		Root:               namedRoot(ts.Name),
-		Secret:             keys.ts,
+	if s.series, err = series.Open(ctx, bdb, series.Config{
+		Root:               namedRoot(series.Name),
+		Secret:             keys.series,
 		EncryptValues:      hasFlag(md.Flags, EncryptTSValues),
 		EncryptSeriesNames: hasFlag(md.Flags, EncryptTSSeriesNames),
 		Audit:              auditSink(AuditTS),
@@ -345,17 +345,17 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open ts store: %w", err)
 	}
-	if s.fts, err = fts.Open(ctx, bdb, fts.Config{
-		Root:          namedRoot(fts.Name),
-		Secret:        keys.fts,
+	if s.search, err = search.Open(ctx, bdb, search.Config{
+		Root:          namedRoot(search.Name),
+		Secret:        keys.search,
 		EncryptValues: hasFlag(md.Flags, EncryptDBValues),
 		Metrics:       options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open fts store: %w", err)
 	}
-	if s.vec, err = vec.Open(ctx, bdb, vec.Config{
-		Root:                   namedRoot(vec.Name),
-		Secret:                 keys.vec,
+	if s.vector, err = vector.Open(ctx, bdb, vector.Config{
+		Root:                   namedRoot(vector.Name),
+		Secret:                 keys.vector,
 		UseQuant:               options.UseQuant,
 		Quantizer:              options.Quantizer,
 		EncryptPoints:          hasFlag(md.Flags, EncryptVecPoints),
@@ -528,11 +528,11 @@ func deriveKeys(password string, salt []byte, time, memory uint32, threads uint8
 		dst   *[]byte
 	}{
 		{canaryPlaintext, &keys.canary},
-		{labelDB, &keys.db},
-		{labelFS, &keys.fs},
-		{labelTS, &keys.ts},
-		{labelVec, &keys.vec},
-		{labelFTS, &keys.fts},
+		{labelDB, &keys.record},
+		{labelFS, &keys.file},
+		{labelTS, &keys.series},
+		{labelVec, &keys.vector},
+		{labelFTS, &keys.search},
 	}
 	for _, item := range labels {
 		*item.dst, err = derive(item.label)
@@ -583,43 +583,90 @@ func publicOf(priv ed25519.PrivateKey) ed25519.PublicKey {
 	return append(ed25519.PublicKey(nil), priv.Public().(ed25519.PublicKey)...)
 }
 
-// storeComponent returns one sub-store while holding the read lock, or nil
-// when the store is nil or closed.
-func storeComponent[T any](s *Store, component func(*Store) *T) *T {
+// Record returns the record sub-store. Extra path segments select a rooted
+// view of the same store instead of the conventional root ("db"); no segments
+// keeps the conventional root so existing databases stay readable.
+func (s *Store) Record(path ...string) *record.Store {
 	if s == nil {
 		return nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.bs == nil {
+	if s.bs == nil || s.record == nil {
 		return nil
 	}
-	return component(s)
+	if len(path) == 0 {
+		return s.record
+	}
+	return s.record.WithRoot(path...)
 }
 
-// DB returns the db sub-store.
-func (s *Store) DB() *db.Store {
-	return storeComponent(s, func(s *Store) *db.Store { return s.db })
+// File returns the file sub-store. Extra path segments select a rooted view
+// instead of the conventional root ("fs").
+func (s *Store) File(path ...string) *file.Store {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil || s.file == nil {
+		return nil
+	}
+	if len(path) == 0 {
+		return s.file
+	}
+	return s.file.WithRoot(path...)
 }
 
-// FS returns the fs sub-store.
-func (s *Store) FS() *fs.Store {
-	return storeComponent(s, func(s *Store) *fs.Store { return s.fs })
+// Series returns the time-series sub-store. Extra path segments select a
+// rooted view instead of the conventional root ("ts").
+func (s *Store) Series(path ...string) *series.Store {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil || s.series == nil {
+		return nil
+	}
+	if len(path) == 0 {
+		return s.series
+	}
+	return s.series.WithRoot(path...)
 }
 
-// TS returns the ts sub-store.
-func (s *Store) TS() *ts.Store {
-	return storeComponent(s, func(s *Store) *ts.Store { return s.ts })
+// Vector returns the vector sub-store. Extra path segments select a rooted view
+// instead of the conventional root ("vec").
+func (s *Store) Vector(path ...string) *vector.Store {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil || s.vector == nil {
+		return nil
+	}
+	if len(path) == 0 {
+		return s.vector
+	}
+	return s.vector.WithRoot(path...)
 }
 
-// Vec returns the vec sub-store.
-func (s *Store) Vec() *vec.Store {
-	return storeComponent(s, func(s *Store) *vec.Store { return s.vec })
-}
-
-// FTS returns the full-text sub-store.
-func (s *Store) FTS() *fts.Store {
-	return storeComponent(s, func(s *Store) *fts.Store { return s.fts })
+// Search returns the full-text sub-store. Extra path segments select a rooted
+// view instead of the conventional root ("fts").
+func (s *Store) Search(path ...string) *search.Store {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil || s.search == nil {
+		return nil
+	}
+	if len(path) == 0 {
+		return s.search
+	}
+	return s.search.WithRoot(path...)
 }
 
 // Flags returns the encryption flags persisted by the store. A closed store
@@ -751,8 +798,8 @@ func (s *Store) Backup(ctx context.Context, w io.Writer) error {
 
 	// The vec store buffers points in memory; drain them so the snapshot is
 	// consistent with what the store has accepted.
-	if s.vec != nil {
-		if err := s.vec.Flush(); err != nil && !errors.Is(err, vec.ErrClosed) {
+	if s.vector != nil {
+		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
 			return fmt.Errorf("harbor: backup: flush vec store: %w", err)
 		}
 	}
@@ -822,18 +869,18 @@ func (s *Store) Close() error {
 	// shared handle. A flush failure must not keep the bbolt handle (and its
 	// file lock) open forever: close it anyway and return the flush error.
 	var flushErr error
-	if s.vec != nil {
-		if err := s.vec.Flush(); err != nil && !errors.Is(err, vec.ErrClosed) {
+	if s.vector != nil {
+		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
 			flushErr = fmt.Errorf("harbor: flush vec store: %w", err)
 		}
 	}
 	closeErr := s.bs.Close()
 	s.bs = nil
-	s.db = nil
-	s.fs = nil
-	s.ts = nil
-	s.vec = nil
-	s.fts = nil
+	s.record = nil
+	s.file = nil
+	s.series = nil
+	s.vector = nil
+	s.search = nil
 	if flushErr != nil && closeErr != nil {
 		return errors.Join(flushErr, closeErr)
 	}

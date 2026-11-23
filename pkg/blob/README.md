@@ -2,7 +2,7 @@
 
 `blob` is a flat object store on top of a Harbor file system.
 
-Harbor's `fs` is hierarchical; most applications want a flat blob namespace
+Harbor's `file` store is hierarchical; most applications want a flat blob namespace
 instead — "put these bytes at `tenant/2024/invoice.pdf` and give them back". A
 bucket is a top-level directory, a key is the path beneath it, and the pair maps to
 exactly one file.
@@ -10,7 +10,7 @@ exactly one file.
 ```go
 import "github.com/malivvan/harbor/pkg/blob"
 
-s, err := blob.Open(st.FS(), "objects") // st is a *harbor.Store
+s, err := blob.Open(st.File(), "objects") // st is a *harbor.Store
 if err != nil {
     log.Fatal(err)
 }

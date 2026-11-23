@@ -1,3 +1,11 @@
+> **Post-backlog restructure.** The store packages were renamed and moved:
+> `db` → `store/record`, `ts` → `store/series`, `fs` → `store/file`, `vec` →
+> `store/vector`, `fts` → `store/search`. `harbor.Store` now exposes
+> `Record/File/Series/Vector/Search`, each taking optional bucket-path
+> segments; no-argument accessors keep the original on-disk roots. The
+> compatibility notes below use the names from before that restructure where
+> they describe historical behaviour.
+
 # Post-implementation notes
 
 The backlog in `PLAN.md` is implemented and the local release gate is green.
@@ -82,13 +90,13 @@ CI has not run on this working tree. Tag only from a commit whose CI is green
   buckets, and a new build opens old stores with the same derived keys.
 - `ScoredPoint` gained an optional `Vector` field, and `Node` gained
   `Aggregate`, `ValidateSchema` and `GetMany`. These are additive.
-- `fs.Store`, `ts.Store`, `vec.Store` and `fts.Store` gained transaction-bound
-  views and read-only constructors; `db` gained `AttachWithAudit`. These are
+- `file.Store`, `series.Store`, `vector.Store` and `search.Store` gained transaction-bound
+  views and read-only constructors; `record` gained `AttachWithAudit`. These are
   additive and do not change managed-transaction behaviour.
 - The audit event encoding changed to canonical JSON (PLAN 0.5). The first
   public release has a single audit format; a pre-release trail written by an
   older build would fail verification. No released data exists yet.
-- `db.Set` now records `set` (not `set_bytes`) in the audit trail. `fs.Copy`
+- `record.Set` now records `set` (not `set_bytes`) in the audit trail. `file.Copy`
   records a `copy` event. Operations that were previously invisible now appear.
 
 ## Suggested next steps before tagging
@@ -102,3 +110,42 @@ CI has not run on this working tree. Tag only from a commit whose CI is green
    transactions, backup/verify, FTS, aggregation, references, projection and
    migration sections.
 5. Tag `v0.1.x` from that green commit.
+
+## Post-backlog package restructure
+
+The store packages were renamed and moved under `store/` after the backlog was
+completed:
+
+| Old | New |
+|---|---|
+| `db` (`DB()`) | `store/record` (`Record()`) |
+| `fs` (`FS()`) | `store/file` (`File()`) |
+| `ts` (`TS()`) | `store/series` (`Series()`) |
+| `vec` (`Vec()`) | `store/vector` (`Vector()`) |
+| `fts` (`FTS()`) | `store/search` (`Search()`) |
+
+- Subpackages moved with their parents: `record/index`, `record/q`,
+  `file/s3fs`, `vector/hnsw`, `vector/hnsw/heap`, `vector/doc`.
+- The accessors take variadic bucket-path segments and return a rooted view of
+  the already-open store (`store.Record("tenant", "records")`). No-argument
+  accessors keep the legacy on-disk roots (`db`, `fs`, `ts`, `vec`, `fts`), so
+  existing databases remain readable. Each store gained `WithRoot`; views share
+  the handle, encryption state, rotation guard and (for vector) the flush
+  registry.
+- `Tx` accessors are now `Record/File/Series/Vector/Search`.
+- `pkg/store` manager and package-level accessors were renamed and accept the
+  same path segments; `Search` was added for parity.
+- `pkg/consensus` keeps its own `Node.DB/FS/TS/Vec` facade names (they return
+  consensus wrappers, not the stores); only its internal `harbor.Store` calls
+  changed. Metric names (`harbor.db.*`, `harbor.fs.*`, …) and audit store
+  identifiers (`db`, `fs`, `ts`, `vec`) are unchanged because they are part of
+  externally observed formats.
+- Documentation, package guides, links and snippets were updated to the new
+  paths and names. `PLAN.md` keeps its historical text with a restructure note
+  at the top.
+
+Verification for this change: `gofmt`, `go vet`, `go build`, the full test
+suite, the race suite, the CGO-free suite, `go mod tidy -diff`, staticcheck and
+govulncheck are green. A rooted-view test proves custom roots are isolated from
+the defaults, persist across a close/reopen, and that a base vector flush drains
+its views.

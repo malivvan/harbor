@@ -1,0 +1,749 @@
+package record
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"reflect"
+	"strings"
+
+	"github.com/malivvan/harbor/store/record/index"
+	bolt "go.etcd.io/bbolt"
+)
+
+// Name is the conventional root bucket the harbor root package uses for the db
+// sub-store. It is not applied implicitly: an empty Config.Root means the
+// database root.
+const Name = "db"
+
+// TypeStore stores user defined types in BoltDB.
+type TypeStore interface {
+	Finder
+	// Init creates the indexes and buckets for a given structure
+	Init(ctx context.Context, data any) error
+
+	// ReIndex rebuilds all the indexes of a bucket
+	ReIndex(ctx context.Context, data any) error
+
+	// Save a structure
+	Save(ctx context.Context, data any) error
+
+	// Update a structure
+	Update(ctx context.Context, data any) error
+
+	// UpdateField updates a single field
+	UpdateField(ctx context.Context, data any, fieldName string, value any) error
+
+	// Drop a bucket
+	Drop(ctx context.Context, data any) error
+
+	// DeleteStruct deletes a structure from the associated bucket
+	DeleteStruct(ctx context.Context, data any) error
+}
+
+// Init creates the indexes and buckets for a given structure
+func (n *node) Init(ctx context.Context, data any) error {
+	if err := checkContext(ctx); err != nil {
+		return wrapError("init", err)
+	}
+
+	v := reflect.ValueOf(data)
+	cfg, err := extract(&v)
+	if err != nil {
+		return wrapError("init", err)
+	}
+
+	if err := checkContext(ctx); err != nil {
+		return wrapError("init", err)
+	}
+
+	return wrapError("init", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+		return n.init(ctx, tx, cfg)
+	}))
+}
+
+func (n *node) init(ctx context.Context, tx *bolt.Tx, cfg *structConfig) error {
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	bucket, err := n.createBucketIfNotExists(tx, cfg.Name)
+	if err != nil {
+		return err
+	}
+
+	// save node configuration in the bucket
+	_, err = newMeta(bucket, n)
+	if err != nil {
+		return err
+	}
+
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	for fieldName, fieldCfg := range cfg.Fields {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+		if fieldCfg.Index == "" {
+			continue
+		}
+		switch fieldCfg.Index {
+		case tagID:
+			_, err = index.NewIDIndex(bucket, []byte(indexPrefix+fieldName))
+		case tagUniqueIdx:
+			_, err = index.NewUniqueIndex(bucket, []byte(indexPrefix+fieldName))
+		case tagIdx:
+			_, err = index.NewListIndex(bucket, []byte(indexPrefix+fieldName))
+		default:
+			err = ErrIdxNotFound
+		}
+
+		if err != nil {
+			return err
+		}
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (n *node) ReIndex(ctx context.Context, data any) error {
+	if err := checkContext(ctx); err != nil {
+		return wrapError("reindex", err)
+	}
+
+	ref := reflect.ValueOf(data)
+
+	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
+		return wrapError("reindex", ErrStructPtrNeeded)
+	}
+
+	cfg, err := extract(&ref)
+	if err != nil {
+		return wrapError("reindex", err)
+	}
+	if err := checkContext(ctx); err != nil {
+		return wrapError("reindex", err)
+	}
+
+	return wrapError("reindex", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+		return n.reIndex(ctx, tx, data, cfg)
+	}))
+}
+
+func (n *node) reIndex(ctx context.Context, tx *bolt.Tx, data interface{}, cfg *structConfig) error {
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	root := n.withTransaction(tx)
+	nodes, err := root.From(cfg.Name).PrefixScan(ctx, indexPrefix)
+	if err != nil {
+		return err
+	}
+
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	bucket := root.getBucket(tx, cfg.Name)
+	if bucket == nil {
+		return ErrNotFound
+	}
+
+	// Delete existing index buckets.
+	for _, idxNode := range nodes {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+		buckets := idxNode.Bucket()
+		name := buckets[len(buckets)-1]
+		err := bucket.DeleteBucket([]byte(name))
+		if err != nil {
+			return err
+		}
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+	}
+
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	// Collect the record keys first: updating a record mutates the bucket and
+	// a bbolt cursor must not be walked while it is being modified.
+	var keys [][]byte
+	if err := bucket.ForEach(func(k, v []byte) error {
+		if v == nil {
+			return nil // nested index/metadata bucket
+		}
+		keys = append(keys, append([]byte(nil), k...))
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	for _, key := range keys {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+		raw := bucket.Get(key)
+		if raw == nil {
+			continue
+		}
+		if err := root.unmarshal(raw, data); err != nil {
+			return err
+		}
+		cfg.refresh()
+		// Re-index the record we already decoded instead of going through
+		// Update, which would fetch and decode it a second time.
+		if err := root.save(ctx, tx, cfg, data, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Save a structure
+func (n *node) Save(ctx context.Context, data any) error {
+	if err := checkContext(ctx); err != nil {
+		return wrapError("save", err)
+	}
+
+	ref := reflect.ValueOf(data)
+
+	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
+		return wrapError("save", ErrStructPtrNeeded)
+	}
+
+	cfg, err := extract(&ref)
+	if err != nil {
+		return wrapError("save", err)
+	}
+
+	if cfg.ID.IsZero {
+		if !cfg.ID.IsInteger || !cfg.ID.Increment {
+			return wrapError("save", ErrZeroID)
+		}
+	}
+
+	if err := checkContext(ctx); err != nil {
+		return wrapError("save", err)
+	}
+
+	if err := n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+		return n.save(ctx, tx, cfg, data, false)
+	}); err != nil {
+		return wrapError("save", err)
+	}
+	n.emitUpsert(cfg, data)
+	return n.auditRecordStruct("save", cfg, data)
+}
+
+func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data interface{}, update bool) error {
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	bucket, err := n.createBucketIfNotExists(tx, cfg.Name)
+	if err != nil {
+		return err
+	}
+
+	// save node configuration in the bucket
+	meta, err := newMeta(bucket, n)
+	if err != nil {
+		return err
+	}
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	if cfg.ID.IsZero {
+		err = meta.increment(cfg.ID)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	// A reference field must name an existing record; the check runs inside the
+	// same transaction so a dangling save rolls back completely.
+	if err := n.validateRefFields(tx, cfg); err != nil {
+		return err
+	}
+
+	id, err := n.keyBytes(cfg.ID.Value.Interface(), keyDomainID)
+	if err != nil {
+		return err
+	}
+
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	indexes, err := resolveIndexes(bucket, cfg)
+	if err != nil {
+		return err
+	}
+
+	for fieldName, fieldCfg := range cfg.Fields {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		if !update && !fieldCfg.IsID && fieldCfg.Increment && fieldCfg.IsInteger && fieldCfg.IsZero {
+			err = meta.increment(fieldCfg)
+			if err != nil {
+				return err
+			}
+			if err := checkContext(ctx); err != nil {
+				return err
+			}
+		}
+
+		if fieldCfg.Index == "" {
+			continue
+		}
+
+		idx := indexes[fieldName]
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		if update && fieldCfg.IsZero && !fieldCfg.ForceUpdate {
+			continue
+		}
+
+		if fieldCfg.IsZero {
+			err = idx.RemoveID(ctx, id)
+			if err != nil {
+				return err
+			}
+			if err := checkContext(ctx); err != nil {
+				return err
+			}
+			continue
+		}
+
+		value, err := n.keyBytes(fieldCfg.Value.Interface(), keyDomainIndex)
+		if err != nil {
+			return err
+		}
+
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		var found bool
+		if checker, ok := idx.(interface {
+			HasValueID(context.Context, []byte, []byte) (bool, error)
+		}); ok {
+			found, err = checker.HasValueID(ctx, value, id)
+		} else {
+			var idsSaved [][]byte
+			idsSaved, err = idx.All(ctx, value, nil)
+			for _, idSaved := range idsSaved {
+				if bytes.Equal(idSaved, id) {
+					found = true
+					break
+				}
+			}
+		}
+		if err != nil {
+			return err
+		}
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		if found {
+			continue
+		}
+
+		err = idx.RemoveID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		err = idx.Add(ctx, value, id)
+		if err != nil {
+			if errors.Is(err, index.ErrAlreadyExists) {
+				return ErrAlreadyExists
+			}
+			return err
+		}
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+	}
+
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	raw, err := n.marshal(data)
+	if err != nil {
+		return err
+	}
+
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	if err := bucket.Put(id, raw); err != nil {
+		return err
+	}
+	if err := n.registerRefSchema(tx, cfg); err != nil {
+		return err
+	}
+	return checkContext(ctx)
+}
+
+// Update a structure
+func (n *node) Update(ctx context.Context, data any) error {
+	return wrapError("update", n.update(ctx, data, "update", func(ref *reflect.Value, current *reflect.Value, cfg *structConfig) error {
+		return mergeUpdateFields(ctx, ref, current, cfg)
+	}))
+}
+
+// mergeUpdateFields copies the non-zero fields of src over dst, the stored
+// record. Inline embedded structs are merged field by field: treating the
+// whole embedded value as one top-level field would replace the stored struct
+// wholesale and zero every subfield the caller did not supply.
+func mergeUpdateFields(ctx context.Context, src, dst *reflect.Value, cfg *structConfig) error {
+	return mergeUpdateStruct(ctx, *src, *dst, cfg)
+}
+
+func mergeUpdateStruct(ctx context.Context, src, dst reflect.Value, cfg *structConfig) error {
+	typ := src.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+		sf := typ.Field(i)
+		if sf.PkgPath != "" {
+			continue
+		}
+
+		sv := src.Field(i)
+		dv := dst.Field(i)
+
+		if strings.Contains(sf.Tag.Get("db"), tagInline) {
+			srcElem, dstElem, ok := inlineValues(sv, dv)
+			if !ok {
+				continue
+			}
+			if err := mergeUpdateStruct(ctx, srcElem, dstElem, cfg); err != nil {
+				return err
+			}
+			continue
+		}
+
+		zero := reflect.Zero(sv.Type()).Interface()
+		if reflect.DeepEqual(sv.Interface(), zero) {
+			continue
+		}
+		dv.Set(sv)
+		if idxInfo, ok := cfg.Fields[sf.Name]; ok {
+			idxInfo.Value = &dv
+			idxInfo.IsZero = isZero(&dv)
+		}
+	}
+	return nil
+}
+
+// inlineValues resolves the source and destination values of an inline
+// embedded field. A nil source pointer means the caller supplied nothing for
+// that struct; a nil destination pointer is allocated so the merge has
+// somewhere to write.
+func inlineValues(src, dst reflect.Value) (reflect.Value, reflect.Value, bool) {
+	if src.Kind() != reflect.Pointer {
+		if src.Kind() != reflect.Struct {
+			return reflect.Value{}, reflect.Value{}, false
+		}
+		return src, dst, true
+	}
+	if src.IsNil() {
+		return reflect.Value{}, reflect.Value{}, false
+	}
+	srcElem := src.Elem()
+	if srcElem.Kind() != reflect.Struct {
+		return reflect.Value{}, reflect.Value{}, false
+	}
+	if dst.Kind() == reflect.Pointer {
+		if dst.IsNil() {
+			if !dst.CanSet() {
+				return reflect.Value{}, reflect.Value{}, false
+			}
+			dst.Set(reflect.New(dst.Type().Elem()))
+		}
+		return srcElem, dst.Elem(), true
+	}
+	if dst.Kind() != reflect.Struct {
+		return reflect.Value{}, reflect.Value{}, false
+	}
+	return srcElem, dst, true
+}
+
+// UpdateField updates a single field
+func (n *node) UpdateField(ctx context.Context, data any, fieldName string, value any) error {
+	return wrapError("update field", n.update(ctx, data, "update_field", func(ref *reflect.Value, current *reflect.Value, cfg *structConfig) error {
+		if cfg.ID != nil && fieldName == cfg.ID.Name {
+			return ErrImmutableID
+		}
+		f := current.FieldByName(fieldName)
+		if !f.IsValid() {
+			return ErrNotFound
+		}
+		tf, _ := current.Type().FieldByName(fieldName)
+		if tf.PkgPath != "" {
+			return ErrNotFound
+		}
+		v := reflect.ValueOf(value)
+		if v.Kind() != f.Kind() {
+			return ErrIncompatibleValue
+		}
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+		f.Set(v)
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+		idxInfo, ok := cfg.Fields[fieldName]
+		if ok {
+			idxInfo.Value = &f
+			idxInfo.IsZero = isZero(idxInfo.Value)
+			idxInfo.ForceUpdate = true
+		}
+		return nil
+	}))
+}
+
+func (n *node) update(ctx context.Context, data interface{}, op string, fn func(*reflect.Value, *reflect.Value, *structConfig) error) error {
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	ref := reflect.ValueOf(data)
+	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
+		return ErrStructPtrNeeded
+	}
+
+	cfg, err := extract(&ref)
+	if err != nil {
+		return err
+	}
+
+	if cfg.ID.IsZero {
+		return ErrNoID
+	}
+
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	current := reflect.New(reflect.Indirect(ref).Type())
+
+	if err := n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		err = n.withTransaction(tx).One(ctx, cfg.ID.Name, cfg.ID.Value.Interface(), current.Interface())
+		if err != nil {
+			return err
+		}
+
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		ref := reflect.ValueOf(data).Elem()
+		cref := current.Elem()
+		err = fn(&ref, &cref, cfg)
+		if err != nil {
+			return err
+		}
+
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		return n.save(ctx, tx, cfg, current.Interface(), true)
+	}); err != nil {
+		return err
+	}
+	n.emitUpsert(cfg, current.Interface())
+	return n.auditRecordStruct(op, cfg, current.Interface())
+}
+
+// Drop a bucket
+func (n *node) Drop(ctx context.Context, data any) error {
+	if err := checkContext(ctx); err != nil {
+		return wrapError("drop", err)
+	}
+
+	var bucketName string
+
+	v := reflect.ValueOf(data)
+	if v.Kind() != reflect.String {
+		info, err := extract(&v)
+		if err != nil {
+			return wrapError("drop", err)
+		}
+
+		bucketName = info.Name
+	} else {
+		bucketName = v.Interface().(string)
+	}
+
+	if err := checkContext(ctx); err != nil {
+		return wrapError("drop", err)
+	}
+
+	if err := wrapError("drop", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+		return n.drop(ctx, tx, bucketName)
+	})); err != nil {
+		return err
+	}
+	return n.auditEntry("drop", bucketName, nil)
+}
+
+func (n *node) drop(ctx context.Context, tx *bolt.Tx, bucketName string) error {
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	// Enforce inbound references before the bucket (and its records) vanishes.
+	if err := n.enforceDropRefs(ctx, tx, bucketName, map[string]bool{}, 0); err != nil {
+		return err
+	}
+
+	bucket := n.getBucket(tx)
+	var err error
+	if bucket == nil {
+		err = tx.DeleteBucket([]byte(bucketName))
+	} else {
+		err = bucket.DeleteBucket([]byte(bucketName))
+	}
+	if err != nil {
+		return err
+	}
+	return checkContext(ctx)
+}
+
+// DeleteStruct deletes a structure from the associated bucket
+func (n *node) DeleteStruct(ctx context.Context, data any) error {
+	if err := checkContext(ctx); err != nil {
+		return wrapError("delete struct", err)
+	}
+
+	ref := reflect.ValueOf(data)
+
+	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
+		return wrapError("delete struct", ErrStructPtrNeeded)
+	}
+
+	cfg, err := extract(&ref)
+	if err != nil {
+		return wrapError("delete struct", err)
+	}
+
+	if err := checkContext(ctx); err != nil {
+		return wrapError("delete struct", err)
+	}
+
+	if err := n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+		// Restrict references block the delete; cascade references are removed
+		// in the same transaction.
+		if err := n.enforceDeleteRefs(ctx, tx, cfg.Name, cfg.ID.Value.Interface(), map[string]bool{}, 0); err != nil {
+			return err
+		}
+		id, err := n.keyBytes(cfg.ID.Value.Interface(), keyDomainID)
+		if err != nil {
+			return err
+		}
+		return n.deleteStruct(ctx, tx, cfg, id)
+	}); err != nil {
+		return wrapError("delete struct", err)
+	}
+	n.emitDelete(cfg)
+	return n.auditRecordStruct("delete_struct", cfg, nil)
+}
+
+func (n *node) deleteStruct(ctx context.Context, tx *bolt.Tx, cfg *structConfig, id []byte) error {
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	bucket := n.getBucket(tx, cfg.Name)
+	if bucket == nil {
+		return ErrNotFound
+	}
+
+	indexes, err := resolveIndexes(bucket, cfg)
+	if err != nil {
+		return err
+	}
+
+	for fieldName, fieldCfg := range cfg.Fields {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		if fieldCfg.Index == "" {
+			continue
+		}
+
+		idx := indexes[fieldName]
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+
+		err = idx.RemoveID(ctx, id)
+		if err != nil {
+			if errors.Is(err, index.ErrNotFound) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+	}
+
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	raw := bucket.Get(id)
+	if raw == nil {
+		return ErrNotFound
+	}
+
+	if err := checkContext(ctx); err != nil {
+		return err
+	}
+
+	if err := bucket.Delete(id); err != nil {
+		return err
+	}
+	return checkContext(ctx)
+}

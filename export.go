@@ -16,10 +16,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/malivvan/harbor/db"
-	"github.com/malivvan/harbor/fs"
-	"github.com/malivvan/harbor/ts"
-	"github.com/malivvan/harbor/vec"
+	"github.com/malivvan/harbor/store/file"
+	"github.com/malivvan/harbor/store/record"
+	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/harbor/store/vector"
 )
 
 // Export format constants. The container is newline-delimited JSON: one header
@@ -102,29 +102,29 @@ type ExportSummary struct {
 // exportRecord is the wire form of one line. Header and footer use the first
 // fields; a record kind uses the fields relevant to it.
 type exportRecord struct {
-	Kind      string            `json:"kind"`
-	Format    string            `json:"format,omitempty"`
-	Version   int               `json:"version,omitempty"`
-	Flags     uint16            `json:"flags,omitempty"`
-	Records   int64             `json:"records,omitempty"`
-	Checksum  string            `json:"sha256,omitempty"`
-	Container string            `json:"container,omitempty"`
-	Type      string            `json:"record_type,omitempty"`
-	Path      string            `json:"path,omitempty"`
-	Link      string            `json:"link,omitempty"`
-	Mode      uint32            `json:"mode,omitempty"`
-	Atime     time.Time         `json:"atime,omitempty"`
-	Mtime     time.Time         `json:"mtime,omitempty"`
-	Data      []byte            `json:"data,omitempty"`
-	Labels    map[string]string `json:"labels,omitempty"`
-	MaxAge    int64             `json:"max_age,omitempty"`
-	MaxPoints int               `json:"max_points,omitempty"`
-	Points    []ts.Point        `json:"points,omitempty"`
-	VectorLen int               `json:"vector_len,omitempty"`
-	Metric    string            `json:"metric,omitempty"`
-	UseHNSW   bool              `json:"use_hnsw,omitempty"`
-	HNSW      *vec.HNSWParams   `json:"hnsw,omitempty"`
-	Vectors   json.RawMessage   `json:"vectors,omitempty"`
+	Kind      string             `json:"kind"`
+	Format    string             `json:"format,omitempty"`
+	Version   int                `json:"version,omitempty"`
+	Flags     uint16             `json:"flags,omitempty"`
+	Records   int64              `json:"records,omitempty"`
+	Checksum  string             `json:"sha256,omitempty"`
+	Container string             `json:"container,omitempty"`
+	Type      string             `json:"record_type,omitempty"`
+	Path      string             `json:"path,omitempty"`
+	Link      string             `json:"link,omitempty"`
+	Mode      uint32             `json:"mode,omitempty"`
+	Atime     time.Time          `json:"atime,omitempty"`
+	Mtime     time.Time          `json:"mtime,omitempty"`
+	Data      []byte             `json:"data,omitempty"`
+	Labels    map[string]string  `json:"labels,omitempty"`
+	MaxAge    int64              `json:"max_age,omitempty"`
+	MaxPoints int                `json:"max_points,omitempty"`
+	Points    []series.Point     `json:"points,omitempty"`
+	VectorLen int                `json:"vector_len,omitempty"`
+	Metric    string             `json:"metric,omitempty"`
+	UseHNSW   bool               `json:"use_hnsw,omitempty"`
+	HNSW      *vector.HNSWParams `json:"hnsw,omitempty"`
+	Vectors   json.RawMessage    `json:"vectors,omitempty"`
 }
 
 // countingWriter counts the bytes that reach the destination.
@@ -177,8 +177,8 @@ func Export(ctx context.Context, src *Store, w io.Writer, opts ExportOptions) (E
 	if src.bs == nil {
 		return ExportSummary{}, ErrClosed
 	}
-	if src.vec != nil {
-		if err := src.vec.Flush(); err != nil && !errors.Is(err, vec.ErrClosed) {
+	if src.vector != nil {
+		if err := src.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
 			return ExportSummary{}, fmt.Errorf("harbor: export: flush vec store: %w", err)
 		}
 	}
@@ -289,7 +289,7 @@ func (e *exporter) exportDB() error {
 			return err
 		}
 		records := reflect.New(reflect.SliceOf(reflect.PointerTo(t)))
-		if err := e.src.DB().Select().Find(e.ctx, records.Interface()); err != nil && !errors.Is(err, db.ErrNotFound) {
+		if err := e.src.Record().Select().Find(e.ctx, records.Interface()); err != nil && !errors.Is(err, record.ErrNotFound) {
 			return fmt.Errorf("harbor: export db %s: %w", t, err)
 		}
 		slice := records.Elem()
@@ -310,7 +310,7 @@ func (e *exporter) exportDB() error {
 }
 
 func (e *exporter) exportFS() error {
-	names, err := e.src.FS().FileSystems()
+	names, err := e.src.File().FileSystems()
 	if err != nil {
 		return fmt.Errorf("harbor: export fs: %w", err)
 	}
@@ -319,7 +319,7 @@ func (e *exporter) exportFS() error {
 		if err := e.ctx.Err(); err != nil {
 			return err
 		}
-		vfs, err := e.src.FS().Open(name)
+		vfs, err := e.src.File().Open(name)
 		if err != nil {
 			return fmt.Errorf("harbor: export fs %q: %w", name, err)
 		}
@@ -330,7 +330,7 @@ func (e *exporter) exportFS() error {
 	return nil
 }
 
-func (e *exporter) exportFSTree(container string, vfs *fs.FS, dir string) error {
+func (e *exporter) exportFSTree(container string, vfs *file.FS, dir string) error {
 	entries, err := vfs.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("harbor: export fs %q %s: %w", container, dir, err)
@@ -390,7 +390,7 @@ func (e *exporter) exportFSTree(container string, vfs *fs.FS, dir string) error 
 }
 
 func (e *exporter) exportTS() error {
-	seriesInfos, err := e.src.TS().ListSeries(e.ctx)
+	seriesInfos, err := e.src.Series().ListSeries(e.ctx)
 	if err != nil {
 		return fmt.Errorf("harbor: export ts: %w", err)
 	}
@@ -398,8 +398,8 @@ func (e *exporter) exportTS() error {
 		if err := e.ctx.Err(); err != nil {
 			return err
 		}
-		series := e.src.TS().Series(info.Name)
-		var batch []ts.Point
+		ser := e.src.Series().Series(info.Name)
+		var batch []series.Point
 		flush := func() error {
 			if len(batch) == 0 {
 				return nil
@@ -408,7 +408,7 @@ func (e *exporter) exportTS() error {
 			batch = nil
 			return err
 		}
-		err := series.RangeEach(e.ctx, math.MinInt64, math.MaxInt64, func(p ts.Point) error {
+		err := ser.RangeEach(e.ctx, math.MinInt64, math.MaxInt64, func(p series.Point) error {
 			batch = append(batch, p)
 			if len(batch) >= exportBatch {
 				return flush()
@@ -443,7 +443,7 @@ func (e *exporter) exportTS() error {
 }
 
 func (e *exporter) exportVec() error {
-	names, err := e.src.Vec().ListCollections()
+	names, err := e.src.Vector().ListCollections()
 	if err != nil {
 		return fmt.Errorf("harbor: export vec: %w", err)
 	}
@@ -452,7 +452,7 @@ func (e *exporter) exportVec() error {
 		if err := e.ctx.Err(); err != nil {
 			return err
 		}
-		meta, err := e.src.Vec().LoadCollectionMeta(name)
+		meta, err := e.src.Vector().LoadCollectionMeta(name)
 		if err != nil {
 			return fmt.Errorf("harbor: export collection %q: %w", name, err)
 		}
@@ -467,7 +467,7 @@ func (e *exporter) exportVec() error {
 			return err
 		}
 
-		points, err := e.src.Vec().LoadCollection(name)
+		points, err := e.src.Vector().LoadCollection(name)
 		if err != nil {
 			return fmt.Errorf("harbor: export collection %q: %w", name, err)
 		}
@@ -477,7 +477,7 @@ func (e *exporter) exportVec() error {
 		}
 		sort.Strings(ids)
 
-		var batch []vec.PointStruct
+		var batch []vector.PointStruct
 		flush := func() error {
 			if len(batch) == 0 {
 				return nil

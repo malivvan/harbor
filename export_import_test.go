@@ -9,9 +9,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/malivvan/harbor/db/q"
-	"github.com/malivvan/harbor/ts"
-	"github.com/malivvan/harbor/vec"
+	"github.com/malivvan/harbor/store/record/q"
+	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/harbor/store/vector"
 )
 
 // exportTestRecord is the db record shape used by the export/import tests.
@@ -25,10 +25,10 @@ func seedExportStore(t *testing.T, store *Store) {
 	t.Helper()
 	ctx := context.Background()
 
-	require.NoError(t, store.DB().Save(ctx, &exportTestRecord{Name: "alice"}))
-	require.NoError(t, store.DB().Save(ctx, &exportTestRecord{Name: "bob"}))
+	require.NoError(t, store.Record().Save(ctx, &exportTestRecord{Name: "alice"}))
+	require.NoError(t, store.Record().Save(ctx, &exportTestRecord{Name: "bob"}))
 
-	vfs, err := store.FS().Open("docs")
+	vfs, err := store.File().Open("docs")
 	require.NoError(t, err)
 	require.NoError(t, vfs.MkdirAll("/reports/2026", 0o750))
 	file, err := vfs.OpenFile("/reports/2026/q1.txt", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
@@ -38,21 +38,21 @@ func seedExportStore(t *testing.T, store *Store) {
 	require.NoError(t, file.Close())
 	require.NoError(t, vfs.Symlink("/reports/2026/q1.txt", "/reports/latest"))
 
-	cpu := store.TS().Series("cpu")
+	cpu := store.Series().Series("cpu")
 	require.NotNil(t, cpu)
-	require.NoError(t, cpu.InsertMany(ctx, []ts.Point{
+	require.NoError(t, cpu.InsertMany(ctx, []series.Point{
 		{Timestamp: 1, Value: 1.5},
 		{Timestamp: 2, Value: 2.5},
 	}))
 	require.NoError(t, cpu.SetLabels(ctx, map[string]string{"host": "a"}))
-	require.NoError(t, cpu.SetRetention(ctx, ts.Retention{MaxPoints: 100}))
+	require.NoError(t, cpu.SetRetention(ctx, series.Retention{MaxPoints: 100}))
 
-	col, err := store.Vec().NewCollection("colors", 2, vec.Dot, false)
+	col, err := store.Vector().NewCollection("colors", 2, vector.Dot, false)
 	require.NoError(t, err)
-	require.NoError(t, col.Upsert([]vec.PointStruct{{
+	require.NoError(t, col.Upsert([]vector.PointStruct{{
 		ID:      "red",
 		Vector:  []float32{1, 0},
-		Payload: vec.Payload{"hex": "#f00", "shade": 1},
+		Payload: vector.Payload{"hex": "#f00", "shade": 1},
 	}}))
 	require.NoError(t, col.Flush())
 }
@@ -62,9 +62,9 @@ func verifyExportStore(t *testing.T, store *Store) {
 	ctx := context.Background()
 
 	var rec exportTestRecord
-	require.NoError(t, store.DB().Select(q.Eq("Name", "alice")).First(ctx, &rec))
+	require.NoError(t, store.Record().Select(q.Eq("Name", "alice")).First(ctx, &rec))
 
-	vfs, err := store.FS().Open("docs")
+	vfs, err := store.File().Open("docs")
 	require.NoError(t, err)
 	data, err := vfs.ReadFile("/reports/2026/q1.txt")
 	require.NoError(t, err)
@@ -76,7 +76,7 @@ func verifyExportStore(t *testing.T, store *Store) {
 	require.NoError(t, err)
 	require.Equal(t, "/reports/2026/q1.txt", target)
 
-	series := store.TS().Series("cpu")
+	series := store.Series().Series("cpu")
 	points, err := series.Range(ctx, 0, 10)
 	require.NoError(t, err)
 	require.Len(t, points, 2)
@@ -84,7 +84,7 @@ func verifyExportStore(t *testing.T, store *Store) {
 	require.NoError(t, err)
 	require.Equal(t, "a", labels["host"])
 
-	infos, err := store.TS().ListSeries(ctx)
+	infos, err := store.Series().ListSeries(ctx)
 	require.NoError(t, err)
 	found := false
 	for _, seriesInfo := range infos {
@@ -95,7 +95,7 @@ func verifyExportStore(t *testing.T, store *Store) {
 	}
 	require.True(t, found, "series metadata missing")
 
-	loaded, err := store.Vec().LoadCollection("colors")
+	loaded, err := store.Vector().LoadCollection("colors")
 	require.NoError(t, err)
 	point, ok := loaded["red"]
 	require.True(t, ok)
@@ -209,7 +209,7 @@ func TestImportDryRunValidatesWithoutWriting(t *testing.T) {
 	require.True(t, summary.DryRun)
 	require.Greater(t, summary.Records, int64(0))
 
-	count, err := dst.DB().Select().Count(ctx, &exportTestRecord{})
+	count, err := dst.Record().Select().Count(ctx, &exportTestRecord{})
 	require.NoError(t, err)
 	require.Zero(t, count, "a dry run must not write")
 
@@ -291,7 +291,7 @@ func TestCompactTo(t *testing.T) {
 	seedExportStore(t, src)
 
 	// Delete a record so the compacted file has less live data to carry.
-	require.NoError(t, src.DB().DeleteStruct(ctx, &exportTestRecord{ID: 2}))
+	require.NoError(t, src.Record().DeleteStruct(ctx, &exportTestRecord{ID: 2}))
 
 	compacted := filepath.Join(dir, "compacted.db")
 	require.NoError(t, src.CompactTo(ctx, compacted, 0o600))
@@ -303,7 +303,7 @@ func TestCompactTo(t *testing.T) {
 	verifyExportStore(t, restored)
 
 	var gone exportTestRecord
-	require.Error(t, restored.DB().Select(q.Eq("Name", "bob")).First(ctx, &gone))
+	require.Error(t, restored.Record().Select(q.Eq("Name", "bob")).First(ctx, &gone))
 
 	srcInfo, err := os.Stat(filepath.Join(dir, "source.db"))
 	require.NoError(t, err)

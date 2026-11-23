@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/malivvan/harbor/vec"
+	"github.com/malivvan/harbor/store/vector"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -52,8 +52,8 @@ func (s *Store) CompactTo(ctx context.Context, path string, mode os.FileMode) er
 
 	// Buffered vector points are not in the database yet; drain them so the
 	// copy is complete.
-	if s.vec != nil {
-		if err := s.vec.Flush(); err != nil && !errors.Is(err, vec.ErrClosed) {
+	if s.vector != nil {
+		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
 			return fmt.Errorf("harbor: compact: flush vec store: %w", err)
 		}
 	}

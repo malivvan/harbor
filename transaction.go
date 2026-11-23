@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/malivvan/harbor/db"
-	"github.com/malivvan/harbor/fs"
-	"github.com/malivvan/harbor/fts"
 	"github.com/malivvan/harbor/pkg/audit"
-	"github.com/malivvan/harbor/ts"
-	"github.com/malivvan/harbor/vec"
+	"github.com/malivvan/harbor/store/file"
+	"github.com/malivvan/harbor/store/record"
+	"github.com/malivvan/harbor/store/search"
+	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/harbor/store/vector"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -33,17 +33,17 @@ type Tx struct {
 	btx      *bolt.Tx
 	writable bool
 
-	db  db.Tx
-	fs  *fs.Store
-	ts  *ts.Store
-	vec *vec.Store
-	fts *fts.Store
+	record record.Tx
+	file   *file.Store
+	series *series.Store
+	vector *vector.Store
+	search *search.Store
 }
 
 // newTx binds the sub-stores to btx. sink, when non-nil, collects audit events
 // so they can be recorded after the transaction commits.
 func newTx(s *Store, btx *bolt.Tx, writable bool, sink audit.Sink) (*Tx, error) {
-	attached, err := s.db.AttachWithAudit(btx, sink)
+	attached, err := s.record.AttachWithAudit(btx, sink)
 	if err != nil {
 		return nil, err
 	}
@@ -51,72 +51,72 @@ func newTx(s *Store, btx *bolt.Tx, writable bool, sink audit.Sink) (*Tx, error) 
 		store:    s,
 		btx:      btx,
 		writable: writable,
-		db:       attached,
-		fs:       s.fs.WithTransaction(btx),
-		ts:       s.ts.WithTransaction(btx),
-		vec:      s.vec.WithTransaction(btx),
-		fts:      s.fts.WithTransaction(btx),
+		record:   attached,
+		file:     s.file.WithTransaction(btx),
+		series:   s.series.WithTransaction(btx),
+		vector:   s.vector.WithTransaction(btx),
+		search:   s.search.WithTransaction(btx),
 	}
 	if sink != nil {
-		tx.fs.SetAuditSink(sink)
-		tx.ts.SetAuditSink(sink)
-		tx.vec.SetAuditSink(sink)
+		tx.file.SetAuditSink(sink)
+		tx.series.SetAuditSink(sink)
+		tx.vector.SetAuditSink(sink)
 	} else {
 		// Never let a bound view call the recorder: its Record opens its own
 		// write transaction, which would deadlock against the one we hold.
-		tx.fs.SetAuditSink(nil)
-		tx.ts.SetAuditSink(nil)
-		tx.vec.SetAuditSink(nil)
+		tx.file.SetAuditSink(nil)
+		tx.series.SetAuditSink(nil)
+		tx.vector.SetAuditSink(nil)
 	}
 	return tx, nil
 }
 
-// DB returns the db sub-store bound to this transaction, or nil after the
-// transaction ended.
-func (tx *Tx) DB() db.Tx {
+// Record returns the record sub-store bound to this transaction, or nil after
+// the transaction ended.
+func (tx *Tx) Record() record.Tx {
 	if tx == nil {
 		return nil
 	}
-	return tx.db
+	return tx.record
 }
 
-// FS returns the fs sub-store bound to this transaction, or nil after the
+// File returns the file sub-store bound to this transaction, or nil after the
 // transaction ended. File systems opened through it are bound to the same
 // transaction.
-func (tx *Tx) FS() *fs.Store {
+func (tx *Tx) File() *file.Store {
 	if tx == nil {
 		return nil
 	}
-	return tx.fs
+	return tx.file
 }
 
-// TS returns the ts sub-store bound to this transaction, or nil after the
-// transaction ended.
-func (tx *Tx) TS() *ts.Store {
+// Series returns the time-series sub-store bound to this transaction, or nil
+// after the transaction ended.
+func (tx *Tx) Series() *series.Store {
 	if tx == nil {
 		return nil
 	}
-	return tx.ts
+	return tx.series
 }
 
-// Vec returns the vec sub-store bound to this transaction, or nil after the
-// transaction ended. Points upserted through it are staged in the transaction
-// and become visible to searches on the live store when it commits; searches
-// through this view see the staged points immediately.
-func (tx *Tx) Vec() *vec.Store {
+// Vector returns the vector sub-store bound to this transaction, or nil after
+// the transaction ended. Points upserted through it are staged in the
+// transaction and become visible to searches on the live store when it commits;
+// searches through this view see the staged points immediately.
+func (tx *Tx) Vector() *vector.Store {
 	if tx == nil {
 		return nil
 	}
-	return tx.vec
+	return tx.vector
 }
 
-// FTS returns the full-text sub-store bound to this transaction, or nil after
-// the transaction ended.
-func (tx *Tx) FTS() *fts.Store {
+// Search returns the full-text sub-store bound to this transaction, or nil
+// after the transaction ended.
+func (tx *Tx) Search() *search.Store {
 	if tx == nil {
 		return nil
 	}
-	return tx.fts
+	return tx.search
 }
 
 // Writable reports whether the transaction accepts writes.
@@ -157,7 +157,7 @@ func (t *txAuditSink) replay(rec *audit.Recorder) error {
 //
 // Vector points buffered by earlier calls are flushed before the transaction
 // starts, so the transaction sees the state the store has accepted. Points
-// upserted through tx.Vec() are staged and written inside the transaction; the
+// upserted through tx.Vector() are staged and written inside the transaction; the
 // live collection indexes adopt them after the commit, so searches outside the
 // transaction observe them only once it commits.
 //
@@ -190,8 +190,8 @@ func (s *Store) WriteTransaction(ctx context.Context, fn func(tx *Tx) error) err
 
 	// Buffered vector points are only in memory; drain them so the transaction
 	// starts from the state the store has accepted.
-	if s.vec != nil {
-		if err := s.vec.Flush(); err != nil && !errors.Is(err, vec.ErrClosed) {
+	if s.vector != nil {
+		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
 			return fmt.Errorf("harbor: transaction: flush vec store: %w", err)
 		}
 	}
@@ -220,7 +220,7 @@ func (s *Store) WriteTransaction(ctx context.Context, fn func(tx *Tx) error) err
 			return err
 		}
 		// Flush staged vector points into the transaction before it commits.
-		return bound.vec.FlushStaged()
+		return bound.vector.FlushStaged()
 	})
 	if err != nil {
 		if cerr := ctx.Err(); cerr != nil {
@@ -231,7 +231,7 @@ func (s *Store) WriteTransaction(ctx context.Context, fn func(tx *Tx) error) err
 
 	// The transaction committed. Install the index state built inside it and
 	// replay the staged audit events against the real recorder.
-	s.vec.AdoptTransaction(bound.vec)
+	s.vector.AdoptTransaction(bound.vector)
 	if sink != nil {
 		if err := sink.replay(s.audit); err != nil {
 			return fmt.Errorf("harbor: transaction committed, audit append failed: %w", err)
@@ -271,8 +271,8 @@ func (s *Store) ReadTransaction(ctx context.Context, fn func(tx *Tx) error) erro
 		return ErrClosed
 	}
 
-	if s.vec != nil {
-		if err := s.vec.Flush(); err != nil && !errors.Is(err, vec.ErrClosed) {
+	if s.vector != nil {
+		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
 			return fmt.Errorf("harbor: transaction: flush vec store: %w", err)
 		}
 	}

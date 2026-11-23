@@ -11,11 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/malivvan/harbor/db"
 	"github.com/malivvan/harbor/internal/crypto"
 	"github.com/malivvan/harbor/pkg/audit"
-	"github.com/malivvan/harbor/ts"
-	"github.com/malivvan/harbor/vec"
+	"github.com/malivvan/harbor/store/record"
+	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/harbor/store/vector"
 )
 
 type harborRecord struct {
@@ -58,30 +58,30 @@ func TestStoreRoundTrip(t *testing.T) {
 
 	s := mustOpen(t, path, password)
 
-	if s.DB() == nil || s.FS() == nil || s.TS() == nil || s.Vec() == nil {
+	if s.Record() == nil || s.File() == nil || s.Series() == nil || s.Vector() == nil {
 		t.Fatal("one or more sub-stores are nil")
 	}
 
-	col, err := s.Vec().NewCollection("documents", 3, vec.Cosine, true)
+	col, err := s.Vector().NewCollection("documents", 3, vector.Cosine, true)
 	if err != nil {
 		t.Fatalf("new collection: %v", err)
 	}
-	if err := col.Upsert([]vec.PointStruct{
+	if err := col.Upsert([]vector.PointStruct{
 		{
 			ID:      "user_101",
 			Vector:  []float32{0.5, 0.5, 0.5},
-			Payload: vec.Payload{"role": "admin", "age": 30},
+			Payload: vector.Payload{"role": "admin", "age": 30},
 		},
 		{
 			ID:      "user_202",
 			Vector:  []float32{0.8, 0.2, 0.0},
-			Payload: vec.Payload{"role": "guest", "age": 22},
+			Payload: vector.Payload{"role": "guest", "age": 22},
 		},
 	}); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	filter := &vec.Filter{Must: []vec.Condition{
-		{Key: "role", Match: vec.MatchValue{Value: "admin"}},
+	filter := &vector.Filter{Must: []vector.Condition{
+		{Key: "role", Match: vector.MatchValue{Value: "admin"}},
 	}}
 	results, err := col.Search([]float32{1, 0, 0}, filter, 1)
 	if err != nil {
@@ -94,15 +94,15 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatalf("flush collection: %v", err)
 	}
 
-	cpu := s.TS().Series("cpu")
+	cpu := s.Series().Series("cpu")
 	now := time.Now().UnixNano()
-	if err := cpu.Insert(ctx, ts.Point{Timestamp: now, Value: 0.5}); err != nil {
+	if err := cpu.Insert(ctx, series.Point{Timestamp: now, Value: 0.5}); err != nil {
 		t.Fatalf("ts insert: %v", err)
 	}
 	if err := cpu.SetLabels(ctx, map[string]string{"host": "test"}); err != nil {
 		t.Fatalf("ts labels: %v", err)
 	}
-	samples, err := cpu.Aggregate(ctx, now, now, 1, ts.AggAvg)
+	samples, err := cpu.Aggregate(ctx, now, now, 1, series.AggAvg)
 	if err != nil {
 		t.Fatalf("ts aggregate: %v", err)
 	}
@@ -110,11 +110,11 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatalf("ts aggregate returned %d samples, want 1", len(samples))
 	}
 
-	if err := s.DB().Save(ctx, &harborRecord{Name: "alice"}); err != nil {
+	if err := s.Record().Save(ctx, &harborRecord{Name: "alice"}); err != nil {
 		t.Fatalf("db save: %v", err)
 	}
 
-	vfs, err := s.FS().Open("test_fs")
+	vfs, err := s.File().Open("test_fs")
 	if err != nil {
 		t.Fatalf("fs open: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestStoreRoundTrip(t *testing.T) {
 	s = mustOpen(t, path, password)
 	t.Cleanup(func() { _ = s.Close() })
 
-	loaded, err := s.Vec().LoadCollection("documents")
+	loaded, err := s.Vector().LoadCollection("documents")
 	if err != nil {
 		t.Fatalf("load collection: %v", err)
 	}
@@ -145,17 +145,17 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatalf("loaded %d points, want 2", len(loaded))
 	}
 
-	points, err := s.TS().Series("cpu").Range(ctx, now, now)
+	points, err := s.Series().Series("cpu").Range(ctx, now, now)
 	if err != nil || len(points) != 1 {
 		t.Fatalf("ts range after reopen = %v, %v; want 1 point", points, err)
 	}
 
 	var rec harborRecord
-	if err := s.DB().One(ctx, "Name", "alice", &rec); err != nil {
+	if err := s.Record().One(ctx, "Name", "alice", &rec); err != nil {
 		t.Fatalf("db one after reopen: %v", err)
 	}
 
-	vfs, err = s.FS().Open("test_fs")
+	vfs, err = s.File().Open("test_fs")
 	if err != nil {
 		t.Fatalf("fs open after reopen: %v", err)
 	}
@@ -363,7 +363,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
 	}
-	if s.DB() != nil || s.FS() != nil || s.TS() != nil || s.Vec() != nil {
+	if s.Record() != nil || s.File() != nil || s.Series() != nil || s.Vector() != nil {
 		t.Fatal("sub-store accessors must return nil after Close")
 	}
 	if _, _, _, _, _, err := s.Meta(); !errors.Is(err, ErrClosed) {
@@ -374,7 +374,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 	if err := nilStore.Close(); err != nil {
 		t.Fatalf("nil Close: %v", err)
 	}
-	if nilStore.DB() != nil || nilStore.Flags() != 0 {
+	if nilStore.Record() != nil || nilStore.Flags() != 0 {
 		t.Fatal("nil receiver accessors must return zero values")
 	}
 }
@@ -471,7 +471,7 @@ func TestCanaryBindsEncryptionFlags(t *testing.T) {
 // Metadata is not silently re-initialized.
 func TestMissingMetadataBucketIsCorrupt(t *testing.T) {
 	for name, buckets := range map[string][][]byte{
-		"sub-store root":   {[]byte(db.Name)},
+		"sub-store root":   {[]byte(record.Name)},
 		"unrelated bucket": {[]byte("something-else")},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -510,10 +510,10 @@ func TestDeriveKeys(t *testing.T) {
 
 	keys := map[string][]byte{
 		"canary": first.canary,
-		"db":     first.db,
-		"fs":     first.fs,
-		"ts":     first.ts,
-		"vec":    first.vec,
+		"db":     first.record,
+		"fs":     first.file,
+		"ts":     first.series,
+		"vec":    first.vector,
 	}
 	seen := make(map[string]string, len(keys))
 	for name, key := range keys {
@@ -531,7 +531,7 @@ func TestDeriveKeys(t *testing.T) {
 		t.Fatalf("deriveKeys again: %v", err)
 	}
 	t.Cleanup(again.wipe)
-	if !bytes.Equal(first.db, again.db) {
+	if !bytes.Equal(first.record, again.record) {
 		t.Fatal("deriveKeys is not deterministic for the same password and salt")
 	}
 
@@ -540,7 +540,7 @@ func TestDeriveKeys(t *testing.T) {
 		t.Fatalf("deriveKeys other password: %v", err)
 	}
 	t.Cleanup(otherPassword.wipe)
-	if bytes.Equal(first.db, otherPassword.db) {
+	if bytes.Equal(first.record, otherPassword.record) {
 		t.Fatal("different passwords derived the same key")
 	}
 
@@ -549,7 +549,7 @@ func TestDeriveKeys(t *testing.T) {
 		t.Fatalf("deriveKeys other salt: %v", err)
 	}
 	t.Cleanup(otherSalt.wipe)
-	if bytes.Equal(first.db, otherSalt.db) {
+	if bytes.Equal(first.record, otherSalt.record) {
 		t.Fatal("different salts derived the same key")
 	}
 }
@@ -562,10 +562,10 @@ func TestStoreKeysWipe(t *testing.T) {
 	keys.wipe()
 	for name, key := range map[string][]byte{
 		"canary": keys.canary,
-		"db":     keys.db,
-		"fs":     keys.fs,
-		"ts":     keys.ts,
-		"vec":    keys.vec,
+		"db":     keys.record,
+		"fs":     keys.file,
+		"ts":     keys.series,
+		"vec":    keys.vector,
 	} {
 		if !bytes.Equal(key, make([]byte, len(key))) {
 			t.Errorf("%s key was not wiped", name)
@@ -739,7 +739,7 @@ type corruptSubRecord struct {
 func TestOpenFailsWhenSubstoreIsCorrupt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "corrupt-sub.db")
 	s := mustOpen(t, path, "pw")
-	require.NoError(t, s.DB().Save(context.Background(), &corruptSubRecord{ID: 1, Name: "x"}))
+	require.NoError(t, s.Record().Save(context.Background(), &corruptSubRecord{ID: 1, Name: "x"}))
 	require.NoError(t, s.Close())
 
 	raw, err := bolt.Open(path, 0600, nil)
@@ -843,7 +843,7 @@ func TestOpenNilReceiverHelpers(t *testing.T) {
 	}
 	_, _, _, _, _, err := s.Meta()
 	require.ErrorIs(t, err, ErrClosed)
-	if s.DB() != nil || s.FS() != nil || s.TS() != nil || s.Vec() != nil {
+	if s.Record() != nil || s.File() != nil || s.Series() != nil || s.Vector() != nil {
 		t.Fatal("nil sub-store accessors must return nil")
 	}
 }
@@ -863,15 +863,15 @@ func TestAuditTrailEndToEnd(t *testing.T) {
 	require.NotNil(t, s.Audit())
 
 	// One write per store.
-	require.NoError(t, s.DB().Save(ctx, &harborRecord{Name: "alice"}))
-	require.NoError(t, s.TS().Series("cpu").Insert(ctx, ts.Point{Timestamp: 1, Value: 1}))
+	require.NoError(t, s.Record().Save(ctx, &harborRecord{Name: "alice"}))
+	require.NoError(t, s.Series().Series("cpu").Insert(ctx, series.Point{Timestamp: 1, Value: 1}))
 
-	col, err := s.Vec().NewCollection("docs", 3, vec.Cosine, false)
+	col, err := s.Vector().NewCollection("docs", 3, vector.Cosine, false)
 	require.NoError(t, err)
-	require.NoError(t, col.Upsert([]vec.PointStruct{{ID: "a", Vector: []float32{1, 2, 3}}}))
+	require.NoError(t, col.Upsert([]vector.PointStruct{{ID: "a", Vector: []float32{1, 2, 3}}}))
 	require.NoError(t, col.Flush())
 
-	vfs, err := s.FS().Open("audit_fs")
+	vfs, err := s.File().Open("audit_fs")
 	require.NoError(t, err)
 	f, err := vfs.Create("blob.txt")
 	require.NoError(t, err)
@@ -901,7 +901,7 @@ func TestAuditDisabledHasNoTrail(t *testing.T) {
 	require.Equal(t, AuditNone, s.AuditFlags())
 	require.Nil(t, s.Audit())
 
-	require.NoError(t, s.DB().Save(ctx, &harborRecord{Name: "alice"}))
+	require.NoError(t, s.Record().Save(ctx, &harborRecord{Name: "alice"}))
 
 	_, err := s.VerifyAudit()
 	require.ErrorIs(t, err, audit.ErrNoLog)
@@ -915,7 +915,7 @@ func TestAuditWrongPasswordIsRejectedOnOpen(t *testing.T) {
 	opts.Audit = AuditDB
 	s, err := Open(ctx, path, 0600, opts)
 	require.NoError(t, err)
-	require.NoError(t, s.DB().Save(ctx, &harborRecord{Name: "alice"}))
+	require.NoError(t, s.Record().Save(ctx, &harborRecord{Name: "alice"}))
 	require.NoError(t, s.Close())
 
 	// The audit signing keys derive from the same seed as the encryption keys,

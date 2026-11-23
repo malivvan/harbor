@@ -8,18 +8,20 @@ Harbor is a self-contained, encrypted storage toolkit built on
 [BoltDB](https://github.com/etcd-io/bbolt). One database file, one password, and
 stores you can use together or on their own:
 
-- **`db`** — a structured record store with indexes, unique constraints, a
+- **`record`** — a structured record store with indexes, unique constraints, a
   matcher-based query API, and callback-managed transactions.
-- **`fs`** — a complete in-database file system with symbolic links, snapshots,
+- **`file`** — a complete in-database file system with symbolic links, snapshots,
   an inode cache, and chunked content.
-- **`ts`** — a time-series store with ordered range scans, aggregation, labels,
-  and retention policies.
-- **`vec`** — a vector store with Flat and HNSW indexes, payload filters, SQ8
+- **`series`** — a time-series store with ordered range scans, aggregation,
+  labels, and retention policies.
+- **`vector`** — a vector store with Flat and HNSW indexes, payload filters, SQ8
   quantization, and buffered writes.
+- **`search`** — a full-text index with BM25 ranking and word/CJK tokenizers.
 
 The root `harbor` package opens a single bbolt file behind one password, derives
-a separate key for each store, and exposes them through `DB()`, `FS()`, `TS()`
-and `Vec()`. Every store can also be used directly with its own `*bolt.DB`.
+a separate key for each store, and exposes them through `Record()`, `File()`,
+`Series()`, `Vector()` and `Search()`. Each accessor accepts optional bucket-path
+segments that select a rooted view of the already-open store. Every store can also be used directly with its own `*bolt.DB`.
 
 ## Table of contents
 
@@ -27,11 +29,11 @@ and `Vec()`. Every store can also be used directly with its own `*bolt.DB`.
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Opening a store](#opening-a-store)
-- [Records with `db`](#records-with-db)
-- [Files with `fs`](#files-with-fs)
-- [Time series with `ts`](#time-series-with-ts)
-- [Vectors with `vec`](#vectors-with-vec)
-- [Full-text search with `fts`](#full-text-search-with-fts)
+- [Records with `record`](#records-with-record)
+- [Files with `file`](#files-with-file)
+- [Time series with `series`](#time-series-with-series)
+- [Vectors with `vector`](#vectors-with-vector)
+- [Full-text search with `search`](#full-text-search-with-search)
 - [Object storage: `blob` and `snapshot`](#object-storage-blob-and-snapshot)
 - [Utilities](#utilities)
 - [Clustering](#clustering)
@@ -75,15 +77,17 @@ It is pure Go and builds and tests with `CGO_ENABLED=0`.
 go get github.com/malivvan/harbor
 ```
 
-The module contains the root `harbor` package and four sub-packages:
+The module contains the root `harbor` package and the store packages under
+`store/`:
 
 | Package | Import path | Guide |
 |---------|-------------|-------|
 | `harbor` | `github.com/malivvan/harbor` | this file |
-| `db` | `github.com/malivvan/harbor/db` | [db/README.md](db/README.md) |
-| `fs` | `github.com/malivvan/harbor/fs` | [fs/README.md](fs/README.md) |
-| `ts` | `github.com/malivvan/harbor/ts` | [ts/README.md](ts/README.md) |
-| `vec` | `github.com/malivvan/harbor/vec` | [vec/README.md](vec/README.md) |
+| `record` | `github.com/malivvan/harbor/store/record` | [store/record/README.md](store/record/README.md) |
+| `file` | `github.com/malivvan/harbor/store/file` | [store/file/README.md](store/file/README.md) |
+| `series` | `github.com/malivvan/harbor/store/series` | [store/series/README.md](store/series/README.md) |
+| `vector` | `github.com/malivvan/harbor/store/vector` | [store/vector/README.md](store/vector/README.md) |
+| `search` | `github.com/malivvan/harbor/store/search` | [store/search/README.md](store/search/README.md) |
 
 API reference: [pkg.go.dev/github.com/malivvan/harbor](https://pkg.go.dev/github.com/malivvan/harbor).
 
@@ -99,7 +103,7 @@ import (
 	"time"
 
 	"github.com/malivvan/harbor"
-	"github.com/malivvan/harbor/ts"
+	"github.com/malivvan/harbor/store/series"
 )
 
 type User struct {
@@ -125,19 +129,19 @@ func main() {
 
 	// Structured records and indexes.
 	user := User{Name: "alice", Email: "alice@example.com"}
-	if err := store.DB().Save(ctx, &user); err != nil {
+	if err := store.Record().Save(ctx, &user); err != nil {
 		log.Fatal(err)
 	}
 
 	var found User
-	if err := store.DB().One(ctx, "Email", "alice@example.com", &found); err != nil {
+	if err := store.Record().One(ctx, "Email", "alice@example.com", &found); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("saved user:", found.ID, found.Name)
 
 	// Time-series points.
-	series := store.TS().Series("cpu")
-	if err := series.Insert(ctx, ts.Point{
+	cpuSeries := store.Series().Series("cpu")
+	if err := cpuSeries.Insert(ctx, series.Point{
 		Timestamp: time.Now().UnixNano(),
 		Value:     0.42,
 	}); err != nil {
@@ -145,7 +149,7 @@ func main() {
 	}
 
 	// A file system inside the same database.
-	vfs, err := store.FS().Open("documents")
+	vfs, err := store.File().Open("documents")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -165,8 +169,8 @@ func main() {
 ```
 
 `harbor.Open` takes ownership of the bbolt handle it opens: `Store.Close` flushes
-pending vector writes and closes it. The sub-store packages (`db.Open`, `fs.Open`,
-`ts.Open`, `vec.Open`) borrow a caller-owned `*bolt.DB` instead and never close
+pending vector writes and closes it. The sub-store packages (`record.Open`, `file.Open`,
+`series.Open`, `vector.Open`) borrow a caller-owned `*bolt.DB` instead and never close
 it. See [Database lifecycle](#database-lifecycle).
 
 ## Opening a store
@@ -205,6 +209,10 @@ Important properties:
 - `Store.Close` flushes buffered vector writes and closes the database that
   `Open` created. It is safe to call twice, and the sub-store accessors return
   `nil` afterwards.
+- The accessors are `Record`, `File`, `Series`, `Vector` and `Search`. Each
+  takes optional bucket-path segments: `store.Record("tenant", "records")`
+  returns a rooted view of the already-open store, while `store.Record()` keeps
+  the conventional `db` root so existing databases stay readable.
 
 `Options.Validate()` performs the checks `Open` applies when creating a store —
 password, complete and bounded Argon2id parameters, encryption-flag conflicts
@@ -215,12 +223,12 @@ Use `Options{Plaintext: true}` for an unencrypted store, or select individual
 encryption flags with `Options.Encrypt`. See [Encryption](#encryption) for the
 flags, rotation rules and threat model.
 
-## Records with `db`
+## Records with `record`
 
 Map Go structs to buckets, declare indexes with struct tags, and query with
 `One`, `Find`, `All`, `Range`, `Prefix`, or the matcher API.
 
-Declare a struct and describe indexes with the `db` tag namespace:
+Declare a struct and describe indexes with the `db` struct-tag namespace:
 
 ```go
 type User struct {
@@ -242,40 +250,40 @@ Supported tags are:
 | `unique` | Creates a unique index for the field. |
 | `inline` | Flattens an embedded struct into the parent. |
 
-Implement `db.BucketNamer` (`HarborBucketName() string`) for a custom bucket
+Implement `record.BucketNamer` (`HarborBucketName() string`) for a custom bucket
 name. Runtime-created structs can use `records.From("bucket")` to provide an
 explicit bucket.
 
 ### Save and fetch
 
 ```go
-users := store.DB()
+users := store.Record()
 
 u := User{Name: "alice", Email: "alice@example.com", Team: "core"}
 if err := users.Save(ctx, &u); err != nil {
-	return err // duplicate unique values match db.ErrAlreadyExists
+	return err // duplicate unique values match record.ErrAlreadyExists
 }
 
 var found User
 if err := users.One(ctx, "Email", "alice@example.com", &found); err != nil {
-	return err // no match matches db.ErrNotFound
+	return err // no match matches record.ErrNotFound
 }
 ```
 
 `Save` creates the bucket and indexes on first use, assigns auto-increment
 values, and enforces unique constraints. `Update` updates non-zero fields;
 `UpdateField` updates one field, including zero values. The primary key cannot
-be updated (`db.ErrImmutableID`).
+be updated (`record.ErrImmutableID`).
 
 ### Find, range, prefix
 
 ```go
 var team []User
-err := users.Find(ctx, "Team", "core", &team, db.Limit(20), db.Skip(0))
+err := users.Find(ctx, "Team", "core", &team, record.Limit(20), record.Skip(0))
 
 var all []User
 err = users.All(ctx, &all)
-err = users.AllByIndex(ctx, "CreatedAt", &all, db.Reverse())
+err = users.AllByIndex(ctx, "CreatedAt", &all, record.Reverse())
 
 var recent []User
 err = users.Range(ctx, "CreatedAt", since, time.Now(), &recent)
@@ -284,9 +292,9 @@ var prefixed []User
 err = users.Prefix(ctx, "Name", "al", &prefixed)
 ```
 
-`Find`, `Range` and `Prefix` return `db.ErrNotFound` when nothing matches; use
+`Find`, `Range` and `Prefix` return `record.ErrNotFound` when nothing matches; use
 `All` if you want an empty slice contract. Pagination and ordering are
-`FindOption` values: `db.Limit`, `db.Skip` and `db.Reverse`.
+`FindOption` values: `record.Limit`, `record.Skip` and `record.Reverse`.
 
 ### Multi-get by key
 
@@ -295,7 +303,7 @@ order, returning the missing IDs separately:
 
 ```go
 var users []User
-missing, err := store.DB().GetMany(ctx, []any{"u1", "u2"}, &users)
+missing, err := store.Record().GetMany(ctx, []any{"u1", "u2"}, &users)
 ```
 
 ### Projection
@@ -304,13 +312,13 @@ missing, err := store.DB().GetMany(ctx, []any{"u1", "u2"}, &users)
 
 ```go
 var docs []Doc
-err := store.DB().Select().Project("ID", "Metadata").Find(ctx, &docs)
+err := store.Record().Select().Project("ID", "Metadata").Find(ctx, &docs)
 ```
 
 The JSON codec decodes only the requested top-level fields; a custom codec
 without projected decoding falls back to a full decode and zeroes the rest.
 Matchers and ordering cannot be combined with a projection. See
-[db/README.md](db/README.md#projection).
+[store/record/README.md](store/record/README.md#projection).
 
 ### References
 
@@ -327,17 +335,17 @@ Saving a chunk requires the referenced `Doc` to exist. Deleting or dropping a
 `Doc` is blocked by default (`ErrReferenceViolation`) or cascades to the
 referencing records when `ondelete=cascade` is set; `ValidateSchema` catches a
 misspelled target at startup. See
-[db/README.md](db/README.md#references-and-cascades).
+[store/record/README.md](store/record/README.md#references-and-cascades).
 
 ### Aggregation
 
 `Aggregate` groups records and computes measures without materializing them:
 
 ```go
-res, err := store.DB().From("Sale").Aggregate(ctx, db.AggregateSpec{
+res, err := store.Record().From("Sale").Aggregate(ctx, record.AggregateSpec{
 	GroupBy:  []string{"Kind"},
-	Measures: []db.Measure{{Alias: "total", Type: db.MeasureSum, Field: "Amount"}},
-	Having:   []db.Having{{Alias: "total", Op: db.HavingGTE, Value: 100}},
+	Measures: []record.Measure{{Alias: "total", Type: record.MeasureSum, Field: "Amount"}},
+	Having:   []record.Having{{Alias: "total", Op: record.HavingGTE, Value: 100}},
 	OrderBy:  "total",
 	Desc:     true,
 })
@@ -346,12 +354,12 @@ res, err := store.DB().From("Sale").Aggregate(ctx, db.AggregateSpec{
 Measures include count, sum, average, min/max, median, percentile, and sample
 or population standard deviation. `TimeBucket` groups a timestamp by second,
 minute, hour, day or week; `Missing` and `NonNumeric` choose how unusable values
-are treated. See [db/README.md](db/README.md#aggregation).
+are treated. See [store/record/README.md](store/record/README.md#aggregation).
 
 ### Matcher queries
 
 ```go
-import "github.com/malivvan/harbor/db/q"
+import "github.com/malivvan/harbor/store/record/q"
 
 var admins []User
 err := users.Select(q.In("Team", []string{"core", "admin"})).
@@ -371,7 +379,7 @@ Matchers include `Eq`, `StrictEq`, `Gt`, `Gte`, `Lt`, `Lte`, `In`, `Re`,
 Harbor exposes callback-managed transactions only:
 
 ```go
-err := users.WriteTransaction(ctx, func(tx db.Node) error {
+err := users.WriteTransaction(ctx, func(tx record.Node) error {
 	if err := tx.Save(ctx, &from); err != nil {
 		return err
 	}
@@ -387,7 +395,7 @@ To mix Harbor operations with raw bbolt writes, attach Harbor to a transaction
 you own:
 
 ```go
-tx, err := bdb.Begin(true)
+tx, err := brecord.Begin(true)
 if err != nil {
 	return err
 }
@@ -424,15 +432,15 @@ exists, err := users.KeyExists(ctx, "sessions", sessionID)
 err = users.Delete(ctx, "sessions", sessionID)
 ```
 
-Full reference: [db/README.md](db/README.md).
+Full reference: [store/record/README.md](store/record/README.md).
 
-## Files with `fs`
+## Files with `file`
 
 An `absfs`-compatible file system stored in the same bbolt file. File systems
 are named, so one store can hold many independent roots.
 
 ```go
-vfs, err := store.FS().Open("documents")
+vfs, err := store.File().Open("documents")
 if err != nil {
 	return err
 }
@@ -467,7 +475,7 @@ info, err := vfs.Stat("/latest.txt")
 link, err := vfs.Readlink("/latest.txt")
 ```
 
-`fs` supports symbolic links, `filepath.Walk`-style traversal, concurrent
+`file` supports symbolic links, `filepath.Walk`-style traversal, concurrent
 `FastWalk`, read-only snapshots, an inode cache, external content back ends, and
 chunked encrypted content.
 
@@ -478,7 +486,7 @@ file: JSON sessions, uploaded documents, generated reports. Keep the meaning of
 those files in the application; Harbor only stores them.
 
 ```go
-app, err := store.FS().Open("app")
+app, err := store.File().Open("app")
 err = app.MkdirAll("/sessions", 0o755)
 
 f, err := app.Create("/sessions/alice.json")
@@ -496,10 +504,10 @@ do not put a bearer token there that the application would not otherwise trust.
 
 ### Walk
 
-`fs.Walk` has the shape of `filepath.Walk`:
+`file.Walk` has the shape of `filepath.Walk`:
 
 ```go
-err := fs.Walk(vfs, "/", func(path string, info os.FileInfo, err error) error {
+err := file.Walk(vfs, "/", func(path string, info os.FileInfo, err error) error {
 	if err != nil {
 		return err
 	}
@@ -511,11 +519,11 @@ err := fs.Walk(vfs, "/", func(path string, info os.FileInfo, err error) error {
 })
 ```
 
-For large trees, `fs.FastWalk` traverses concurrently and passes an
+For large trees, `file.FastWalk` traverses concurrently and passes an
 `io/fs.DirEntry` instead of a full `FileInfo`:
 
 ```go
-err := fs.FastWalk(vfs, "/", func(path string, d iofs.DirEntry, err error) error {
+err := file.FastWalk(vfs, "/", func(path string, d iofs.DirEntry, err error) error {
 	if err != nil {
 		return err
 	}
@@ -543,7 +551,7 @@ database file.
 
 ### Encryption and content storage
 
-`fs.Config` enables encryption per store; `Config.ChunkSize` stores encrypted
+`file.Config` enables encryption per store; `Config.ChunkSize` stores encrypted
 content as independently sealed chunks. When using the root package, encryption
 is selected at `harbor.Open` time instead:
 
@@ -554,11 +562,11 @@ store, err := harbor.Open(ctx, "encrypted.db", 0o600, &harbor.Options{
 })
 ```
 
-Opening `fs` directly with a caller-owned `*bolt.DB` gives full control over
+Opening `file` directly with a caller-owned `*bolt.DB` gives full control over
 the key and chunk size:
 
 ```go
-fsStore, err := fs.Open(ctx, bdb, fs.Config{
+fsStore, err := file.Open(ctx, bdb, file.Config{
 	Root:            [][]byte{[]byte("fs")},
 	Secret:          key, // 32 bytes
 	EncryptMetadata: true,
@@ -571,7 +579,7 @@ vfs, err := fsStore.Open("vault")
 
 ### The `absfs` interface and paths
 
-`fs` implements the module's internal `absfs` interfaces (`Filer`,
+`file` implements the module's internal `absfs` interfaces (`Filer`,
 `FileSystem` and `SymlinkFileSystem`). The in-tree `fs/s3fs` adapter implements
 the `Filer` subset, and the interfaces make file systems work with standard
 `io/fs` functions. The interface package itself is internal and cannot be
@@ -590,22 +598,22 @@ external synchronization. Individual `File` values should be used by a single
 goroutine. See [AGENTS.md](AGENTS.md#internalabsfs) for the interface contracts
 and implementer guidance.
 
-Full reference: [fs/README.md](fs/README.md).
+Full reference: [store/file/README.md](store/file/README.md).
 
-## Time series with `ts`
+## Time series with `series`
 
 Points are keyed by their timestamp, so no secondary index is needed for range
 scans. Series carry labels and an optional retention policy.
 
 ```go
-series := store.TS().Series("requests")
+series := store.Series().Series("requests")
 now := time.Now().UnixNano()
 
-if err := series.Insert(ctx, ts.Point{Timestamp: now, Value: 148}); err != nil {
+if err := series.Insert(ctx, series.Point{Timestamp: now, Value: 148}); err != nil {
 	return err
 }
 
-if err := series.InsertMany(ctx, []ts.Point{
+if err := series.InsertMany(ctx, []series.Point{
 	{Timestamp: now - int64(time.Minute), Value: 120},
 	{Timestamp: now - 2*int64(time.Minute), Value: 133},
 }); err != nil {
@@ -630,7 +638,7 @@ order, returning the missing IDs separately:
 
 ```go
 var users []User
-missing, err := store.DB().GetMany(ctx, []any{"u1", "u2"}, &users)
+missing, err := store.Record().GetMany(ctx, []any{"u1", "u2"}, &users)
 ```
 
 ### Projection
@@ -639,13 +647,13 @@ missing, err := store.DB().GetMany(ctx, []any{"u1", "u2"}, &users)
 
 ```go
 var docs []Doc
-err := store.DB().Select().Project("ID", "Metadata").Find(ctx, &docs)
+err := store.Record().Select().Project("ID", "Metadata").Find(ctx, &docs)
 ```
 
 The JSON codec decodes only the requested top-level fields; a custom codec
 without projected decoding falls back to a full decode and zeroes the rest.
 Matchers and ordering cannot be combined with a projection. See
-[db/README.md](db/README.md#projection).
+[store/record/README.md](store/record/README.md#projection).
 
 ### References
 
@@ -662,12 +670,12 @@ Saving a chunk requires the referenced `Doc` to exist. Deleting or dropping a
 `Doc` is blocked by default (`ErrReferenceViolation`) or cascades to the
 referencing records when `ondelete=cascade` is set; `ValidateSchema` catches a
 misspelled target at startup. See
-[db/README.md](db/README.md#references-and-cascades).
+[store/record/README.md](store/record/README.md#references-and-cascades).
 
 ### Aggregation
 
 ```go
-samples, err := series.Aggregate(ctx, start, end, int64(time.Minute), ts.AggAvg)
+samples, err := series.Aggregate(ctx, start, end, int64(time.Minute), series.AggAvg)
 ```
 
 Aggregations are `AggMin`, `AggMax`, `AggAvg`, `AggSum`, `AggCount`,
@@ -680,7 +688,7 @@ of its window.
 err = series.SetLabels(ctx, map[string]string{"host": "web-1"})
 labels, err := series.Labels(ctx)
 
-err = series.SetRetention(ctx, ts.Retention{
+err = series.SetRetention(ctx, series.Retention{
 	MaxAge:    24 * time.Hour,
 	MaxPoints: 100_000,
 })
@@ -690,29 +698,29 @@ removed, err := series.EnforceRetention(ctx, time.Now().UnixNano())
 Retention policies are persisted with the series and enforced automatically by
 `Insert`/`InsertMany`. `Store.EnforceRetention` applies every persisted policy.
 `Store.SetNow` injects a clock for deterministic tests. Full reference:
-[ts/README.md](ts/README.md).
+[store/series/README.md](store/series/README.md).
 
-## Vectors with `vec`
+## Vectors with `vector`
 
 Collections store fixed-dimension vectors with payload filters. Choose HNSW for
 large collections or `FlatIndex` for exact search.
 
 ```go
-docs, err := store.Vec().NewCollection("docs", 3, vec.Cosine, true)
+docs, err := store.Vector().NewCollection("docs", 3, vector.Cosine, true)
 if err != nil {
 	return err
 }
 
-err = docs.Upsert([]vec.PointStruct{
+err = docs.Upsert([]vector.PointStruct{
 	{
 		ID:      "doc-1",
 		Vector:  []float32{1, 0, 0},
-		Payload: vec.Payload{"lang": "en", "year": 2026},
+		Payload: vector.Payload{"lang": "en", "year": 2026},
 	},
 	{
 		ID:      "doc-2",
 		Vector:  []float32{0, 1, 0},
-		Payload: vec.Payload{"lang": "de", "year": 2025},
+		Payload: vector.Payload{"lang": "de", "year": 2025},
 	},
 })
 if err != nil {
@@ -722,7 +730,7 @@ if err != nil {
 hits, err := docs.Search([]float32{1, 0, 0}, nil, 5)
 ```
 
-Distance metrics are `vec.Cosine`, `vec.Euclid` and `vec.Dot`. Pass `true` as
+Distance metrics are `vector.Cosine`, `vector.Euclid` and `vector.Dot`. Pass `true` as
 the last `NewCollection` argument for HNSW; pass `false` for exact flat search.
 Results are ordered by relevance: descending for Cosine/Dot, ascending for
 Euclid.
@@ -730,13 +738,13 @@ Euclid.
 ### Filters
 
 ```go
-filter := &vec.Filter{
-	Must: []vec.Condition{
-		{Key: "lang", Type: vec.MatchTypeExact, Match: vec.MatchValue{Value: "en"}},
-		{Key: "year", Type: vec.MatchTypeRange, Range: &vec.RangeValue{GTE: 2020}},
+filter := &vector.Filter{
+	Must: []vector.Condition{
+		{Key: "lang", Type: vector.MatchTypeExact, Match: vector.MatchValue{Value: "en"}},
+		{Key: "year", Type: vector.MatchTypeRange, Range: &vector.RangeValue{GTE: 2020}},
 	},
-	MustNot: []vec.Condition{
-		{Key: "status", Match: vec.MatchValue{Value: "deleted"}},
+	MustNot: []vector.Condition{
+		{Key: "status", Match: vector.MatchValue{Value: "deleted"}},
 	},
 }
 
@@ -766,7 +774,7 @@ reports, and the scan is exact for both Flat and HNSW collections.
 `FacetCounts` counts string payload values over the points a filter selects:
 
 ```go
-facets, err := docs.FacetCounts(vec.FacetRequest{
+facets, err := docs.FacetCounts(vector.FacetRequest{
 	Fields:    []string{"kind", "lang"},
 	MaxValues: 10, // 0 keeps every value
 })
@@ -779,11 +787,11 @@ filtered collection, not a previous search result.
 ### Buffering and lifecycle
 
 `Upsert` updates the in-memory index immediately and buffers points for bbolt.
-The buffer is flushed when `vec.DefaultFlushThreshold` points accumulate, or
+The buffer is flushed when `vector.DefaultFlushThreshold` points accumulate, or
 when you call `docs.Flush()` / `store.Close()`. The root `Store.Close` flushes
-the vec store before closing the shared handle.
+the vector store before closing the shared handle.
 
-If you open `vec` directly with your own bbolt handle, call `vecStore.Flush()`
+If you open `vector` directly with your own bbolt handle, call `vecStore.Flush()`
 before closing that handle, or use `SetOwnsDB(false)` when the handle is shared.
 
 ### Quantization
@@ -791,7 +799,7 @@ before closing that handle, or use `SetOwnsDB(false)` when the handle is shared.
 Enable scalar quantization to reduce stored vector size:
 
 ```go
-vstore, err := vec.Open(ctx, bdb, vec.Config{
+vstore, err := vector.Open(ctx, bdb, vector.Config{
 	Root:     [][]byte{[]byte("vec")},
 	UseQuant: true, // nil Quantizer selects SQ8
 })
@@ -805,25 +813,25 @@ quantized collection without quantization, or a plaintext collection with
 quantization, is rejected. The quantizer implementation itself is not recorded;
 use the same one for every process that opens the collection.
 
-Full reference: [vec/README.md](vec/README.md).
+Full reference: [store/vector/README.md](store/vector/README.md).
 
-## Full-text search with `fts`
+## Full-text search with `search`
 
-`fts` indexes documents by id and ranks matches with BM25. It lives in the same
+`search` indexes documents by id and ranks matches with BM25. It lives in the same
 database and participates in cross-store transactions.
 
 ```go
-idx, err := store.FTS().Open("articles", fts.Config{})
+idx, err := store.Search().Open("articles", search.Config{})
 if err != nil {
 	return err
 }
 
 err = idx.Upsert(ctx, "article-42", "Harbor keeps records, files, series and vectors")
-hits, err := idx.Search(ctx, "vectors", 10) // []fts.Hit, best first
+hits, err := idx.Search(ctx, "vectors", 10) // []search.Hit, best first
 ```
 
-Two tokenizers are built in: `fts.Words()` (the default) splits on Unicode
-letters and digits and lowercases; `fts.WordsWithCJK()` adds overlapping
+Two tokenizers are built in: `search.Words()` (the default) splits on Unicode
+letters and digits and lowercases; `search.WordsWithCJK()` adds overlapping
 trigrams for Han, Hiragana, Katakana and Hangul so CJK text matches substrings
 without a dictionary segmenter. The tokenizer and BM25 parameters (`K1` 1.2,
 `B` 0.75 by default) are fixed when an index is created and checked on reopen.
@@ -831,11 +839,11 @@ without a dictionary segmenter. The tokenizer and BM25 parameters (`K1` 1.2,
 Values are sealed when value encryption is enabled, following the
 `EncryptDBValues` flag. Term keys are plaintext unless `Config.EncryptTokens` is
 set; encrypting them hides the vocabulary but still leaks equality and result
-sizes. See [fts/README.md](fts/README.md) for the layout, errors and limits.
+sizes. See [store/search/README.md](store/search/README.md) for the layout, errors and limits.
 
 ## Object storage: `blob` and `snapshot`
 
-Harbor's `fs` is hierarchical. Two optional packages build an object-store
+Harbor's `file` store is hierarchical. Two optional packages build an object-store
 shape on top of it:
 
 - **`pkg/blob`** is a flat namespace over one named file system. A bucket is a
@@ -855,7 +863,7 @@ import (
 	"github.com/malivvan/harbor/pkg/snapshot/blobstore"
 )
 
-objects, err := blob.Open(store.FS(), "app-data")
+objects, err := blob.Open(store.File(), "app-data")
 if err != nil {
 	return err
 }
@@ -888,10 +896,10 @@ Small packages shared by applications and by Harbor itself:
 - **`pkg/fusion`** combines ranked lists with reciprocal rank fusion, the usual
   way to merge full-text and vector results whose scores are not comparable.
   Ranking policy and list selection stay in the caller.
-- **`vec/doc`** is a document-oriented facade over `vec`: id, content,
+- **`vec/doc`** is a document-oriented facade over `vector`: id, content,
   embedding and string metadata, with the collection dimension taken from the
   first upsert instead of being known up front. See
-  [vec/doc/README.md](vec/doc/README.md).
+  [store/vector/doc/README.md](store/vector/doc/README.md).
 
 ## Clustering
 
@@ -912,12 +920,12 @@ node, err := consensus.Open(ctx, consensus.Config{
 })
 
 // Writes go through the replicated facades (leader only).
-err = node.DB().Save(ctx, &User{ID: "u1", Name: "alice"})
-err = node.TS().Insert(ctx, "cpu", ts.Point{Timestamp: now, Value: 42})
+err = node.Record().Save(ctx, &User{ID: "u1", Name: "alice"})
+err = node.Series().Insert(ctx, "cpu", series.Point{Timestamp: now, Value: 42})
 
 // Reads hit the local store directly.
 var u User
-_ = node.Store().DB().One(ctx, "ID", "u1", &u)
+_ = node.Store().Record().One(ctx, "ID", "u1", &u)
 ```
 
 Every node in a cluster must use the same password. A second node opens with
@@ -991,26 +999,26 @@ Full rotation uses the whole-store methods:
 
 | Store | Method |
 |-------|--------|
-| `db` | `ReEncrypt` or `RotateAll` (aliases) |
-| `fs` | `RotateAll` |
-| `ts` | `RotateAll` |
-| `vec` | `RotateAll` |
+| `record` | `ReEncrypt` or `RotateAll` (aliases) |
+| `file` | `RotateAll` |
+| `series` | `RotateAll` |
+| `vector` | `RotateAll` |
 
 A full rotation is atomic within its store and adopts the new key when it
 completes. Run it with **exclusive access** to the store; do not write from
 other goroutines while it runs. `VerifyAll` re-reads every value and confirms
 it decrypts with the configured keys.
 
-The per-entity methods (`fs.ReEncryptFS`, `ts.ReEncryptSeries`,
-`vec.ReEncryptCollection`) are **partial** migrations. The marker stays under
+The per-entity methods (`file.ReEncryptFS`, `series.ReEncryptSeries`,
+`vector.ReEncryptCollection`) are **partial** migrations. The marker stays under
 the current key and the previous key remains available in the running process,
 so entities that have not been rewritten keep working. Rewrite every entity,
 call `RotateAll`, and only then close the store or reopen it from a fresh
 process. Closing a store between a partial rotation and `RotateAll` is
 unsupported.
 
-Partial rotation cannot run when deterministic names are encrypted: `ts` with
-`EncryptSeriesNames`, or `vec` with `EncryptPointIDs` or
+Partial rotation cannot run when deterministic names are encrypted: `series` with
+`EncryptSeriesNames`, or `vector` with `EncryptPointIDs` or
 `EncryptVecCollectionNames`. In those modes the physical names are derived from
 one master key, so the remaining entities could neither be found nor decrypted
 after the new key is installed. The methods return `ErrInvalidConfig`; use
@@ -1020,7 +1028,7 @@ after the new key is installed. The methods return `ErrInvalidConfig`; use
 
 When `EncryptDBKeys` is enabled, primary keys and index values are AES-SIV
 ciphertext. Exact lookups still work, but ciphertext order is meaningless, so
-`OrderBy`, `Range` and `Prefix` return `db.ErrEncryptedOrdering` rather than
+`OrderBy`, `Range` and `Prefix` return `record.ErrEncryptedOrdering` rather than
 wrong results. There are three honest options:
 
 1. **Plaintext index for non-secret ordering fields.** Fast, but deliberately
@@ -1101,10 +1109,10 @@ log.Printf("audit: %d events, tip %x", res.Count, res.Tip)
 | Flag | Records |
 |------|---------|
 | `AuditNone` | nothing (default) |
-| `AuditDB` | `db` writes |
-| `AuditFS` | `fs` writes |
-| `AuditTS` | `ts` writes |
-| `AuditVec` | `vec` writes |
+| `AuditDB` | `record` writes |
+| `AuditFS` | `file` writes |
+| `AuditTS` | `series` writes |
+| `AuditVec` | `vector` writes |
 | `AuditAll` | all four |
 
 Unlike encryption flags, audit flags are **not persisted**: they are a per-open
@@ -1130,11 +1138,11 @@ or roll back together:
 
 ```go
 err := store.WriteTransaction(ctx, func(tx *harbor.Tx) error {
-	if err := tx.DB().Save(ctx, &doc); err != nil {
+	if err := tx.Record().Save(ctx, &doc); err != nil {
 		return err
 	}
 
-	fsys, err := tx.FS().Open("app")
+	fsys, err := tx.File().Open("app")
 	if err != nil {
 		return err
 	}
@@ -1149,15 +1157,15 @@ err := store.WriteTransaction(ctx, func(tx *harbor.Tx) error {
 		return err
 	}
 
-	col, err := tx.Vec().NewCollection("documents", len(embedding), vec.Cosine, false)
+	col, err := tx.Vector().NewCollection("documents", len(embedding), vector.Cosine, false)
 	if err != nil {
 		return err
 	}
-	if err := col.Upsert([]vec.PointStruct{{ID: doc.ID, Vector: embedding}}); err != nil {
+	if err := col.Upsert([]vector.PointStruct{{ID: doc.ID, Vector: embedding}}); err != nil {
 		return err
 	}
 
-	return tx.TS().Series("writes").Insert(ctx, ts.Point{Timestamp: now, Value: 1})
+	return tx.Series().Series("writes").Insert(ctx, series.Point{Timestamp: now, Value: 1})
 })
 ```
 
@@ -1169,7 +1177,7 @@ Behaviour worth knowing:
 
 - **One fsync.** All writes share one bbolt transaction instead of one
   transaction per store.
-- **Vector staging.** Points upserted through `tx.Vec()` are visible to searches
+- **Vector staging.** Points upserted through `tx.Vector()` are visible to searches
   through the same view immediately. The live collection indexes adopt them when
   the transaction commits, so searches outside the transaction do not see them
   early. Points still buffered from earlier calls are flushed before the
@@ -1188,15 +1196,15 @@ The two entry points differ in who owns the bbolt handle:
 - `harbor.Open` opens the file itself; `Store.Close` flushes buffered vector
   writes and closes the database. It is safe to call more than once, and the
   sub-store accessors return `nil` afterwards.
-- `db.Open`, `fs.Open`, `ts.Open` and `vec.Open` wrap an already-open
+- `record.Open`, `file.Open`, `series.Open` and `vector.Open` wrap an already-open
   `*bolt.DB`. Their `Close` methods release the wrapper only; the caller keeps
   ownership of the database. If several stores share one handle, close the
   handle after all wrappers are closed.
 
-When embedding `vec` on a shared handle, set `vec.Config.SharedDB` (or call
-`SetOwnsDB(false)`): `vec.Store.Close` then flushes buffered points without
-closing the handle. Use `Store.Vec().Flush()` to drain explicitly and
-`Store.Vec().Closed()` to check the state. Per collection, `Pending()` reports
+When embedding `vector` on a shared handle, set `vector.Config.SharedDB` (or call
+`SetOwnsDB(false)`): `vector.Store.Close` then flushes buffered points without
+closing the handle. Use `Store.Vector().Flush()` to drain explicitly and
+`Store.Vector().Closed()` to check the state. Per collection, `Pending()` reports
 buffered points and `Close()` flushes and retires that handle. The root store
 does this automatically: `harbor.Store.Close` and `harbor.Store.Backup` flush
 the vector buffer before touching the database.
@@ -1263,7 +1271,7 @@ err := store.Migrate(ctx, harbor.Schema{
 	Version: 2,
 	Steps: []harbor.Step{
 		{From: 0, To: 1, Apply: func(ctx context.Context, tx *harbor.Tx) error {
-			return tx.DB().Save(ctx, &Backfill{})
+			return tx.Record().Save(ctx, &Backfill{})
 		}},
 		{From: 1, To: 2, Apply: migrateDocuments},
 	},
@@ -1320,9 +1328,9 @@ Classify errors with `errors.Is`, never by comparing strings:
 
 ```go
 var user User
-err := store.DB().One(ctx, "Email", "missing@example.com", &user)
+err := store.Record().One(ctx, "Email", "missing@example.com", &user)
 switch {
-case errors.Is(err, db.ErrNotFound):
+case errors.Is(err, record.ErrNotFound):
 	// Record does not exist.
 case errors.Is(err, context.Canceled):
 	// The request was cancelled.
@@ -1347,13 +1355,13 @@ results are not retroactively changed to cancellation errors.
 
 The defaults favor portability and safety. For throughput-sensitive workloads:
 
-- Pass a faster `db.Codec` than JSON for decode-heavy scans.
-- Batch writes with `db.WriteTransaction`, `ts.Series.InsertMany`, or
-  `vec.Collection.Upsert` instead of writing one record per loop; every bbolt
+- Pass a faster `record.Codec` than JSON for decode-heavy scans.
+- Batch writes with `record.WriteTransaction`, `series.Series.InsertMany`, or
+  `vector.Collection.Upsert` instead of writing one record per loop; every bbolt
   commit is an fsync.
-- For encrypted time series, set `ts.Config.BlockDuration` so blocks are sealed
+- For encrypted time series, set `series.Config.BlockDuration` so blocks are sealed
   and opened once instead of once per point.
-- Use `fs.Config.ChunkSize` for large files so writes and truncations touch only
+- Use `file.Config.ChunkSize` for large files so writes and truncations touch only
   the affected chunks.
 
 The repository ships benchmarks for the hot paths:
@@ -1364,17 +1372,17 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
 
 ## Documentation
 
-- [db/README.md](db/README.md) — models, tags, CRUD, queries, transactions,
+- [store/record/README.md](store/record/README.md) — models, tags, CRUD, queries, transactions,
   key/value access, and codecs.
-- [fs/README.md](fs/README.md) — file systems, snapshots, external content, and
+- [store/file/README.md](store/file/README.md) — file systems, snapshots, external content, and
   encryption.
-- [ts/README.md](ts/README.md) — series, aggregation, retention, and encrypted
+- [store/series/README.md](store/series/README.md) — series, aggregation, retention, and encrypted
   blocks.
-- [vec/README.md](vec/README.md) — collections, indexes, filters, quantization,
+- [store/vector/README.md](store/vector/README.md) — collections, indexes, filters, quantization,
   and buffering.
-- [fts/README.md](fts/README.md) — full-text indexes, tokenizers, BM25 and
+- [store/search/README.md](store/search/README.md) — full-text indexes, tokenizers, BM25 and
   encryption.
-- [fs/s3fs/README.md](fs/s3fs/README.md) — the S3-backed `absfs.Filer`.
+- [store/file/s3fs/README.md](store/file/s3fs/README.md) — the S3-backed `absfs.Filer`.
 - [pkg/audit/README.md](pkg/audit/README.md) — the tamper-evident audit trail:
   event model, recorded operations, threat model, and direct package use.
 - [pkg/store/README.md](pkg/store/README.md) — the process-wide database
@@ -1383,7 +1391,7 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
   and grants.
 - [pkg/snapshot/README.md](pkg/snapshot/README.md) — content-addressed
   incremental snapshots, restore, retention, and scheduling.
-- [vec/doc/README.md](vec/doc/README.md) — the document-oriented vector
+- [store/vector/doc/README.md](store/vector/doc/README.md) — the document-oriented vector
   facade.
 - [AGENTS.md](AGENTS.md) — architecture, on-disk layout, encryption internals,
   development workflow, and repository conventions for contributors and coding
@@ -1392,11 +1400,11 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
 Generated API documentation is published on pkg.go.dev:
 
 - [github.com/malivvan/harbor](https://pkg.go.dev/github.com/malivvan/harbor)
-- [github.com/malivvan/harbor/db](https://pkg.go.dev/github.com/malivvan/harbor/db)
-- [github.com/malivvan/harbor/fs](https://pkg.go.dev/github.com/malivvan/harbor/fs)
-- [github.com/malivvan/harbor/ts](https://pkg.go.dev/github.com/malivvan/harbor/ts)
-- [github.com/malivvan/harbor/vec](https://pkg.go.dev/github.com/malivvan/harbor/vec)
-- [github.com/malivvan/harbor/fts](https://pkg.go.dev/github.com/malivvan/harbor/fts)
+- [github.com/malivvan/harbor/store/record](https://pkg.go.dev/github.com/malivvan/harbor/store/record)
+- [github.com/malivvan/harbor/store/file](https://pkg.go.dev/github.com/malivvan/harbor/store/file)
+- [github.com/malivvan/harbor/store/series](https://pkg.go.dev/github.com/malivvan/harbor/store/series)
+- [github.com/malivvan/harbor/store/vector](https://pkg.go.dev/github.com/malivvan/harbor/store/vector)
+- [github.com/malivvan/harbor/store/search](https://pkg.go.dev/github.com/malivvan/harbor/store/search)
 - [github.com/malivvan/harbor/pkg/audit](https://pkg.go.dev/github.com/malivvan/harbor/pkg/audit)
 - [github.com/malivvan/harbor/pkg/blob](https://pkg.go.dev/github.com/malivvan/harbor/pkg/blob)
 - [github.com/malivvan/harbor/pkg/consensus](https://pkg.go.dev/github.com/malivvan/harbor/pkg/consensus)
@@ -1407,39 +1415,39 @@ Generated API documentation is published on pkg.go.dev:
 - [github.com/malivvan/harbor/pkg/snapshot](https://pkg.go.dev/github.com/malivvan/harbor/pkg/snapshot)
 - [github.com/malivvan/harbor/pkg/snapshot/blobstore](https://pkg.go.dev/github.com/malivvan/harbor/pkg/snapshot/blobstore)
 - [github.com/malivvan/harbor/pkg/store](https://pkg.go.dev/github.com/malivvan/harbor/pkg/store)
-- [github.com/malivvan/harbor/vec/doc](https://pkg.go.dev/github.com/malivvan/harbor/vec/doc)
+- [github.com/malivvan/harbor/store/vector/doc](https://pkg.go.dev/github.com/malivvan/harbor/store/vector/doc)
 
 Where to start:
 
 - **New to Harbor:** [Quick start](#quick-start), then the guide sections for
   the stores you need.
-- **Records, indexes and transactions:** [db/README.md](db/README.md).
-- **Full-text search:** [Full-text search with `fts`](#full-text-search-with-fts)
-  and [fts/README.md](fts/README.md).
-- **Files, snapshots or external content:** [fs/README.md](fs/README.md) and
-  [fs/s3fs/README.md](fs/s3fs/README.md).
-- **Metrics and time series:** [ts/README.md](ts/README.md).
-- **Embeddings and similarity search:** [vec/README.md](vec/README.md).
+- **Records, indexes and transactions:** [store/record/README.md](store/record/README.md).
+- **Full-text search:** [Full-text search with `search`](#full-text-search-with-search)
+  and [store/search/README.md](store/search/README.md).
+- **Files, snapshots or external content:** [store/file/README.md](store/file/README.md) and
+  [store/file/s3fs/README.md](store/file/s3fs/README.md).
+- **Metrics and time series:** [store/series/README.md](store/series/README.md).
+- **Embeddings and similarity search:** [store/vector/README.md](store/vector/README.md).
 - **Process-wide database, blobs or object snapshots:**
   [pkg/store/README.md](pkg/store/README.md),
   [pkg/blob/README.md](pkg/blob/README.md) and
   [pkg/snapshot/README.md](pkg/snapshot/README.md).
 - **IDs, metrics or a document vector facade:**
-  [Utilities](#utilities) and [vec/doc/README.md](vec/doc/README.md).
+  [Utilities](#utilities) and [store/vector/doc/README.md](store/vector/doc/README.md).
 - **Security review or operations:** [Encryption](#encryption) and
   [AGENTS.md](AGENTS.md#architecture).
 
 Every public package has a package-level overview in its doc comment, and every
 exported identifier is documented. Compile-checked examples live next to the
-code where they are most useful (for the `db` package, see
-`db/examples_test.go`).
+code where they are most useful (for the `record` package, see
+`store/record/examples_test.go`).
 
 ## Status
 
 Harbor is preparing its first public release (`v0.1.x`). The on-disk formats
 are versioned and refuse data from an incompatible build instead of misreading
-it. Every persisted format is version 1 (`db.Version`, `fs.FormatVersion`,
-`ts.FormatVersion`, `vec.CollectionFormatVersion`, `audit.FormatVersion`);
+it. Every persisted format is version 1 (`record.Version`, `file.FormatVersion`,
+`series.FormatVersion`, `vector.CollectionFormatVersion`, `audit.FormatVersion`);
 there is no v2 or dual-version compatibility path. Pin a module version, and
 treat pre-1.0 API changes as potentially breaking.
 

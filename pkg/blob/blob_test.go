@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/malivvan/harbor"
-	hfs "github.com/malivvan/harbor/fs"
+	hfs "github.com/malivvan/harbor/store/file"
 )
 
 // newBlob returns a Store over a throwaway database.
@@ -27,7 +27,7 @@ func newBlob(t *testing.T) *Store {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	s, err := Open(st.FS(), "objects")
+	s, err := Open(st.File(), "objects")
 	if err != nil {
 		t.Fatalf("blob.Open: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestOpenCreatesNamedFileSystem(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	s, err := Open(st.FS(), "custom-name")
+	s, err := Open(st.File(), "custom-name")
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestOpenCreatesNamedFileSystem(t *testing.T) {
 		t.Fatalf("Put: %v", err)
 	}
 	// The named file system is visible through the fs store.
-	names, err := st.FS().FileSystems()
+	names, err := st.File().FileSystems()
 	if err != nil {
 		t.Fatalf("FileSystems: %v", err)
 	}

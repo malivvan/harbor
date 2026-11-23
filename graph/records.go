@@ -15,8 +15,8 @@ import (
 	"sort"
 	"time"
 
-	hdb "github.com/malivvan/harbor/db"
-	"github.com/malivvan/harbor/db/q"
+	hdb "github.com/malivvan/harbor/store/record"
+	"github.com/malivvan/harbor/store/record/q"
 )
 
 // NodeRecord is one live node.

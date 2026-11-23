@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/malivvan/harbor"
-	"github.com/malivvan/harbor/db"
+	"github.com/malivvan/harbor/store/record"
 )
 
 // typeRegistry maps a record's reflect.Type name to its type, so the FSM can
@@ -58,7 +58,7 @@ func newValue(name string, raw json.RawMessage) (any, error) {
 }
 
 // DB is the replicated write view of the db sub-store. Reads should use
-// Node.Store().DB() directly; writes go through the methods here so they are
+// Node.Store().Record() directly; writes go through the methods here so they are
 // proposed through raft and applied on every node.
 type DB struct {
 	n    *Node
@@ -148,7 +148,7 @@ func (d *DB) Set(ctx context.Context, bucket string, key, value any) error {
 	if err != nil {
 		return err
 	}
-	kb, err := db.EncodeKey(key, node.Codec())
+	kb, err := record.EncodeKey(key, node.Codec())
 	if err != nil {
 		return fmt.Errorf("consensus: encode key: %w", err)
 	}
@@ -173,7 +173,7 @@ func (d *DB) SetBytes(ctx context.Context, bucket string, key any, value []byte)
 	if err != nil {
 		return err
 	}
-	kb, err := db.EncodeKey(key, node.Codec())
+	kb, err := record.EncodeKey(key, node.Codec())
 	if err != nil {
 		return fmt.Errorf("consensus: encode key: %w", err)
 	}
@@ -190,7 +190,7 @@ func (d *DB) Delete(ctx context.Context, bucket string, key any) error {
 	if err != nil {
 		return err
 	}
-	kb, err := db.EncodeKey(key, node.Codec())
+	kb, err := record.EncodeKey(key, node.Codec())
 	if err != nil {
 		return fmt.Errorf("consensus: encode key: %w", err)
 	}
@@ -200,7 +200,7 @@ func (d *DB) Delete(ctx context.Context, bucket string, key any) error {
 
 // localNode returns the leader's local db node for this view. It is used to
 // encode keys and values exactly as a direct write would.
-func (d *DB) localNode() (db.Node, error) {
+func (d *DB) localNode() (record.Node, error) {
 	if d == nil || d.n == nil {
 		return nil, ErrClosed
 	}
@@ -241,8 +241,8 @@ func (d *DB) recordWrite(ctx context.Context, op, field string, value, data any)
 }
 
 // dbNode resolves the db.Node for a bucket path.
-func dbNode(st *harbor.Store, path []string) db.Node {
-	var node db.Node = st.DB()
+func dbNode(st *harbor.Store, path []string) record.Node {
+	var node record.Node = st.Record()
 	if len(path) > 0 {
 		node = node.From(path...)
 	}

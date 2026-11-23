@@ -8,8 +8,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/malivvan/harbor/ts"
-	"github.com/malivvan/harbor/vec"
+	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/harbor/store/vector"
 )
 
 // TestReplicateDBKeyValue covers the raw key/value writes: Set encodes the
@@ -29,14 +29,14 @@ func TestReplicateDBKeyValue(t *testing.T) {
 
 	for _, n := range nodes {
 		var theme string
-		require.NoError(t, n.Store().DB().Get(ctx, "settings", "theme", &theme), "read on %s", n.cfg.NodeID)
+		require.NoError(t, n.Store().Record().Get(ctx, "settings", "theme", &theme), "read on %s", n.cfg.NodeID)
 		require.Equal(t, "dark", theme)
 
 		var answer string
-		require.NoError(t, n.Store().DB().Get(ctx, "settings", 42, &answer))
+		require.NoError(t, n.Store().Record().Get(ctx, "settings", 42, &answer))
 		require.Equal(t, "answer", answer)
 
-		raw, err := n.Store().DB().GetBytes(ctx, "blobs", "raw")
+		raw, err := n.Store().Record().GetBytes(ctx, "blobs", "raw")
 		require.NoError(t, err)
 		require.Equal(t, []byte{1, 2, 3}, raw)
 	}
@@ -47,8 +47,8 @@ func TestReplicateDBKeyValue(t *testing.T) {
 
 	for _, n := range nodes {
 		var theme string
-		require.Error(t, n.Store().DB().Get(ctx, "settings", "theme", &theme))
-		exists, err := n.Store().DB().KeyExists(ctx, "blobs", "raw")
+		require.Error(t, n.Store().Record().Get(ctx, "settings", "theme", &theme))
+		exists, err := n.Store().Record().KeyExists(ctx, "blobs", "raw")
 		require.NoError(t, err)
 		require.False(t, exists)
 	}
@@ -75,7 +75,7 @@ func TestReplicateFSMetadata(t *testing.T) {
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
-		local, err := n.Store().FS().Open("data")
+		local, err := n.Store().File().Open("data")
 		require.NoError(t, err)
 
 		data, err := local.ReadFile("/a/b/file.txt")
@@ -120,7 +120,7 @@ func TestReplicateFSStreamingWrite(t *testing.T) {
 	// Buffered writes must not reach the log before Close.
 	waitApplied(t, leader, nodes...)
 	for _, n := range nodes {
-		local, err := n.Store().FS().Open("data")
+		local, err := n.Store().File().Open("data")
 		require.NoError(t, err)
 		_, err = local.Stat("/stream.bin")
 		require.True(t, os.IsNotExist(err), "buffered file visible on %s before Close", n.cfg.NodeID)
@@ -129,7 +129,7 @@ func TestReplicateFSStreamingWrite(t *testing.T) {
 	require.NoError(t, file.Close())
 	waitApplied(t, leader, nodes...)
 	for _, n := range nodes {
-		local, err := n.Store().FS().Open("data")
+		local, err := n.Store().File().Open("data")
 		require.NoError(t, err)
 		data, err := local.ReadFile("/stream.bin")
 		require.NoError(t, err)
@@ -143,7 +143,7 @@ func TestReplicateFSStreamingWrite(t *testing.T) {
 	require.NoError(t, app.Close())
 	waitApplied(t, leader, nodes...)
 	for _, n := range nodes {
-		local, err := n.Store().FS().Open("data")
+		local, err := n.Store().File().Open("data")
 		require.NoError(t, err)
 		data, err := local.ReadFile("/stream.bin")
 		require.NoError(t, err)
@@ -161,20 +161,20 @@ func TestReplicateVecFlushAndOptions(t *testing.T) {
 
 	leader := waitLeader(t, nodes...)
 	require.NoError(t, leader.Vec().EnsureCollection(ctx, "docs"))
-	require.NoError(t, leader.Vec().CreateCollectionWithOptions(ctx, vec.CollectionOptions{
+	require.NoError(t, leader.Vec().CreateCollectionWithOptions(ctx, vector.CollectionOptions{
 		Name:           "colors",
 		VectorLen:      2,
-		Metric:         vec.Dot,
+		Metric:         vector.Dot,
 		FlushThreshold: 1000,
 	}))
-	require.NoError(t, leader.Vec().Upsert("colors", []vec.PointStruct{
+	require.NoError(t, leader.Vec().Upsert("colors", []vector.PointStruct{
 		{ID: "red", Vector: []float32{1, 0}},
 	}))
 	require.NoError(t, leader.Vec().Flush(ctx))
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
-		st := n.Store().Vec()
+		st := n.Store().Vector()
 
 		names, err := st.ListCollections()
 		require.NoError(t, err)
@@ -188,7 +188,7 @@ func TestReplicateVecFlushAndOptions(t *testing.T) {
 			if meta.Name == "colors" {
 				found = true
 				require.Equal(t, 2, meta.VectorLen)
-				require.Equal(t, vec.Dot, meta.Metric)
+				require.Equal(t, vector.Dot, meta.Metric)
 			}
 		}
 		require.True(t, found, "collection metadata missing on %s", n.cfg.NodeID)
@@ -209,30 +209,30 @@ func TestReplicateTSMetadataAndDeletion(t *testing.T) {
 	defer closeAll(nodes...)
 
 	leader := waitLeader(t, nodes...)
-	require.NoError(t, leader.TS().InsertMany(ctx, "cpu", []ts.Point{
+	require.NoError(t, leader.TS().InsertMany(ctx, "cpu", []series.Point{
 		{Timestamp: 1, Value: 1},
 		{Timestamp: 2, Value: 2},
 		{Timestamp: 3, Value: 3},
 	}))
 	require.NoError(t, leader.TS().SetLabels(ctx, "cpu", map[string]string{"host": "a"}))
-	require.NoError(t, leader.TS().SetRetention(ctx, "cpu", ts.Retention{MaxPoints: 10}))
+	require.NoError(t, leader.TS().SetRetention(ctx, "cpu", series.Retention{MaxPoints: 10}))
 	removed, err := leader.TS().DeleteRange(ctx, "cpu", 2, 2)
 	require.NoError(t, err)
 	require.Equal(t, 1, removed)
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
-		series := n.Store().TS().Series("cpu")
-		count, err := series.Count(ctx)
+		ser := n.Store().Series().Series("cpu")
+		count, err := ser.Count(ctx)
 		require.NoError(t, err)
 		require.Equal(t, 2, count, "count on %s", n.cfg.NodeID)
 
-		_, err = series.Get(ctx, 2)
+		_, err = ser.Get(ctx, 2)
 		require.Error(t, err)
 
-		infos, err := n.Store().TS().ListSeries(ctx)
+		infos, err := n.Store().Series().ListSeries(ctx)
 		require.NoError(t, err)
-		var info *ts.SeriesInfo
+		var info *series.SeriesInfo
 		for i := range infos {
 			if infos[i].Name == "cpu" {
 				info = &infos[i]

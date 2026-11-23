@@ -11,9 +11,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/malivvan/harbor/fts"
-	"github.com/malivvan/harbor/ts"
-	"github.com/malivvan/harbor/vec"
+	"github.com/malivvan/harbor/store/search"
+	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/harbor/store/vector"
 )
 
 // seedBackup writes one record, file, series, vector and full-text document.
@@ -21,20 +21,20 @@ func seedBackup(t *testing.T, s *Store) {
 	t.Helper()
 	ctx := context.Background()
 
-	require.NoError(t, s.DB().Save(ctx, &txRecord{ID: "b1", Name: "backup"}))
-	fsys, err := s.FS().Open("data")
+	require.NoError(t, s.Record().Save(ctx, &txRecord{ID: "b1", Name: "backup"}))
+	fsys, err := s.File().Open("data")
 	require.NoError(t, err)
 	f, err := fsys.Create("/note.txt")
 	require.NoError(t, err)
 	_, err = f.Write([]byte("backed up"))
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
-	require.NoError(t, s.TS().Series("cpu").Insert(ctx, ts.Point{Timestamp: 1_000, Value: 3.5}))
-	col, err := s.Vec().NewCollection("docs", 2, vec.Cosine, false)
+	require.NoError(t, s.Series().Series("cpu").Insert(ctx, series.Point{Timestamp: 1_000, Value: 3.5}))
+	col, err := s.Vector().NewCollection("docs", 2, vector.Cosine, false)
 	require.NoError(t, err)
-	require.NoError(t, col.Upsert([]vec.PointStruct{{ID: "p1", Vector: []float32{1, 0}}}))
+	require.NoError(t, col.Upsert([]vector.PointStruct{{ID: "p1", Vector: []float32{1, 0}}}))
 	require.NoError(t, col.Flush())
-	idx, err := s.FTS().Open("docs", fts.Config{})
+	idx, err := s.Search().Open("docs", search.Config{})
 	require.NoError(t, err)
 	require.NoError(t, idx.Upsert(ctx, "d1", "backup text"))
 }
@@ -73,26 +73,26 @@ func TestBackupFileVerifyAndRestore(t *testing.T) {
 	defer mustClose(t, restored)
 
 	var rec txRecord
-	require.NoError(t, restored.DB().One(ctx, "ID", "b1", &rec))
+	require.NoError(t, restored.Record().One(ctx, "ID", "b1", &rec))
 	require.Equal(t, "backup", rec.Name)
 
-	fsys, err := restored.FS().Open("data")
+	fsys, err := restored.File().Open("data")
 	require.NoError(t, err)
 	body, err := fsys.ReadFile("/note.txt")
 	require.NoError(t, err)
 	require.Equal(t, "backed up", string(body))
 
-	points, err := restored.TS().Series("cpu").Range(ctx, 0, 10_000)
+	points, err := restored.Series().Series("cpu").Range(ctx, 0, 10_000)
 	require.NoError(t, err)
 	require.Len(t, points, 1)
 
-	col, err := restored.Vec().NewCollection("docs", 2, vec.Cosine, false)
+	col, err := restored.Vector().NewCollection("docs", 2, vector.Cosine, false)
 	require.NoError(t, err)
 	hits, err := col.Search([]float32{1, 0}, nil, 1)
 	require.NoError(t, err)
 	require.Len(t, hits, 1)
 
-	idx, err := restored.FTS().Open("docs", fts.Config{})
+	idx, err := restored.Search().Open("docs", search.Config{})
 	require.NoError(t, err)
 	fhits, err := idx.Search(ctx, "backup", 10)
 	require.NoError(t, err)
@@ -203,7 +203,7 @@ func TestBackupUnderConcurrentWrites(t *testing.T) {
 	go func() {
 		defer close(done)
 		for i := 0; i < 200; i++ {
-			_ = s.DB().Save(context.Background(), &txRecord{ID: "hot-" + time.Now().Format("150405.000000000")})
+			_ = s.Record().Save(context.Background(), &txRecord{ID: "hot-" + time.Now().Format("150405.000000000")})
 		}
 	}()
 

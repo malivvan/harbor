@@ -1,7 +1,7 @@
 # audit
 
 Tamper-evident, append-only audit trail for Harbor. Every mutating operation in
-the `db`, `fs`, `ts` and `vec` stores can be recorded as a signed, hash-linked
+the `record`, `file`, `series` and `vector` stores can be recorded as a signed, hash-linked
 event, so the trail proves *what* changed and *in which order* — and cannot be
 forged, altered, reordered or spliced without the store's key material.
 
@@ -54,10 +54,10 @@ log.Printf("audit: %d events, tip %x", res.Count, res.Tip)
 | Flag | Records |
 |------|---------|
 | `AuditNone` | nothing (default) |
-| `AuditDB` | `db` writes |
-| `AuditFS` | `fs` writes |
-| `AuditTS` | `ts` writes |
-| `AuditVec` | `vec` writes |
+| `AuditDB` | `record` writes |
+| `AuditFS` | `file` writes |
+| `AuditTS` | `series` writes |
+| `AuditVec` | `vector` writes |
 | `AuditAll` | all four |
 
 Unlike encryption flags, audit flags are **not persisted**: they are a per-open
@@ -115,10 +115,10 @@ keys, using SLIP-0010 hardened paths:
 
 | Store | Path |
 |-------|------|
-| `db`  | `m/0'` |
-| `fs`  | `m/1'` |
-| `ts`  | `m/2'` |
-| `vec` | `m/3'` |
+| record (`db`) | `m/0'` |
+| file (`fs`) | `m/1'` |
+| series (`ts`) | `m/2'` |
+| vector (`vec`) | `m/3'` |
 
 SLIP-0010 and SLIP-0021 are domain-separated (different HMAC keys), so deriving
 signing keys and encryption keys from one seed does not couple them. No separate
@@ -129,10 +129,10 @@ and therefore the derived audit keys, is correct.
 
 | Store | Operations |
 |-------|------------|
-| `db`  | `save`, `update`, `update_field`, `delete_struct`, `drop`, `set`, `set_bytes`, `delete` |
-| `fs`  | `mkdir`, `write`, `truncate`, `remove`, `remove_all`, `rename`, `copy`, `chmod`, `chtimes`, `chown`, `symlink`, `delete_fs` |
-| `ts`  | `insert`, `insert_many`, `delete_range`, `set_labels`, `set_retention`, `delete_series` |
-| `vec` | `create_collection`, `upsert`, `delete`, `drop_collection` |
+| record (`db`) | `save`, `update`, `update_field`, `delete_struct`, `drop`, `set`, `set_bytes`, `delete` |
+| file (`fs`) | `mkdir`, `write`, `truncate`, `remove`, `remove_all`, `rename`, `copy`, `chmod`, `chtimes`, `chown`, `symlink`, `delete_fs` |
+| series (`ts`) | `insert`, `insert_many`, `delete_range`, `set_labels`, `set_retention`, `delete_series` |
+| vector (`vec`) | `create_collection`, `upsert`, `delete`, `drop_collection` |
 
 Each event carries a SHA-256 `Digest` of the written payload (nil for deletes),
 so re-hashing current data against the recorded digest detects content changes.
@@ -147,10 +147,10 @@ canonicalisation step and a future event field holding a map still has one
 signature per logical value. `TestEventEncodingIsCanonical` pins the stored
 bytes to the canonical form.
 
-`db.Set` records `set` and `db.SetBytes` records `set_bytes`: both write the same
+`record.Set` records `set` and `record.SetBytes` records `set_bytes`: both write the same
 encoded value, but the operation name preserves the caller's intent. Higher-level
 packages are audited at the layer that performs the write: `blob` and
-`snapshot` write through `fs`, so their writes appear as `fs` events; the
+`snapshot` write through `file`, so their writes appear as `file` events; the
 `store` manager only opens stores and records nothing itself.
 
 **Not recorded:** reads (`Get`, `Find`, `Range`, `Search`, `Stat`, `ReadFile`,
@@ -184,7 +184,7 @@ Not guaranteed (by design, not by omission):
 - **Per-user identity.** Events record what happened, not which human did it.
 - **Crash-atomic coupling.** An event is appended in its own transaction after
   the data write commits. A crash in between loses the *trailing* audit event
-  (the data is present, the event is not) — the same model as `db.ChangeHook`.
+  (the data is present, the event is not) — the same model as `record.ChangeHook`.
 
 ## Verification
 

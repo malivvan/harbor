@@ -35,7 +35,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/malivvan/harbor/fs"
+	"github.com/malivvan/harbor/store/file"
 )
 
 // tempCounter is the fallback uniqueness source when crypto/rand fails.
@@ -65,14 +65,14 @@ type Info struct {
 
 // Store is a flat object namespace over one Harbor file system.
 type Store struct {
-	fs *fs.FS
+	fs *file.FS
 }
 
 // New returns a Store over an already-open Harbor file system.
-func New(fsys *fs.FS) *Store { return &Store{fs: fsys} }
+func New(fsys *file.FS) *Store { return &Store{fs: fsys} }
 
 // Open returns a Store over the named file system, creating it if absent.
-func Open(store *fs.Store, name string) (*Store, error) {
+func Open(store *file.Store, name string) (*Store, error) {
 	if store == nil {
 		return nil, ErrNoStore
 	}
@@ -84,7 +84,7 @@ func Open(store *fs.Store, name string) (*Store, error) {
 }
 
 // FS returns the underlying file system, or nil.
-func (s *Store) FS() *fs.FS {
+func (s *Store) FS() *file.FS {
 	if s == nil {
 		return nil
 	}
@@ -176,7 +176,7 @@ func (s *Store) Put(ctx context.Context, bucket, key string, r io.Reader, size i
 const tempPrefix = ".harbor-put-"
 
 // putAtomic streams r into a temporary sibling of p and renames it into place.
-// fs.Rename within one store replaces an existing file, so the final key is
+// file.Rename within one store replaces an existing file, so the final key is
 // either the previous content or the complete new content, never a partial copy.
 func (s *Store) putAtomic(p string, r io.Reader) error {
 	tmp := path.Join(path.Dir(p), tempPrefix+randomSuffix())
@@ -237,7 +237,7 @@ func (s *Store) Get(ctx context.Context, bucket, key string) (io.ReadCloser, int
 }
 
 // ReadAll reads a whole object. A missing object returns the wrapped os error, so
-// callers can test with errors.Is(err, fs.ErrNotExist).
+// callers can test with errors.Is(err, os.ErrNotExist).
 func (s *Store) ReadAll(ctx context.Context, bucket, key string) ([]byte, error) {
 	rc, _, err := s.Get(ctx, bucket, key)
 	if err != nil {
@@ -364,7 +364,7 @@ func (s *Store) List(ctx context.Context, bucket, prefix string) ([]Info, error)
 	}
 
 	out := make([]Info, 0, 16)
-	err := fs.Walk(s.fs, root, func(p string, info os.FileInfo, err error) error {
+	err := file.Walk(s.fs, root, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}

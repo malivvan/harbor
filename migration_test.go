@@ -27,11 +27,11 @@ func TestMigrateForward(t *testing.T) {
 		Steps: []Step{
 			{From: 0, To: 1, Apply: func(ctx context.Context, tx *Tx) error {
 				order = append(order, 1)
-				return tx.DB().Save(ctx, &migratedRow{ID: "one", Name: "first"})
+				return tx.Record().Save(ctx, &migratedRow{ID: "one", Name: "first"})
 			}},
 			{From: 1, To: 2, Apply: func(ctx context.Context, tx *Tx) error {
 				order = append(order, 2)
-				return tx.DB().Save(ctx, &migratedRow{ID: "two", Name: "second"})
+				return tx.Record().Save(ctx, &migratedRow{ID: "two", Name: "second"})
 			}},
 		},
 	}
@@ -43,9 +43,9 @@ func TestMigrateForward(t *testing.T) {
 	require.Equal(t, uint64(2), version)
 
 	var row migratedRow
-	require.NoError(t, s.DB().One(ctx, "ID", "one", &row))
+	require.NoError(t, s.Record().One(ctx, "ID", "one", &row))
 	require.Equal(t, "first", row.Name)
-	require.NoError(t, s.DB().One(ctx, "ID", "two", &row))
+	require.NoError(t, s.Record().One(ctx, "ID", "two", &row))
 	require.Equal(t, "second", row.Name)
 
 	// Re-running the same schema is a no-op.
@@ -76,7 +76,7 @@ func TestMigrateFailingStepRollsBack(t *testing.T) {
 
 	require.NoError(t, s.Migrate(ctx, Schema{Version: 1, Steps: []Step{
 		{From: 0, To: 1, Apply: func(ctx context.Context, tx *Tx) error {
-			return tx.DB().Save(ctx, &migratedRow{ID: "kept", Name: "first"})
+			return tx.Record().Save(ctx, &migratedRow{ID: "kept", Name: "first"})
 		}},
 	}}))
 
@@ -84,7 +84,7 @@ func TestMigrateFailingStepRollsBack(t *testing.T) {
 	err := s.Migrate(ctx, Schema{Version: 2, Steps: []Step{
 		{From: 0, To: 1, Apply: func(context.Context, *Tx) error { return nil }},
 		{From: 1, To: 2, Apply: func(ctx context.Context, tx *Tx) error {
-			if err := tx.DB().Save(ctx, &migratedRow{ID: "lost", Name: "second"}); err != nil {
+			if err := tx.Record().Save(ctx, &migratedRow{ID: "lost", Name: "second"}); err != nil {
 				return err
 			}
 			return boom
@@ -97,8 +97,8 @@ func TestMigrateFailingStepRollsBack(t *testing.T) {
 	require.Equal(t, uint64(1), version)
 
 	var row migratedRow
-	require.Error(t, s.DB().One(ctx, "ID", "lost", &row))
-	require.NoError(t, s.DB().One(ctx, "ID", "kept", &row))
+	require.Error(t, s.Record().One(ctx, "ID", "lost", &row))
+	require.NoError(t, s.Record().One(ctx, "ID", "kept", &row))
 }
 
 func TestMigrateInvalidSchemas(t *testing.T) {

@@ -25,7 +25,7 @@ func newStore(t *testing.T, bucket string) *Store {
 	}
 	t.Cleanup(func() { _ = harborStore.Close() })
 
-	objects, err := blob.Open(harborStore.FS(), bucket)
+	objects, err := blob.Open(harborStore.File(), bucket)
 	if err != nil {
 		t.Fatalf("blob.Open: %v", err)
 	}

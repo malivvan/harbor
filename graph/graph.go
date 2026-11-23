@@ -43,7 +43,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	hdb "github.com/malivvan/harbor/db"
+	hdb "github.com/malivvan/harbor/store/record"
 )
 
 var (

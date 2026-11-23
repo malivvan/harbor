@@ -1,0 +1,515 @@
+package index_test
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/malivvan/harbor/store/record/index"
+	"github.com/stretchr/testify/require"
+	bolt "go.etcd.io/bbolt"
+)
+
+func TestListIndex(t *testing.T) {
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	defer os.RemoveAll(dir)
+	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
+	defer db.Close()
+
+	err := db.bdb.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucket([]byte("test"))
+		require.NoError(t, err)
+
+		idx, err := index.NewListIndex(b, []byte("lindex1"))
+		require.NoError(t, err)
+
+		err = idx.Add(context.Background(), []byte("hello"), []byte("id1"))
+		require.NoError(t, err)
+
+		err = idx.Add(context.Background(), []byte("hello"), []byte("id1"))
+		require.NoError(t, err)
+
+		err = idx.Add(context.Background(), []byte("hello"), []byte("id2"))
+		require.NoError(t, err)
+
+		err = idx.Add(context.Background(), []byte("goodbye"), []byte("id2"))
+		require.NoError(t, err)
+
+		err = idx.Add(context.Background(), nil, []byte("id2"))
+		require.Error(t, err)
+		require.ErrorIs(t, err, index.ErrNilParam)
+
+		err = idx.Add(context.Background(), []byte("hi"), nil)
+		require.Error(t, err)
+		require.ErrorIs(t, err, index.ErrNilParam)
+
+		ids, err := idx.All(context.Background(), []byte("hello"), nil)
+		require.NoError(t, err)
+		require.Len(t, ids, 1)
+		require.Equal(t, []byte("id1"), ids[0])
+
+		ids, err = idx.All(context.Background(), []byte("goodbye"), nil)
+		require.NoError(t, err)
+		require.Len(t, ids, 1)
+		require.Equal(t, []byte("id2"), ids[0])
+
+		ids, err = idx.All(context.Background(), []byte("yo"), nil)
+		require.NoError(t, err)
+		require.Nil(t, ids)
+
+		err = idx.RemoveID(context.Background(), []byte("id2"))
+		require.NoError(t, err)
+
+		ids, err = idx.All(context.Background(), []byte("goodbye"), nil)
+		require.NoError(t, err)
+		require.Len(t, ids, 0)
+
+		err = idx.RemoveID(context.Background(), nil)
+		require.NoError(t, err)
+
+		err = idx.RemoveID(context.Background(), []byte("id1"))
+		require.NoError(t, err)
+		err = idx.RemoveID(context.Background(), []byte("id2"))
+		require.NoError(t, err)
+		err = idx.RemoveID(context.Background(), []byte("id3"))
+		require.NoError(t, err)
+
+		ids, err = idx.All(context.Background(), []byte("hello"), nil)
+		require.NoError(t, err)
+		require.Nil(t, ids)
+
+		err = idx.Add(context.Background(), []byte("hello"), []byte("id1"))
+		require.NoError(t, err)
+
+		err = idx.Add(context.Background(), []byte("hi"), []byte("id2"))
+		require.NoError(t, err)
+
+		err = idx.Add(context.Background(), []byte("yo"), []byte("id3"))
+		require.NoError(t, err)
+
+		err = idx.RemoveID(context.Background(), []byte("id2"))
+		require.NoError(t, err)
+
+		ids, err = idx.All(context.Background(), []byte("hello"), nil)
+		require.NoError(t, err)
+		require.Len(t, ids, 1)
+		require.Equal(t, []byte("id1"), ids[0])
+		ids, err = idx.All(context.Background(), []byte("hi"), nil)
+		require.NoError(t, err)
+		require.Len(t, ids, 0)
+		ids, err = idx.All(context.Background(), []byte("yo"), nil)
+		require.NoError(t, err)
+		require.Len(t, ids, 1)
+		require.Equal(t, []byte("id3"), ids[0])
+
+		err = idx.RemoveID(context.Background(), []byte("id2"))
+		require.NoError(t, err)
+		err = idx.RemoveID(context.Background(), []byte("id4"))
+		require.NoError(t, err)
+
+		err = idx.Add(context.Background(), []byte("hey"), []byte("id1"))
+		require.NoError(t, err)
+		err = idx.Add(context.Background(), []byte("hey"), []byte("id2"))
+		require.NoError(t, err)
+		err = idx.Add(context.Background(), []byte("hey"), []byte("id3"))
+		require.NoError(t, err)
+		err = idx.Add(context.Background(), []byte("hey"), []byte("id4"))
+		require.NoError(t, err)
+
+		ids, err = idx.All(context.Background(), []byte("hey"), nil)
+		require.NoError(t, err)
+		require.Len(t, ids, 4)
+
+		opts := index.NewOptions()
+		opts.Limit = 1
+		ids, err = idx.All(context.Background(), []byte("hey"), opts)
+		require.NoError(t, err)
+		require.Len(t, ids, 1)
+
+		opts = index.NewOptions()
+		opts.Skip = 2
+		ids, err = idx.All(context.Background(), []byte("hey"), opts)
+		require.NoError(t, err)
+		require.Len(t, ids, 2)
+
+		opts = index.NewOptions()
+		opts.Skip = 2
+		opts.Limit = 3
+		opts.Reverse = true
+		ids, err = idx.All(context.Background(), []byte("hey"), opts)
+		require.NoError(t, err)
+		require.Len(t, ids, 2)
+		require.Equal(t, []byte("id2"), ids[0])
+
+		id, _ := idx.Get(context.Background(), []byte("hey"))
+		require.Equal(t, []byte("id1"), id)
+
+		err = idx.Remove(context.Background(), []byte("hey"))
+		require.NoError(t, err)
+		ids, err = idx.All(context.Background(), []byte("hey"), nil)
+		require.NoError(t, err)
+		require.Len(t, ids, 0)
+
+		ids, err = idx.All(context.Background(), []byte("hey"), nil)
+		require.NoError(t, err)
+		require.Len(t, ids, 0)
+		return nil
+	})
+
+	require.NoError(t, err)
+}
+
+func TestListIndexReverse(t *testing.T) {
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	defer os.RemoveAll(dir)
+	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
+	defer db.Close()
+
+	err := db.bdb.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucket([]byte("test"))
+		require.NoError(t, err)
+
+		idx, err := index.NewListIndex(b, []byte("lindex1"))
+		require.NoError(t, err)
+
+		err = idx.Add(context.Background(), []byte("hello"), []byte("id1"))
+		require.NoError(t, err)
+
+		opts := index.NewOptions()
+		ids, err := idx.All(context.Background(), []byte("hello"), opts)
+		require.NoError(t, err)
+		require.Len(t, ids, 1)
+		require.Equal(t, []byte("id1"), ids[0])
+
+		opts = index.NewOptions()
+		opts.Reverse = true
+		ids, err = idx.All(context.Background(), []byte("hello"), opts)
+		require.NoError(t, err)
+		require.Len(t, ids, 1)
+		require.Equal(t, []byte("id1"), ids[0])
+
+		err = idx.Add(context.Background(), []byte("hello"), []byte("id2"))
+		require.NoError(t, err)
+
+		opts = index.NewOptions()
+		opts.Reverse = true
+		ids, err = idx.All(context.Background(), []byte("hello"), opts)
+		require.NoError(t, err)
+		require.Len(t, ids, 2)
+		require.Equal(t, []byte("id2"), ids[0])
+		require.Equal(t, []byte("id1"), ids[1])
+		return nil
+	})
+
+	require.NoError(t, err)
+}
+
+func TestListIndexAddRemoveID(t *testing.T) {
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	defer os.RemoveAll(dir)
+	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
+	defer db.Close()
+
+	db.bdb.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucket([]byte("test"))
+		require.NoError(t, err)
+
+		idx, err := index.NewListIndex(b, []byte("lindex1"))
+		require.NoError(t, err)
+
+		err = idx.Add(context.Background(), []byte("hello"), []byte("id1"))
+		require.NoError(t, err)
+		require.Equal(t, 1, countItems(t, idx.IndexBucket))
+
+		err = idx.Add(context.Background(), []byte("hello"), []byte("id2"))
+		require.NoError(t, err)
+		require.Equal(t, 2, countItems(t, idx.IndexBucket))
+
+		err = idx.Add(context.Background(), []byte("goodbye"), []byte("id1"))
+		require.NoError(t, err)
+		require.Equal(t, 2, countItems(t, idx.IndexBucket))
+
+		err = idx.Add(context.Background(), []byte("hello"), []byte("id3"))
+		require.NoError(t, err)
+		require.Equal(t, 3, countItems(t, idx.IndexBucket))
+
+		err = idx.RemoveID(context.Background(), []byte("id1"))
+		require.NoError(t, err)
+		require.Equal(t, 2, countItems(t, idx.IndexBucket))
+
+		err = idx.RemoveID(context.Background(), []byte("id2"))
+		require.NoError(t, err)
+		require.Equal(t, 1, countItems(t, idx.IndexBucket))
+
+		err = idx.RemoveID(context.Background(), []byte("id3"))
+		require.NoError(t, err)
+		require.Equal(t, 0, countItems(t, idx.IndexBucket))
+		return nil
+	})
+}
+
+func TestListIndexAllRecords(t *testing.T) {
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	defer os.RemoveAll(dir)
+	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
+	defer db.Close()
+
+	db.bdb.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucket([]byte("test"))
+		require.NoError(t, err)
+
+		idx, err := index.NewListIndex(b, []byte("lindex1"))
+		require.NoError(t, err)
+
+		ids, err := idx.AllRecords(context.Background(), nil)
+		require.NoError(t, err)
+		require.Len(t, ids, 0)
+
+		err = idx.Add(context.Background(), []byte("goodbye"), []byte("id2"))
+		require.NoError(t, err)
+		require.Equal(t, 1, countItems(t, idx.IndexBucket))
+
+		err = idx.Add(context.Background(), []byte("goodbye"), []byte("id1"))
+		require.NoError(t, err)
+		require.Equal(t, 2, countItems(t, idx.IndexBucket))
+
+		err = idx.Add(context.Background(), []byte("hello"), []byte("id4"))
+		require.NoError(t, err)
+		require.Equal(t, 3, countItems(t, idx.IndexBucket))
+
+		err = idx.Add(context.Background(), []byte("hello"), []byte("id3"))
+		require.NoError(t, err)
+		require.Equal(t, 4, countItems(t, idx.IndexBucket))
+
+		ids, err = idx.AllRecords(context.Background(), nil)
+		require.NoError(t, err)
+		require.Len(t, ids, 4)
+		require.Equal(t, []byte("id1"), ids[0])
+		require.Equal(t, []byte("id2"), ids[1])
+		require.Equal(t, []byte("id3"), ids[2])
+		require.Equal(t, []byte("id4"), ids[3])
+
+		err = idx.RemoveID(context.Background(), []byte("id1"))
+		require.NoError(t, err)
+		require.Equal(t, 3, countItems(t, idx.IndexBucket))
+
+		ids, err = idx.AllRecords(context.Background(), nil)
+		require.NoError(t, err)
+		require.Len(t, ids, 3)
+		require.Equal(t, []byte("id2"), ids[0])
+
+		err = idx.Add(context.Background(), []byte("goodbye"), []byte("id1"))
+		require.NoError(t, err)
+		require.Equal(t, 4, countItems(t, idx.IndexBucket))
+
+		opts := index.NewOptions()
+		opts.Limit = 1
+		ids, err = idx.AllRecords(context.Background(), opts)
+		require.NoError(t, err)
+		require.Len(t, ids, 1)
+
+		opts = index.NewOptions()
+		opts.Skip = 2
+		ids, err = idx.AllRecords(context.Background(), opts)
+		require.NoError(t, err)
+		require.Len(t, ids, 2)
+
+		opts = index.NewOptions()
+		opts.Skip = 2
+		opts.Limit = 3
+		opts.Reverse = true
+		ids, err = idx.AllRecords(context.Background(), opts)
+		require.NoError(t, err)
+		require.Len(t, ids, 2)
+		require.Equal(t, []byte("id2"), ids[0])
+
+		return nil
+	})
+}
+
+func TestListIndexRange(t *testing.T) {
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	defer os.RemoveAll(dir)
+	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
+	defer db.Close()
+
+	db.bdb.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucket([]byte("test"))
+		require.NoError(t, err)
+
+		idx, err := index.NewListIndex(b, []byte("index1"))
+		require.NoError(t, err)
+
+		for i := 0; i < 10; i++ {
+			val, _ := encodeTestInt(i)
+			err = idx.Add(context.Background(), val, val)
+			require.NoError(t, err)
+		}
+
+		min, _ := encodeTestInt(3)
+		max, _ := encodeTestInt(5)
+		list, err := idx.Range(context.Background(), min, max, nil)
+		require.Len(t, list, 3)
+		require.NoError(t, err)
+		assertEncodedIntListEqual(t, []int{3, 4, 5}, list)
+
+		min, _ = encodeTestInt(11)
+		max, _ = encodeTestInt(20)
+		list, err = idx.Range(context.Background(), min, max, nil)
+		require.Len(t, list, 0)
+		require.NoError(t, err)
+
+		min, _ = encodeTestInt(7)
+		max, _ = encodeTestInt(2)
+		list, err = idx.Range(context.Background(), min, max, nil)
+		require.Len(t, list, 0)
+		require.NoError(t, err)
+
+		min, _ = encodeTestInt(-5)
+		max, _ = encodeTestInt(2)
+		list, err = idx.Range(context.Background(), min, max, nil)
+		require.Len(t, list, 0)
+		require.NoError(t, err)
+
+		min, _ = encodeTestInt(3)
+		max, _ = encodeTestInt(7)
+		opts := index.NewOptions()
+		opts.Skip = 2
+		list, err = idx.Range(context.Background(), min, max, opts)
+		require.Len(t, list, 3)
+		require.NoError(t, err)
+		assertEncodedIntListEqual(t, []int{5, 6, 7}, list)
+
+		opts = index.NewOptions()
+		opts.Limit = 2
+		list, err = idx.Range(context.Background(), min, max, opts)
+		require.Len(t, list, 2)
+		require.NoError(t, err)
+		assertEncodedIntListEqual(t, []int{3, 4}, list)
+
+		opts = index.NewOptions()
+		opts.Reverse = true
+		opts.Skip = 2
+		opts.Limit = 2
+		list, err = idx.Range(context.Background(), min, max, opts)
+		require.Len(t, list, 2)
+		require.NoError(t, err)
+		assertEncodedIntListEqual(t, []int{5, 4}, list)
+
+		// issue #218
+		val, _ := encodeTestInt(8)
+		err = idx.Remove(context.Background(), val)
+		require.NoError(t, err)
+
+		// normal with gaps
+		min, _ = encodeTestInt(6)
+		max, _ = encodeTestInt(8)
+		list, err = idx.Range(context.Background(), min, max, nil)
+		require.Len(t, list, 2)
+		require.NoError(t, err)
+		assertEncodedIntListEqual(t, []int{6, 7}, list)
+
+		// reverse with gaps
+		min, _ = encodeTestInt(6)
+		max, _ = encodeTestInt(8)
+		opts = index.NewOptions()
+		opts.Reverse = true
+		list, err = idx.Range(context.Background(), min, max, opts)
+		require.Len(t, list, 2)
+		require.NoError(t, err)
+		assertEncodedIntListEqual(t, []int{7, 6}, list)
+
+		return nil
+	})
+}
+
+func TestListIndexPrefix(t *testing.T) {
+	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	defer os.RemoveAll(dir)
+	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
+	defer db.Close()
+
+	db.bdb.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucket([]byte("test"))
+		require.NoError(t, err)
+
+		idx, err := index.NewListIndex(b, []byte("lindex1"))
+		require.NoError(t, err)
+
+		for i := 0; i < 10; i++ {
+			val := []byte(fmt.Sprintf("a%d", i%2))
+			id := []byte(fmt.Sprintf("%d", i))
+			err = idx.Add(context.Background(), val, id)
+			require.NoError(t, err)
+		}
+
+		for i := 10; i < 20; i++ {
+			val := []byte(fmt.Sprintf("b%d", i%2))
+			id := []byte(fmt.Sprintf("%d", i))
+			err = idx.Add(context.Background(), val, id)
+			require.NoError(t, err)
+		}
+
+		list, err := idx.Prefix(context.Background(), []byte("a"), nil)
+		require.Len(t, list, 10)
+		require.NoError(t, err)
+		require.Equal(t, []byte("0"), list[0])
+		require.Equal(t, []byte("9"), list[9])
+
+		list, err = idx.Prefix(context.Background(), []byte("b"), nil)
+		require.Len(t, list, 10)
+		require.NoError(t, err)
+		require.Equal(t, []byte("10"), list[0])
+		require.Equal(t, []byte("19"), list[9])
+
+		opts := index.NewOptions()
+		opts.Reverse = true
+		list, err = idx.Prefix(context.Background(), []byte("a"), opts)
+		require.Len(t, list, 10)
+		require.NoError(t, err)
+		require.Equal(t, []byte("9"), list[0])
+		require.Equal(t, []byte("0"), list[9])
+
+		opts = index.NewOptions()
+		opts.Reverse = true
+		list, err = idx.Prefix(context.Background(), []byte("b"), opts)
+		require.Len(t, list, 10)
+		require.NoError(t, err)
+		require.Equal(t, []byte("19"), list[0])
+		require.Equal(t, []byte("10"), list[9])
+
+		opts = index.NewOptions()
+		opts.Skip = 9
+		opts.Limit = 5
+		list, err = idx.Prefix(context.Background(), []byte("a"), opts)
+		require.Len(t, list, 1)
+		require.NoError(t, err)
+		require.Equal(t, []byte("9"), list[0])
+
+		opts = index.NewOptions()
+		opts.Reverse = true
+		opts.Skip = 9
+		opts.Limit = 5
+		list, err = idx.Prefix(context.Background(), []byte("a"), opts)
+		require.Len(t, list, 1)
+		require.NoError(t, err)
+		require.Equal(t, []byte("0"), list[0])
+		return nil
+	})
+}
+
+func countItems(t *testing.T, bucket *bolt.Bucket) int {
+	c := bucket.Cursor()
+	count := 0
+	for k, id := c.First(); k != nil; k, id = c.Next() {
+		if id == nil || bytes.Equal(k, []byte("harbor__ids")) {
+			continue
+		}
+		count++
+	}
+
+	return count
+}

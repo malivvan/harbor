@@ -22,7 +22,7 @@ func TestFSSessionSurvivesReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "app.db")
 
 	s := mustOpen(t, path, "session-password")
-	fsys, err := s.FS().Open("app")
+	fsys, err := s.File().Open("app")
 	require.NoError(t, err)
 	require.NoError(t, fsys.MkdirAll("/sessions", 0o755))
 
@@ -39,7 +39,7 @@ func TestFSSessionSurvivesReopen(t *testing.T) {
 	reopened := mustOpen(t, path, "session-password")
 	defer mustClose(t, reopened)
 
-	app, err := reopened.FS().Open("app")
+	app, err := reopened.File().Open("app")
 	require.NoError(t, err)
 	body, err := app.ReadFile("/sessions/alice.json")
 	require.NoError(t, err)

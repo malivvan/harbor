@@ -39,10 +39,11 @@ import (
 	"sync"
 
 	"github.com/malivvan/harbor"
-	"github.com/malivvan/harbor/db"
-	"github.com/malivvan/harbor/fs"
-	"github.com/malivvan/harbor/ts"
-	"github.com/malivvan/harbor/vec"
+	"github.com/malivvan/harbor/store/file"
+	"github.com/malivvan/harbor/store/record"
+	"github.com/malivvan/harbor/store/search"
+	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/harbor/store/vector"
 )
 
 const (
@@ -193,34 +194,47 @@ func (m *Manager) Store() *harbor.Store {
 	return m.st
 }
 
-// DB returns the record store, or nil before Open.
-func (m *Manager) DB() *db.Store {
+// Record returns the record store, or nil before Open. Extra path segments
+// select a rooted view of the store.
+func (m *Manager) Record(path ...string) *record.Store {
 	if st := m.Store(); st != nil {
-		return st.DB()
+		return st.Record(path...)
 	}
 	return nil
 }
 
-// FS returns the in-database filesystem store, or nil before Open.
-func (m *Manager) FS() *fs.Store {
+// File returns the in-database filesystem store, or nil before Open. Extra path
+// segments select a rooted view.
+func (m *Manager) File(path ...string) *file.Store {
 	if st := m.Store(); st != nil {
-		return st.FS()
+		return st.File(path...)
 	}
 	return nil
 }
 
-// TS returns the time-series store, or nil before Open.
-func (m *Manager) TS() *ts.Store {
+// Series returns the time-series store, or nil before Open. Extra path segments
+// select a rooted view.
+func (m *Manager) Series(path ...string) *series.Store {
 	if st := m.Store(); st != nil {
-		return st.TS()
+		return st.Series(path...)
 	}
 	return nil
 }
 
-// Vec returns the vector store, or nil before Open.
-func (m *Manager) Vec() *vec.Store {
+// Vector returns the vector store, or nil before Open. Extra path segments
+// select a rooted view.
+func (m *Manager) Vector(path ...string) *vector.Store {
 	if st := m.Store(); st != nil {
-		return st.Vec()
+		return st.Vector(path...)
+	}
+	return nil
+}
+
+// Search returns the full-text store, or nil before Open. Extra path segments
+// select a rooted view.
+func (m *Manager) Search(path ...string) *search.Store {
+	if st := m.Store(); st != nil {
+		return st.Search(path...)
 	}
 	return nil
 }
@@ -276,34 +290,47 @@ func Store() *harbor.Store {
 	return nil
 }
 
-// DB returns the process-wide record store, or nil before Open.
-func DB() *db.Store {
+// Record returns the process-wide record store, or nil before Open. Extra path
+// segments select a rooted view.
+func Record(path ...string) *record.Store {
 	if m := Default(); m != nil {
-		return m.DB()
+		return m.Record(path...)
 	}
 	return nil
 }
 
-// FS returns the process-wide filesystem store, or nil before Open.
-func FS() *fs.Store {
+// File returns the process-wide filesystem store, or nil before Open. Extra
+// path segments select a rooted view.
+func File(path ...string) *file.Store {
 	if m := Default(); m != nil {
-		return m.FS()
+		return m.File(path...)
 	}
 	return nil
 }
 
-// TS returns the process-wide time-series store, or nil before Open.
-func TS() *ts.Store {
+// Series returns the process-wide time-series store, or nil before Open. Extra
+// path segments select a rooted view.
+func Series(path ...string) *series.Store {
 	if m := Default(); m != nil {
-		return m.TS()
+		return m.Series(path...)
 	}
 	return nil
 }
 
-// Vec returns the process-wide vector store, or nil before Open.
-func Vec() *vec.Store {
+// Vector returns the process-wide vector store, or nil before Open. Extra path
+// segments select a rooted view.
+func Vector(path ...string) *vector.Store {
 	if m := Default(); m != nil {
-		return m.Vec()
+		return m.Vector(path...)
+	}
+	return nil
+}
+
+// Search returns the process-wide full-text store, or nil before Open. Extra
+// path segments select a rooted view.
+func Search(path ...string) *search.Store {
+	if m := Default(); m != nil {
+		return m.Search(path...)
 	}
 	return nil
 }

@@ -1,6 +1,6 @@
 # graph — a reusable bitemporal property graph
 
-`graph` is the portable core of a property graph over one Harbour `db` store:
+`graph` is the portable core of a property graph over one Harbor `record` store:
 nodes and directed edges with typed labels and free-form properties, adjacency
 reads, breadth-first traversal, counts, and the bitemporal history that makes an
 as-of question answerable. It is deliberately **not** an application model: it
@@ -8,7 +8,7 @@ does not know what a node type means, which labels are bookkeeping, or how an
 ontology resolves a single-valued link. Those stay with the caller.
 
 ```go
-records, err := db.Open(ctx, bdb, db.Config{})
+records, err := record.Open(ctx, bdb, record.Config{})
 g := graph.New(records)
 
 _ = g.UpsertNode(ctx, &graph.Node{
@@ -46,13 +46,13 @@ nothing is silently dropped.
 Records use the names the graph kept in eidos's earlier implementation and pin
 their buckets with `HarborBucketName` (`harborNodeRecord`, `harborNodeVersion`,
 `harborEdgeRecord`, `harborEdgeVersion`); their field names and order are
-identical. Harbour's `db` derives a bucket from the type name, so the pin is what
+identical. Harbour's `record` derives a bucket from the type name, so the pin is what
 keeps an existing file readable.
 
 The store's codec encodes records. A record's dynamic properties are encoded by
 a `ValueCodec` (`WithValues`); the default is JSON, and a caller whose existing
 files use another byte encoding supplies it so an adoption does not reinterpret
-stored properties. `Graph` borrows the `db.Store` and never closes it; several
+stored properties. `Graph` borrows the `record.Store` and never closes it; several
 graphs can share one file through `WithPrefix`.
 
 ## Time

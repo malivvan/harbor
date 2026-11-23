@@ -10,9 +10,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/malivvan/harbor/fts"
-	"github.com/malivvan/harbor/ts"
-	"github.com/malivvan/harbor/vec"
+	"github.com/malivvan/harbor/store/search"
+	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/harbor/store/vector"
 )
 
 type txRecord struct {
@@ -25,9 +25,9 @@ type txRecord struct {
 func txSeed(t *testing.T, s *Store) {
 	t.Helper()
 	ctx := context.Background()
-	require.NoError(t, s.DB().Save(ctx, &txRecord{ID: "keep", Name: "seed"}))
+	require.NoError(t, s.Record().Save(ctx, &txRecord{ID: "keep", Name: "seed"}))
 
-	fsys, err := s.FS().Open("txfs")
+	fsys, err := s.File().Open("txfs")
 	require.NoError(t, err)
 	f, err := fsys.Create("/keep.txt")
 	require.NoError(t, err)
@@ -35,7 +35,7 @@ func txSeed(t *testing.T, s *Store) {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	require.NoError(t, s.TS().Series("cpu").Insert(ctx, ts.Point{Timestamp: 1_000, Value: 1}))
+	require.NoError(t, s.Series().Series("cpu").Insert(ctx, series.Point{Timestamp: 1_000, Value: 1}))
 }
 
 // TestWriteTransactionCommitsAcrossStores proves that one callback writes to all
@@ -46,11 +46,11 @@ func TestWriteTransactionCommitsAcrossStores(t *testing.T) {
 	defer mustClose(t, s)
 
 	require.NoError(t, s.WriteTransaction(ctx, func(tx *Tx) error {
-		if err := tx.DB().Save(ctx, &txRecord{ID: "r1", Name: "one"}); err != nil {
+		if err := tx.Record().Save(ctx, &txRecord{ID: "r1", Name: "one"}); err != nil {
 			return err
 		}
 
-		fsys, err := tx.FS().Open("txfs")
+		fsys, err := tx.File().Open("txfs")
 		if err != nil {
 			return err
 		}
@@ -65,40 +65,40 @@ func TestWriteTransactionCommitsAcrossStores(t *testing.T) {
 			return err
 		}
 
-		if err := tx.TS().Series("requests").Insert(ctx, ts.Point{Timestamp: 2_000, Value: 42}); err != nil {
+		if err := tx.Series().Series("requests").Insert(ctx, series.Point{Timestamp: 2_000, Value: 42}); err != nil {
 			return err
 		}
 
-		col, err := tx.Vec().NewCollection("docs", 2, vec.Cosine, false)
+		col, err := tx.Vector().NewCollection("docs", 2, vector.Cosine, false)
 		if err != nil {
 			return err
 		}
-		return col.Upsert([]vec.PointStruct{{ID: "p1", Vector: []float32{1, 0}}})
+		return col.Upsert([]vector.PointStruct{{ID: "p1", Vector: []float32{1, 0}}})
 	}))
 
 	var rec txRecord
-	require.NoError(t, s.DB().One(ctx, "ID", "r1", &rec))
+	require.NoError(t, s.Record().One(ctx, "ID", "r1", &rec))
 	require.Equal(t, "one", rec.Name)
 
-	fsys, err := s.FS().Open("txfs")
+	fsys, err := s.File().Open("txfs")
 	require.NoError(t, err)
 	body, err := fsys.ReadFile("/a.txt")
 	require.NoError(t, err)
 	require.Equal(t, "payload", string(body))
 
-	points, err := s.TS().Series("requests").Range(ctx, 0, 10_000)
+	points, err := s.Series().Series("requests").Range(ctx, 0, 10_000)
 	require.NoError(t, err)
 	require.Len(t, points, 1)
 	require.Equal(t, 42.0, points[0].Value)
 
-	col, err := s.Vec().NewCollection("docs", 2, vec.Cosine, false)
+	col, err := s.Vector().NewCollection("docs", 2, vector.Cosine, false)
 	require.NoError(t, err)
 	got, err := col.Get("p1")
 	require.NoError(t, err)
 	require.Equal(t, []float32{1, 0}, got.Vector)
 
 	// The adopted live index answers searches without reloading from disk.
-	col, err = s.Vec().NewCollection("docs", 2, vec.Cosine, false)
+	col, err = s.Vector().NewCollection("docs", 2, vector.Cosine, false)
 	require.NoError(t, err)
 	hits, err := col.Search([]float32{1, 0}, nil, 1)
 	require.NoError(t, err)
@@ -116,14 +116,14 @@ func TestWriteTransactionAbortLeavesNoTrace(t *testing.T) {
 
 	wantErr := errors.New("abort")
 	err := s.WriteTransaction(ctx, func(tx *Tx) error {
-		if err := tx.DB().Save(ctx, &txRecord{ID: "gone", Name: "no"}); err != nil {
+		if err := tx.Record().Save(ctx, &txRecord{ID: "gone", Name: "no"}); err != nil {
 			return err
 		}
-		if err := tx.DB().Save(ctx, &txRecord{ID: "keep", Name: "changed"}); err != nil {
+		if err := tx.Record().Save(ctx, &txRecord{ID: "keep", Name: "changed"}); err != nil {
 			return err
 		}
 
-		fsys, err := tx.FS().Open("txfs")
+		fsys, err := tx.File().Open("txfs")
 		if err != nil {
 			return err
 		}
@@ -138,15 +138,15 @@ func TestWriteTransactionAbortLeavesNoTrace(t *testing.T) {
 			return err
 		}
 
-		if err := tx.TS().Series("cpu").Insert(ctx, ts.Point{Timestamp: 2_000, Value: 2}); err != nil {
+		if err := tx.Series().Series("cpu").Insert(ctx, series.Point{Timestamp: 2_000, Value: 2}); err != nil {
 			return err
 		}
 
-		col, err := tx.Vec().NewCollection("docs", 2, vec.Cosine, false)
+		col, err := tx.Vector().NewCollection("docs", 2, vector.Cosine, false)
 		if err != nil {
 			return err
 		}
-		if err := col.Upsert([]vec.PointStruct{{ID: "p1", Vector: []float32{1, 0}}}); err != nil {
+		if err := col.Upsert([]vector.PointStruct{{ID: "p1", Vector: []float32{1, 0}}}); err != nil {
 			return err
 		}
 		return wantErr
@@ -154,22 +154,22 @@ func TestWriteTransactionAbortLeavesNoTrace(t *testing.T) {
 	require.ErrorIs(t, err, wantErr)
 
 	var rec txRecord
-	require.Error(t, s.DB().One(ctx, "ID", "gone", &rec))
-	require.NoError(t, s.DB().One(ctx, "ID", "keep", &rec))
+	require.Error(t, s.Record().One(ctx, "ID", "gone", &rec))
+	require.NoError(t, s.Record().One(ctx, "ID", "keep", &rec))
 	require.Equal(t, "seed", rec.Name, "an aborted update must not change the record")
 
-	fsys, err := s.FS().Open("txfs")
+	fsys, err := s.File().Open("txfs")
 	require.NoError(t, err)
 	if _, err := fsys.Stat("/new.txt"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Stat(/new.txt) err = %v, want not exist", err)
 	}
 
-	points, err := s.TS().Series("cpu").Range(ctx, 0, 10_000)
+	points, err := s.Series().Series("cpu").Range(ctx, 0, 10_000)
 	require.NoError(t, err)
 	require.Len(t, points, 1, "aborted ts insert")
 	require.Equal(t, 1.0, points[0].Value)
 
-	col, err := s.Vec().NewCollection("docs", 2, vec.Cosine, false)
+	col, err := s.Vector().NewCollection("docs", 2, vector.Cosine, false)
 	require.NoError(t, err)
 	if _, err := col.Get("p1"); err == nil {
 		t.Fatal("aborted vector upsert is visible")
@@ -188,7 +188,7 @@ func TestWriteTransactionCancellationRollsBack(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(base)
 	err := s.WriteTransaction(ctx, func(tx *Tx) error {
-		if err := tx.DB().Save(base, &txRecord{ID: "c1", Name: "cancel"}); err != nil {
+		if err := tx.Record().Save(base, &txRecord{ID: "c1", Name: "cancel"}); err != nil {
 			return err
 		}
 		cancel()
@@ -197,7 +197,7 @@ func TestWriteTransactionCancellationRollsBack(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 
 	var rec txRecord
-	require.Error(t, s.DB().One(base, "ID", "c1", &rec))
+	require.Error(t, s.Record().One(base, "ID", "c1", &rec))
 }
 
 // TestWriteTransactionRejectsNilCallback guards the programming error.
@@ -221,13 +221,13 @@ func TestReadTransactionIsConsistentAndReadOnly(t *testing.T) {
 			t.Fatal("Writable() = true for a read transaction")
 		}
 		var rec txRecord
-		if err := tx.DB().One(ctx, "ID", "keep", &rec); err != nil {
+		if err := tx.Record().One(ctx, "ID", "keep", &rec); err != nil {
 			return err
 		}
 		if rec.Name != "seed" {
 			t.Fatalf("read %q, want seed", rec.Name)
 		}
-		points, err := tx.TS().Series("cpu").Range(ctx, 0, 10_000)
+		points, err := tx.Series().Series("cpu").Range(ctx, 0, 10_000)
 		if err != nil {
 			return err
 		}
@@ -235,7 +235,7 @@ func TestReadTransactionIsConsistentAndReadOnly(t *testing.T) {
 			t.Fatalf("read %d points, want 1", len(points))
 		}
 		// Writes are rejected by the underlying read-only transaction.
-		if err := tx.DB().Save(ctx, &txRecord{ID: "nope"}); err == nil {
+		if err := tx.Record().Save(ctx, &txRecord{ID: "nope"}); err == nil {
 			t.Fatal("a write through a read transaction succeeded")
 		}
 		return nil
@@ -257,7 +257,7 @@ func TestWriteTransactionSerializesConcurrentWriters(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			errs <- s.WriteTransaction(ctx, func(tx *Tx) error {
-				return tx.DB().Save(ctx, &txRecord{ID: string(rune('a' + i))})
+				return tx.Record().Save(ctx, &txRecord{ID: string(rune('a' + i))})
 			})
 		}(i)
 	}
@@ -268,7 +268,7 @@ func TestWriteTransactionSerializesConcurrentWriters(t *testing.T) {
 	}
 
 	var all []txRecord
-	require.NoError(t, s.DB().All(ctx, &all))
+	require.NoError(t, s.Record().All(ctx, &all))
 	require.Len(t, all, writers)
 }
 
@@ -284,10 +284,10 @@ func TestWriteTransactionAuditsAfterCommit(t *testing.T) {
 	defer mustClose(t, s)
 
 	require.NoError(t, s.WriteTransaction(ctx, func(tx *Tx) error {
-		if err := tx.DB().Save(ctx, &txRecord{ID: "audited"}); err != nil {
+		if err := tx.Record().Save(ctx, &txRecord{ID: "audited"}); err != nil {
 			return err
 		}
-		fsys, err := tx.FS().Open("txfs")
+		fsys, err := tx.File().Open("txfs")
 		if err != nil {
 			return err
 		}
@@ -320,11 +320,11 @@ func TestWriteTransactionReadsOwnWrites(t *testing.T) {
 	defer mustClose(t, s)
 
 	require.NoError(t, s.WriteTransaction(ctx, func(tx *Tx) error {
-		if err := tx.DB().Save(ctx, &txRecord{ID: "inner", Name: "visible"}); err != nil {
+		if err := tx.Record().Save(ctx, &txRecord{ID: "inner", Name: "visible"}); err != nil {
 			return err
 		}
 		var rec txRecord
-		if err := tx.DB().One(ctx, "ID", "inner", &rec); err != nil {
+		if err := tx.Record().One(ctx, "ID", "inner", &rec); err != nil {
 			return err
 		}
 		if rec.Name != "visible" {
@@ -333,7 +333,7 @@ func TestWriteTransactionReadsOwnWrites(t *testing.T) {
 
 		// The fs write is visible to a second handle opened on the same
 		// transaction, before the commit.
-		fsys, err := tx.FS().Open("txfs")
+		fsys, err := tx.File().Open("txfs")
 		if err != nil {
 			return err
 		}
@@ -355,11 +355,11 @@ func TestWriteTransactionReadsOwnWrites(t *testing.T) {
 			t.Fatalf("inside transaction read %q", body)
 		}
 
-		col, err := tx.Vec().NewCollection("docs", 2, vec.Cosine, false)
+		col, err := tx.Vector().NewCollection("docs", 2, vector.Cosine, false)
 		if err != nil {
 			return err
 		}
-		if err := col.Upsert([]vec.PointStruct{{ID: "staged", Vector: []float32{0, 1}}}); err != nil {
+		if err := col.Upsert([]vector.PointStruct{{ID: "staged", Vector: []float32{0, 1}}}); err != nil {
 			return err
 		}
 		hits, err := col.Search([]float32{0, 1}, nil, 1)
@@ -374,7 +374,7 @@ func TestWriteTransactionReadsOwnWrites(t *testing.T) {
 
 	// Outside the transaction the index has adopted the staged point without
 	// re-reading the database.
-	col, err := s.Vec().NewCollection("docs", 2, vec.Cosine, false)
+	col, err := s.Vector().NewCollection("docs", 2, vector.Cosine, false)
 	require.NoError(t, err)
 	hits, err := col.Search([]float32{0, 1}, nil, 1)
 	require.NoError(t, err)
@@ -389,13 +389,13 @@ func TestReadTransactionVecSnapshot(t *testing.T) {
 	s := mustOpen(t, filepath.Join(t.TempDir(), "tx.db"), "tx-password")
 	defer mustClose(t, s)
 
-	col, err := s.Vec().NewCollection("docs", 2, vec.Cosine, false)
+	col, err := s.Vector().NewCollection("docs", 2, vector.Cosine, false)
 	require.NoError(t, err)
-	require.NoError(t, col.Upsert([]vec.PointStruct{{ID: "p1", Vector: []float32{1, 0}}}))
+	require.NoError(t, col.Upsert([]vector.PointStruct{{ID: "p1", Vector: []float32{1, 0}}}))
 	require.NoError(t, col.Flush())
 
 	require.NoError(t, s.ReadTransaction(ctx, func(tx *Tx) error {
-		read, err := tx.Vec().NewCollection("docs", 2, vec.Cosine, false)
+		read, err := tx.Vector().NewCollection("docs", 2, vector.Cosine, false)
 		if err != nil {
 			return err
 		}
@@ -419,7 +419,7 @@ func TestWriteTransactionFTS(t *testing.T) {
 	defer mustClose(t, s)
 
 	require.NoError(t, s.WriteTransaction(ctx, func(tx *Tx) error {
-		idx, err := tx.FTS().Open("docs", fts.Config{})
+		idx, err := tx.Search().Open("docs", search.Config{})
 		if err != nil {
 			return err
 		}
@@ -436,7 +436,7 @@ func TestWriteTransactionFTS(t *testing.T) {
 		return nil
 	}))
 
-	idx, err := s.FTS().Open("docs", fts.Config{})
+	idx, err := s.Search().Open("docs", search.Config{})
 	require.NoError(t, err)
 	hits, err := idx.Search(ctx, "harbor", 10)
 	require.NoError(t, err)
@@ -444,7 +444,7 @@ func TestWriteTransactionFTS(t *testing.T) {
 
 	// An aborted upsert is not indexed.
 	err = s.WriteTransaction(ctx, func(tx *Tx) error {
-		idx, err := tx.FTS().Open("docs", fts.Config{})
+		idx, err := tx.Search().Open("docs", search.Config{})
 		if err != nil {
 			return err
 		}
@@ -455,7 +455,7 @@ func TestWriteTransactionFTS(t *testing.T) {
 	})
 	require.Error(t, err)
 
-	idx, err = s.FTS().Open("docs", fts.Config{})
+	idx, err = s.Search().Open("docs", search.Config{})
 	require.NoError(t, err)
 	count, err := idx.Count(ctx)
 	require.NoError(t, err)
