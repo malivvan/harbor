@@ -43,12 +43,63 @@ type Collection struct {
 // several fsyncs into one.
 const DefaultFlushThreshold = 64
 
+// CollectionOptions configures NewCollectionWithOptions. It collects the
+// collection's identity, index choice and buffering into one validated struct.
+//
+// Quantization is a store-level setting (Config.UseQuant and Config.Quantizer)
+// inherited by every collection, so it is not part of the per-collection
+// options.
+type CollectionOptions struct {
+	// Name is the collection name. It is required.
+	Name string
+	// VectorLen is the fixed vector dimension. It must be positive.
+	VectorLen int
+	// Metric is the distance metric: Cosine, Euclid or Dot.
+	Metric Distance
+	// UseHNSW selects the approximate HNSW graph index instead of the exact
+	// flat index.
+	UseHNSW bool
+	// HNSWParams tunes the HNSW index when UseHNSW is set. Zero fields take
+	// their defaults.
+	HNSWParams HNSWParams
+	// FlushThreshold is the number of buffered points that triggers a flush.
+	// Zero selects DefaultFlushThreshold.
+	FlushThreshold int
+}
+
+// resolve validates the options and fills in defaults.
+func (o CollectionOptions) resolve() (CollectionOptions, error) {
+	if o.Name == "" {
+		return o, fmt.Errorf("%w: collection name is required", ErrInvalidConfig)
+	}
+	if o.VectorLen <= 0 {
+		return o, fmt.Errorf("%w: vector length must be positive, got %d", ErrInvalidConfig, o.VectorLen)
+	}
+	switch o.Metric {
+	case Cosine, Euclid, Dot:
+	default:
+		return o, fmt.Errorf("%w: unknown distance metric %q", ErrInvalidConfig, o.Metric)
+	}
+	if o.UseHNSW {
+		o.HNSWParams = normalizeHNSWParams(o.HNSWParams)
+	}
+	if o.FlushThreshold <= 0 {
+		o.FlushThreshold = DefaultFlushThreshold
+	}
+	return o, nil
+}
+
 // NewCollection initializes a new vector collection, optionally loading from storage.
 // If useHNSW is true, it uses the optimized HNSW graph search; otherwise uses flat memory search.
 // When the receiver is non-nil, existing points are automatically loaded into memory.
 // Returns an error if the collection cannot be created or if loaded points have invalid dimensions.
 func (s *Store) NewCollection(name string, vectorLen int, metric Distance, useHNSW bool) (*Collection, error) {
-	return s.NewCollectionWithParams(name, vectorLen, metric, useHNSW, DefaultHNSWParams())
+	return s.NewCollectionWithOptions(CollectionOptions{
+		Name:      name,
+		VectorLen: vectorLen,
+		Metric:    metric,
+		UseHNSW:   useHNSW,
+	})
 }
 
 // NewCollectionWithParams initializes a new vector collection with custom HNSW parameters.
@@ -57,6 +108,28 @@ func (s *Store) NewCollection(name string, vectorLen int, metric Distance, useHN
 // When the receiver is non-nil, existing points are automatically loaded into memory.
 // Returns an error if the collection cannot be created or if loaded points have invalid dimensions.
 func (s *Store) NewCollectionWithParams(name string, vectorLen int, metric Distance, useHNSW bool, hnswParams HNSWParams) (*Collection, error) {
+	return s.NewCollectionWithOptions(CollectionOptions{
+		Name:       name,
+		VectorLen:  vectorLen,
+		Metric:     metric,
+		UseHNSW:    useHNSW,
+		HNSWParams: hnswParams,
+	})
+}
+
+// NewCollectionWithOptions initializes a collection from validated options. It
+// is the single constructor behind NewCollection and NewCollectionWithParams.
+func (s *Store) NewCollectionWithOptions(opts CollectionOptions) (*Collection, error) {
+	opts, err := opts.resolve()
+	if err != nil {
+		return nil, err
+	}
+	return s.newCollection(opts)
+}
+
+func (s *Store) newCollection(opts CollectionOptions) (*Collection, error) {
+	name, vectorLen, metric, useHNSW, hnswParams := opts.Name, opts.VectorLen, opts.Metric, opts.UseHNSW, opts.HNSWParams
+
 	var index VectorIndex
 	if useHNSW {
 		index = NewHNSWIndexWithParams(metric, hnswParams)
@@ -72,7 +145,7 @@ func (s *Store) NewCollectionWithParams(name string, vectorLen int, metric Dista
 		storage:   s,
 
 		writeBuf:       make([]PointStruct, 0),
-		flushThreshold: DefaultFlushThreshold,
+		flushThreshold: opts.FlushThreshold,
 	}
 
 	if s != nil {
