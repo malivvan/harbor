@@ -12,6 +12,29 @@ import (
 const jsonCodecName = "json"
 
 // Codec represents a codec used to marshal and unmarshal entities.
+//
+// # Pointer contract
+//
+// Marshal receives the caller's entity pointer for Save, Update and
+// UpdateField; key/value Set passes its value unchanged, which may be a scalar
+// or a map (the internal format record uses a string).
+//
+// Unmarshal receives a pointer whose shape depends on the read path:
+//
+//   - One(ctx, ..., &out) and Each(ctx, &T{}, fn): *T.
+//   - Find/Range/Prefix/All into *[]T: *T, decoded into the element slot.
+//   - Find/Range/Prefix/All into *[]*T: **T (the address of a pointer slot).
+//   - Iterator: internal decodes use *T; Decode(&out) receives the caller's
+//     pointer unchanged.
+//   - Aggregate and reference enforcement decode into *map[string]any.
+//
+// A codec must therefore accept a pointer to the destination value, including
+// one extra indirection for pointer-element slices. A codec that rejects **T
+// makes []*T reads fail while []T reads succeed; db/README.md documents the
+// matrix and codec_contract_test.go runs it against a strict codec.
+//
+// The destination is zeroed before Unmarshal is called, so a codec may assume
+// it is writing into a fresh value.
 type Codec interface {
 	// Marshal encodes v.
 	Marshal(v interface{}) ([]byte, error)

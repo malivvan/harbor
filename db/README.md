@@ -535,6 +535,25 @@ zero value.
 
 ## Codecs
 
+A codec's `Marshal` receives the caller's entity pointer for `Save`, `Update`
+and `UpdateField`; `Set` passes its value unchanged (a pointer, scalar or map).
+`Unmarshal` receives:
+
+| Read path | Destination |
+|---|---|
+| `One`, `Each` | `*T` |
+| `Find`/`Range`/`Prefix`/`All` into `*[]T` | `*T` (element slot) |
+| `Find`/`Range`/`Prefix`/`All` into `*[]*T` | `**T` (pointer slot) |
+| `Iterator` internal decode | `*T` |
+| `Iterator.Decode(&out)` | the caller's pointer |
+| `Aggregate`, reference scans | `*map[string]any` |
+
+The destination is zeroed before `Unmarshal`. A codec must therefore accept
+the extra indirection for pointer-element slices; `codec_contract_test.go` runs
+this matrix with a pointer-strict codec. Implement `db.ProjectedCodec` to make
+`Query.Project` cheap.
+
+
 The default codec is JSON (`db.JSONCodec`). Select another codec per store or
 node:
 
