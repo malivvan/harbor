@@ -43,13 +43,17 @@ type Snapshot struct {
 // CreateSnapshot creates a new read-only snapshot of the filesystem.
 // The snapshot must be released by calling Release() when done to free memory.
 func (fsys *FS) CreateSnapshot(name string) (*Snapshot, error) {
-	tx, err := fsys.db.Begin(false) // false = read-only transaction
-	if err != nil {
-		return nil, err
+	tx := fsys.tx
+	if tx == nil {
+		var err error
+		tx, err = fsys.db.Begin(false) // false = read-only transaction
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			_ = tx.Rollback() // read-only: Rollback is the close operation
+		}()
 	}
-	defer func() {
-		_ = tx.Rollback() // read-only: Rollback is the close operation
-	}()
 
 	bucket, err := fsys.openFsBucket(tx) // Snapshots don't use the cache
 	if err != nil {

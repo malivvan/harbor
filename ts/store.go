@@ -3,6 +3,7 @@ package ts
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -21,6 +22,10 @@ const Name = "ts"
 
 const metaBucketName = "__ts_meta__"
 
+// ErrInTransaction reports an operation that cannot run on a store bound to a
+// caller-owned transaction (for example key rotation).
+var ErrInTransaction = errors.New("ts: operation is not available inside an explicit transaction")
+
 // FormatVersion is the on-disk time-series format revision this build writes
 // and accepts. The first release has a single version 1; any other value fails
 // the open with ErrIncompatibleVersion.
@@ -34,7 +39,10 @@ type nowProvider struct {
 
 // Store manages named time series backed by a bbolt database.
 type Store struct {
-	b      *bolt.DB
+	b *bolt.DB
+	// tx, when non-nil, binds every operation to a caller-owned transaction.
+	// See WithTransaction.
+	tx     *bolt.Tx
 	root   [][]byte
 	now    atomic.Pointer[nowProvider]
 	mu     sync.RWMutex
@@ -53,6 +61,62 @@ type Store struct {
 	// opened without instrumentation. It is set once at Open and never
 	// mutated.
 	obs metrics.Observer
+}
+
+// view runs fn against the bound transaction, or a fresh read transaction.
+func (s *Store) view(fn func(*bolt.Tx) error) error {
+	if s == nil {
+		return ErrNilParam
+	}
+	if s.tx != nil {
+		return fn(s.tx)
+	}
+	return s.b.View(fn)
+}
+
+// update runs fn against the bound transaction, or a fresh write transaction.
+// A bound Store never commits; the transaction owner does.
+func (s *Store) update(fn func(*bolt.Tx) error) error {
+	if s == nil {
+		return ErrNilParam
+	}
+	if s.tx != nil {
+		return fn(s.tx)
+	}
+	return s.b.Update(fn)
+}
+
+// SetAuditSink replaces the sink that receives committed-write events and
+// returns the receiver. It is intended for a transaction-bound view created by
+// WithTransaction: the view stages events and the transaction owner records
+// them after it commits. It must not be called concurrently with writes on the
+// same Store.
+func (s *Store) SetAuditSink(sink audit.Sink) *Store {
+	if s != nil {
+		s.audit = sink
+	}
+	return s
+}
+
+// WithTransaction returns a Store whose operations run inside tx instead of
+// opening their own bbolt transaction. The bound store never commits, rolls
+// back or closes tx. It is used by the root package for a cross-store
+// transaction; rotation is rejected on a bound store.
+func (s *Store) WithTransaction(tx *bolt.Tx) *Store {
+	if s == nil || tx == nil {
+		return nil
+	}
+	bound := &Store{
+		b:      s.b,
+		tx:     tx,
+		root:   cloneRoot(s.root),
+		series: make(map[string]*Series),
+		audit:  s.audit,
+		obs:    s.obs,
+	}
+	bound.now.Store(s.now.Load())
+	bound.enc.Store(s.enc.Load())
+	return bound
 }
 
 // auditEntry records one committed write in the store's audit trail. It is a
@@ -215,7 +279,7 @@ func (s *Store) ListSeries(ctx context.Context) ([]SeriesInfo, error) {
 	}
 
 	seen := make(map[string]SeriesInfo)
-	err := s.b.View(func(tx *bolt.Tx) error {
+	err := s.view(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -316,7 +380,7 @@ func (s *Store) DeleteSeries(ctx context.Context, name string) error {
 		return ErrNilParam
 	}
 
-	err := s.b.Update(func(tx *bolt.Tx) error {
+	err := s.update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}

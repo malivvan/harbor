@@ -364,7 +364,7 @@ func (b *fsBucket) writeAllChunks(ino uint64, data []byte, chunkSize int64) erro
 
 func (fsys *FS) readRange(ino uint64, off, n int64) ([]byte, error) {
 	var out []byte
-	err := fsys.db.View(func(tx *bolt.Tx) error {
+	err := fsys.view(func(tx *bolt.Tx) error {
 		b, err := fsys.openFsBucket(tx)
 		if err != nil {
 			return err
@@ -378,7 +378,7 @@ func (fsys *FS) readRange(ino uint64, off, n int64) ([]byte, error) {
 // writeRangeAndInode writes a range of chunks and updates the inode in one
 // transaction, so a chunked Write commits (and fsyncs) once.
 func (fsys *FS) writeRangeAndInode(ino uint64, off int64, data []byte, node *iNode) error {
-	return fsys.db.Update(func(tx *bolt.Tx) error {
+	return fsys.update(func(tx *bolt.Tx) error {
 		b, err := fsys.openFsBucketForWrite(tx)
 		if err != nil {
 			return err
@@ -391,7 +391,7 @@ func (fsys *FS) writeRangeAndInode(ino uint64, off int64, data []byte, node *iNo
 }
 
 func (fsys *FS) writeRange(ino uint64, off int64, data []byte) error {
-	return fsys.db.Update(func(tx *bolt.Tx) error {
+	return fsys.update(func(tx *bolt.Tx) error {
 		b, err := fsys.openFsBucketForWrite(tx)
 		if err != nil {
 			return err
@@ -401,7 +401,7 @@ func (fsys *FS) writeRange(ino uint64, off int64, data []byte) error {
 }
 
 func (fsys *FS) truncateRange(ino uint64, size int64) error {
-	return fsys.db.Update(func(tx *bolt.Tx) error {
+	return fsys.update(func(tx *bolt.Tx) error {
 		b, err := fsys.openFsBucketForWrite(tx)
 		if err != nil {
 			return err
@@ -412,7 +412,7 @@ func (fsys *FS) truncateRange(ino uint64, size int64) error {
 
 // truncateRangeAndInode trims chunks and persists the inode in one transaction.
 func (fsys *FS) truncateRangeAndInode(ino uint64, size int64, node *iNode) error {
-	return fsys.db.Update(func(tx *bolt.Tx) error {
+	return fsys.update(func(tx *bolt.Tx) error {
 		b, err := fsys.openFsBucketForWrite(tx)
 		if err != nil {
 			return err
@@ -426,7 +426,7 @@ func (fsys *FS) truncateRangeAndInode(ino uint64, size int64, node *iNode) error
 
 func (fsys *FS) loadChunkedData(ino uint64) ([]byte, error) {
 	var out []byte
-	err := fsys.db.View(func(tx *bolt.Tx) error {
+	err := fsys.view(func(tx *bolt.Tx) error {
 		b, err := fsys.openFsBucket(tx)
 		if err != nil {
 			return err
@@ -442,7 +442,7 @@ func (fsys *FS) loadChunkedData(ino uint64) ([]byte, error) {
 }
 
 func (fsys *FS) saveChunkedData(ino uint64, data []byte) error {
-	return fsys.db.Update(func(tx *bolt.Tx) error {
+	return fsys.update(func(tx *bolt.Tx) error {
 		b, err := fsys.openFsBucketForWrite(tx)
 		if err != nil {
 			return err

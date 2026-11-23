@@ -26,12 +26,20 @@ var (
 
 	// ErrNilParam is returned when a required parameter is nil.
 	ErrNilParam = errors.New("fs: nil parameter")
+
+	// ErrInTransaction reports an operation that cannot run on a store bound
+	// to a caller-owned transaction (for example key rotation).
+	ErrInTransaction = errors.New("fs: operation is not available inside an explicit transaction")
 )
 
 // Store manages named file systems backed by a caller-owned bbolt database.
 // Every file system lives under the Store's root bucket.
 type Store struct {
-	db   *bolt.DB
+	db *bolt.DB
+	// tx, when non-nil, binds every operation to a caller-owned bbolt
+	// transaction instead of opening a managed one. A bound Store never
+	// commits, rolls back or closes the transaction; see WithTransaction.
+	tx   *bolt.Tx
 	root [][]byte
 
 	// enc is the optional encryption state; an atomic pointer so a rotation
@@ -95,6 +103,66 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 	return store, nil
 }
 
+// view runs fn against a read-only transaction: the bound transaction when the
+// Store came from WithTransaction, or a fresh bbolt view otherwise.
+func (s *Store) view(fn func(*bolt.Tx) error) error {
+	if s == nil {
+		return ErrNilParam
+	}
+	if s.tx != nil {
+		return fn(s.tx)
+	}
+	return s.db.View(fn)
+}
+
+// update runs fn against a write transaction: the bound transaction when the
+// Store came from WithTransaction, or a fresh bbolt update otherwise. A bound
+// Store never commits; the owner of the transaction does.
+func (s *Store) update(fn func(*bolt.Tx) error) error {
+	if s == nil {
+		return ErrNilParam
+	}
+	if s.tx != nil {
+		return fn(s.tx)
+	}
+	return s.db.Update(fn)
+}
+
+// SetAuditSink replaces the sink that receives committed-write events and
+// returns the receiver. It is intended for a transaction-bound view created by
+// WithTransaction: the view stages events and the transaction owner records
+// them after it commits. It must not be called concurrently with writes on the
+// same Store.
+func (s *Store) SetAuditSink(sink audit.Sink) *Store {
+	if s != nil {
+		s.audit = sink
+	}
+	return s
+}
+
+// WithTransaction returns a Store whose operations run inside tx instead of
+// opening their own bbolt transaction. The bound store never commits, rolls
+// back or closes tx, and is not tracked by the parent Store. It is used by the
+// root package to bind a sub-store to a cross-store transaction.
+//
+// A bound Store shares the parent's encryption state, audit sink and observer;
+// filesystems opened through it are bound to the same transaction. Rotation is
+// rejected on a bound Store.
+func (s *Store) WithTransaction(tx *bolt.Tx) *Store {
+	if s == nil || tx == nil {
+		return nil
+	}
+	bound := &Store{
+		db:    s.db,
+		tx:    tx,
+		root:  cloneRoot(s.root),
+		audit: s.audit,
+		obs:   s.obs,
+	}
+	bound.enc.Store(s.enc.Load())
+	return bound
+}
+
 // validateBucketName rejects names that would make the literal-bucket and
 // slash-joined path views disagree. An empty name is allowed where the caller
 // documents it (the Store root itself).
@@ -139,12 +207,14 @@ func (s *Store) Open(name string) (*FS, error) {
 		return nil, err
 	}
 
-	filesystem, err := newFS(s.db, s.bucketPath(name), s.enc.Load(), s.obs)
+	filesystem, err := newFS(s.db, s.tx, s.bucketPath(name), s.enc.Load(), s.obs)
 	if err != nil {
 		return nil, err
 	}
 	filesystem.audit = s.audit
-	s.track(filesystem)
+	if s.tx == nil {
+		s.track(filesystem)
+	}
 	return filesystem, nil
 }
 
@@ -163,13 +233,15 @@ func (s *Store) OpenWithContentFS(name string, contentFS ContentFS) (*FS, error)
 		return nil, err
 	}
 
-	filesystem, err := newFS(s.db, s.bucketPath(name), s.enc.Load(), s.obs)
+	filesystem, err := newFS(s.db, s.tx, s.bucketPath(name), s.enc.Load(), s.obs)
 	if err != nil {
 		return nil, err
 	}
 	filesystem.contentFS = contentFS
 	filesystem.audit = s.audit
-	s.track(filesystem)
+	if s.tx == nil {
+		s.track(filesystem)
+	}
 	return filesystem, nil
 }
 
@@ -181,7 +253,7 @@ func (s *Store) FileSystems() ([]string, error) {
 	}
 
 	var names []string
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.view(func(tx *bolt.Tx) error {
 		if len(s.root) > 0 {
 			root := s.rootBucket(tx)
 			if root == nil {
@@ -223,7 +295,7 @@ func (s *Store) DeleteFS(name string) error {
 		return err
 	}
 
-	err := s.db.Update(func(tx *bolt.Tx) error {
+	err := s.update(func(tx *bolt.Tx) error {
 		var parent *bolt.Bucket
 		if len(s.root) > 0 {
 			parent = s.rootBucket(tx)
@@ -270,7 +342,7 @@ func (s *Store) checkMode(name string) error {
 		canary []byte
 		found  bool
 	)
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.view(func(tx *bolt.Tx) error {
 		bb, err := openBucket(tx, path)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -333,7 +405,7 @@ func readMarker(b *fsBucket) (marker, []byte, bool, error) {
 // hasUserData reports whether a filesystem already stores user data.
 func (s *Store) hasUserData(path string) (bool, error) {
 	var found bool
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.view(func(tx *bolt.Tx) error {
 		bb, err := openBucket(tx, path)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {

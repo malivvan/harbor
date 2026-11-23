@@ -166,6 +166,9 @@ func (s *Store) ReEncryptFS(ctx context.Context, name string, newKey []byte) err
 	if s == nil || s.db == nil {
 		return ErrNilParam
 	}
+	if s.tx != nil {
+		return ErrInTransaction
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -188,7 +191,7 @@ func (s *Store) ReEncryptFS(ctx context.Context, name string, newKey []byte) err
 		defer filesystem.mu.Unlock()
 	}
 	old := s.enc.Load()
-	if err := s.db.Update(func(tx *bolt.Tx) error {
+	if err := s.update(func(tx *bolt.Tx) error {
 		return s.reEncryptFSTx(ctx, tx, name, old, next)
 	}); err != nil {
 		return err
@@ -202,6 +205,9 @@ func (s *Store) ReEncryptFS(ctx context.Context, name string, newKey []byte) err
 func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 	if s == nil || s.db == nil {
 		return ErrNilParam
+	}
+	if s.tx != nil {
+		return ErrInTransaction
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -233,7 +239,7 @@ func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 	}()
 
 	old := s.enc.Load()
-	if err := s.db.Update(func(tx *bolt.Tx) error {
+	if err := s.update(func(tx *bolt.Tx) error {
 		for _, name := range names {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -257,6 +263,9 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return ErrNilParam
 	}
+	if s.tx != nil {
+		return ErrInTransaction
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -277,7 +286,7 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 }
 
 func (s *Store) verifyFS(name string) error {
-	return s.db.View(func(tx *bolt.Tx) error {
+	return s.view(func(tx *bolt.Tx) error {
 		bb, err := openBucket(tx, s.bucketPath(name))
 		if err != nil {
 			return err

@@ -29,6 +29,10 @@ var (
 	// ErrPointNotFound is returned when a point ID is not present.
 	ErrPointNotFound = errors.New("vec: point not found")
 
+	// ErrInTransaction reports an operation that cannot run on a store bound to
+	// a caller-owned transaction (for example key rotation).
+	ErrInTransaction = errors.New("vec: operation is not available inside an explicit transaction")
+
 	// ErrInvalidOptions is returned for invalid list options or a nil iteration
 	// callback.
 	ErrInvalidOptions = errors.New("vec: invalid options")

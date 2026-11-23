@@ -149,7 +149,7 @@ func (s *Store) writeMarker(tx *bolt.Tx) error {
 // them. Run RotateAll to finish the migration.
 func (s *Store) reEncryptSeries(ctx context.Context, name string, next *Store) error {
 	old := s.encState()
-	err := s.b.Update(func(tx *bolt.Tx) error {
+	err := s.update(func(tx *bolt.Tx) error {
 		if err := s.reEncryptSeriesTx(ctx, tx, name, next); err != nil {
 			return err
 		}
@@ -263,6 +263,9 @@ func (s *Store) reEncryptSeriesTx(ctx context.Context, tx *bolt.Tx, name string,
 // and ReEncryptSeries reports ErrInvalidConfig instead of leaving the database
 // unrecoverable.
 func (s *Store) ReEncryptSeries(ctx context.Context, name string, newKey []byte) error {
+	if s != nil && s.tx != nil {
+		return ErrInTransaction
+	}
 	if s == nil || s.b == nil {
 		return ErrNilParam
 	}
@@ -286,6 +289,9 @@ func (s *Store) ReEncryptSeries(ctx context.Context, name string, newKey []byte)
 // RotateAll re-encrypts every known series under newKey, adopts it and drops
 // the previous key.
 func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
+	if s != nil && s.tx != nil {
+		return ErrInTransaction
+	}
 	if s == nil || s.b == nil {
 		return ErrNilParam
 	}
@@ -309,7 +315,7 @@ func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 	// sealed under the old key, which withKey then drops, making the series
 	// permanently undecryptable.
 	old := s.encState()
-	if err := s.b.Update(func(tx *bolt.Tx) error {
+	if err := s.update(func(tx *bolt.Tx) error {
 		names, err := s.allSeriesNames(tx)
 		if err != nil {
 			return err
@@ -337,6 +343,9 @@ func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 // VerifyAll re-reads the marker, metadata and points of every known series to
 // confirm they decrypt with the configured keys.
 func (s *Store) VerifyAll(ctx context.Context) error {
+	if s != nil && s.tx != nil {
+		return ErrInTransaction
+	}
 	if s == nil || s.b == nil {
 		return ErrNilParam
 	}
@@ -345,7 +354,7 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 	}
 
 	var names []string
-	if err := s.b.View(func(tx *bolt.Tx) error {
+	if err := s.view(func(tx *bolt.Tx) error {
 		if enc := s.encState(); enc != nil {
 			meta, err := s.metaBucket(tx, false)
 			if err != nil {
@@ -374,7 +383,7 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
-		if err := s.b.View(func(tx *bolt.Tx) error {
+		if err := s.view(func(tx *bolt.Tx) error {
 			if _, err := s.readMeta(tx, name); err != nil {
 				return err
 			}

@@ -39,7 +39,10 @@ const FormatVersion uint64 = 1
 
 // FS implements absfs.FileSystem on top of bbolt.
 type FS struct {
-	db          *bolt.DB
+	db *bolt.DB
+	// tx, when non-nil, binds every operation to a caller-owned transaction.
+	// See Store.WithTransaction.
+	tx          *bolt.Tx
 	bucket      string
 	bucketParts []string
 	rootIno     uint64
@@ -69,6 +72,29 @@ type FS struct {
 	// system was opened without audit. It is set once at construction and never
 	// mutated.
 	audit audit.Sink
+}
+
+// view runs fn against the bound transaction, or a fresh read transaction.
+func (fs *FS) view(fn func(*bolt.Tx) error) error {
+	if fs == nil {
+		return ErrNilParam
+	}
+	if fs.tx != nil {
+		return fn(fs.tx)
+	}
+	return fs.db.View(fn)
+}
+
+// update runs fn against the bound transaction, or a fresh write transaction.
+// A bound FS never commits; the transaction owner does.
+func (fs *FS) update(fn func(*bolt.Tx) error) error {
+	if fs == nil {
+		return ErrNilParam
+	}
+	if fs.tx != nil {
+		return fn(fs.tx)
+	}
+	return fs.db.Update(fn)
 }
 
 // encState returns the current encryption state (nil when disabled).
@@ -105,14 +131,31 @@ func digestOf(data []byte) []byte {
 // newFS creates a new FS in the convention of other `absfs`
 // implementations. It takes a bolt.DB pointer and a bucket path. obs, when
 // non-nil, receives cache and chunk metrics.
-func newFS(db *bolt.DB, bucketpath string, enc *encState, obs metrics.Observer) (*FS, error) {
+func newFS(db *bolt.DB, bound *bolt.Tx, bucketpath string, enc *encState, obs metrics.Observer) (*FS, error) {
+	update := func(fn func(*bolt.Tx) error) error {
+		if bound != nil {
+			return fn(bound)
+		}
+		return db.Update(fn)
+	}
+	// A read-only bound transaction must not initialize anything: the file
+	// system already exists and writes would fail with ErrTxNotWritable.
+	readOnly := bound != nil && !bound.Writable()
+	loadOr := func(fn func() ([]byte, error), fallback []byte) ([]byte, error) {
+		if !readOnly {
+			return fn()
+		}
+		return fallback, nil
+	}
 
 	// create buckets
-	err := db.Update(func(tx *bolt.Tx) error {
-		return bucketInit(tx, bucketpath)
-	})
-	if err != nil {
-		return nil, err
+	if !readOnly {
+		err := update(func(tx *bolt.Tx) error {
+			return bucketInit(tx, bucketpath)
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// load or initialize
@@ -121,6 +164,7 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState, obs metrics.Observer) 
 	cache.obs = obs
 	fs := &FS{
 		db:          db,
+		tx:          bound,
 		bucket:      bucketpath,
 		bucketParts: splitBucketPath(bucketpath),
 		rootIno:     rootIno,
@@ -129,7 +173,7 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState, obs metrics.Observer) 
 		contentFS:   nil, // Use BoltDB by default (backward compatible)
 	}
 	fs.enc.Store(enc)
-	err = db.Update(func(tx *bolt.Tx) error {
+	err := update(func(tx *bolt.Tx) error {
 		bb, err := openBucket(tx, bucketpath)
 		if err != nil {
 			return err
@@ -139,7 +183,7 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState, obs metrics.Observer) 
 		if err := checkFormatVersion(b); err != nil {
 			return err
 		}
-		if enc != nil && b.state.Get([]byte(markerKey)) == nil {
+		if !readOnly && enc != nil && b.state.Get([]byte(markerKey)) == nil {
 			raw, err := enc.encodeMarker()
 			if err != nil {
 				return err
@@ -167,28 +211,29 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState, obs metrics.Observer) 
 		}
 
 		// create the `nil` node if it doesn't exist
-		err = b.InodeInit()
-		if err != nil {
-			return err
+		if !readOnly {
+			if err = b.InodeInit(); err != nil {
+				return err
+			}
 		}
 
 		// load the
 		data := make([]byte, 4)
 		binary.BigEndian.PutUint32(data, uint32(0022))
-		umaskData, err := b.LoadOrSet("umask", data)
+		umaskData, err := loadOr(func() ([]byte, error) { return b.LoadOrSet("umask", data) }, data)
 		if err != nil {
 			return err
 		}
 		fs.umask.Store(binary.BigEndian.Uint32(umaskData))
 
-		tempdir, err := b.LoadOrSet("tempdir", []byte("/tmp"))
+		tempdir, err := loadOr(func() ([]byte, error) { return b.LoadOrSet("tempdir", []byte("/tmp")) }, []byte("/tmp"))
 		if err != nil {
 			return err
 		}
 		fs.tempdir.Store(string(tempdir))
 
 		// load the root Ino if one is available
-		data, err = b.LoadOrSet("rootIno", i2b(rootIno))
+		data, err = loadOr(func() ([]byte, error) { return b.LoadOrSet("rootIno", i2b(rootIno)) }, i2b(rootIno))
 		if err != nil {
 			return err
 		}
@@ -203,6 +248,9 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState, obs metrics.Observer) 
 		}
 
 		if err == os.ErrNotExist {
+			if readOnly {
+				return err
+			}
 			node := newInode(os.ModeDir | 0755)
 			node.countUp()
 			err = b.PutInode(rootIno, node)
@@ -318,7 +366,7 @@ func (fs *FS) Umask() os.FileMode {
 func (fs *FS) SetUmask(umask os.FileMode) {
 	var data [4]byte
 
-	err := fs.db.Update(func(tx *bolt.Tx) error {
+	err := fs.update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucket(tx)
 		if err != nil {
 			return err
@@ -351,7 +399,7 @@ func (fs *FS) TempDir() string {
 // actual directories. Silently ignores errors.
 func (fs *FS) SetTempdir(tempdir string) {
 	// Ignore the error to maintain backwards compatibility
-	err := fs.db.Update(func(tx *bolt.Tx) error {
+	err := fs.update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucket(tx)
 		if err != nil {
 			return err
@@ -369,7 +417,7 @@ func (fs *FS) SetTempdir(tempdir string) {
 // cases the `ino` value is returned.
 func (fs *FS) saveInode(node *iNode) (ino uint64, err error) {
 	ino = node.Ino
-	err = fs.db.Update(func(tx *bolt.Tx) error {
+	err = fs.update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucketWithCache(tx)
 		if err != nil {
 			return err
@@ -396,7 +444,7 @@ func (fs *FS) saveInodeAndData(node *iNode, data []byte) (ino uint64, err error)
 	}
 
 	ino = node.Ino
-	err = fs.db.Update(func(tx *bolt.Tx) error {
+	err = fs.update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucketWithCache(tx)
 		if err != nil {
 			return err
@@ -602,7 +650,7 @@ func (fs *FS) loadInode(ino uint64) (*iNode, error) {
 	}
 
 	node := new(iNode)
-	err := fs.db.View(func(tx *bolt.Tx) error {
+	err := fs.view(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucketWithCache(tx)
 		if err != nil {
 			return err
@@ -621,7 +669,7 @@ func (fs *FS) loadInodes(inos []uint64) ([]*iNode, error) {
 	}
 
 	nodes := make([]*iNode, len(inos))
-	err := fs.db.View(func(tx *bolt.Tx) error {
+	err := fs.view(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucketWithCache(tx)
 		if err != nil {
 			return err
@@ -668,7 +716,7 @@ func (fs *FS) saveData(ino uint64, data []byte) error {
 		return err
 	}
 
-	return fs.db.Update(func(tx *bolt.Tx) error {
+	return fs.update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucket(tx)
 		if err != nil {
 			return err
@@ -705,7 +753,7 @@ func (fs *FS) loadData(ino uint64) ([]byte, error) {
 	}
 
 	var data []byte
-	err := fs.db.View(func(tx *bolt.Tx) error {
+	err := fs.view(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucket(tx)
 		if err != nil {
 			return err
@@ -811,7 +859,7 @@ func (fs *FS) resizeContent(node *iNode, size int64) error {
 // write transaction.
 func (fs *FS) deleteDataAndSaveInode(node *iNode) error {
 	ino := node.Ino
-	return fs.db.Update(func(tx *bolt.Tx) error {
+	return fs.update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucketWithCache(tx)
 		if err != nil {
 			return err
@@ -941,7 +989,7 @@ func (fs *FS) Rename(oldpath, newpath string) error {
 	// failure can therefore never leave two names for one inode without a
 	// matching link count.
 	deleteReplaced := false
-	err := fs.db.Update(func(tx *bolt.Tx) error {
+	err := fs.update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucketWithCache(tx)
 		if err != nil {
 			return err
@@ -1144,7 +1192,7 @@ func (fs *FS) CopyContext(ctx context.Context, source, destination string, opts 
 	// transaction, like Rename: a failure cannot leave the new name without its
 	// inode or the old inode dangling with an inflated link count.
 	deleteReplaced := false
-	err = fs.db.Update(func(tx *bolt.Tx) error {
+	err = fs.update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucketWithCache(tx)
 		if err != nil {
 			return err
@@ -1227,7 +1275,7 @@ func (fs *FS) copyNodeCtx(src *iNode, st *copyState) (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
-		err = fs.db.Update(func(tx *bolt.Tx) error {
+		err = fs.update(func(tx *bolt.Tx) error {
 			b, err := fs.openFsBucket(tx)
 			if err != nil {
 				return err
@@ -1303,7 +1351,7 @@ func resetInodeMetadata(node *iNode) {
 // readLink returns the symlink target stored for ino.
 func (fs *FS) readLink(ino uint64) (string, error) {
 	var link string
-	err := fs.db.View(func(tx *bolt.Tx) error {
+	err := fs.view(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucket(tx)
 		if err != nil {
 			return err
@@ -1379,7 +1427,7 @@ func (fs *FS) resolveFollow(name string, depth int) (*iNode, error) {
 func (fs *FS) resolve(path string) (*iNode, error) {
 	node := new(iNode)
 
-	err := fs.db.View(func(tx *bolt.Tx) error {
+	err := fs.view(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucketWithCache(tx)
 		if err != nil {
 			return err
@@ -1651,7 +1699,7 @@ func (fs *FS) loadParentChild(dir, filename string) (*iNode, *iNode) {
 func (fs *FS) saveParentChild(parent *iNode, filename string, child *iNode) error {
 	filename = strings.Trim(filename, "/")
 	child.countUp()
-	return fs.db.Update(func(tx *bolt.Tx) error {
+	return fs.update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucketWithCache(tx)
 		if err != nil {
 			return err
@@ -1711,7 +1759,7 @@ func (fs *FS) deleteInode(ino uint64) error {
 		}
 	}
 
-	err := fs.db.Update(func(tx *bolt.Tx) error {
+	err := fs.update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucket(tx)
 		if err != nil {
 			return err
@@ -1934,7 +1982,7 @@ func (fs *FS) RemoveAll(name string) error {
 	// We need to collect which inodes are regular files vs directories
 	var fileInos []uint64
 	var err error
-	err = fs.db.View(func(tx *bolt.Tx) error {
+	err = fs.view(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucket(tx)
 		if err != nil {
 			return err
@@ -1967,7 +2015,7 @@ func (fs *FS) RemoveAll(name string) error {
 		}
 	}
 
-	err = fs.db.Update(func(tx *bolt.Tx) error {
+	err = fs.update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucket(tx)
 		if err != nil {
 			return err
@@ -2237,7 +2285,7 @@ func (fs *FS) Symlink(source, destination string) error {
 		return pathErr
 	}
 
-	err = fs.db.Update(func(tx *bolt.Tx) error {
+	err = fs.update(func(tx *bolt.Tx) error {
 		b, err := fs.openFsBucket(tx)
 		if err != nil {
 			return err

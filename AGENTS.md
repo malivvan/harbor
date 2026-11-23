@@ -174,6 +174,18 @@ bbolt provides one writer and many readers, and Harbor follows that model:
   an attached handle.
 - `db.TransactionManager`, `fs.Walk`, `ts.Store`, and `vec.Collection` all use
   the same bbolt handle and therefore share the single-writer constraint.
+- `Store.WriteTransaction`/`ReadTransaction` bind every sub-store to one
+  caller-owned bbolt transaction. `fs`, `ts` and `vec` carry an optional `tx`
+  field: when set, their `view`/`update` helpers execute against it instead of
+  opening a managed transaction, and `WithTransaction` builds the bound view
+  without tracking it in the parent. Rotation is rejected on a bound store
+  (`ErrInTransaction`). Audit events cannot be recorded inside the transaction
+  (the recorder opens its own write transaction), so bound views receive a
+  collecting sink and the root replays it after commit; `db.AttachWithAudit`
+  provides the same for the record store. `vec` stages writes in its bound
+  view and calls `AdoptTransaction` after commit to install the updated
+  in-memory indexes, so no point is re-read. Write transactions are serialized
+  by `Store.txMu`; nesting is unsupported.
 - The root `Store` guards close against in-flight access with a read/write
   mutex. After `Close`, the sub-store accessors return `nil`.
 - Vector writes are buffered; `Store.Close` flushes the vec store before

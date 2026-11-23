@@ -298,7 +298,7 @@ func (s *Store) ensureMarker(tx *bolt.Tx) error {
 // bucket, writing the current one for a store created before the marker
 // existed.
 func (s *Store) ensureFormatVersion() error {
-	return s.b.Update(func(tx *bolt.Tx) error {
+	return s.update(func(tx *bolt.Tx) error {
 		if err := s.ensureMarker(tx); err != nil {
 			return err
 		}

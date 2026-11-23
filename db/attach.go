@@ -1,6 +1,7 @@
 package db
 
 import (
+	"github.com/malivvan/harbor/pkg/audit"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -45,6 +46,21 @@ var _ Tx = (*node)(nil)
 // fail with bbolt's ErrTxClosed. Harbor never falls back to a managed
 // transaction for a dead handle.
 func (s *Store) Attach(tx *bolt.Tx) (Tx, error) {
+	return s.attach(tx, nil)
+}
+
+// AttachWithAudit is Attach with an explicit audit sink for writes performed
+// through the returned Tx. It lets a caller that owns a bbolt transaction stage
+// audit events and record them after committing, instead of calling the
+// store's recorder from inside the transaction (which would deadlock).
+//
+// A nil sink attaches with no audit recording at all, even when the store has
+// an audit trail configured.
+func (s *Store) AttachWithAudit(tx *bolt.Tx, sink audit.Sink) (Tx, error) {
+	return s.attach(tx, sink)
+}
+
+func (s *Store) attach(tx *bolt.Tx, sink audit.Sink) (Tx, error) {
 	if s == nil || tx == nil {
 		return nil, wrapError("attach", ErrNilParam)
 	}
@@ -58,5 +74,7 @@ func (s *Store) Attach(tx *bolt.Tx) (Tx, error) {
 		return nil, wrapError("attach", ErrBadType)
 	}
 
-	return root.withTransaction(tx), nil
+	bound := root.withTransaction(tx)
+	bound.audit = sink
+	return bound, nil
 }

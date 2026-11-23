@@ -181,12 +181,14 @@ func (o *Options) creationParams() (time, memory uint32, threads uint8, flags ui
 // Store is a single bbolt database that hosts the db, fs, ts and vec stores.
 // Each sub-store uses its own domain-separated key derived from Password.
 type Store struct {
-	mu  sync.RWMutex
-	bs  *bolt.DB
-	db  *db.Store
-	fs  *fs.Store
-	ts  *ts.Store
-	vec *vec.Store
+	mu sync.RWMutex
+	// txMu serializes explicit cross-store write transactions.
+	txMu sync.Mutex
+	bs   *bolt.DB
+	db   *db.Store
+	fs   *fs.Store
+	ts   *ts.Store
+	vec  *vec.Store
 
 	// audit records events for the enabled stores, or nil when disabled.
 	audit *audit.Recorder

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/malivvan/harbor/pkg/audit"
 	"github.com/malivvan/harbor/pkg/metrics"
 	bolt "go.etcd.io/bbolt"
 )
@@ -72,6 +73,11 @@ type node struct {
 
 	// Codec of this node
 	codec Codec
+
+	// audit, when non-nil, replaces the store's sink for writes performed
+	// through this node. The root package uses it to stage audit events for a
+	// cross-store transaction instead of recording them inside the transaction.
+	audit audit.Sink
 }
 
 // cloneBucketPath returns a defensive copy of the given bucket path.

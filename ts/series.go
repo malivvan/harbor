@@ -137,7 +137,7 @@ func (se *Series) Labels(ctx context.Context) (map[string]string, error) {
 	}
 
 	labels := make(map[string]string)
-	err := se.store.b.View(func(tx *bolt.Tx) error {
+	err := se.store.view(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -169,7 +169,7 @@ func (se *Series) SetLabels(ctx context.Context, labels map[string]string) error
 		labels = make(map[string]string)
 	}
 
-	if err := se.store.b.Update(func(tx *bolt.Tx) error {
+	if err := se.store.update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -219,7 +219,7 @@ func (se *Series) InsertAt(ctx context.Context, p Point, now int64) error {
 		return err
 	}
 
-	if err := se.store.b.Update(func(tx *bolt.Tx) error {
+	if err := se.store.update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -282,7 +282,7 @@ func (se *Series) InsertManyAt(ctx context.Context, points []Point, now int64) e
 		return nil
 	}
 
-	if err := se.store.b.Update(func(tx *bolt.Tx) error {
+	if err := se.store.update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -385,7 +385,7 @@ func (se *Series) Get(ctx context.Context, ts int64) (Point, error) {
 	}
 
 	var point Point
-	err := se.store.b.View(func(tx *bolt.Tx) error {
+	err := se.store.view(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -445,7 +445,7 @@ func (se *Series) First(ctx context.Context) (Point, error) {
 	}
 
 	var point Point
-	err := se.store.b.View(func(tx *bolt.Tx) error {
+	err := se.store.view(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -499,7 +499,7 @@ func (se *Series) Last(ctx context.Context) (Point, error) {
 	}
 
 	var point Point
-	err := se.store.b.View(func(tx *bolt.Tx) error {
+	err := se.store.view(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -639,7 +639,7 @@ func (se *Series) rangeScan(ctx context.Context, start, end int64, opts RangeOpt
 		return visit(p)
 	}
 
-	return se.store.b.View(func(tx *bolt.Tx) error {
+	return se.store.view(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -667,7 +667,7 @@ func (se *Series) Count(ctx context.Context) (int, error) {
 		count   int
 		persist bool
 	)
-	err := se.store.b.View(func(tx *bolt.Tx) error {
+	err := se.store.view(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -703,7 +703,7 @@ func (se *Series) Count(ctx context.Context) (int, error) {
 
 	if persist {
 		// Best effort: a failed cache write must not fail the count.
-		_ = se.store.b.Update(func(tx *bolt.Tx) error {
+		_ = se.store.update(func(tx *bolt.Tx) error {
 			meta, err := se.store.readMeta(tx, se.name)
 			if err != nil {
 				return err
@@ -732,7 +732,7 @@ func (se *Series) DeleteRange(ctx context.Context, start, end int64) (int, error
 	}
 
 	deleted := 0
-	err := se.store.b.Update(func(tx *bolt.Tx) error {
+	err := se.store.update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}

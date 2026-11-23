@@ -70,6 +70,9 @@ func (s *Store) adoptEnc(next *encState) {
 //
 // Rotation must not run concurrently with other operations on the store.
 func (s *Store) ReEncryptCollection(ctx context.Context, name string, newKey []byte) error {
+	if s != nil && s.tx != nil {
+		return ErrInTransaction
+	}
 	if s == nil || s.db == nil {
 		return fmt.Errorf("%w: store is not open", ErrInvalidConfig)
 	}
@@ -124,6 +127,9 @@ func (s *Store) ReEncryptCollection(ctx context.Context, name string, newKey []b
 // RotateAll re-encrypts every collection, all collection metadata and the marker
 // canary under newKey, then adopts the new key and drops the previous one.
 func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
+	if s != nil && s.tx != nil {
+		return ErrInTransaction
+	}
 	if s == nil || s.db == nil {
 		return fmt.Errorf("%w: store is not open", ErrInvalidConfig)
 	}
@@ -170,6 +176,9 @@ func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 // VerifyAll re-reads the marker, every point, every collection metadata entry and
 // every encrypted name to confirm they decrypt with the configured keys.
 func (s *Store) VerifyAll(ctx context.Context) error {
+	if s != nil && s.tx != nil {
+		return ErrInTransaction
+	}
 	if s == nil || s.db == nil {
 		return fmt.Errorf("%w: store is not open", ErrInvalidConfig)
 	}

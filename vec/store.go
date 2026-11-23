@@ -43,6 +43,15 @@ var reservedTopLevelBuckets = map[string]bool{
 // It provides durable storage for vector collections and their points.
 type Store struct {
 	db *bbolt.DB
+	// tx, when non-nil, binds every operation to a caller-owned transaction.
+	// See WithTransaction.
+	tx *bbolt.Tx
+	// dropped records collections dropped inside a bound transaction so the
+	// live store forgets them when the transaction commits.
+	dropped map[string]struct{}
+	// readOnly marks a view bound to a read-only transaction; constructors
+	// then open existing collections without writing metadata.
+	readOnly bool
 
 	// root is the parent bucket path for collections and collection metadata.
 	// The default is the "vec" bucket.
@@ -113,18 +122,116 @@ func resultLabel(err error) string {
 	return metrics.ResultOK
 }
 
-// view runs a read-only transaction while excluding rotation.
+// view runs a read-only transaction while excluding rotation. A store bound to
+// an explicit transaction reads from that transaction instead.
 func (s *Store) view(fn func(tx *bbolt.Tx) error) error {
+	if s.tx != nil {
+		return fn(s.tx)
+	}
 	s.rotMu.RLock()
 	defer s.rotMu.RUnlock()
 	return s.db.View(fn)
 }
 
-// update runs a write transaction while excluding rotation.
+// update runs a write transaction while excluding rotation. A store bound to an
+// explicit transaction writes into that transaction instead and never commits.
 func (s *Store) update(fn func(tx *bbolt.Tx) error) error {
+	if s.tx != nil {
+		return fn(s.tx)
+	}
 	s.rotMu.RLock()
 	defer s.rotMu.RUnlock()
 	return s.db.Update(fn)
+}
+
+// SetAuditSink replaces the sink that receives committed-write events and
+// returns the receiver. It is intended for a transaction-bound view created by
+// WithTransaction: the view stages events and the transaction owner records
+// them after it commits. It must not be called concurrently with writes on the
+// same Store.
+func (s *Store) SetAuditSink(sink audit.Sink) *Store {
+	if s != nil {
+		s.audit = sink
+	}
+	return s
+}
+
+// WithTransaction returns a Store bound to tx. Every read and write goes
+// through tx; the bound store owns neither the transaction nor its handle.
+// Collections opened through the bound view live only in its in-memory map, so
+// a search inside the transaction sees staged points and the committed state.
+//
+// Commit a cross-store transaction in three steps: FlushStaged, commit tx, then
+// AdoptTransaction(view).
+func (s *Store) WithTransaction(tx *bbolt.Tx) *Store {
+	if s == nil || tx == nil {
+		return nil
+	}
+	bound := &Store{
+		db:          s.db,
+		tx:          tx,
+		readOnly:    !tx.Writable(),
+		root:        cloneRoot(s.root),
+		quantizer:   s.quantizer,
+		useQuant:    s.useQuant,
+		collections: make(map[string]*Collection),
+		dropped:     make(map[string]struct{}),
+		audit:       s.audit,
+		obs:         s.obs,
+	}
+	bound.enc.Store(s.enc.Load())
+	bound.ownsDB.Store(false)
+	return bound
+}
+
+// FlushStaged writes every buffered point of a transaction-bound view into its
+// transaction. The caller must call it before committing the transaction so
+// staged points are part of it.
+func (s *Store) FlushStaged() error {
+	if s == nil || s.tx == nil {
+		return ErrInvalidConfig
+	}
+	return s.flushCollections()
+}
+
+// AdoptTransaction installs the collection state built by a committed
+// transaction view into s, rebinding the collections to the live store. It must
+// be called after the caller committed the transaction; on abort it is not
+// called and the view is discarded.
+//
+// The transaction view's indexes were loaded from the committed database and
+// then updated with the staged writes, so adopting them avoids re-reading every
+// point. Collections dropped inside the transaction are removed from s.
+func (s *Store) AdoptTransaction(view *Store) {
+	if s == nil || view == nil {
+		return
+	}
+	view.mu.Lock()
+	adopted := make(map[string]*Collection, len(view.collections))
+	for name, c := range view.collections {
+		adopted[name] = c
+	}
+	dropped := make([]string, 0, len(view.dropped))
+	for name := range view.dropped {
+		dropped = append(dropped, name)
+	}
+	view.mu.Unlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.collections == nil {
+		s.collections = make(map[string]*Collection)
+	}
+	for _, name := range dropped {
+		delete(s.collections, name)
+	}
+	for name, c := range adopted {
+		c.mu.Lock()
+		c.storage = s
+		c.writeBuf = nil
+		c.mu.Unlock()
+		s.collections[name] = c
+	}
 }
 
 // payloadJSONKey is the reserved stored-payload key that carries one JSON
@@ -1155,6 +1262,12 @@ func (s *Store) DropCollection(name string) error {
 		return nil
 	}); err != nil {
 		return err
+	}
+	if s.tx != nil {
+		if s.dropped == nil {
+			s.dropped = make(map[string]struct{})
+		}
+		s.dropped[name] = struct{}{}
 	}
 	return s.auditEntry("drop_collection", name, nil)
 }

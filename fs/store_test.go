@@ -577,7 +577,7 @@ func openFSWithContentForTest(tb testing.TB, path, bucketpath string, contentFS 
 }
 
 func newFSWithContentForTest(db *bolt.DB, bucketpath string, contentFS ContentFS) (*FS, error) {
-	filesystem, err := newFS(db, bucketpath, nil, nil)
+	filesystem, err := newFS(db, nil, bucketpath, nil, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -155,7 +155,7 @@ func (se *Series) Aggregate(ctx context.Context, start, end int64, step int64, f
 
 	agg := &aggregator{fn: fn, step: step}
 	started := time.Now()
-	err := se.store.b.View(func(tx *bolt.Tx) error {
+	err := se.store.view(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}

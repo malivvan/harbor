@@ -163,8 +163,10 @@ func (s *Store) newCollection(opts CollectionOptions) (*Collection, error) {
 	}
 
 	if s != nil {
-		if err := s.EnsureCollection(name); err != nil {
-			return nil, fmt.Errorf("failed to ensure storage collection %s: %w", name, err)
+		if !s.readOnly {
+			if err := s.EnsureCollection(name); err != nil {
+				return nil, fmt.Errorf("failed to ensure storage collection %s: %w", name, err)
+			}
 		}
 
 		// An existing collection must keep the configuration it was created
@@ -183,6 +185,9 @@ func (s *Store) newCollection(opts CollectionOptions) (*Collection, error) {
 				return nil, fmt.Errorf("%w: collection %q uses an incompatible point schema", ErrInvalidConfig, name)
 			}
 		case errors.Is(metaErr, ErrMetadataNotFound):
+			if s.readOnly {
+				return nil, fmt.Errorf("%w: %s", ErrCollectionNotFound, name)
+			}
 			// New collection.
 		default:
 			return nil, fmt.Errorf("failed to read metadata for %s: %w", name, metaErr)
@@ -223,8 +228,10 @@ func (s *Store) newCollection(opts CollectionOptions) (*Collection, error) {
 			FormatVersion:     CollectionFormatVersion,
 			SchemaFingerprint: StoredPointSchemaFingerprint,
 		}
-		if err := s.SaveCollectionMeta(name, meta); err != nil {
-			return nil, fmt.Errorf("failed to save metadata for %s: %w", name, err)
+		if !s.readOnly {
+			if err := s.SaveCollectionMeta(name, meta); err != nil {
+				return nil, fmt.Errorf("failed to save metadata for %s: %w", name, err)
+			}
 		}
 		s.trackCollection(col)
 	}

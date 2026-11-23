@@ -145,7 +145,31 @@ Run and record: `gofmt -l .`, `go vet ./...`, `go build ./...`,
 `go mod tidy -diff`, staticcheck and govulncheck per AGENTS.md; verify README
 links and examples. Tag only from a green commit.
 
-## 1. P0 — cross-store transaction
+## 1. P0 — cross-store transaction — DONE
+
+Done: `Store.WriteTransaction`/`ReadTransaction` and `Tx` are implemented in
+`transaction.go`. `Tx.DB()` is `db.AttachWithAudit`, and `fs`, `ts` and `vec`
+gained a `tx` field plus `WithTransaction`/`SetAuditSink`: their existing
+`view`/`update` helpers now run against the caller's transaction, bound views
+are not tracked by the parent store, and rotation is rejected
+(`ErrInTransaction`). Vec stages points in the bound view and
+`AdoptTransaction` installs the updated in-memory indexes after commit, so no
+point is re-read. Audit events are staged by a collecting sink and replayed
+after commit; `db.AttachWithAudit` covers the record store. Read transactions
+use bbolt's read snapshot and construct existing file systems/collections
+without writing (`readOnly` handling in `newFS` and `vec.newCollection`).
+
+Deviation: write transactions are serialized with `Store.txMu` rather than
+returning `ErrTxAlreadyOpen`. A nested call from inside a callback would block
+instead of being detected (Go has no supported goroutine identity), so nesting
+is documented as unsupported. Concurrent writers serialize as the plan asked.
+
+Tests in `transaction_test.go`: cross-store commit visibility (including a
+search over the adopted index), abort leaving db/fs/ts/vec untouched, context
+cancellation rollback, read-your-writes inside the callback, read-only
+enforcement, vector snapshot reads, concurrent writer serialization, and
+post-commit audit. `go test -race` is green for the root package and the four
+sub-stores.
 
 ### Current state
 

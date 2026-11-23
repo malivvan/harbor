@@ -44,7 +44,7 @@ func (se *Series) SetRetention(ctx context.Context, r Retention) error {
 		return err
 	}
 
-	if err := se.store.b.Update(func(tx *bolt.Tx) error {
+	if err := se.store.update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -87,7 +87,7 @@ func (se *Series) Retention(ctx context.Context) (Retention, error) {
 	}
 
 	var retention Retention
-	err := se.store.b.View(func(tx *bolt.Tx) error {
+	err := se.store.view(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -115,7 +115,7 @@ func (se *Series) EnforceRetention(ctx context.Context, now int64) (int, error) 
 	}
 
 	removed := 0
-	err := se.store.b.Update(func(tx *bolt.Tx) error {
+	err := se.store.update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
@@ -170,7 +170,7 @@ func (s *Store) EnforceRetention(ctx context.Context, now int64) (int, error) {
 		meta seriesMeta
 	}
 	var updates []metaUpdate
-	err := s.b.Update(func(tx *bolt.Tx) error {
+	err := s.update(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}

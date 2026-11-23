@@ -123,10 +123,17 @@ func (s *Store) TouchChange(ctx context.Context, c Change) {
 // Internal bookkeeping (the version record in __database and per-bucket
 // metadata) is not an application write and is never recorded.
 func (n *node) auditEntry(op, entity string, digest []byte) error {
-	if n == nil || n.s == nil || n.s.audit == nil {
+	if n == nil || n.s == nil {
 		return nil
 	}
-	return n.s.audit.Record(audit.Entry{
+	sink := n.audit
+	if sink == nil {
+		sink = n.s.audit
+	}
+	if sink == nil {
+		return nil
+	}
+	return sink.Record(audit.Entry{
 		Store:  audit.StoreDB,
 		Op:     op,
 		Entity: n.auditEntity(entity),

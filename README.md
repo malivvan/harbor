@@ -36,6 +36,7 @@ and `Vec()`. Every store can also be used directly with its own `*bolt.DB`.
 - [Clustering](#clustering)
 - [Encryption](#encryption)
 - [Audit trail](#audit-trail)
+- [Cross-store transactions](#cross-store-transactions)
 - [Database lifecycle](#database-lifecycle)
 - [Error handling](#error-handling)
 - [Contexts and cancellation](#contexts-and-cancellation)
@@ -921,6 +922,65 @@ same trust boundary as the encryption itself.
 
 See [pkg/audit/README.md](pkg/audit/README.md) for the event model, the recorded
 operations, the full threat model and how to use the `audit` package directly.
+
+## Cross-store transactions
+
+`WriteTransaction` runs a callback in one bbolt transaction bound to all four
+sub-stores, so a record, a file, a time-series point and a vector upsert commit
+or roll back together:
+
+```go
+err := store.WriteTransaction(ctx, func(tx *harbor.Tx) error {
+	if err := tx.DB().Save(ctx, &doc); err != nil {
+		return err
+	}
+
+	fsys, err := tx.FS().Open("app")
+	if err != nil {
+		return err
+	}
+	f, err := fsys.Create("/doc.json")
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(payload); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+
+	col, err := tx.Vec().NewCollection("documents", len(embedding), vec.Cosine, false)
+	if err != nil {
+		return err
+	}
+	if err := col.Upsert([]vec.PointStruct{{ID: doc.ID, Vector: embedding}}); err != nil {
+		return err
+	}
+
+	return tx.TS().Series("writes").Insert(ctx, ts.Point{Timestamp: now, Value: 1})
+})
+```
+
+Returning `nil` commits every change; returning an error (or canceling the
+context) rolls all of them back. `ReadTransaction` runs the same views against
+a consistent read-only snapshot.
+
+Behaviour worth knowing:
+
+- **One fsync.** All writes share one bbolt transaction instead of one
+  transaction per store.
+- **Vector staging.** Points upserted through `tx.Vec()` are visible to searches
+  through the same view immediately. The live collection indexes adopt them when
+  the transaction commits, so searches outside the transaction do not see them
+  early. Points still buffered from earlier calls are flushed before the
+  transaction starts.
+- **Audit after commit.** Audit events for transaction writes are collected and
+  appended to the trail once the transaction commits, never from inside it.
+- **Single writer.** Write transactions are serialized. Do not start a
+  transaction from inside another transaction's callback; pass `tx` down
+  instead. A read transaction blocks while a write transaction is open, as
+  bbolt's single-writer model requires.
 
 ## Database lifecycle
 
