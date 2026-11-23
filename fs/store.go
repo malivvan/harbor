@@ -218,6 +218,25 @@ func (s *Store) Open(name string) (*FS, error) {
 	return filesystem, nil
 }
 
+// OpenReadOnly opens an existing file system without writing or creating
+// anything. It is used by backup verification over a read-only database handle.
+// The returned FS supports reads only; writes fail with bbolt's
+// ErrTxNotWritable.
+func (s *Store) OpenReadOnly(name string) (*FS, error) {
+	if s == nil || s.db == nil {
+		return nil, ErrNilParam
+	}
+	if err := validateBucketName(name); err != nil {
+		return nil, err
+	}
+	filesystem, err := newFSReadOnly(s.db, s.bucketPath(name), s.enc.Load(), s.obs)
+	if err != nil {
+		return nil, err
+	}
+	filesystem.audit = nil
+	return filesystem, nil
+}
+
 // OpenWithContentFS creates or opens the named file system with an external
 // content store. The backend implements the exported ContentFS interface; an
 // *FS from this package can be adapted with AsContentFS.

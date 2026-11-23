@@ -323,7 +323,21 @@ determinism.
 New package; existing stores are untouched. The FTS root is new, so no on-disk
 migration is required. Version the FTS format independently (version 1).
 
-## 3. P0 — backup verification and metadata
+## 3. P0 — backup verification and metadata — DONE
+
+Done: `BackupInfo`, `BackupOptions`, `Store.BackupFile` and `VerifyBackup`.
+`BackupFile` streams through SHA-256 into a temporary sibling, syncs, renames,
+and optionally writes `<path>.manifest.json` (size, checksum, creation time,
+flags, per-store format versions). `BackupTo` now delegates to it with
+`Overwrite: true`, keeping its signature and behaviour. `VerifyBackup` hashes
+the file, reads the sidecar (if present), opens the copy read-only and validates
+the metadata canary (wrong password → `ErrInvalidPassword`) and every
+sub-store's marker/version. To make that read-only, `ts` now only writes its
+format version when it is missing, and `fs`/`fts` gained `OpenReadOnly`
+constructors used for per-filesystem and per-index validation. Tests cover
+verify + restore of all stores, wrong password, truncation, manifest tampering,
+overwrite policy, cancellation leaving no file, and a backup taken while a
+writer is active. The manifest is a sidecar; the backup bytes are unchanged.
 
 ### Current state
 

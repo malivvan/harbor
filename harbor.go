@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sync"
 
@@ -787,37 +786,8 @@ func (s *Store) Backup(ctx context.Context, w io.Writer) error {
 // never truncates or corrupts an existing backup at path, and no partial file
 // is left behind.
 func (s *Store) BackupTo(ctx context.Context, path string) error {
-	if path == "" {
-		return fmt.Errorf("harbor: backup: %w: path is required", ErrInvalidOptions)
-	}
-
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".harbor-backup-*")
-	if err != nil {
-		return fmt.Errorf("harbor: backup to %q: %w", path, err)
-	}
-	tmpPath := tmp.Name()
-	discard := func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-	}
-
-	if err := s.Backup(ctx, tmp); err != nil {
-		discard()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		discard()
-		return fmt.Errorf("harbor: backup to %q: sync: %w", path, err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("harbor: backup to %q: close: %w", path, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("harbor: backup to %q: %w", path, err)
-	}
-	return nil
+	_, err := s.BackupFile(ctx, path, BackupOptions{Overwrite: true})
+	return err
 }
 
 // ctxWriter aborts a long write (such as a bbolt snapshot) when the context is

@@ -132,15 +132,28 @@ func digestOf(data []byte) []byte {
 // implementations. It takes a bolt.DB pointer and a bucket path. obs, when
 // non-nil, receives cache and chunk metrics.
 func newFS(db *bolt.DB, bound *bolt.Tx, bucketpath string, enc *encState, obs metrics.Observer) (*FS, error) {
+	return initFS(db, bound, false, bucketpath, enc, obs)
+}
+
+// newFSReadOnly opens an existing file system without writing or initializing
+// anything. It is used by backup verification over a read-only handle.
+func newFSReadOnly(db *bolt.DB, bucketpath string, enc *encState, obs metrics.Observer) (*FS, error) {
+	return initFS(db, nil, true, bucketpath, enc, obs)
+}
+
+func initFS(db *bolt.DB, bound *bolt.Tx, forceReadOnly bool, bucketpath string, enc *encState, obs metrics.Observer) (*FS, error) {
+	readOnly := forceReadOnly || (bound != nil && !bound.Writable())
 	update := func(fn func(*bolt.Tx) error) error {
 		if bound != nil {
 			return fn(bound)
 		}
+		if readOnly {
+			return db.View(fn)
+		}
 		return db.Update(fn)
 	}
-	// A read-only bound transaction must not initialize anything: the file
-	// system already exists and writes would fail with ErrTxNotWritable.
-	readOnly := bound != nil && !bound.Writable()
+	// A read-only view must not initialize anything: the file system already
+	// exists and writes would fail with ErrTxNotWritable.
 	loadOr := func(fn func() ([]byte, error), fallback []byte) ([]byte, error) {
 		if !readOnly {
 			return fn()

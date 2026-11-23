@@ -628,6 +628,20 @@ There is no plaintext ↔ encrypted in-place migration. Export and re-import.
 - The root package derives keys from the password and does not expose rotation.
   Rotate only through sub-stores opened with caller-managed keys.
 
+### Backup and verification
+
+`Store.Backup`/`BackupTo`/`BackupFile` copy the on-disk database under one bbolt
+read transaction after flushing vec buffers. `BackupFile` hashes the stream,
+returns `BackupInfo` and can write a JSON sidecar
+(`<path>.manifest.json`). `VerifyBackup` reopens the copy with
+`bolt.Options{ReadOnly: true}` and validates the metadata canary plus each
+sub-store's marker and version through the normal `db.Open`/`fs.Open`/`ts.Open`/
+`vec.Open` paths. Those paths therefore must not write when the data is intact:
+`ts.ensureFormatVersion` reads before it writes, `fs.OpenReadOnly` and
+`fts.OpenReadOnly` exist for read-only traversal, and fs filesystems are opened
+with `OpenReadOnly` per name. The manifest is a sidecar, so the backup bytes are
+unchanged. Verification never mutates the copy.
+
 ## Development workflow
 
 ```sh

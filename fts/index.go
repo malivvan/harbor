@@ -86,7 +86,7 @@ func (s *Store) Open(name string, cfg Config) (*Index, error) {
 		idx.b = DefaultB
 	}
 
-	readOnly := s.tx != nil && !s.tx.Writable()
+	readOnly := s.readOnly || (s.tx != nil && !s.tx.Writable())
 	run := s.update
 	if readOnly {
 		run = s.view

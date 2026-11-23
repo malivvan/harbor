@@ -1037,13 +1037,19 @@ as `context.Background()`.
 ### Backup
 
 `Backup` writes a consistent, point-in-time snapshot of the whole database to
-an `io.Writer`; `BackupTo` writes the same snapshot to a file atomically.
+an `io.Writer`; `BackupTo` writes the same snapshot to a file atomically, and
+`BackupFile` also reports its size and SHA-256:
 
 ```go
 var buf bytes.Buffer
 err := store.Backup(ctx, &buf)
 
 err = store.BackupTo(ctx, "/backups/harbor-2026-11-23.db")
+
+info, err := store.BackupFile(ctx, "/backups/harbor-2026-11-24.db", harbor.BackupOptions{
+	Manifest: true, // also write <path>.manifest.json
+})
+fmt.Println(info.Size, info.SHA256, info.Flags)
 ```
 
 - Buffered vector points are flushed first, so the snapshot includes every
@@ -1061,6 +1067,20 @@ err = store.BackupTo(ctx, "/backups/harbor-2026-11-23.db")
 
 To restore, open the snapshot file with `harbor.Open` and the same password.
 `View` remains available for lower-level raw bbolt snapshots.
+
+`VerifyBackup` validates a copy before restoring it. It opens the file
+read-only and checks the metadata canary (so a wrong password is
+`ErrInvalidPassword`), every sub-store marker and format version, and the
+sidecar manifest when one exists. A truncated or corrupted copy fails; the
+verification never writes to the file.
+
+```go
+info, err := harbor.VerifyBackup(ctx, "/backups/harbor-2026-11-24.db", password, nil)
+```
+
+`BackupFile` writes `<path>.manifest.json` with the checksum, creation time,
+encryption flags and format versions. `BackupOptions.Overwrite` controls whether
+an existing destination is replaced (`BackupTo` always replaces).
 
 ### Export, import and compaction
 

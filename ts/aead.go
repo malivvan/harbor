@@ -298,19 +298,22 @@ func (s *Store) ensureMarker(tx *bolt.Tx) error {
 // bucket, writing the current one for a store created before the marker
 // existed.
 func (s *Store) ensureFormatVersion() error {
-	return s.update(func(tx *bolt.Tx) error {
-		if err := s.ensureMarker(tx); err != nil {
-			return err
-		}
-		bucket, err := s.metaBucket(tx, true)
+	// Read first so opening a complete store does not write: a read-only
+	// handle (backup verification) must be able to open an intact store.
+	var missing bool
+	err := s.b.View(func(tx *bolt.Tx) error {
+		bucket, err := s.metaBucket(tx, false)
 		if err != nil {
 			return err
 		}
+		if bucket == nil {
+			missing = true
+			return nil
+		}
 		raw := bucket.Get([]byte(versionKey))
 		if raw == nil {
-			var buf [8]byte
-			binary.BigEndian.PutUint64(buf[:], FormatVersion)
-			return bucket.Put([]byte(versionKey), buf[:])
+			missing = true
+			return nil
 		}
 		if len(raw) != 8 {
 			return fmt.Errorf("%w: malformed version marker", ErrIncompatibleVersion)
@@ -319,6 +322,24 @@ func (s *Store) ensureFormatVersion() error {
 			return fmt.Errorf("%w: timeseries format %d, this build supports %d", ErrIncompatibleVersion, v, FormatVersion)
 		}
 		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if !missing {
+		return nil
+	}
+	return s.b.Update(func(tx *bolt.Tx) error {
+		if err := s.ensureMarker(tx); err != nil {
+			return err
+		}
+		bucket, err := s.metaBucket(tx, true)
+		if err != nil {
+			return err
+		}
+		var buf [8]byte
+		binary.BigEndian.PutUint64(buf[:], FormatVersion)
+		return bucket.Put([]byte(versionKey), buf[:])
 	})
 }
 

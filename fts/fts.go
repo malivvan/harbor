@@ -102,11 +102,12 @@ type Store struct {
 	db *bolt.DB
 	// tx, when non-nil, binds every operation to a caller-owned transaction.
 	// See WithTransaction.
-	tx     *bolt.Tx
-	root   [][]byte
-	enc    atomic.Pointer[encState]
-	obs    metrics.Observer
-	closed atomic.Bool
+	tx       *bolt.Tx
+	root     [][]byte
+	enc      atomic.Pointer[encState]
+	obs      metrics.Observer
+	closed   atomic.Bool
+	readOnly bool
 }
 
 // encState holds the resolved encryption settings for one store.
@@ -217,6 +218,18 @@ func (s *Store) update(fn func(*bolt.Tx) error) error {
 		return fn(s.tx)
 	}
 	return s.db.Update(fn)
+}
+
+// OpenReadOnly creates a Store that only reads. Every operation uses a read
+// transaction and index opens validate existing buckets instead of creating
+// them. It is used by backup verification over a read-only database handle.
+func OpenReadOnly(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
+	s, err := Open(ctx, bdb, cfg)
+	if err != nil {
+		return nil, err
+	}
+	s.readOnly = true
+	return s, nil
 }
 
 // WithTransaction returns a Store whose operations run inside tx. The bound
