@@ -2,9 +2,12 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sync"
+
+	"github.com/malivvan/harbor/audit"
 )
 
 // ChangeOp is the kind of mutation a record bucket saw.
@@ -113,4 +116,77 @@ func (n *node) emitDelete(cfg *structConfig) {
 func (s *Store) TouchChange(ctx context.Context, c Change) {
 	_ = ctx
 	s.emitChange(c)
+}
+
+// auditEntry records one committed write in the store's audit trail. It is a
+// no-op when the store has no audit sink. Digest is the SHA-256 of the written
+// payload, or nil for deletes. A sink error is returned so the caller can
+// surface it; the data write has already committed at that point.
+//
+// Internal bookkeeping (the version record in __database and per-bucket
+// metadata) is not an application write and is never recorded.
+func (n *node) auditEntry(op, entity string, digest []byte) error {
+	if n == nil || n.s == nil || n.s.audit == nil {
+		return nil
+	}
+	return n.s.audit.Record(audit.Entry{
+		Store:  audit.StoreDB,
+		Op:     op,
+		Entity: n.auditEntity(entity),
+		Digest: digest,
+	})
+}
+
+// auditEntryBucket is like auditEntry but skips the reserved internal buckets,
+// so opening a store (which writes the version record) leaves no event.
+func (n *node) auditEntryBucket(op, bucketName, entity string, digest []byte) error {
+	if isInternalBucket(bucketName) {
+		return nil
+	}
+	return n.auditEntry(op, entity, digest)
+}
+
+func isInternalBucket(name string) bool {
+	return name == databaseInfo || name == metadataBucket
+}
+
+// auditEntity prefixes the bucket path so an event identifies the node the
+// write landed on, matching the Change.Path convention.
+func (n *node) auditEntity(entity string) string {
+	path := n.Bucket()
+	if len(path) == 0 {
+		return entity
+	}
+	prefix := ""
+	for _, part := range path {
+		prefix += part + "/"
+	}
+	return prefix + entity
+}
+
+// digestOf returns the SHA-256 of data, or nil when data is empty so a delete
+// and an empty write are distinguishable.
+func digestOf(data []byte) []byte {
+	if len(data) == 0 {
+		return nil
+	}
+	sum := sha256.Sum256(data)
+	return sum[:]
+}
+
+// auditRecordStruct records a committed struct write. The digest is the
+// SHA-256 of the codec-encoded record, matching what is stored.
+func (n *node) auditRecordStruct(op string, cfg *structConfig, data any) error {
+	if n == nil || n.s == nil || n.s.audit == nil {
+		return nil
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return nil
+	}
+	id := ""
+	if cfg.ID != nil {
+		id = fmt.Sprint(cfg.ID.Value.Interface())
+	}
+	return n.auditEntry(op, cfg.Name+":"+id, digestOf(raw))
 }

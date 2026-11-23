@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 
 	bolt "go.etcd.io/bbolt"
@@ -110,7 +111,7 @@ func (n *node) SetBytes(ctx context.Context, bucketName string, key any, value [
 		return wrapError("kv set bytes", ErrNilParam)
 	}
 
-	return wrapError("kv set bytes", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+	if err := wrapError("kv set bytes", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
 		id, err := n.keyBytes(key, keyDomainKV)
 		if err != nil {
 			return err
@@ -122,7 +123,10 @@ func (n *node) SetBytes(ctx context.Context, bucketName string, key any, value [
 			return err
 		}
 		return n.setBytes(ctx, tx, bucketName, id, sealed)
-	}))
+	})); err != nil {
+		return err
+	}
+	return n.auditEntryBucket("set_bytes", bucketName, bucketName+":"+fmt.Sprint(key), digestOf(value))
 }
 
 func (n *node) setBytes(ctx context.Context, tx *bolt.Tx, bucketName string, id, data []byte) error {
@@ -237,13 +241,16 @@ func (n *node) Delete(ctx context.Context, bucketName string, key any) error {
 		return wrapError("kv delete", err)
 	}
 
-	return wrapError("kv delete", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+	if err := wrapError("kv delete", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
 		id, err := n.keyBytes(key, keyDomainKV)
 		if err != nil {
 			return err
 		}
 		return n.delete(ctx, tx, bucketName, id)
-	}))
+	})); err != nil {
+		return err
+	}
+	return n.auditEntryBucket("delete", bucketName, bucketName+":"+fmt.Sprint(key), nil)
 }
 
 func (n *node) delete(ctx context.Context, tx *bolt.Tx, bucketName string, id []byte) error {

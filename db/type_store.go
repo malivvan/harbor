@@ -242,7 +242,7 @@ func (n *node) Save(ctx context.Context, data any) error {
 		return wrapError("save", err)
 	}
 	n.emitUpsert(cfg, data)
-	return nil
+	return n.auditRecordStruct("save", cfg, data)
 }
 
 func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data interface{}, update bool) error {
@@ -408,7 +408,7 @@ func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data in
 
 // Update a structure
 func (n *node) Update(ctx context.Context, data any) error {
-	return wrapError("update", n.update(ctx, data, func(ref *reflect.Value, current *reflect.Value, cfg *structConfig) error {
+	return wrapError("update", n.update(ctx, data, "update", func(ref *reflect.Value, current *reflect.Value, cfg *structConfig) error {
 		return mergeUpdateFields(ctx, ref, current, cfg)
 	}))
 }
@@ -494,7 +494,7 @@ func inlineValues(src, dst reflect.Value) (reflect.Value, reflect.Value, bool) {
 
 // UpdateField updates a single field
 func (n *node) UpdateField(ctx context.Context, data any, fieldName string, value any) error {
-	return wrapError("update field", n.update(ctx, data, func(ref *reflect.Value, current *reflect.Value, cfg *structConfig) error {
+	return wrapError("update field", n.update(ctx, data, "update_field", func(ref *reflect.Value, current *reflect.Value, cfg *structConfig) error {
 		if cfg.ID != nil && fieldName == cfg.ID.Name {
 			return ErrImmutableID
 		}
@@ -527,7 +527,7 @@ func (n *node) UpdateField(ctx context.Context, data any, fieldName string, valu
 	}))
 }
 
-func (n *node) update(ctx context.Context, data interface{}, fn func(*reflect.Value, *reflect.Value, *structConfig) error) error {
+func (n *node) update(ctx context.Context, data interface{}, op string, fn func(*reflect.Value, *reflect.Value, *structConfig) error) error {
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
@@ -582,7 +582,7 @@ func (n *node) update(ctx context.Context, data interface{}, fn func(*reflect.Va
 		return err
 	}
 	n.emitUpsert(cfg, current.Interface())
-	return nil
+	return n.auditRecordStruct(op, cfg, current.Interface())
 }
 
 // Drop a bucket
@@ -609,9 +609,12 @@ func (n *node) Drop(ctx context.Context, data any) error {
 		return wrapError("drop", err)
 	}
 
-	return wrapError("drop", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+	if err := wrapError("drop", n.readWriteTx(ctx, func(tx *bolt.Tx) error {
 		return n.drop(ctx, tx, bucketName)
-	}))
+	})); err != nil {
+		return err
+	}
+	return n.auditEntry("drop", bucketName, nil)
 }
 
 func (n *node) drop(ctx context.Context, tx *bolt.Tx, bucketName string) error {
@@ -663,7 +666,7 @@ func (n *node) DeleteStruct(ctx context.Context, data any) error {
 		return wrapError("delete struct", err)
 	}
 	n.emitDelete(cfg)
-	return nil
+	return n.auditRecordStruct("delete_struct", cfg, nil)
 }
 
 func (n *node) deleteStruct(ctx context.Context, tx *bolt.Tx, cfg *structConfig, id []byte) error {
