@@ -115,200 +115,200 @@ func (f *fsm) applyCommand(index uint64, c Command) any {
 	ctx := context.Background()
 	switch c.Op {
 	// db
-	case opDBSave, opDBUpdate:
-		var a dbChange
+	case opRecordSave, opRecordUpdate:
+		var a recordChange
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyDBUpsert(ctx, a, c.Op == opDBUpdate)
-	case opDBUpdateField:
-		var a dbFieldChange
+		return f.applyRecordUpsert(ctx, a, c.Op == opRecordUpdate)
+	case opRecordUpdateField:
+		var a recordFieldChange
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyDBUpdateField(ctx, a)
-	case opDBDelete:
-		var a dbChange
+		return f.applyRecordUpdateField(ctx, a)
+	case opRecordDelete:
+		var a recordChange
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyDBDelete(ctx, a)
-	case opDBDrop:
-		var a dbChange
+		return f.applyRecordDelete(ctx, a)
+	case opRecordDrop:
+		var a recordChange
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyDBDrop(ctx, a)
-	case opDBSet:
-		var a dbKVArg
+		return f.applyRecordDrop(ctx, a)
+	case opRecordSet:
+		var a recordKVArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyDBSet(ctx, a)
-	case opDBDeleteKey:
-		var a dbKVArg
+		return f.applyRecordSet(ctx, a)
+	case opRecordDeleteKey:
+		var a recordKVArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyDBDeleteKey(ctx, a)
+		return f.applyRecordDeleteKey(ctx, a)
 
 	// ts
-	case opTSInsert:
-		var a tsInsertArg
+	case opSeriesInsert:
+		var a seriesInsertArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyTSInsert(ctx, a)
-	case opTSInsertMany:
-		var a tsInsertManyArg
+		return f.applySeriesInsert(ctx, a)
+	case opSeriesInsertMany:
+		var a seriesInsertManyArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyTSInsertMany(ctx, a)
-	case opTSDeleteRange:
-		var a tsRangeArg
+		return f.applySeriesInsertMany(ctx, a)
+	case opSeriesDeleteRange:
+		var a seriesRangeArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyTSDeleteRange(ctx, a)
-	case opTSDrop:
-		var a tsNameArg
+		return f.applySeriesDeleteRange(ctx, a)
+	case opSeriesDrop:
+		var a seriesNameArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyTSDrop(ctx, a)
-	case opTSSetLabels:
-		var a tsLabelsArg
+		return f.applySeriesDrop(ctx, a)
+	case opSeriesSetLabels:
+		var a seriesLabelsArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyTSSetLabels(ctx, a)
-	case opTSSetRetention:
-		var a tsRetentionArg
+		return f.applySeriesSetLabels(ctx, a)
+	case opSeriesSetRetention:
+		var a seriesRetentionArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyTSSetRetention(ctx, a)
-	case opTSDeleteSeries:
-		var a tsNameArg
+		return f.applySeriesSetRetention(ctx, a)
+	case opSeriesDeleteSeries:
+		var a seriesNameArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyTSDeleteSeries(ctx, a)
+		return f.applySeriesDeleteSeries(ctx, a)
 
 	// vec
-	case opVecCreateCollection:
-		var a vecCreateArg
+	case opVectorCreateCollection:
+		var a vectorCreateArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyVecCreate(ctx, a)
-	case opVecCreateCollectionOptions:
-		var a vecCreateOptionsArg
+		return f.applyVectorCreate(ctx, a)
+	case opVectorCreateCollectionOptions:
+		var a vectorCreateOptionsArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyVecCreateOptions(ctx, a)
-	case opVecEnsureCollection:
-		var a vecNameArg
+		return f.applyVectorCreateOptions(ctx, a)
+	case opVectorEnsureCollection:
+		var a vectorNameArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyVecEnsure(ctx, a)
-	case opVecFlush:
-		return f.applyVecFlush(ctx)
-	case opVecUpsert:
-		var a vecUpsertArg
+		return f.applyVectorEnsure(ctx, a)
+	case opVectorFlush:
+		return f.applyVectorFlush(ctx)
+	case opVectorUpsert:
+		var a vectorUpsertArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyVecUpsert(ctx, a)
-	case opVecDelete:
-		var a vecDeleteArg
+		return f.applyVectorUpsert(ctx, a)
+	case opVectorDelete:
+		var a vectorDeleteArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyVecDelete(ctx, a)
-	case opVecDropCollection:
-		var a vecDropArg
+		return f.applyVectorDelete(ctx, a)
+	case opVectorDropCollection:
+		var a vectorDropArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyVecDrop(ctx, a)
+		return f.applyVectorDrop(ctx, a)
 
 	// fs
-	case opFSMkdir:
-		var a fsPathArg
+	case opFileMkdir:
+		var a filePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyFSMkdir(a)
-	case opFSMkdirAll:
-		var a fsPathArg
+		return f.applyFileMkdir(a)
+	case opFileMkdirAll:
+		var a filePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyFSMkdirAll(a)
-	case opFSTruncate:
-		var a fsPathArg
+		return f.applyFileMkdirAll(a)
+	case opFileTruncate:
+		var a filePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyFSTruncate(a)
-	case opFSChmod:
-		var a fsPathArg
+		return f.applyFileTruncate(a)
+	case opFileChmod:
+		var a filePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyFSChmod(a)
-	case opFSChtimes:
-		var a fsPathArg
+		return f.applyFileChmod(a)
+	case opFileChtimes:
+		var a filePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyFSChtimes(a)
-	case opFSChown:
-		var a fsPathArg
+		return f.applyFileChtimes(a)
+	case opFileChown:
+		var a filePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyFSChown(a)
-	case opFSSymlink:
-		var a fsPathArg
+		return f.applyFileChown(a)
+	case opFileSymlink:
+		var a filePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyFSSymlink(a)
-	case opFSRemove:
-		var a fsPathArg
+		return f.applyFileSymlink(a)
+	case opFileRemove:
+		var a filePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyFSRemove(a)
-	case opFSRename:
-		var a fsPathArg
+		return f.applyFileRemove(a)
+	case opFileRename:
+		var a filePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyFSRename(a)
-	case opFSRemoveAll:
-		var a fsPathArg
+		return f.applyFileRename(a)
+	case opFileRemoveAll:
+		var a filePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyFSRemoveAll(a)
-	case opFSWrite:
-		var a fsPathArg
+		return f.applyFileRemoveAll(a)
+	case opFileWrite:
+		var a filePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyFSWrite(a)
-	case opFSDeleteFS:
-		var a fsPathArg
+		return f.applyFileWrite(a)
+	case opFileDeleteFileSystem:
+		var a filePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
-		return f.applyFSDeleteFS(a)
+		return f.applyFileDeleteFileSystem(a)
 
 	default:
 		return &ApplyError{

@@ -1,4 +1,4 @@
-package graph
+package graphs
 
 // The persisted records and the bitemporal reads and writes over them.
 //

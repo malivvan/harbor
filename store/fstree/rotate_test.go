@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -26,7 +27,7 @@ func TestReEncryptFS(t *testing.T) {
 	for i, name := range []string{"content", "metadata", "both", "chunked"} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			root := []byte("ts")
+			root := []byte(hstore.SERIES)
 			key1 := testEncKey(byte(40 + i*2))
 			key2 := testEncKey(byte(41 + i*2))
 			dbPath := filepath.Join(t.TempDir(), "rotate.db")
@@ -81,7 +82,7 @@ func TestReEncryptFS(t *testing.T) {
 
 func TestRotateAll(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	key1, key2 := testEncKey(50), testEncKey(51)
 	dbPath := filepath.Join(t.TempDir(), "rotate-all.db")
 
@@ -153,7 +154,7 @@ func flipFirstValue(t *testing.T, db *bolt.DB, root []byte, name string, selectB
 
 func TestVerifyAllTamper(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 
 	newStore := func(t *testing.T, cfg Config) (*Store, *bolt.DB, *FS) {
 		t.Helper()
@@ -205,7 +206,7 @@ func TestVerifyAllTamper(t *testing.T) {
 
 func TestRotationErrors(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 
 	plain, _ := openEncStore(t, root, Config{})
 	require.ErrorIs(t, plain.ReEncryptFS(ctx, "fs", testEncKey(58)), ErrInvalidConfig)
@@ -231,7 +232,7 @@ func TestRotationErrors(t *testing.T) {
 
 func TestReEncryptEmptyFS(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	key1, key2 := testEncKey(61), testEncKey(62)
 	dbPath := filepath.Join(t.TempDir(), "empty.db")
 

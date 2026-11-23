@@ -18,7 +18,7 @@ var ErrSchemaTooNew = errors.New("harbor: store schema is newer than this build"
 var ErrInvalidSchema = errors.New("harbor: invalid schema")
 
 // Reserved bucket and key for the application schema version. It is separate
-// from harbor.Metadata so existing stores keep opening.
+// from the system header so existing stores keep opening.
 const (
 	schemaBucket = "harbor.schema"
 	schemaKey    = "version"

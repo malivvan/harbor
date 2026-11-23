@@ -94,22 +94,22 @@ var (
 
 	// ErrProjectionUnsupported reports Query.Project combined with matchers or
 	// ordering, which need fields the projection may remove.
-	ErrProjectionUnsupported = errors.New("db: projection is not supported with matchers or ordering")
+	ErrProjectionUnsupported = errors.New("record: projection is not supported with matchers or ordering")
 
 	// ErrDanglingReference reports a save whose reference field names a record
 	// that does not exist.
-	ErrDanglingReference = errors.New("db: referenced record does not exist")
+	ErrDanglingReference = errors.New("record: referenced record does not exist")
 
 	// ErrReferenceViolation reports a delete or drop blocked by a restrict
 	// reference.
-	ErrReferenceViolation = errors.New("db: referenced record is still in use")
+	ErrReferenceViolation = errors.New("record: referenced record is still in use")
 
 	// ErrReferenceTargetMissing reports a reference to a bucket that does not
 	// exist.
-	ErrReferenceTargetMissing = errors.New("db: reference target bucket does not exist")
+	ErrReferenceTargetMissing = errors.New("record: reference target bucket does not exist")
 
 	// ErrReferenceCycle reports a cascade deeper than the guard allows.
-	ErrReferenceCycle = errors.New("db: reference cascade is too deep")
+	ErrReferenceCycle = errors.New("record: reference cascade is too deep")
 
 	// ErrEncryptedOrdering is returned by ordered or prefix lookups on a store
 	// that encrypts keys: ciphertext ordering is meaningless, so these queries

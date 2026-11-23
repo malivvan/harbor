@@ -11,6 +11,7 @@ import (
 
 	"github.com/malivvan/harbor/internal/absfs"
 	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/harbor/store"
 )
 
 // FastWalkFunc is the callback function type for FastWalk.
@@ -194,7 +195,7 @@ func (w *genericWalker) enqueue(it fastWalkItem) {
 	}
 	if w.obs != nil {
 		metrics.Gauge(w.obs, metrics.MetricWalkQueueDepth, float64(len(w.enqueuec)), metrics.Labels{
-			metrics.LabelStore: "fs",
+			metrics.LabelStore: store.FSTREE,
 			metrics.LabelOp:    "walk",
 		})
 	}
@@ -209,7 +210,7 @@ func (w *genericWalker) call(path string, d fs.DirEntry, err error) error {
 	start := time.Now()
 	cbErr := w.fn(path, d, err)
 	metrics.Histogram(w.obs, metrics.MetricWalkCallbackDuration, float64(time.Since(start)), metrics.Labels{
-		metrics.LabelStore: "fs",
+		metrics.LabelStore: store.FSTREE,
 		metrics.LabelOp:    "walk",
 	})
 	return cbErr

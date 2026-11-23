@@ -1,4 +1,4 @@
-package graph
+package graphs
 
 import (
 	"bytes"
@@ -132,7 +132,7 @@ func TestDocumentRoundTrip(t *testing.T) {
 	if err := g.ExportJSON(ctx, &buf); err != nil {
 		t.Fatalf("export: %v", err)
 	}
-	other := New(g.DB(), WithPrefix("copy"))
+	other := New(g.RecordStore(), WithPrefix("copy"))
 	result, err := other.ImportJSON(ctx, &buf)
 	if err != nil {
 		t.Fatalf("import: %v", err)

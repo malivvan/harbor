@@ -217,7 +217,7 @@ Important properties:
 - The accessors are `Record`, `File`, `Series`, `Vector` and `Search`. Each
   takes optional bucket-path segments: `store.Record("tenant", "records")`
   returns a rooted view of the already-open store, while `store.Record()` keeps
-  the conventional `db` root so existing databases stay readable.
+  the conventional `record` root so existing databases stay readable.
 
 `Options.Validate()` performs the checks `Open` applies when creating a store —
 password, complete and bounded Argon2id parameters, encryption-flag conflicts
@@ -563,7 +563,7 @@ is selected at `harbor.Open` time instead:
 ```go
 store, err := harbor.Open(ctx, "encrypted.db", 0o600, &harbor.Options{
 	Password: password,
-	Encrypt:  harbor.EncryptFS,
+	Encrypt:  harbor.EncryptFile,
 })
 ```
 
@@ -572,7 +572,7 @@ the key and chunk size:
 
 ```go
 fsStore, err := file.Open(ctx, bdb, file.Config{
-	Root:            [][]byte{[]byte("fs")},
+	Root:            [][]byte{[]byte("fstree")},
 	Secret:          key, // 32 bytes
 	EncryptMetadata: true,
 	EncryptContent:  true,
@@ -805,7 +805,7 @@ Enable scalar quantization to reduce stored vector size:
 
 ```go
 vstore, err := vector.Open(ctx, bdb, vector.Config{
-	Root:     [][]byte{[]byte("vec")},
+	Root:     [][]byte{[]byte("vector")},
 	UseQuant: true, // nil Quantizer selects SQ8
 })
 ```
@@ -842,7 +842,7 @@ without a dictionary segmenter. The tokenizer and BM25 parameters (`K1` 1.2,
 `B` 0.75 by default) are fixed when an index is created and checked on reopen.
 
 Values are sealed when value encryption is enabled, following the
-`EncryptDBValues` flag. Term keys are plaintext unless `Config.EncryptTokens` is
+`EncryptRecordValues` flag. Term keys are plaintext unless `Config.EncryptTokens` is
 set; encrypting them hides the vocabulary but still leaks equality and result
 sizes. See [store/search/README.md](store/search/README.md) for the layout, errors and limits.
 
@@ -948,7 +948,7 @@ loudly instead of returning garbage.
 ```go
 store, err := harbor.Open(ctx, "app.db", 0o600, &harbor.Options{
 	Password: "correct horse battery staple",
-	Encrypt:  harbor.EncryptDB | harbor.EncryptTS,
+	Encrypt:  harbor.EncryptRecord | harbor.EncryptSeries,
 })
 ```
 
@@ -957,20 +957,20 @@ flags:
 
 | Flag | Protects |
 |------|----------|
-| `EncryptDBKeys` | db primary keys, index values, key/value keys |
-| `EncryptDBValues` | db record and key/value values |
-| `EncryptDBMetadata` | db auto-increment counters |
-| `EncryptFSContent` | fs file content and symlink targets |
-| `EncryptFSMetadata` | fs inode blobs (names, modes, sizes, times) |
-| `EncryptTSValues` | ts point values and series metadata |
-| `EncryptTSSeriesNames` | ts series and metadata names |
-| `EncryptVecPointIDs` | vec point IDs; also the stored point value |
-| `EncryptVecCollectionNames` | vec collection names |
-| `EncryptVecPoints` | vec point blobs and collection metadata |
+| `EncryptRecordKeys` | db primary keys, index values, key/value keys |
+| `EncryptRecordValues` | db record and key/value values |
+| `EncryptRecordMetadata` | db auto-increment counters |
+| `EncryptFileContent` | fs file content and symlink targets |
+| `EncryptFileMetadata` | fs inode blobs (names, modes, sizes, times) |
+| `EncryptSeriesValues` | ts point values and series metadata |
+| `EncryptSeriesNames` | ts series and metadata names |
+| `EncryptVectorPointIDs` | vec point IDs; also the stored point value |
+| `EncryptVectorCollectionNames` | vec collection names |
+| `EncryptVectorPoints` | vec point blobs and collection metadata |
 | `EncryptGraphValues` | graph records |
 | `EncryptObjectValues` | object records |
 
-Aggregates (`EncryptDB`, `EncryptFS`, `EncryptTS`, `EncryptVec`,
+Aggregates (`EncryptRecord`, `EncryptFile`, `EncryptSeries`, `EncryptVector`,
 `EncryptGraph`, `EncryptObject`) and `EncryptAll` combine these bits. The encryption and KDF fields of `Options`
 only apply when creating a store; an existing store always uses its persisted
 settings.
@@ -1023,14 +1023,14 @@ unsupported.
 
 Partial rotation cannot run when deterministic names are encrypted: `series` with
 `EncryptSeriesNames`, or `vector` with `EncryptPointIDs` or
-`EncryptVecCollectionNames`. In those modes the physical names are derived from
+`EncryptVectorCollectionNames`. In those modes the physical names are derived from
 one master key, so the remaining entities could neither be found nor decrypted
 after the new key is installed. The methods return `ErrInvalidConfig`; use
 `RotateAll`.
 
 ### Ordered queries under encryption
 
-When `EncryptDBKeys` is enabled, primary keys and index values are AES-SIV
+When `EncryptRecordKeys` is enabled, primary keys and index values are AES-SIV
 ciphertext. Exact lookups still work, but ciphertext order is meaningless, so
 `OrderBy`, `Range` and `Prefix` return `record.ErrEncryptedOrdering` rather than
 wrong results. There are three honest options:
@@ -1095,7 +1095,7 @@ flags:
 ```go
 store, err := harbor.Open(ctx, "app.db", 0o600, &harbor.Options{
 	Password: "correct horse battery staple",
-	Audit:    harbor.AuditAll, // or AuditDB | AuditTS, …
+	Audit:    harbor.AuditAll, // or AuditRecord | AuditSeries, …
 })
 if err != nil {
 	log.Fatal(err)
@@ -1113,17 +1113,17 @@ log.Printf("audit: %d events, tip %x", res.Count, res.Tip)
 | Flag | Records |
 |------|---------|
 | `AuditNone` | nothing (default) |
-| `AuditDB` | `record` writes |
-| `AuditFS` | `file` writes |
-| `AuditTS` | `series` writes |
-| `AuditVec` | `vector` writes |
+| `AuditRecord` | `record` writes |
+| `AuditFile` | `file` writes |
+| `AuditSeries` | `series` writes |
+| `AuditVector` | `vector` writes |
 | `AuditGraphs` | `graphs` writes |
 | `AuditObject` | `object` writes |
 | `AuditAll` | every store |
 
 Unlike encryption flags, audit flags are **not persisted**: they are a per-open
 runtime choice, so enabling or disabling auditing never changes the on-disk
-format. The trail lives in an `audit/` bucket in the same file, so it travels
+format. The trail lives in a `ledger/` bucket in the same file, so it travels
 with snapshots and backups.
 
 The trail detects interior tampering but **cannot by itself detect tail
@@ -1133,7 +1133,7 @@ signing keys derive from the password, so anyone holding it can produce valid
 events; the trail proves integrity against an attacker *without* the key, the
 same trust boundary as the encryption itself.
 
-See [pkg/ledger/README.md](pkg/ledger/README.md) for the event model, the recorded
+See [store/ledger/README.md](store/ledger/README.md) for the event model, the recorded
 operations, the full threat model and how to use the `audit` package directly.
 
 ## Cross-store transactions
@@ -1179,7 +1179,7 @@ err := store.WriteTransaction(ctx, func(tx *harbor.Tx) error {
 	if err != nil {
 		return err
 	}
-	if err := g.UpsertNode(ctx, &graph.Node{ID: doc.ID}); err != nil {
+	if err := g.UpsertNode(ctx, &graphs.Node{ID: doc.ID}); err != nil {
 		return err
 	}
 
@@ -1400,11 +1400,12 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
   and buffering.
 - [store/search/README.md](store/search/README.md) — full-text indexes, tokenizers, BM25 and
   encryption.
-- [store/graphs/README.md](store/graphs/README.md) — the independent property-graph store.
+- [store/graphs/README.md](store/graphs/README.md) — the property-graph store and its
+  bitemporal graph core.
 - [store/system/README.md](store/system/README.md) — the store header, KDF settings,
   flags and key derivation.
 - [store/fstree/s3fs/README.md](store/fstree/s3fs/README.md) — the S3-backed `absfs.Filer`.
-- [pkg/ledger/README.md](pkg/ledger/README.md) — the tamper-evident audit trail:
+- [store/ledger/README.md](store/ledger/README.md) — the tamper-evident audit trail:
   event model, recorded operations, threat model, and direct package use.
 - [pkg/store/README.md](pkg/store/README.md) — the process-wide database
   manager, directory layout, and password file.
@@ -1426,7 +1427,7 @@ Generated API documentation is published on pkg.go.dev:
 - [github.com/malivvan/harbor/store/series](https://pkg.go.dev/github.com/malivvan/harbor/store/series)
 - [github.com/malivvan/harbor/store/vector](https://pkg.go.dev/github.com/malivvan/harbor/store/vector)
 - [github.com/malivvan/harbor/store/search](https://pkg.go.dev/github.com/malivvan/harbor/store/search)
-- [github.com/malivvan/harbor/pkg/ledger](https://pkg.go.dev/github.com/malivvan/harbor/pkg/ledger)
+- [github.com/malivvan/harbor/store/ledger](https://pkg.go.dev/github.com/malivvan/harbor/store/ledger)
 - [github.com/malivvan/harbor/store/object](https://pkg.go.dev/github.com/malivvan/harbor/store/object)
 - [github.com/malivvan/harbor/store/graphs](https://pkg.go.dev/github.com/malivvan/harbor/store/graphs)
 - [github.com/malivvan/harbor/store/system](https://pkg.go.dev/github.com/malivvan/harbor/store/system)

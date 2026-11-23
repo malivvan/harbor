@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -13,7 +14,7 @@ import (
 // in-memory series set is empty.
 func TestListSeries(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := openTestStore(t, root)
 
 	// "cpu" has metadata (labels, retention) and one point.
@@ -55,7 +56,7 @@ func TestListSeries(t *testing.T) {
 // when series names are encrypted.
 func TestListSeriesEncryptedNames(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, _ := openAEADTestStore(t, root, Config{Secret: testKey(33), EncryptSeriesNames: true, EncryptValues: true})
 
 	require.NoError(t, store.Series("cpu").Insert(ctx, Point{Timestamp: 1, Value: 1}))

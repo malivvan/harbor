@@ -1,8 +1,8 @@
-// Package harbor exposes a single bbolt-backed store that combines the db, fs,
-// ts and vec sub-stores behind one password.
+// Package harbor exposes a single bbolt-backed store that combines the record,
+// fstree, series, vector and other sub-stores behind one password.
 //
 // The password is stretched with Argon2id using the salt and cost parameters
-// kept in an unencrypted "harbor.Metadata" record, then one key is derived per
+// kept in the unencrypted system header, then one key is derived per
 // sub-store. The password itself is never stored. A sealed canary in the
 // Metadata detects a wrong password even for stores created with encryption
 // disabled.
@@ -20,11 +20,12 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
-	"github.com/malivvan/harbor/pkg/ledger"
-	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/harbor/store"
 	"github.com/malivvan/harbor/store/fstree"
 	"github.com/malivvan/harbor/store/graphs"
+	"github.com/malivvan/harbor/store/ledger"
 	"github.com/malivvan/harbor/store/object"
 	"github.com/malivvan/harbor/store/record"
 	"github.com/malivvan/harbor/store/search"
@@ -61,47 +62,71 @@ type Metadata = system.Metadata
 
 // Encryption, audit and KDF identifiers are re-exported from store/system.
 const (
-	EncryptNone               = system.EncryptNone
-	EncryptDBKeys             = system.EncryptDBKeys
-	EncryptDBValues           = system.EncryptDBValues
-	EncryptDBMetadata         = system.EncryptDBMetadata
-	EncryptFSContent          = system.EncryptFSContent
-	EncryptFSMetadata         = system.EncryptFSMetadata
-	EncryptTSValues           = system.EncryptTSValues
-	EncryptTSSeriesNames      = system.EncryptTSSeriesNames
-	EncryptVecPointIDs        = system.EncryptVecPointIDs
-	EncryptVecCollectionNames = system.EncryptVecCollectionNames
-	EncryptVecPoints          = system.EncryptVecPoints
-	EncryptGraphValues        = system.EncryptGraphValues
-	EncryptObjectValues       = system.EncryptObjectValues
-	EncryptDB                 = system.EncryptDB
-	EncryptFS                 = system.EncryptFS
-	EncryptTS                 = system.EncryptTS
-	EncryptVec                = system.EncryptVec
-	EncryptGraph              = system.EncryptGraph
-	EncryptObject             = system.EncryptObject
-	EncryptAll                = system.EncryptAll
-	AuditNone                 = system.AuditNone
-	AuditDB                   = system.AuditDB
-	AuditFS                   = system.AuditFS
-	AuditTS                   = system.AuditTS
-	AuditVec                  = system.AuditVec
-	AuditGraphs               = system.AuditGraphs
-	AuditObject               = system.AuditObject
-	AuditAll                  = system.AuditAll
-	SaltSize                  = system.SaltSize
-	KeySize                   = system.KeySize
-	MiB                       = system.MiB
-	FastKDFTime               = system.FastKDFTime
-	FastKDFMemory             = system.FastKDFMemory
-	FastKDFThreads            = system.FastKDFThreads
-	DefaultKDFTime            = system.DefaultKDFTime
-	DefaultKDFMemory          = system.DefaultKDFMemory
-	DefaultKDFThreads         = system.DefaultKDFThreads
-	StrongKDFTime             = system.StrongKDFTime
-	StrongKDFMemory           = system.StrongKDFMemory
-	StrongKDFThreads          = system.StrongKDFThreads
+	EncryptNone                  = system.EncryptNone
+	EncryptRecordKeys            = system.EncryptRecordKeys
+	EncryptRecordValues          = system.EncryptRecordValues
+	EncryptRecordMetadata        = system.EncryptRecordMetadata
+	EncryptFileContent           = system.EncryptFileContent
+	EncryptFileMetadata          = system.EncryptFileMetadata
+	EncryptSeriesValues          = system.EncryptSeriesValues
+	EncryptSeriesNames           = system.EncryptSeriesNames
+	EncryptVectorPointIDs        = system.EncryptVectorPointIDs
+	EncryptVectorCollectionNames = system.EncryptVectorCollectionNames
+	EncryptVectorPoints          = system.EncryptVectorPoints
+	EncryptGraphValues           = system.EncryptGraphValues
+	EncryptObjectValues          = system.EncryptObjectValues
+	EncryptRecord                = system.EncryptRecord
+	EncryptFile                  = system.EncryptFile
+	EncryptSeries                = system.EncryptSeries
+	EncryptVector                = system.EncryptVector
+	EncryptGraph                 = system.EncryptGraph
+	EncryptObject                = system.EncryptObject
+	EncryptAll                   = system.EncryptAll
+	AuditNone                    = system.AuditNone
+	AuditRecord                  = system.AuditRecord
+	AuditFile                    = system.AuditFile
+	AuditSeries                  = system.AuditSeries
+	AuditVector                  = system.AuditVector
+	AuditGraphs                  = system.AuditGraphs
+	AuditObject                  = system.AuditObject
+	AuditAll                     = system.AuditAll
+	SaltSize                     = system.SaltSize
+	KeySize                      = system.KeySize
+	MiB                          = system.MiB
+	FastKDFTime                  = system.FastKDFTime
+	FastKDFMemory                = system.FastKDFMemory
+	FastKDFThreads               = system.FastKDFThreads
+	DefaultKDFTime               = system.DefaultKDFTime
+	DefaultKDFMemory             = system.DefaultKDFMemory
+	DefaultKDFThreads            = system.DefaultKDFThreads
+	StrongKDFTime                = system.StrongKDFTime
+	StrongKDFMemory              = system.StrongKDFMemory
+	StrongKDFThreads             = system.StrongKDFThreads
 )
+
+// Store is a single bbolt database that hosts the db, fs, ts, vec and fts stores.
+// Each sub-store uses its own domain-separated key derived from Password.
+type Store struct {
+	mu sync.RWMutex
+	// txMu serializes explicit cross-store write transactions.
+	txMu   sync.Mutex
+	bs     *bolt.DB
+	record *record.Store
+	fstree *fstree.Store
+	series *series.Store
+	vector *vector.Store
+	search *search.Store
+	graphs *graphs.Store
+	object *object.Store
+
+	// audit records events for the enabled stores, or nil when disabled.
+	audit *ledger.Recorder
+	// auditFlags remembers which stores are enabled, for verification.
+	auditFlags uint16
+	// auditPubs holds the public keys matching the recorder's private keys, so
+	// VerifyAudit can check the chain without re-deriving from the password.
+	auditPubs auditPublicKeys
+}
 
 // Options configures Open.
 //
@@ -165,7 +190,7 @@ type Options struct {
 // Validate checks the options that apply when a store is created: the password,
 // the Argon2id parameter set, the encryption selection and the audit flags.
 // Open ignores the KDF costs and the encryption selection for an existing
-// store; this method validates them as they would apply to a new file, so
+// store; this method validates them as they would apply to a new fstree, so
 // callers can check their configuration before creating one.
 func (o *Options) Validate() error {
 	if o == nil {
@@ -203,37 +228,13 @@ func (o *Options) validateAuditFlags() error {
 	return nil
 }
 
-// Store is a single bbolt database that hosts the db, fs, ts, vec and fts stores.
-// Each sub-store uses its own domain-separated key derived from Password.
-type Store struct {
-	mu sync.RWMutex
-	// txMu serializes explicit cross-store write transactions.
-	txMu   sync.Mutex
-	bs     *bolt.DB
-	record *record.Store
-	file   *fstree.Store
-	series *series.Store
-	vector *vector.Store
-	search *search.Store
-	graphs *graphs.Store
-	object *object.Store
-
-	// audit records events for the enabled stores, or nil when disabled.
-	audit *ledger.Recorder
-	// auditFlags remembers which stores are enabled, for verification.
-	auditFlags uint16
-	// auditPubs holds the public keys matching the recorder's private keys, so
-	// VerifyAudit can check the chain without re-deriving from the password.
-	auditPubs auditPublicKeys
-}
-
 // auditPublicKeys holds the per-store Ed25519 public keys used to verify the
 // audit trail.
 type auditPublicKeys struct {
-	auditDB     ed25519.PublicKey
-	auditFS     ed25519.PublicKey
-	auditTS     ed25519.PublicKey
-	auditVec    ed25519.PublicKey
+	auditRecord ed25519.PublicKey
+	auditFSTree ed25519.PublicKey
+	auditSeries ed25519.PublicKey
+	auditVector ed25519.PublicKey
 	auditGraphs ed25519.PublicKey
 	auditObject ed25519.PublicKey
 }
@@ -285,17 +286,17 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	// private keys so they survive storeKeys.wipe below.
 	if options.Audit != 0 {
 		recKeys := make(map[string]ed25519.PrivateKey, 4)
-		if system.HasFlag(options.Audit, AuditDB) {
-			recKeys[ledger.StoreDB] = append(ed25519.PrivateKey(nil), keys.AuditDB...)
+		if system.HasFlag(options.Audit, AuditRecord) {
+			recKeys[ledger.StoreRecord] = append(ed25519.PrivateKey(nil), keys.AuditRecord...)
 		}
-		if system.HasFlag(options.Audit, AuditFS) {
-			recKeys[ledger.StoreFS] = append(ed25519.PrivateKey(nil), keys.AuditFS...)
+		if system.HasFlag(options.Audit, AuditFile) {
+			recKeys[ledger.StoreFile] = append(ed25519.PrivateKey(nil), keys.AuditFile...)
 		}
-		if system.HasFlag(options.Audit, AuditTS) {
-			recKeys[ledger.StoreTS] = append(ed25519.PrivateKey(nil), keys.AuditTS...)
+		if system.HasFlag(options.Audit, AuditSeries) {
+			recKeys[ledger.StoreSeries] = append(ed25519.PrivateKey(nil), keys.AuditSeries...)
 		}
-		if system.HasFlag(options.Audit, AuditVec) {
-			recKeys[ledger.StoreVec] = append(ed25519.PrivateKey(nil), keys.AuditVec...)
+		if system.HasFlag(options.Audit, AuditVector) {
+			recKeys[ledger.StoreVector] = append(ed25519.PrivateKey(nil), keys.AuditVector...)
 		}
 		if system.HasFlag(options.Audit, AuditGraphs) {
 			recKeys[ledger.StoreGraphs] = append(ed25519.PrivateKey(nil), keys.AuditGraphs...)
@@ -306,10 +307,10 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		s.audit = ledger.NewRecorder(bdb, recKeys)
 		s.auditFlags = options.Audit
 		s.auditPubs = auditPublicKeys{
-			auditDB:     publicOf(keys.AuditDB),
-			auditFS:     publicOf(keys.AuditFS),
-			auditTS:     publicOf(keys.AuditTS),
-			auditVec:    publicOf(keys.AuditVec),
+			auditRecord: publicOf(keys.AuditRecord),
+			auditFSTree: publicOf(keys.AuditFile),
+			auditSeries: publicOf(keys.AuditSeries),
+			auditVector: publicOf(keys.AuditVector),
 			auditGraphs: publicOf(keys.AuditGraphs),
 			auditObject: publicOf(keys.AuditObject),
 		}
@@ -325,80 +326,80 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	// The persisted flags decide which features are encrypted, so the on-disk
 	// mode cannot drift between runs.
 	if s.record, err = record.Open(ctx, bdb, record.Config{
-		Root:            namedRoot(record.Name),
+		Root:            namedRoot(store.RECORD),
 		Codec:           options.Codec,
 		Secret:          keys.Record,
-		EncryptKeys:     system.HasFlag(md.Flags, EncryptDBKeys),
-		EncryptValues:   system.HasFlag(md.Flags, EncryptDBValues),
-		EncryptMetadata: system.HasFlag(md.Flags, EncryptDBMetadata),
-		Audit:           auditSink(AuditDB),
+		EncryptKeys:     system.HasFlag(md.Flags, EncryptRecordKeys),
+		EncryptValues:   system.HasFlag(md.Flags, EncryptRecordValues),
+		EncryptMetadata: system.HasFlag(md.Flags, EncryptRecordMetadata),
+		Audit:           auditSink(AuditRecord),
 		Metrics:         options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("harbor: open db store: %w", err)
+		return nil, fmt.Errorf("harbor: open record store: %w", err)
 	}
-	if s.file, err = fstree.Open(ctx, bdb, fstree.Config{
-		Root:            namedRoot(fstree.Name),
+	if s.fstree, err = fstree.Open(ctx, bdb, fstree.Config{
+		Root:            namedRoot(store.FSTREE),
 		Secret:          keys.File,
-		EncryptMetadata: system.HasFlag(md.Flags, EncryptFSMetadata),
-		EncryptContent:  system.HasFlag(md.Flags, EncryptFSContent),
-		Audit:           auditSink(AuditFS),
+		EncryptMetadata: system.HasFlag(md.Flags, EncryptFileMetadata),
+		EncryptContent:  system.HasFlag(md.Flags, EncryptFileContent),
+		Audit:           auditSink(AuditFile),
 		Metrics:         options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("harbor: open fs store: %w", err)
+		return nil, fmt.Errorf("harbor: open file store: %w", err)
 	}
 	if s.series, err = series.Open(ctx, bdb, series.Config{
-		Root:               namedRoot(series.Name),
+		Root:               namedRoot(store.SERIES),
 		Secret:             keys.Series,
-		EncryptValues:      system.HasFlag(md.Flags, EncryptTSValues),
-		EncryptSeriesNames: system.HasFlag(md.Flags, EncryptTSSeriesNames),
-		Audit:              auditSink(AuditTS),
+		EncryptValues:      system.HasFlag(md.Flags, EncryptSeriesValues),
+		EncryptSeriesNames: system.HasFlag(md.Flags, EncryptSeriesNames),
+		Audit:              auditSink(AuditSeries),
 		Metrics:            options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("harbor: open ts store: %w", err)
+		return nil, fmt.Errorf("harbor: open series store: %w", err)
 	}
 	if s.search, err = search.Open(ctx, bdb, search.Config{
-		Root:          namedRoot(search.Name),
+		Root:          namedRoot(store.SEARCH),
 		Secret:        keys.Search,
-		EncryptValues: system.HasFlag(md.Flags, EncryptDBValues),
+		EncryptValues: system.HasFlag(md.Flags, EncryptRecordValues),
 		Metrics:       options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("harbor: open fts store: %w", err)
+		return nil, fmt.Errorf("harbor: open search store: %w", err)
 	}
 	if s.graphs, err = graphs.Open(ctx, bdb, graphs.Config{
-		Root:   namedRoot(graphs.Name),
+		Root:   namedRoot(store.GRAPHS),
 		Secret: keys.Graphs,
 		// Graph values follow the graph flag for new stores and the db value
 		// flag for stores created before the graph flag existed.
-		EncryptValues: system.HasFlag(md.Flags, EncryptGraphValues) || system.HasFlag(md.Flags, EncryptDBValues),
+		EncryptValues: system.HasFlag(md.Flags, EncryptGraphValues) || system.HasFlag(md.Flags, EncryptRecordValues),
 		Audit:         auditSink(AuditGraphs),
 		Metrics:       options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open graphs store: %w", err)
 	}
 	if s.object, err = object.Open(ctx, bdb, object.Config{
-		Root:          namedRoot(object.Name),
+		Root:          namedRoot(store.OBJECT),
 		Secret:        keys.Object,
-		EncryptValues: system.HasFlag(md.Flags, EncryptObjectValues) || system.HasFlag(md.Flags, EncryptDBValues),
+		EncryptValues: system.HasFlag(md.Flags, EncryptObjectValues) || system.HasFlag(md.Flags, EncryptRecordValues),
 		Audit:         auditSink(AuditObject),
 		Metrics:       options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open object store: %w", err)
 	}
 	if s.vector, err = vector.Open(ctx, bdb, vector.Config{
-		Root:                   namedRoot(vector.Name),
+		Root:                   namedRoot(store.VECTOR),
 		Secret:                 keys.Vector,
 		UseQuant:               options.UseQuant,
 		Quantizer:              options.Quantizer,
-		EncryptPoints:          system.HasFlag(md.Flags, EncryptVecPoints),
-		EncryptPointIDs:        system.HasFlag(md.Flags, EncryptVecPointIDs),
-		EncryptCollectionNames: system.HasFlag(md.Flags, EncryptVecCollectionNames),
-		Audit:                  auditSink(AuditVec),
+		EncryptPoints:          system.HasFlag(md.Flags, EncryptVectorPoints),
+		EncryptPointIDs:        system.HasFlag(md.Flags, EncryptVectorPointIDs),
+		EncryptCollectionNames: system.HasFlag(md.Flags, EncryptVectorCollectionNames),
+		Audit:                  auditSink(AuditVector),
 		Metrics:                options.Metrics,
 		// The vec store shares this handle with db, fs and ts; Close must only
 		// flush its buffers and never close the handle.
 		SharedDB: true,
 	}); err != nil {
-		return nil, fmt.Errorf("harbor: open vec store: %w", err)
+		return nil, fmt.Errorf("harbor: open vector store: %w", err)
 	}
 
 	opened = true
@@ -415,8 +416,8 @@ func publicOf(priv ed25519.PrivateKey) ed25519.PublicKey {
 }
 
 // Record returns the record sub-store. Extra path segments select a rooted
-// view of the same store instead of the conventional root ("db"); no segments
-// keeps the conventional root so existing databases stay readable.
+// view of the same store instead of the conventional root (store.RECORD); no
+// segments keeps the conventional root so existing databases stay readable.
 func (s *Store) Record(path ...string) *record.Store {
 	if s == nil {
 		return nil
@@ -432,25 +433,25 @@ func (s *Store) Record(path ...string) *record.Store {
 	return s.record.WithRoot(path...)
 }
 
-// File returns the file sub-store. Extra path segments select a rooted view
-// instead of the conventional root ("fs").
+// File returns the fstree sub-store. Extra path segments select a rooted view
+// instead of the conventional root (store.FSTREE).
 func (s *Store) File(path ...string) *fstree.Store {
 	if s == nil {
 		return nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.bs == nil || s.file == nil {
+	if s.bs == nil || s.fstree == nil {
 		return nil
 	}
 	if len(path) == 0 {
-		return s.file
+		return s.fstree
 	}
-	return s.file.WithRoot(path...)
+	return s.fstree.WithRoot(path...)
 }
 
 // Series returns the time-series sub-store. Extra path segments select a
-// rooted view instead of the conventional root ("ts").
+// rooted view instead of the conventional root (store.SERIES).
 func (s *Store) Series(path ...string) *series.Store {
 	if s == nil {
 		return nil
@@ -466,8 +467,8 @@ func (s *Store) Series(path ...string) *series.Store {
 	return s.series.WithRoot(path...)
 }
 
-// Vector returns the vector sub-store. Extra path segments select a rooted view
-// instead of the conventional root ("vec").
+// Vector returns the vector sub-store. Extra path segments select a rooted
+// view instead of the conventional root (store.VECTOR).
 func (s *Store) Vector(path ...string) *vector.Store {
 	if s == nil {
 		return nil
@@ -484,7 +485,7 @@ func (s *Store) Vector(path ...string) *vector.Store {
 }
 
 // Objects returns the flat object sub-store. Extra path segments select a
-// rooted view instead of the conventional root ("object").
+// rooted view instead of the conventional root (store.OBJECT).
 func (s *Store) Objects(path ...string) *object.Store {
 	if s == nil {
 		return nil
@@ -501,7 +502,7 @@ func (s *Store) Objects(path ...string) *object.Store {
 }
 
 // Graphs returns the property-graph sub-store. Extra path segments select a
-// rooted view instead of the conventional root ("graphs").
+// rooted view instead of the conventional root (store.GRAPHS).
 func (s *Store) Graphs(path ...string) *graphs.Store {
 	if s == nil {
 		return nil
@@ -518,7 +519,7 @@ func (s *Store) Graphs(path ...string) *graphs.Store {
 }
 
 // Search returns the full-text sub-store. Extra path segments select a rooted
-// view instead of the conventional root ("fts").
+// view instead of the conventional root (store.SEARCH).
 func (s *Store) Search(path ...string) *search.Store {
 	if s == nil {
 		return nil
@@ -602,17 +603,17 @@ func (s *Store) VerifyAudit() (ledger.Result, error) {
 		return ledger.Result{}, ErrClosed
 	}
 	keys := make(map[string]ed25519.PublicKey, 4)
-	if system.HasFlag(s.auditFlags, AuditDB) {
-		keys[ledger.StoreDB] = s.auditPubs.auditDB
+	if system.HasFlag(s.auditFlags, AuditRecord) {
+		keys[ledger.StoreRecord] = s.auditPubs.auditRecord
 	}
-	if system.HasFlag(s.auditFlags, AuditFS) {
-		keys[ledger.StoreFS] = s.auditPubs.auditFS
+	if system.HasFlag(s.auditFlags, AuditFile) {
+		keys[ledger.StoreFile] = s.auditPubs.auditFSTree
 	}
-	if system.HasFlag(s.auditFlags, AuditTS) {
-		keys[ledger.StoreTS] = s.auditPubs.auditTS
+	if system.HasFlag(s.auditFlags, AuditSeries) {
+		keys[ledger.StoreSeries] = s.auditPubs.auditSeries
 	}
-	if system.HasFlag(s.auditFlags, AuditVec) {
-		keys[ledger.StoreVec] = s.auditPubs.auditVec
+	if system.HasFlag(s.auditFlags, AuditVector) {
+		keys[ledger.StoreVector] = s.auditPubs.auditVector
 	}
 	if system.HasFlag(s.auditFlags, AuditGraphs) {
 		keys[ledger.StoreGraphs] = s.auditPubs.auditGraphs
@@ -663,7 +664,7 @@ func (s *Store) View(fn func(*bolt.Tx) error) error {
 //
 // The snapshot is complete only when Backup returns nil. A writer failure or a
 // canceled context leaves w holding a partial copy; use BackupTo for an atomic
-// file destination.
+// fstree destination.
 func (s *Store) Backup(ctx context.Context, w io.Writer) error {
 	if w == nil {
 		return fmt.Errorf("harbor: backup: %w: writer is required", ErrInvalidOptions)
@@ -716,9 +717,9 @@ func (s *Store) Backup(ctx context.Context, w io.Writer) error {
 }
 
 // BackupTo writes the snapshot produced by Backup to path atomically: the
-// bytes go to a temporary file in the same directory, are synced and closed,
+// bytes go to a temporary fstree in the same directory, are synced and closed,
 // and only then replace path by rename. A failed or canceled backup therefore
-// never truncates or corrupts an existing backup at path, and no partial file
+// never truncates or corrupts an existing backup at path, and no partial fstree
 // is left behind.
 func (s *Store) BackupTo(ctx context.Context, path string) error {
 	_, err := s.BackupFile(ctx, path, BackupOptions{Overwrite: true})
@@ -739,6 +740,78 @@ func (cw ctxWriter) Write(p []byte) (int, error) {
 	return cw.w.Write(p)
 }
 
+// compactTxMaxSize bounds each rewrite transaction during compaction. Committing
+// periodically keeps memory bounded for large stores.
+const compactTxMaxSize = 64 << 10
+
+// CompactTo writes a compacted copy of the database to path.
+//
+// bbolt appends pages and only reuses the ones it has freed, so a store that
+// grows and shrinks keeps a fstree larger than its live data needs. CompactTo
+// rewrites the live pages into a fresh fstree, dropping free space.
+//
+// Buffered vector points are flushed first. path must not exist; it is created
+// with mode (0600 when mode is zero) and removed again if compaction fails.
+// Writers may continue during the copy because bbolt compacts from a read
+// transaction; Close waits for the copy to finish.
+//
+// The result is the on-disk representation, not a logical export: an encrypted
+// store yields an encrypted compacted fstree that opens with the same password.
+// bbolt.Compact cannot be interrupted once started, so ctx is checked before the
+// copy only.
+func (s *Store) CompactTo(ctx context.Context, path string, mode os.FileMode) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if path == "" {
+		return fmt.Errorf("harbor: compact: %w: path is required", ErrInvalidOptions)
+	}
+	if s == nil {
+		return ErrClosed
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil {
+		return ErrClosed
+	}
+
+	// Buffered vector points are not in the database yet; drain them so the
+	// copy is complete.
+	if s.vector != nil {
+		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
+			return fmt.Errorf("harbor: compact: flush vec store: %w", err)
+		}
+	}
+
+	if _, err := os.Stat(path); err == nil {
+		return &os.PathError{Op: "compact", Path: path, Err: os.ErrExist}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("harbor: compact: %w", err)
+	}
+
+	if mode == 0 {
+		mode = 0o600
+	}
+	dst, err := bolt.Open(path, mode, &bolt.Options{Timeout: time.Second})
+	if err != nil {
+		return fmt.Errorf("harbor: compact: %w", err)
+	}
+	compactErr := bolt.Compact(dst, s.bs, compactTxMaxSize)
+	closeErr := dst.Close()
+	if compactErr == nil {
+		compactErr = closeErr
+	}
+	if compactErr != nil {
+		_ = os.Remove(path)
+		return fmt.Errorf("harbor: compact: %w", compactErr)
+	}
+	return nil
+}
+
 // Close closes the underlying database. It is safe to call more than once, and
 // the sub-store accessors return nil afterwards.
 //
@@ -755,7 +828,7 @@ func (s *Store) Close() error {
 	}
 	// The vec store buffers points in memory; drain them before closing the
 	// shared handle. A flush failure must not keep the bbolt handle (and its
-	// file lock) open forever: close it anyway and return the flush error.
+	// fstree lock) open forever: close it anyway and return the flush error.
 	var flushErr error
 	if s.vector != nil {
 		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
@@ -765,7 +838,7 @@ func (s *Store) Close() error {
 	closeErr := s.bs.Close()
 	s.bs = nil
 	s.record = nil
-	s.file = nil
+	s.fstree = nil
 	s.series = nil
 	s.vector = nil
 	s.search = nil

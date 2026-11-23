@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/store/fstree"
 	"github.com/malivvan/harbor/store/graphs"
+	"github.com/malivvan/harbor/store/ledger"
 	"github.com/malivvan/harbor/store/object"
 	"github.com/malivvan/harbor/store/record"
 	"github.com/malivvan/harbor/store/search"
@@ -56,7 +56,7 @@ func newTx(s *Store, btx *bolt.Tx, writable bool, sink ledger.Sink) (*Tx, error)
 		btx:      btx,
 		writable: writable,
 		record:   attached,
-		file:     s.file.WithTransaction(btx),
+		file:     s.fstree.WithTransaction(btx),
 		series:   s.series.WithTransaction(btx),
 		vector:   s.vector.WithTransaction(btx),
 		search:   s.search.WithTransaction(btx),
@@ -90,7 +90,7 @@ func (tx *Tx) Record() record.Tx {
 	return tx.record
 }
 
-// File returns the file sub-store bound to this transaction, or nil after the
+// File returns the fstree sub-store bound to this transaction, or nil after the
 // transaction ended. File systems opened through it are bound to the same
 // transaction.
 func (tx *Tx) File() *fstree.Store {

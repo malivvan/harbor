@@ -10,6 +10,7 @@ import (
 
 	"github.com/malivvan/harbor/internal/crypto"
 	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/harbor/store"
 	"github.com/malivvan/harbor/store/record/index"
 	bolt "go.etcd.io/bbolt"
 )
@@ -87,7 +88,7 @@ func (s *Store) observeRotate(d time.Duration, err error) {
 		return
 	}
 	metrics.Histogram(s.obs, metrics.MetricRotateDuration, float64(d), metrics.Labels{
-		metrics.LabelStore:  "db",
+		metrics.LabelStore:  store.RECORD,
 		metrics.LabelOp:     "rotate",
 		metrics.LabelResult: resultLabel(err),
 	})
@@ -220,12 +221,12 @@ func (r *rotation) run(tx *bolt.Tx) error {
 		}
 		if name == databaseInfo {
 			if err := r.databaseBucket(b); err != nil {
-				return fmt.Errorf("db: rotating bucket %q: %w", name, err)
+				return fmt.Errorf("record: rotating bucket %q: %w", name, err)
 			}
 			continue
 		}
 		if err := r.dataBucket(b); err != nil {
-			return fmt.Errorf("db: rotating bucket %q: %w", name, err)
+			return fmt.Errorf("record: rotating bucket %q: %w", name, err)
 		}
 	}
 
@@ -268,7 +269,7 @@ func (r *rotation) dataBucket(b *bolt.Bucket) error {
 			err = r.dataBucket(cb)
 		}
 		if err != nil {
-			return fmt.Errorf("db: rotating bucket %q: %w", child, err)
+			return fmt.Errorf("record: rotating bucket %q: %w", child, err)
 		}
 	}
 

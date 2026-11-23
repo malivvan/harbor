@@ -6,8 +6,8 @@ import (
 	"reflect"
 
 	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/harbor/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 

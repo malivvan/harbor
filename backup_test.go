@@ -11,12 +11,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/malivvan/harbor/store/search"
 	"github.com/malivvan/harbor/store/series"
 	"github.com/malivvan/harbor/store/vector"
 )
 
-// seedBackup writes one record, file, series, vector and full-text document.
+// seedBackup writes one record, fstree, series, vector and full-text document.
 func seedBackup(t *testing.T, s *Store) {
 	t.Helper()
 	ctx := context.Background()
@@ -65,8 +66,8 @@ func TestBackupFileVerifyAndRestore(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, info.SHA256, manifest.SHA256)
-	require.Equal(t, "1", manifest.Formats["fs"])
-	require.Equal(t, "1", manifest.Formats["fts"])
+	require.Equal(t, "1", manifest.Formats[hstore.FSTREE])
+	require.Equal(t, "1", manifest.Formats[hstore.SEARCH])
 
 	// The backup opens and holds every store's data.
 	restored := mustOpen(t, path, "backup-password")
@@ -123,7 +124,7 @@ func TestVerifyBackupRejectsCorruptFile(t *testing.T) {
 	_, err := s.BackupFile(ctx, path, BackupOptions{})
 	require.NoError(t, err)
 
-	// Truncating the file must be detected by the checksum and the open path.
+	// Truncating the fstree must be detected by the checksum and the open path.
 	require.NoError(t, os.Truncate(path, 4096))
 	_, err = VerifyBackup(ctx, path, "backup-password", nil)
 	require.Error(t, err)
@@ -187,7 +188,7 @@ func TestBackupFileCancellationLeavesNoFile(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Dir(path))
 	require.NoError(t, err)
 	for _, entry := range entries {
-		require.NotContains(t, entry.Name(), ".harbor-backup-", "temporary file left behind")
+		require.NotContains(t, entry.Name(), ".harbor-backup-", "temporary fstree left behind")
 	}
 }
 
@@ -215,4 +216,68 @@ func TestBackupUnderConcurrentWrites(t *testing.T) {
 	verified, err := VerifyBackup(ctx, path, "backup-password", nil)
 	require.NoError(t, err)
 	require.Equal(t, info.SHA256, verified.SHA256)
+}
+
+func TestObjectStoreAuditAndBackup(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "object.db")
+	opts := testOptions("object-password")
+	opts.Audit = AuditObject
+	store, err := Open(ctx, path, 0o600, opts)
+	require.NoError(t, err)
+	defer mustClose(t, store)
+
+	_, err = store.Objects().Put(ctx, "bucket", "a.txt", strings.NewReader("alpha"), 5, "")
+	require.NoError(t, err)
+	res, err := store.VerifyAudit()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, res.Count, uint64(1))
+
+	backupPath := filepath.Join(t.TempDir(), "copy.db")
+	info, err := store.BackupFile(ctx, backupPath, BackupOptions{Manifest: true})
+	require.NoError(t, err)
+	verified, err := VerifyBackup(ctx, backupPath, "object-password", nil)
+	require.NoError(t, err)
+	require.Equal(t, info.SHA256, verified.SHA256)
+
+	restored := mustOpen(t, backupPath, "object-password")
+	defer mustClose(t, restored)
+	body, err := restored.Objects().ReadAll(ctx, "bucket", "a.txt")
+	require.NoError(t, err)
+	require.Equal(t, "alpha", string(body))
+}
+
+func TestGraphsStoreAuditAndBackup(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "graphs.db")
+	opts := testOptions("graph-password")
+	opts.Audit = AuditGraphs
+	store, err := Open(ctx, path, 0o600, opts)
+	require.NoError(t, err)
+	defer mustClose(t, store)
+
+	g, err := store.Graphs().Open("social")
+	require.NoError(t, err)
+	require.NoError(t, g.UpsertNode(ctx, &graphs.Node{ID: "a", Type: "person"}))
+	require.NoError(t, g.UpsertNode(ctx, &graphs.Node{ID: "b", Type: "person"}))
+	require.NoError(t, g.UpsertEdge(ctx, &graphs.Edge{ID: "e", From: "a", To: "b"}))
+
+	res, err := store.VerifyAudit()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, res.Count, uint64(3))
+
+	backupPath := filepath.Join(t.TempDir(), "copy.db")
+	info, err := store.BackupFile(ctx, backupPath, BackupOptions{Manifest: true})
+	require.NoError(t, err)
+	verified, err := VerifyBackup(ctx, backupPath, "graph-password", nil)
+	require.NoError(t, err)
+	require.Equal(t, info.SHA256, verified.SHA256)
+
+	restored := mustOpen(t, backupPath, "graph-password")
+	defer mustClose(t, restored)
+	rg, err := restored.Graphs().Open("social")
+	require.NoError(t, err)
+	got, err := rg.GetNode(ctx, "a")
+	require.NoError(t, err)
+	require.Equal(t, "person", got.Type)
 }

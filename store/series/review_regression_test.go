@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -119,7 +120,7 @@ func TestUnpackBlockRejectsOverflowingCount(t *testing.T) {
 // aggregation covers points spread across many sealed blocks.
 func TestAggregateBlockModeStreamsAcrossBlocks(t *testing.T) {
 	ctx := context.Background()
-	store := openBlockStore(t, []byte("ts"), 30, 10)
+	store := openBlockStore(t, []byte(hstore.SERIES), 30, 10)
 	se := store.Series("cpu")
 
 	const total = 500

@@ -2,6 +2,7 @@ package fstree
 
 import (
 	"fmt"
+	hstore "github.com/malivvan/harbor/store"
 	"path/filepath"
 	"testing"
 	"time"
@@ -423,7 +424,7 @@ func TestInodeCache_Concurrent(t *testing.T) {
 // not alias the cached children slice in a way that later mutations leak into
 // the previously returned node.
 func TestSharedInodeCacheIsCopyOnWrite(t *testing.T) {
-	store, _ := openEncStore(t, []byte("ts"), Config{})
+	store, _ := openEncStore(t, []byte(hstore.SERIES), Config{})
 	fsys, err := store.Open("fs")
 	if err != nil {
 		t.Fatal(err)

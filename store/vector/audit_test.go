@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	audit "github.com/malivvan/harbor/pkg/ledger"
+	hstore "github.com/malivvan/harbor/store"
+	audit "github.com/malivvan/harbor/store/ledger"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -25,8 +26,8 @@ func openAuditedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bdb.Close() })
 
-	rec := audit.NewRecorder(bdb, map[string]ed25519.PrivateKey{audit.StoreVec: priv})
-	store, err := openStore(context.Background(), bdb, []byte("vec"), Config{Audit: rec})
+	rec := audit.NewRecorder(bdb, map[string]ed25519.PrivateKey{audit.StoreVector: priv})
+	store, err := openStore(context.Background(), bdb, []byte(hstore.VECTOR), Config{Audit: rec})
 	require.NoError(t, err)
 	return store, bdb, pub
 }
@@ -42,7 +43,7 @@ func TestAuditRecordsCollectionWrites(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.DropCollection("docs"))
 
-	res, err := audit.Verify(bdb, map[string]ed25519.PublicKey{audit.StoreVec: pub})
+	res, err := audit.Verify(bdb, map[string]ed25519.PublicKey{audit.StoreVector: pub})
 	require.NoError(t, err)
 	// create_collection (EnsureCollection) + save_collection_meta + upsert +
 	// delete + drop_collection.
@@ -56,7 +57,7 @@ func TestAuditDisabledRecordsNothing(t *testing.T) {
 	require.NoError(t, col.Upsert([]PointStruct{{ID: "a", Vector: []float32{1, 2, 3}}}))
 	require.NoError(t, col.Flush())
 
-	_, err = audit.Verify(store.db, map[string]ed25519.PublicKey{audit.StoreVec: nil})
+	_, err = audit.Verify(store.db, map[string]ed25519.PublicKey{audit.StoreVector: nil})
 	require.ErrorIs(t, err, audit.ErrNoLog)
 }
 

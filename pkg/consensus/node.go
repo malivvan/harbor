@@ -14,7 +14,6 @@ import (
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/raft"
-	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
 	"github.com/malivvan/harbor"
 	"github.com/malivvan/harbor/pkg/metrics"
 )
@@ -26,7 +25,7 @@ type Node struct {
 
 	raft          *raft.Raft
 	transport     *raft.NetworkTransport
-	raftDB        *raftboltdb.BoltStore
+	raftDB        *boltStore
 	logStore      raft.LogStore
 	stableStore   raft.StableStore
 	snapshotStore raft.SnapshotStore
@@ -141,7 +140,7 @@ func (n *Node) startRaft() error {
 	}
 	n.snapshotStore = snapshotStore
 
-	raftDB, err := raftboltdb.New(raftboltdb.Options{Path: filepath.Join(n.cfg.Dir, "raft.db")})
+	raftDB, err := openBoltStore(filepath.Join(n.cfg.Dir, "raft.db"))
 	if err != nil {
 		return fmt.Errorf("consensus: create raft log store: %w", err)
 	}

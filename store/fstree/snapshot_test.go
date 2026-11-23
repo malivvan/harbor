@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -638,7 +639,7 @@ func TestSnapshotReadResultsArePrivate(t *testing.T) {
 		if encrypted {
 			cfg = Config{Secret: testEncKey(41)}
 		}
-		store, _ := openEncStore(t, []byte("ts"), cfg)
+		store, _ := openEncStore(t, []byte(hstore.SERIES), cfg)
 		fsys, err := store.Open("fs")
 		require.NoError(t, err)
 		writeTestFile(t, fsys, "/f.txt", "snapshot payload")
@@ -660,7 +661,7 @@ func TestSnapshotReadResultsArePrivate(t *testing.T) {
 // TestSnapshotLazyOpenSeeks verifies that an opened snapshot file reports its
 // size before any data has been materialized.
 func TestSnapshotLazyOpenSeeks(t *testing.T) {
-	store, _ := openEncStore(t, []byte("ts"), Config{})
+	store, _ := openEncStore(t, []byte(hstore.SERIES), Config{})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, fsys, "/f.txt", "0123456789")

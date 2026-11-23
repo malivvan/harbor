@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -233,7 +234,7 @@ func TestSnapshotReadAtBranches(t *testing.T) {
 }
 
 func TestSnapshotChunkedReadAt(t *testing.T) {
-	store, _ := chunkedStore(t, []byte("ts"), 63, 8)
+	store, _ := chunkedStore(t, []byte(hstore.SERIES), 63, 8)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, fsys, "/f", "0123456789abcdefghij")
@@ -403,7 +404,7 @@ func TestFilesystemTimeAndTempdir(t *testing.T) {
 }
 
 func TestChunkedWriteAndTruncateTransactions(t *testing.T) {
-	store, _ := chunkedStore(t, []byte("ts"), 64, 8)
+	store, _ := chunkedStore(t, []byte(hstore.SERIES), 64, 8)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, fsys, "/f", "0123456789")

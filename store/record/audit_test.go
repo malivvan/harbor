@@ -8,7 +8,8 @@ import (
 	"testing"
 	"time"
 
-	audit "github.com/malivvan/harbor/pkg/ledger"
+	hstore "github.com/malivvan/harbor/store"
+	audit "github.com/malivvan/harbor/store/ledger"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -34,7 +35,7 @@ func openAudited(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bdb.Close() })
 
-	rec := audit.NewRecorder(bdb, map[string]ed25519.PrivateKey{audit.StoreDB: priv})
+	rec := audit.NewRecorder(bdb, map[string]ed25519.PrivateKey{audit.StoreRecord: priv})
 	st, err := Open(context.Background(), bdb, Config{Audit: rec})
 	require.NoError(t, err)
 	return st, bdb, pub
@@ -51,7 +52,7 @@ func TestAuditRecordsStructWrites(t *testing.T) {
 	require.NoError(t, st.UpdateField(ctx, &u, "Name", "carol"))
 	require.NoError(t, st.DeleteStruct(ctx, &u))
 
-	res, err := audit.Verify(bdb, map[string]ed25519.PublicKey{audit.StoreDB: pub})
+	res, err := audit.Verify(bdb, map[string]ed25519.PublicKey{audit.StoreRecord: pub})
 	require.NoError(t, err)
 	require.Equal(t, uint64(4), res.Count)
 }
@@ -64,7 +65,7 @@ func TestAuditRecordsKeyValueWrites(t *testing.T) {
 	require.NoError(t, st.SetBytes(ctx, "cfg", "raw", []byte("bytes")))
 	require.NoError(t, st.Delete(ctx, "cfg", "k"))
 
-	res, err := audit.Verify(bdb, map[string]ed25519.PublicKey{audit.StoreDB: pub})
+	res, err := audit.Verify(bdb, map[string]ed25519.PublicKey{audit.StoreRecord: pub})
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), res.Count)
 }
@@ -80,7 +81,7 @@ func TestAuditDisabledRecordsNothing(t *testing.T) {
 	u := auditUser{ID: "u1", Name: "alice"}
 	require.NoError(t, st.Save(context.Background(), &u))
 
-	_, err = audit.Verify(bdb, map[string]ed25519.PublicKey{audit.StoreDB: nil})
+	_, err = audit.Verify(bdb, map[string]ed25519.PublicKey{audit.StoreRecord: nil})
 	require.ErrorIs(t, err, audit.ErrNoLog)
 }
 
@@ -93,7 +94,7 @@ func TestAuditDigestMatchesPayload(t *testing.T) {
 
 	var ev audit.Event
 	require.NoError(t, bdb.View(func(tx *bolt.Tx) error {
-		events := tx.Bucket([]byte("audit")).Bucket([]byte("events"))
+		events := tx.Bucket([]byte(hstore.LEDGER)).Bucket([]byte("events"))
 		v := events.Get([]byte{0, 0, 0, 0, 0, 0, 0, 0})
 		encoded := v[:len(v)-ed25519.SignatureSize]
 		return json.Unmarshal(encoded, &ev)
@@ -120,7 +121,7 @@ func TestAuditSetOperationNames(t *testing.T) {
 
 	var ops []string
 	require.NoError(t, bdb.View(func(tx *bolt.Tx) error {
-		root := tx.Bucket([]byte("audit"))
+		root := tx.Bucket([]byte(hstore.LEDGER))
 		events := root.Bucket([]byte("events"))
 		return events.ForEach(func(_, v []byte) error {
 			var event audit.Event

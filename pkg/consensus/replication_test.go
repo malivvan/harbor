@@ -22,9 +22,9 @@ func TestReplicateDBKeyValue(t *testing.T) {
 	defer closeAll(nodes...)
 
 	leader := waitLeader(t, nodes...)
-	require.NoError(t, leader.DB().Set(ctx, "settings", "theme", "dark"))
-	require.NoError(t, leader.DB().Set(ctx, "settings", 42, "answer"))
-	require.NoError(t, leader.DB().SetBytes(ctx, "blobs", "raw", []byte{1, 2, 3}))
+	require.NoError(t, leader.Record().Set(ctx, "settings", "theme", "dark"))
+	require.NoError(t, leader.Record().Set(ctx, "settings", 42, "answer"))
+	require.NoError(t, leader.Record().SetBytes(ctx, "blobs", "raw", []byte{1, 2, 3}))
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
@@ -41,8 +41,8 @@ func TestReplicateDBKeyValue(t *testing.T) {
 		require.Equal(t, []byte{1, 2, 3}, raw)
 	}
 
-	require.NoError(t, leader.DB().Delete(ctx, "settings", "theme"))
-	require.NoError(t, leader.DB().Delete(ctx, "blobs", "raw"))
+	require.NoError(t, leader.Record().Delete(ctx, "settings", "theme"))
+	require.NoError(t, leader.Record().Delete(ctx, "blobs", "raw"))
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
@@ -63,7 +63,7 @@ func TestReplicateFSMetadata(t *testing.T) {
 	defer closeAll(nodes...)
 
 	leader := waitLeader(t, nodes...)
-	fsys := leader.FS().Open("data")
+	fsys := leader.File().Open("data")
 	require.NoError(t, fsys.MkdirAll(ctx, "/a/b/c", 0o750))
 	require.NoError(t, fsys.WriteFile(ctx, "/a/b/file.txt", []byte("0123456789"), 0o644))
 	require.NoError(t, fsys.Truncate(ctx, "/a/b/file.txt", 4))
@@ -107,7 +107,7 @@ func TestReplicateFSStreamingWrite(t *testing.T) {
 	defer closeAll(nodes...)
 
 	leader := waitLeader(t, nodes...)
-	fsys := leader.FS().Open("data")
+	fsys := leader.File().Open("data")
 
 	file, err := fsys.Create(ctx, "/stream.bin", 0o644)
 	require.NoError(t, err)
@@ -160,17 +160,17 @@ func TestReplicateVecFlushAndOptions(t *testing.T) {
 	defer closeAll(nodes...)
 
 	leader := waitLeader(t, nodes...)
-	require.NoError(t, leader.Vec().EnsureCollection(ctx, "docs"))
-	require.NoError(t, leader.Vec().CreateCollectionWithOptions(ctx, vector.CollectionOptions{
+	require.NoError(t, leader.Vector().EnsureCollection(ctx, "docs"))
+	require.NoError(t, leader.Vector().CreateCollectionWithOptions(ctx, vector.CollectionOptions{
 		Name:           "colors",
 		VectorLen:      2,
 		Metric:         vector.Dot,
 		FlushThreshold: 1000,
 	}))
-	require.NoError(t, leader.Vec().Upsert("colors", []vector.PointStruct{
+	require.NoError(t, leader.Vector().Upsert("colors", []vector.PointStruct{
 		{ID: "red", Vector: []float32{1, 0}},
 	}))
-	require.NoError(t, leader.Vec().Flush(ctx))
+	require.NoError(t, leader.Vector().Flush(ctx))
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
@@ -209,14 +209,14 @@ func TestReplicateTSMetadataAndDeletion(t *testing.T) {
 	defer closeAll(nodes...)
 
 	leader := waitLeader(t, nodes...)
-	require.NoError(t, leader.TS().InsertMany(ctx, "cpu", []series.Point{
+	require.NoError(t, leader.Series().InsertMany(ctx, "cpu", []series.Point{
 		{Timestamp: 1, Value: 1},
 		{Timestamp: 2, Value: 2},
 		{Timestamp: 3, Value: 3},
 	}))
-	require.NoError(t, leader.TS().SetLabels(ctx, "cpu", map[string]string{"host": "a"}))
-	require.NoError(t, leader.TS().SetRetention(ctx, "cpu", series.Retention{MaxPoints: 10}))
-	removed, err := leader.TS().DeleteRange(ctx, "cpu", 2, 2)
+	require.NoError(t, leader.Series().SetLabels(ctx, "cpu", map[string]string{"host": "a"}))
+	require.NoError(t, leader.Series().SetRetention(ctx, "cpu", series.Retention{MaxPoints: 10}))
+	removed, err := leader.Series().DeleteRange(ctx, "cpu", 2, 2)
 	require.NoError(t, err)
 	require.Equal(t, 1, removed)
 	waitApplied(t, leader, nodes...)

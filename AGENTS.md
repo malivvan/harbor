@@ -12,21 +12,20 @@ separate `docs/` tree.
 |---------|----------------|
 | `github.com/malivvan/harbor` | Opens one bbolt file, derives per-store keys from a password, and exposes `Record()`, `File()`, `Series()`, `Vector()`, `Search()`, `Graphs()`, `Objects()`, `Flags()` and `Meta()`. Each accessor takes optional bucket-path segments. |
 | `.../store/record` | Struct-to-bucket mapping, indexes, matchers, managed transactions, key/value access, codecs. |
-| `.../graph` | A reusable bitemporal property graph over `record`: nodes, directed edges, adjacency and traversal, counts, history/as-of/diff/purge, JSON interchange. |
 | `.../store/fstree` | Named file systems implementing the `absfs` interfaces, with symlinks, snapshots, inode cache and chunked content. |
 | `.../store/series` | Named time series with ordered scans, aggregation, labels and retention. |
 | `.../store/vector` | Vector collections with Flat/HNSW indexes, payload filters and quantization. |
 | `.../store/search` | Full-text indexes: BM25 ranking, word and CJK tokenizers, posting lists and corpus statistics. |
-| `.../store/graphs` | Independent bitemporal property-graph store: node/edge records and closed versions in their own root bucket. |
+| `.../store/graphs` | Bitemporal property-graph store and the reusable graph core: `Store` keeps node/edge records and closed versions in its own root bucket, while `Graph` (also runnable over `record` for the legacy layout) provides adjacency, traversal, counts, history/as-of/diff/purge and JSON interchange. |
 | `.../store/system` | Store header manager: metadata record, KDF settings, encryption/audit flags, canary and every per-store key derivation. |
-| `.../store` | The stable numeric identifier registry for the sub-stores (`RECORD`, `SERIES`, `VECTOR`, `FSTREE`, `SEARCH`, `GRAPHS`, `OBJECT`, `SYSTEM`, `Audit`). Append new identifiers; never renumber. |
+| `.../store` | The root bucket name registry for the sub-stores (`RECORD`, `SERIES`, `VECTOR`, `FSTREE`, `SEARCH`, `GRAPHS`, `OBJECT`, `SYSTEM`, `LEDGER`). Append a name for a new store; never rename an existing one. |
 | `.../store/fstree/s3fs` | An `absfs.Filer` backed by S3-compatible object storage. |
 | `.../store/vector/hnsw` | The vendored HNSW graph implementation used by `vector`. |
 | `.../store/vector/hnsw/heap` | The heap used on the HNSW search hot path. |
 | `.../store/vector/doc` | Document-oriented facade over `vector`: id, content, embedding and string metadata; the collection dimension is taken from the first upsert. |
 | `.../pkg/metrics` | Dependency-free observer interface and nil-safe metric helpers used by every store; a nil observer means no instrumentation. |
-| `.../pkg/ledger` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write. |
-| `.../pkg/consensus` | Raft-backed cluster replication of a whole store. |
+| `.../store/ledger` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write. |
+| `.../pkg/consensus` | Raft-backed cluster replication of a whole store: replicated command facades, snapshots, and the bolt-backed raft log/stable store it persists with (no raft-boltdb dependency). |
 | `.../pkg/store` | Process-wide database manager: resolves a directory, reads or creates the password file (`O_EXCL`, mode 0600, never logged), and opens one handle. |
 | `.../store/object` | Independent flat object store with buckets, path containment and atomic `Put`; works without the file store and migrates file-backed blobs explicitly. |
 | `.../pkg/snapshot` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore. |
@@ -42,28 +41,30 @@ not a required layer: each store can be opened directly with a caller-owned
 
 ## Architecture
 
-### One file, seven key spaces
+### One file, one bucket per store
 
 The root package creates one bbolt database with this top-level shape:
 
 ```text
-harbor.Metadata            unencrypted configuration record
-db/                        record store root bucket (persisted name)
-fs/                        file store root bucket (persisted name)
-ts/                        series store root bucket (persisted name)
-vec/                       vector store root bucket (persisted name)
-fts/                       search store root bucket (persisted name)
-graphs/                    graph store root bucket
-object/                    object store root bucket
+system/                    unencrypted configuration record
+record/                    record store root bucket
+fstree/                    file store root bucket
+series/                    series store root bucket
+vector/                    vector store root bucket
+search/                    full-text store root bucket
+graphs/                    property-graph store root bucket
+object/                    flat object store root bucket
+ledger/                    audit trail (created only when auditing is enabled)
 ```
 
-The Go package names (`record`, `fstree`, `series`, `vector`, `search`,
-`graphs`, `object`) differ
-from these persisted bucket names on purpose: the bucket names are part of the
-on-disk format and do not change. The no-argument accessors use them; passing
-explicit path segments selects a different root.
+The names come from the `store` package registry (`store.RECORD`,
+`store.FSTREE`, `store.SERIES`, `store.VECTOR`, `store.SEARCH`, `store.GRAPHS`,
+`store.OBJECT`, `store.SYSTEM`, `store.LEDGER`). They are the persisted bucket
+names, so they are part of the on-disk format and do not change; the store
+packages own no root name of their own. The no-argument accessors use these
+buckets; passing explicit path segments selects a different root.
 
-`harbor.Metadata/Metadata` contains the Argon2id salt and cost parameters, the
+`system/Metadata` contains the Argon2id salt and cost parameters, the
 encryption flags, and a sealed canary. It is the only record that must be read
 before any key exists. See [Encryption internals](#encryption-internals) for the
 key pipeline.
@@ -191,7 +192,7 @@ Inside the configured root:
 ```
 
 - Values (documents, posting lists and metadata) are sealed when value
-  encryption is enabled; the root store follows `EncryptDBValues`.
+  encryption is enabled; the root store follows `EncryptRecordValues`.
 - Term keys are plaintext by default. `Config.EncryptTokens` encrypts them with
   AES-SIV, which hides the vocabulary but leaks term equality and result sizes.
 - The tokenizer and BM25 parameters are persisted and checked on reopen; a
@@ -608,19 +609,19 @@ too, which is why a password is required even when encryption is disabled.
 
 ### Store-specific implementation behavior
 
-#### db
+#### record
 
-`EncryptDBKeys` makes exact lookups work over ciphertext but destroys meaningful
+`EncryptRecordKeys` makes exact lookups work over ciphertext but destroys meaningful
 ordering. Ordered and prefix lookups return `record.ErrEncryptedOrdering` instead of
 returning wrong results. The three options — a plaintext order index, an
 open-time in-memory ordered map, or order-preserving encryption — are weighed in
 [README.md](README.md#ordered-queries-under-encryption). This release keeps the
 fail-closed behaviour; option 2 is the planned path because it needs no format
-change. Do not add OPE without a security review. `EncryptDBValues` seals record and key/value values;
-`EncryptDBMetadata` seals auto-increment counters. Bucket names and the codec
+change. Do not add OPE without a security review. `EncryptRecordValues` seals record and key/value values;
+`EncryptRecordMetadata` seals auto-increment counters. Bucket names and the codec
 name stay readable.
 
-#### fs
+#### fstree
 
 `Config.ChunkSize` enables chunked content encryption and implies
 `EncryptContent`. A positive chunk size splits content into independently
@@ -629,7 +630,7 @@ rewrites the affected chunks. Without chunking, the whole file is one sealed
 blob and every write re-seals all of it. `EncryptMetadata` seals inode blobs,
 hiding names, modes, sizes and times.
 
-#### ts
+#### series
 
 `Config.BlockDuration` groups points into sealed blocks. It enables encryption
 on its own (so `Config.Secret` is required) and is strongly recommended for
@@ -637,7 +638,7 @@ high-volume encrypted series: a block is sealed and opened once instead of once
 per point. `EncryptSeriesNames` encrypts physical bucket and metadata names with
 AES-SIV while listing still returns logical names.
 
-#### vec
+#### vector
 
 `EncryptPointIDs` encrypts point IDs and the stored point value (which contains
 the ID). `EncryptCollectionNames` encrypts collection bucket and metadata names.
@@ -684,7 +685,7 @@ There is no plaintext ↔ encrypted in-place migration. Export and re-import.
 
 `Store.Migrate` applies a `Schema` of ordered `Step`s inside one
 `WriteTransaction`; the application version lives in its own top-level
-`harbor.schema` bucket (8-byte big-endian), not in `harbor.Metadata`, so
+`harbor.schema` bucket (8-byte big-endian), not in `system/Metadata`, so
 existing stores keep opening. Steps must be contiguous, end at `Schema.Version`
 and be deterministic/idempotent. A newer stored version fails with
 `ErrSchemaTooNew`; malformed plans fail with `ErrInvalidSchema`. The version is
@@ -746,7 +747,7 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 - `AGENTS.md` (this file) is developer/agent-facing: architecture, on-disk
   layouts, encryption internals, invariants, development workflow.
 - Per-package guides live in `store/record/README.md`, `store/fstree/README.md`, `store/series/README.md`,
-  `store/vector/README.md`, `store/fstree/s3fs/README.md`, `pkg/ledger/README.md`,
+  `store/vector/README.md`, `store/fstree/s3fs/README.md`, `store/ledger/README.md`,
   `pkg/consensus/README.md`, `pkg/store/README.md`, `store/object/README.md`,
   `store/graphs/README.md`, `store/system/README.md` and
   `pkg/snapshot/README.md`. Package doc comments are the source of truth for
@@ -795,8 +796,7 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 - [store/graphs/README.md](store/graphs/README.md)
 - [store/fstree/s3fs/README.md](store/fstree/s3fs/README.md)
 - [store/vector/doc/README.md](store/vector/doc/README.md)
-- [graph/README.md](graph/README.md)
-- [pkg/ledger/README.md](pkg/ledger/README.md)
+- [store/ledger/README.md](store/ledger/README.md)
 - [store/object/README.md](store/object/README.md)
 - [pkg/consensus/README.md](pkg/consensus/README.md)
 - [pkg/store/README.md](pkg/store/README.md)
@@ -811,7 +811,7 @@ Generated API documentation:
 - [github.com/malivvan/harbor/store/series](https://pkg.go.dev/github.com/malivvan/harbor/store/series)
 - [github.com/malivvan/harbor/store/vector](https://pkg.go.dev/github.com/malivvan/harbor/store/vector)
 - [github.com/malivvan/harbor/store/search](https://pkg.go.dev/github.com/malivvan/harbor/store/search)
-- [github.com/malivvan/harbor/pkg/ledger](https://pkg.go.dev/github.com/malivvan/harbor/pkg/ledger)
+- [github.com/malivvan/harbor/store/ledger](https://pkg.go.dev/github.com/malivvan/harbor/store/ledger)
 - [github.com/malivvan/harbor/store/object](https://pkg.go.dev/github.com/malivvan/harbor/store/object)
 - [github.com/malivvan/harbor/store/graphs](https://pkg.go.dev/github.com/malivvan/harbor/store/graphs)
 - [github.com/malivvan/harbor/store/system](https://pkg.go.dev/github.com/malivvan/harbor/store/system)

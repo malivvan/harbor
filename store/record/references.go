@@ -76,7 +76,7 @@ func (n *node) registerRefSchema(tx *bolt.Tx, cfg *structConfig) error {
 	}
 	raw, err := json.Marshal(schema)
 	if err != nil {
-		return fmt.Errorf("db: encode reference schema: %w", err)
+		return fmt.Errorf("record: encode reference schema: %w", err)
 	}
 	b, err := n.refsBucket(tx, true)
 	if err != nil {
@@ -124,7 +124,7 @@ func (n *node) inboundRefs(tx *bolt.Tx, targetBucket string) ([]refRelation, err
 		}
 		var schema refSchema
 		if err := json.Unmarshal(v, &schema); err != nil {
-			return fmt.Errorf("db: decode reference schema %q: %w", k, err)
+			return fmt.Errorf("record: decode reference schema %q: %w", k, err)
 		}
 		source := string(k[len(refSchemaPrefix):])
 		for field, ref := range schema.Fields {

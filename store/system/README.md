@@ -14,7 +14,7 @@ stores.
 The header lives in a single record:
 
 ```text
-harbor.Metadata/Metadata
+system/Metadata
   salt[16] | time[4] | flags[2] | memory[4] | threads[1] | canaryLen[4] | canary
 ```
 

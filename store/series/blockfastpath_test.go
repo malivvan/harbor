@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -12,7 +13,7 @@ import (
 // timestamp handling, and checks the stored points.
 func TestInsertBlockFastPaths(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store := openBlockStore(t, root, 51, 10)
 	se := store.Series("cpu")
 

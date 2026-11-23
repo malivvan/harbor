@@ -21,23 +21,23 @@ var (
 	ErrWrongMode = crypto.ErrWrongMode
 
 	// ErrCollectionNotFound is returned when a collection bucket is missing.
-	ErrCollectionNotFound = errors.New("vec: collection not found")
+	ErrCollectionNotFound = errors.New("vector: collection not found")
 
 	// ErrMetadataNotFound is returned when a collection has no stored metadata.
-	ErrMetadataNotFound = errors.New("vec: collection metadata not found")
+	ErrMetadataNotFound = errors.New("vector: collection metadata not found")
 
 	// ErrPointNotFound is returned when a point ID is not present.
-	ErrPointNotFound = errors.New("vec: point not found")
+	ErrPointNotFound = errors.New("vector: point not found")
 
 	// ErrInTransaction reports an operation that cannot run on a store bound to
 	// a caller-owned transaction (for example key rotation).
-	ErrInTransaction = errors.New("vec: operation is not available inside an explicit transaction")
+	ErrInTransaction = errors.New("vector: operation is not available inside an explicit transaction")
 
 	// ErrInvalidOptions is returned for invalid list options or a nil iteration
 	// callback.
-	ErrInvalidOptions = errors.New("vec: invalid options")
+	ErrInvalidOptions = errors.New("vector: invalid options")
 
 	// ErrStopIteration can be returned from a ForEachPoint callback to stop the
 	// iteration without reporting an error.
-	ErrStopIteration = errors.New("vec: stop iteration")
+	ErrStopIteration = errors.New("vector: stop iteration")
 )

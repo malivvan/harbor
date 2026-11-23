@@ -1,7 +1,7 @@
 package record
 
 import (
-	"github.com/malivvan/harbor/pkg/ledger"
+	"github.com/malivvan/harbor/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 

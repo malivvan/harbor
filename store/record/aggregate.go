@@ -13,7 +13,7 @@ import (
 )
 
 // ErrInvalidAggregate reports an unusable AggregateSpec.
-var ErrInvalidAggregate = errors.New("db: invalid aggregation")
+var ErrInvalidAggregate = errors.New("record: invalid aggregation")
 
 // MeasureType selects how a Measure aggregates a field.
 type MeasureType string

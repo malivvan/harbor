@@ -16,7 +16,7 @@ type fallbackCounter struct {
 }
 
 func (c *fallbackCounter) Counter(name string, delta int64, _ metrics.Labels) {
-	if name == metrics.MetricVecFallbacks {
+	if name == metrics.MetricVectorFallbacks {
 		c.fallbacks += delta
 	}
 }

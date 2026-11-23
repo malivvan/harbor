@@ -10,7 +10,7 @@ const recordSize = 8
 
 // errCorruptPoint reports a plaintext record that does not have the expected
 // size. Ciphertext failures are reported as ErrAuthFailed instead.
-var errCorruptPoint = errors.New("ts: corrupt point")
+var errCorruptPoint = errors.New("series: corrupt point")
 
 // encodeKey maps an int64 timestamp to 8 bytes that sort chronologically.
 func encodeKey(ts int64) [recordSize]byte {

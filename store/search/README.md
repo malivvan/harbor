@@ -2,8 +2,9 @@
 
 `search` is a full-text index for Harbor: one document per id, BM25 ranking, and
 tokenizers for word text and CJK scripts. The package was historically named
-`fts`; its persisted root bucket and key label (`fts/`, `harbor/fts/v1`) keep
-that name, so existing indexes stay readable. It lives in the same bbolt file and
+`fts`; its key label (`harbor/fts/v1`) keeps that name, so existing indexes stay
+readable. It lives under the `search` root bucket (`store.SEARCH`) in the same
+bbolt file and
 participates in [cross-store transactions](../../README.md#cross-store-transactions).
 
 ```go
@@ -49,7 +50,7 @@ same one.
 - The format version is `search.FormatVersion` (1). An index written by another
   version fails with `search.ErrIncompatibleVersion`.
 - Values are sealed when `Config.EncryptValues` is set; the root store enables
-  it with the `EncryptDBValues` flag. `Config.EncryptTokens` additionally
+  it with the `EncryptRecordValues` flag. `Config.EncryptTokens` additionally
   encrypts term keys deterministically, hiding the vocabulary while still
   leaking term equality and result sizes. It is off by default.
 - The encryption mode is a plaintext record, so opening an index with the wrong

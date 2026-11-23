@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	audit "github.com/malivvan/harbor/pkg/ledger"
+	hstore "github.com/malivvan/harbor/store"
+	audit "github.com/malivvan/harbor/store/ledger"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -25,8 +26,8 @@ func openAuditedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	rec := audit.NewRecorder(db, map[string]ed25519.PrivateKey{audit.StoreTS: priv})
-	store, err := openStore(context.Background(), db, []byte("ts"), Config{Audit: rec})
+	rec := audit.NewRecorder(db, map[string]ed25519.PrivateKey{audit.StoreSeries: priv})
+	store, err := openStore(context.Background(), db, []byte(hstore.SERIES), Config{Audit: rec})
 	require.NoError(t, err)
 	return store, db, pub
 }
@@ -44,16 +45,16 @@ func TestAuditRecordsSeriesWrites(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.DeleteSeries(ctx, "cpu"))
 
-	res, err := audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreTS: pub})
+	res, err := audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreSeries: pub})
 	require.NoError(t, err)
 	require.Equal(t, uint64(6), res.Count)
 }
 
 func TestAuditDisabledRecordsNothing(t *testing.T) {
-	store, db := openTestStore(t, []byte("ts"))
+	store, db := openTestStore(t, []byte(hstore.SERIES))
 	require.NoError(t, store.Series("cpu").Insert(context.Background(), Point{Timestamp: 1, Value: 1}))
 
-	_, err := audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreTS: nil})
+	_, err := audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreSeries: nil})
 	require.ErrorIs(t, err, audit.ErrNoLog)
 }
 

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/malivvan/harbor/store"
 	"github.com/malivvan/harbor/store/fstree"
 	"github.com/malivvan/harbor/store/graphs"
 	"github.com/malivvan/harbor/store/object"
@@ -25,18 +26,18 @@ import (
 
 // ErrBackupManifest reports a backup whose bytes or metadata do not match the
 // manifest written next to it.
-var ErrBackupManifest = errors.New("harbor: backup manifest does not match the file")
+var ErrBackupManifest = errors.New("harbor: backup manifest does not match the fstree")
 
-// ErrInvalidBackup reports a file that is not a readable Harbor database.
+// ErrInvalidBackup reports a fstree that is not a readable Harbor database.
 var ErrInvalidBackup = errors.New("harbor: invalid backup")
 
-// BackupInfo describes one backup file.
+// BackupInfo describes one backup fstree.
 type BackupInfo struct {
-	// Path is the backup file.
+	// Path is the backup fstree.
 	Path string `json:"path"`
-	// Size is the file length in bytes.
+	// Size is the fstree length in bytes.
 	Size int64 `json:"size"`
-	// SHA256 is the lowercase hex SHA-256 of the whole file.
+	// SHA256 is the lowercase hex SHA-256 of the whole fstree.
 	SHA256 string `json:"sha256"`
 	// CreatedAt is when the backup was written.
 	CreatedAt time.Time `json:"created_at"`
@@ -51,7 +52,7 @@ type BackupOptions struct {
 	// Manifest writes a JSON sidecar next to the backup describing its size,
 	// checksum, flags and format versions.
 	Manifest bool
-	// Overwrite replaces an existing file at the destination. When false, an
+	// Overwrite replaces an existing fstree at the destination. When false, an
 	// existing destination fails with os.ErrExist.
 	Overwrite bool
 }
@@ -68,9 +69,9 @@ func manifestPath(path string) string { return path + ".manifest.json" }
 // BackupFile writes a consistent snapshot of the whole database to path and
 // returns its size and SHA-256.
 //
-// The bytes go to a temporary file in the same directory, are synced and
+// The bytes go to a temporary fstree in the same directory, are synced and
 // closed, and only then replace path, so a failed or canceled backup never
-// truncates an existing file. With BackupOptions.Manifest, a JSON sidecar
+// truncates an existing fstree. With BackupOptions.Manifest, a JSON sidecar
 // records the checksum, creation time, encryption flags and format versions.
 //
 // The backup is the on-disk representation of an encrypted store, so it is
@@ -139,13 +140,13 @@ func writeBackupManifest(path string, info BackupInfo) error {
 	m := backupManifest{
 		BackupInfo: info,
 		Formats: map[string]string{
-			"db":     record.Version,
-			"fs":     fmt.Sprint(fstree.FormatVersion),
-			"ts":     fmt.Sprint(series.FormatVersion),
-			"vec":    fmt.Sprint(vector.CollectionFormatVersion),
-			"fts":    fmt.Sprint(search.FormatVersion),
-			"graphs": fmt.Sprint(graphs.FormatVersion),
-			"object": fmt.Sprint(object.FormatVersion),
+			store.RECORD: record.Version,
+			store.FSTREE: fmt.Sprint(fstree.FormatVersion),
+			store.SERIES: fmt.Sprint(series.FormatVersion),
+			store.VECTOR: fmt.Sprint(vector.CollectionFormatVersion),
+			store.SEARCH: fmt.Sprint(search.FormatVersion),
+			store.GRAPHS: fmt.Sprint(graphs.FormatVersion),
+			store.OBJECT: fmt.Sprint(object.FormatVersion),
 		},
 	}
 	raw, err := json.MarshalIndent(m, "", "  ")
@@ -198,7 +199,7 @@ func readBackupManifest(path string) (backupManifest, bool, error) {
 // VerifyBackup opens a backup read-only and validates it end to end: the
 // metadata canary proves the password and the persisted flags, and every
 // sub-store marker and format version is checked. The sidecar manifest, when
-// present, must match the file's size and checksum.
+// present, must match the fstree's size and checksum.
 //
 // It never writes to the backup. opts may supply the record codec and bolt
 // options; the stored Argon2id parameters and encryption flags always win.
@@ -289,88 +290,88 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 	// needs no writes, so a read-only handle succeeds; an incomplete one fails
 	// instead of being "repaired" during verification.
 	if _, err := record.Open(ctx, bdb, record.Config{
-		Root:            namedRoot(record.Name),
+		Root:            namedRoot(store.RECORD),
 		Codec:           codec,
 		Secret:          keys.Record,
-		EncryptKeys:     system.HasFlag(md.Flags, EncryptDBKeys),
-		EncryptValues:   system.HasFlag(md.Flags, EncryptDBValues),
-		EncryptMetadata: system.HasFlag(md.Flags, EncryptDBMetadata),
+		EncryptKeys:     system.HasFlag(md.Flags, EncryptRecordKeys),
+		EncryptValues:   system.HasFlag(md.Flags, EncryptRecordValues),
+		EncryptMetadata: system.HasFlag(md.Flags, EncryptRecordMetadata),
 	}); err != nil {
-		return info, fmt.Errorf("harbor: verify backup: db: %w", err)
+		return info, fmt.Errorf("harbor: verify backup: record: %w", err)
 	}
 
 	fsStore, err := fstree.Open(ctx, bdb, fstree.Config{
-		Root:            namedRoot(fstree.Name),
+		Root:            namedRoot(store.FSTREE),
 		Secret:          keys.File,
-		EncryptMetadata: system.HasFlag(md.Flags, EncryptFSMetadata),
-		EncryptContent:  system.HasFlag(md.Flags, EncryptFSContent),
+		EncryptMetadata: system.HasFlag(md.Flags, EncryptFileMetadata),
+		EncryptContent:  system.HasFlag(md.Flags, EncryptFileContent),
 	})
 	if err != nil {
-		return info, fmt.Errorf("harbor: verify backup: fs: %w", err)
+		return info, fmt.Errorf("harbor: verify backup: fstree: %w", err)
 	}
 	names, err := fsStore.FileSystems()
 	if err != nil {
-		return info, fmt.Errorf("harbor: verify backup: fs: %w", err)
+		return info, fmt.Errorf("harbor: verify backup: fstree: %w", err)
 	}
 	for _, name := range names {
 		if _, err := fsStore.OpenReadOnly(name); err != nil {
-			return info, fmt.Errorf("harbor: verify backup: fs %q: %w", name, err)
+			return info, fmt.Errorf("harbor: verify backup: fstree %q: %w", name, err)
 		}
 	}
 
 	if _, err := series.Open(ctx, bdb, series.Config{
-		Root:               namedRoot(series.Name),
+		Root:               namedRoot(store.SERIES),
 		Secret:             keys.Series,
-		EncryptValues:      system.HasFlag(md.Flags, EncryptTSValues),
-		EncryptSeriesNames: system.HasFlag(md.Flags, EncryptTSSeriesNames),
+		EncryptValues:      system.HasFlag(md.Flags, EncryptSeriesValues),
+		EncryptSeriesNames: system.HasFlag(md.Flags, EncryptSeriesNames),
 	}); err != nil {
-		return info, fmt.Errorf("harbor: verify backup: ts: %w", err)
+		return info, fmt.Errorf("harbor: verify backup: series: %w", err)
 	}
 
 	vecStore, err := vector.Open(ctx, bdb, vector.Config{
-		Root:                   namedRoot(vector.Name),
+		Root:                   namedRoot(store.VECTOR),
 		Secret:                 keys.Vector,
-		EncryptPoints:          system.HasFlag(md.Flags, EncryptVecPoints),
-		EncryptPointIDs:        system.HasFlag(md.Flags, EncryptVecPointIDs),
-		EncryptCollectionNames: system.HasFlag(md.Flags, EncryptVecCollectionNames),
+		EncryptPoints:          system.HasFlag(md.Flags, EncryptVectorPoints),
+		EncryptPointIDs:        system.HasFlag(md.Flags, EncryptVectorPointIDs),
+		EncryptCollectionNames: system.HasFlag(md.Flags, EncryptVectorCollectionNames),
 		SharedDB:               true,
 	})
 	if err != nil {
-		return info, fmt.Errorf("harbor: verify backup: vec: %w", err)
+		return info, fmt.Errorf("harbor: verify backup: vector: %w", err)
 	}
 	collections, err := vecStore.ListCollections()
 	if err != nil {
-		return info, fmt.Errorf("harbor: verify backup: vec: %w", err)
+		return info, fmt.Errorf("harbor: verify backup: vector: %w", err)
 	}
 	for _, name := range collections {
 		if _, err := vecStore.LoadCollectionMeta(name); err != nil && !errors.Is(err, vector.ErrMetadataNotFound) {
-			return info, fmt.Errorf("harbor: verify backup: vec %q: %w", name, err)
+			return info, fmt.Errorf("harbor: verify backup: vector %q: %w", name, err)
 		}
 	}
 
 	ftsStore, err := search.OpenReadOnly(ctx, bdb, search.Config{
-		Root:          namedRoot(search.Name),
+		Root:          namedRoot(store.SEARCH),
 		Secret:        keys.Search,
-		EncryptValues: system.HasFlag(md.Flags, EncryptDBValues),
+		EncryptValues: system.HasFlag(md.Flags, EncryptRecordValues),
 	})
 	if err != nil {
-		return info, fmt.Errorf("harbor: verify backup: fts: %w", err)
+		return info, fmt.Errorf("harbor: verify backup: search: %w", err)
 	}
 	indexes, err := ftsStore.Indexes(ctx)
 	if err != nil {
-		return info, fmt.Errorf("harbor: verify backup: fts: %w", err)
+		return info, fmt.Errorf("harbor: verify backup: search: %w", err)
 	}
 	for _, name := range indexes {
 		if _, err := ftsStore.Open(name, search.Config{}); err != nil {
-			return info, fmt.Errorf("harbor: verify backup: fts %q: %w", name, err)
+			return info, fmt.Errorf("harbor: verify backup: search %q: %w", name, err)
 		}
 	}
 
-	if bucketExists(bdb, graphs.Name) {
+	if bucketExists(bdb, store.GRAPHS) {
 		graphStore, err := graphs.OpenReadOnly(ctx, bdb, graphs.Config{
-			Root:          namedRoot(graphs.Name),
+			Root:          namedRoot(store.GRAPHS),
 			Secret:        keys.Graphs,
-			EncryptValues: system.HasFlag(md.Flags, EncryptGraphValues) || system.HasFlag(md.Flags, EncryptDBValues),
+			EncryptValues: system.HasFlag(md.Flags, EncryptGraphValues) || system.HasFlag(md.Flags, EncryptRecordValues),
 		})
 		if err != nil {
 			return info, fmt.Errorf("harbor: verify backup: graphs: %w", err)
@@ -386,11 +387,11 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		}
 	}
 
-	if bucketExists(bdb, object.Name) {
+	if bucketExists(bdb, store.OBJECT) {
 		if _, err := object.OpenReadOnly(ctx, bdb, object.Config{
-			Root:          namedRoot(object.Name),
+			Root:          namedRoot(store.OBJECT),
 			Secret:        keys.Object,
-			EncryptValues: system.HasFlag(md.Flags, EncryptObjectValues) || system.HasFlag(md.Flags, EncryptDBValues),
+			EncryptValues: system.HasFlag(md.Flags, EncryptObjectValues) || system.HasFlag(md.Flags, EncryptRecordValues),
 		}); err != nil {
 			return info, fmt.Errorf("harbor: verify backup: object: %w", err)
 		}
@@ -399,7 +400,7 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 	return info, nil
 }
 
-// hashBackup streams the file through SHA-256, checking the context between
+// hashBackup streams the fstree through SHA-256, checking the context between
 // reads.
 func hashBackup(ctx context.Context, path string) (string, error) {
 	f, err := os.Open(path)

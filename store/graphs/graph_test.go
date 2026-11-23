@@ -1,4 +1,4 @@
-package graph
+package graphs
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/malivvan/harbor/store/record"
 )
 
@@ -21,7 +22,7 @@ func newTestGraph(t *testing.T) (*Graph, *clock) {
 		t.Fatalf("open database: %v", err)
 	}
 	t.Cleanup(func() { _ = bdb.Close() })
-	store, err := record.Open(context.Background(), bdb, record.Config{Root: [][]byte{[]byte("db")}})
+	store, err := record.Open(context.Background(), bdb, record.Config{Root: [][]byte{[]byte(hstore.RECORD)}})
 	if err != nil {
 		t.Fatalf("open record store: %v", err)
 	}
@@ -309,8 +310,8 @@ func TestWriteUnderAsOfIsRefused(t *testing.T) {
 func TestPrefixesShareOneStoreWithoutMixing(t *testing.T) {
 	g, _ := newTestGraph(t)
 	ctx := context.Background()
-	one := New(g.DB(), WithPrefix("one"))
-	two := New(g.DB(), WithPrefix("two"))
+	one := New(g.RecordStore(), WithPrefix("one"))
+	two := New(g.RecordStore(), WithPrefix("two"))
 	if err := one.UpsertNode(ctx, node("a", "person")); err != nil {
 		t.Fatalf("one: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -22,7 +23,7 @@ func openBlockStoreForCoverage(t *testing.T, root []byte, seed byte, block time.
 
 func TestBlockPointAndInsertBlockPoint(t *testing.T) {
 	ctx := context.Background()
-	store := openBlockStoreForCoverage(t, []byte("ts"), 71, 10*time.Second)
+	store := openBlockStoreForCoverage(t, []byte(hstore.SERIES), 71, 10*time.Second)
 	series := store.Series("s")
 
 	for _, ts := range []int64{0, 5 * int64(time.Second), 15 * int64(time.Second)} {
@@ -112,7 +113,7 @@ func TestHasDataBranches(t *testing.T) {
 
 	// Rooted store: an empty root and a root with only the metadata bucket
 	// hold no series.
-	rooted, rootDB := openTestStore(t, []byte("ts"))
+	rooted, rootDB := openTestStore(t, []byte(hstore.SERIES))
 	require.NoError(t, rootDB.Update(func(tx *bolt.Tx) error {
 		_, err := rooted.createRootBucket(tx)
 		return err
@@ -142,7 +143,7 @@ func TestHasDataBranches(t *testing.T) {
 
 func TestRetentionMetadataAndDuplicates(t *testing.T) {
 	ctx := context.Background()
-	store, _ := openTestStore(t, []byte("ts"))
+	store, _ := openTestStore(t, []byte(hstore.SERIES))
 	series := store.Series("s")
 
 	for i := int64(1); i <= 3; i++ {
@@ -188,7 +189,7 @@ func TestRetentionMetadataAndDuplicates(t *testing.T) {
 
 func TestLogicalNameEncrypted(t *testing.T) {
 	ctx := context.Background()
-	store, _ := openStoreAtPath(t, filepath.Join(t.TempDir(), "names.db"), []byte("ts"), Config{
+	store, _ := openStoreAtPath(t, filepath.Join(t.TempDir(), "names.db"), []byte(hstore.SERIES), Config{
 		Secret:             testKey(72),
 		EncryptSeriesNames: true,
 	})
@@ -204,7 +205,7 @@ func TestLogicalNameEncrypted(t *testing.T) {
 	require.Error(t, err)
 
 	// A plaintext store maps names one-to-one.
-	plain, _ := openTestStore(t, []byte("ts"))
+	plain, _ := openTestStore(t, []byte(hstore.SERIES))
 	key, err := plain.bucketKey("name")
 	require.NoError(t, err)
 	require.Equal(t, []byte("name"), key)
@@ -217,7 +218,7 @@ func TestLogicalNameEncrypted(t *testing.T) {
 }
 
 func TestCreateSeriesBucketErrors(t *testing.T) {
-	store, db := openTestStore(t, []byte("ts"))
+	store, db := openTestStore(t, []byte(hstore.SERIES))
 	require.NoError(t, db.Update(func(tx *bolt.Tx) error {
 		_, err := store.createSeriesBucket(tx, "")
 		require.Error(t, err)
@@ -237,7 +238,7 @@ func TestCreateSeriesBucketErrors(t *testing.T) {
 func TestEncryptedVerifyRotateAndMetadataWrites(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "enc-meta.db")
-	store, db := openStoreAtPath(t, path, []byte("ts"), Config{
+	store, db := openStoreAtPath(t, path, []byte(hstore.SERIES), Config{
 		Secret:        testKey(90),
 		EncryptValues: true,
 	})

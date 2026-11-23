@@ -8,12 +8,15 @@ import (
 	"testing"
 	"time"
 
+	file "github.com/malivvan/harbor/store/fstree"
+	"github.com/malivvan/harbor/store/record"
+	"github.com/malivvan/harbor/store/search"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/malivvan/harbor/internal/crypto"
-	audit "github.com/malivvan/harbor/pkg/ledger"
-	"github.com/malivvan/harbor/store/record"
+	hstore "github.com/malivvan/harbor/store"
+	audit "github.com/malivvan/harbor/store/ledger"
 	"github.com/malivvan/harbor/store/series"
 	"github.com/malivvan/harbor/store/system"
 	"github.com/malivvan/harbor/store/vector"
@@ -233,7 +236,7 @@ func TestOpenValidation(t *testing.T) {
 				KDFTime:    1,
 				KDFMemory:  8 * MiB,
 				KDFThreads: 1,
-				Encrypt:    EncryptDB,
+				Encrypt:    EncryptRecord,
 				Plaintext:  true,
 			},
 			want: ErrInvalidOptions,
@@ -275,7 +278,7 @@ func TestWrongPasswordClosesHandle(t *testing.T) {
 		t.Fatalf("wrong password = %v, want it to wrap ErrAuthFailed", err)
 	}
 
-	// A leaked handle would make this reopen time out on the file lock.
+	// A leaked handle would make this reopen time out on the fstree lock.
 	s = mustOpen(t, path, "right")
 	t.Cleanup(func() { _ = s.Close() })
 }
@@ -312,7 +315,7 @@ func TestStoredSettingsWin(t *testing.T) {
 	password := "pw"
 
 	opts := testOptions(password)
-	opts.Encrypt = EncryptDB | EncryptTS
+	opts.Encrypt = EncryptRecord | EncryptSeries
 	s, err := Open(context.Background(), path, 0600, opts)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -335,7 +338,7 @@ func TestStoredSettingsWin(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 
-	if got := s.Flags(); got != EncryptDB|EncryptTS {
+	if got := s.Flags(); got != EncryptRecord|EncryptSeries {
 		t.Fatalf("Flags() = %#x, want stored flags", got)
 	}
 	salt, kdfTime, kdfMemory, kdfThreads, flags, err := s.Meta()
@@ -388,7 +391,7 @@ func TestOpenRejectsBadMetadata(t *testing.T) {
 			t.Fatalf("bolt.Open: %v", err)
 		}
 		if err := bdb.Update(func(tx *bolt.Tx) error {
-			_, err := tx.CreateBucket([]byte("harbor.Metadata"))
+			_, err := tx.CreateBucket([]byte(hstore.SYSTEM))
 			return err
 		}); err != nil {
 			t.Fatalf("create meta bucket: %v", err)
@@ -407,7 +410,7 @@ func TestOpenRejectsBadMetadata(t *testing.T) {
 			t.Fatalf("bolt.Open: %v", err)
 		}
 		if err := bdb.Update(func(tx *bolt.Tx) error {
-			meta, err := tx.CreateBucket([]byte("harbor.Metadata"))
+			meta, err := tx.CreateBucket([]byte(hstore.SYSTEM))
 			if err != nil {
 				return err
 			}
@@ -444,12 +447,12 @@ func TestCanaryBindsEncryptionFlags(t *testing.T) {
 		t.Fatalf("bolt.Open: %v", err)
 	}
 	if err := bdb.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("harbor.Metadata"))
+		b := tx.Bucket([]byte(hstore.SYSTEM))
 		md, err := system.DecodeMetadata(append([]byte(nil), b.Get([]byte("Metadata"))...))
 		if err != nil {
 			return err
 		}
-		md.Flags &^= EncryptDBKeys
+		md.Flags &^= EncryptRecordKeys
 		return b.Put([]byte("Metadata"), md.Encode())
 	}); err != nil {
 		_ = bdb.Close()
@@ -472,7 +475,7 @@ func TestCanaryBindsEncryptionFlags(t *testing.T) {
 // Metadata is not silently re-initialized.
 func TestMissingMetadataBucketIsCorrupt(t *testing.T) {
 	for name, buckets := range map[string][][]byte{
-		"sub-store root":   {[]byte(record.Name)},
+		"sub-store root":   {[]byte(hstore.RECORD)},
 		"unrelated bucket": {[]byte("something-else")},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -671,7 +674,7 @@ func TestLoadOrCreateStateRejectsTampering(t *testing.T) {
 			}
 		}()
 		require.NoError(t, db.Update(func(tx *bolt.Tx) error {
-			b := tx.Bucket([]byte("harbor.Metadata"))
+			b := tx.Bucket([]byte(hstore.SYSTEM))
 			raw := b.Get([]byte("Metadata"))
 			parsed, err := system.DecodeMetadata(raw)
 			if err != nil {
@@ -725,7 +728,7 @@ func TestReadMetadataMissingRecord(t *testing.T) {
 	require.True(t, creating)
 
 	require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucket([]byte("harbor.Metadata"))
+		_, err := tx.CreateBucket([]byte(hstore.SYSTEM))
 		return err
 	}))
 	_, _, err = system.ReadMetadata(bdb)
@@ -746,7 +749,7 @@ func TestOpenFailsWhenSubstoreIsCorrupt(t *testing.T) {
 	raw, err := bolt.Open(path, 0600, nil)
 	require.NoError(t, err)
 	require.NoError(t, raw.Update(func(tx *bolt.Tx) error {
-		sub := tx.Bucket([]byte("db"))
+		sub := tx.Bucket([]byte(hstore.RECORD))
 		require.NotNil(t, sub)
 		info := sub.Bucket([]byte("__database"))
 		require.NotNil(t, info)
@@ -822,7 +825,7 @@ func TestOpenRejectsCorruptCanaryAndFlags(t *testing.T) {
 	raw, err := bolt.Open(path, 0600, nil)
 	require.NoError(t, err)
 	require.NoError(t, raw.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("harbor.Metadata"))
+		b := tx.Bucket([]byte(hstore.SYSTEM))
 		value := b.Get([]byte("Metadata"))
 		md, err := system.DecodeMetadata(append([]byte(nil), value...))
 		if err != nil {
@@ -913,7 +916,7 @@ func TestAuditWrongPasswordIsRejectedOnOpen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "harbor-audit-pw.db")
 
 	opts := testOptions("right")
-	opts.Audit = AuditDB
+	opts.Audit = AuditRecord
 	s, err := Open(ctx, path, 0600, opts)
 	require.NoError(t, err)
 	require.NoError(t, s.Record().Save(ctx, &harborRecord{Name: "alice"}))
@@ -925,4 +928,225 @@ func TestAuditWrongPasswordIsRejectedOnOpen(t *testing.T) {
 	// trail: a wrong password cannot even open the store.
 	_, err = Open(ctx, path, 0600, testOptions("wrong"))
 	require.ErrorIs(t, err, ErrInvalidPassword)
+}
+
+type rootedRow struct {
+	ID   string `db:"id"`
+	Name string `db:"index"`
+}
+
+// TestRootedViewsAreIsolatedAndPersist proves the variadic bucket path on the
+// store accessors selects a rooted view instead of the conventional root, and
+// that the view is flushed and reopened correctly.
+func TestRootedViewsAreIsolatedAndPersist(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "rooted.db")
+	s := mustOpen(t, path, "rooted-password")
+
+	// Record: a custom root is separate from the conventional "db" root.
+	require.NoError(t, s.Record("tenant", "records").Save(ctx, &rootedRow{ID: "r1", Name: "custom"}))
+	require.NoError(t, s.Record().Save(ctx, &rootedRow{ID: "r2", Name: "default"}))
+
+	var row rootedRow
+	require.NoError(t, s.Record("tenant", "records").One(ctx, "ID", "r1", &row))
+	require.Equal(t, "custom", row.Name)
+	require.Error(t, s.Record().One(ctx, "ID", "r1", &row), "the default root must not see a custom-root record")
+	require.NoError(t, s.Record().One(ctx, "ID", "r2", &row))
+
+	// File.
+	tenantFS, err := s.File("tenant").Open("app")
+	require.NoError(t, err)
+	f, err := tenantFS.Create("/note.txt")
+	require.NoError(t, err)
+	_, err = f.Write([]byte("tenant"))
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	defaultFS, err := s.File().Open("app")
+	require.NoError(t, err)
+	_, err = defaultFS.ReadFile("/note.txt")
+	require.Error(t, err, "the default root must not see a custom-root fstree")
+
+	// Series.
+	require.NoError(t, s.Series("tenant").Series("cpu").Insert(ctx, series.Point{Timestamp: 1_000, Value: 7}))
+	defaultPoints, err := s.Series().Series("cpu").Range(ctx, 0, 10_000)
+	require.NoError(t, err)
+	require.Empty(t, defaultPoints)
+	tenantPoints, err := s.Series("tenant").Series("cpu").Range(ctx, 0, 10_000)
+	require.NoError(t, err)
+	require.Len(t, tenantPoints, 1)
+
+	// Vector.
+	col, err := s.Vector("tenant").NewCollection("docs", 2, vector.Cosine, false)
+	require.NoError(t, err)
+	require.NoError(t, col.Upsert([]vector.PointStruct{{ID: "p1", Vector: []float32{1, 0}}}))
+	defaultHits, err := s.Vector().NewCollection("docs", 2, vector.Cosine, false)
+	require.NoError(t, err)
+	require.Zero(t, defaultHits.Count())
+	require.Equal(t, 1, col.Count())
+
+	// Search.
+	idx, err := s.Search("tenant").Open("docs", search.Config{})
+	require.NoError(t, err)
+	require.NoError(t, idx.Upsert(ctx, "d1", "tenant text"))
+	defaultIdx, err := s.Search().Open("docs", search.Config{})
+	require.NoError(t, err)
+	defaultCount, err := defaultIdx.Count(ctx)
+	require.NoError(t, err)
+	require.Zero(t, defaultCount)
+
+	// The base Flush drains vector views too.
+	require.NoError(t, s.Vector().Flush())
+	require.NoError(t, s.Close())
+
+	// Reopen: custom roots persisted and remain separate from the defaults.
+	reopened := mustOpen(t, path, "rooted-password")
+	defer mustClose(t, reopened)
+
+	require.NoError(t, reopened.Record("tenant", "records").One(ctx, "ID", "r1", &row))
+	require.Equal(t, "custom", row.Name)
+	require.NoError(t, reopened.Record().One(ctx, "ID", "r2", &row))
+
+	reopenedCol, err := reopened.Vector("tenant").NewCollection("docs", 2, vector.Cosine, false)
+	require.NoError(t, err)
+	require.Equal(t, 1, reopenedCol.Count())
+
+	reopenedIdx, err := reopened.Search("tenant").Open("docs", search.Config{})
+	require.NoError(t, err)
+	count, err := reopenedIdx.Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+}
+
+// TestAccessorPathsDoNotChangeDefaults keeps the no-argument accessors on the
+// legacy on-disk roots so existing databases stay readable.
+func TestAccessorPathsDoNotChangeDefaults(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "defaults.db")
+	s := mustOpen(t, path, "default-password")
+	require.NoError(t, s.Record().Save(ctx, &rootedRow{ID: "d1"}))
+	require.NoError(t, s.Close())
+
+	reopened := mustOpen(t, path, "default-password")
+	defer mustClose(t, reopened)
+	var row rootedRow
+	require.NoError(t, reopened.Record().One(ctx, "ID", "d1", &row))
+}
+
+// TestSingleVersionOnePolicy pins the first-release policy: every persisted
+// format has exactly one version, number 1. A future format change must bump the
+// relevant exported constant and ship a compatibility path, which makes this
+// test fail until that change is deliberate and documented.
+func TestSingleVersionOnePolicy(t *testing.T) {
+	require.Equal(t, "1.0.0", record.Version)
+	require.Equal(t, uint64(1), file.FormatVersion)
+	require.Equal(t, uint64(1), series.FormatVersion)
+	require.Equal(t, uint32(1), vector.CollectionFormatVersion)
+	require.Equal(t, 1, audit.FormatVersion)
+}
+
+// TestOptionsValidate covers the creation-time option checks exposed by
+// Options.Validate and enforced by Open.
+func TestOptionsValidate(t *testing.T) {
+	var nilOptions *Options
+	require.ErrorIs(t, nilOptions.Validate(), ErrInvalidOptions)
+
+	require.ErrorIs(t, (&Options{}).Validate(), ErrInvalidPassword)
+
+	valid := testOptions("pw")
+	require.NoError(t, valid.Validate())
+
+	partial := testOptions("pw")
+	partial.KDFThreads = 0
+	require.ErrorIs(t, partial.Validate(), ErrInvalidOptions)
+
+	conflict := testOptions("pw")
+	conflict.Plaintext = true
+	conflict.Encrypt = EncryptAll
+	require.ErrorIs(t, conflict.Validate(), ErrInvalidOptions)
+
+	unknownEnc := testOptions("pw")
+	unknownEnc.Encrypt = 1 << 15
+	require.ErrorIs(t, unknownEnc.Validate(), ErrInvalidOptions)
+
+	unknownAudit := testOptions("pw")
+	unknownAudit.Audit = 1 << 15
+	require.ErrorIs(t, unknownAudit.Validate(), ErrInvalidOptions)
+
+	beyondLimits := testOptions("pw")
+	beyondLimits.KDFTime = system.MaxKDFTime + 1
+	require.ErrorIs(t, beyondLimits.Validate(), ErrInvalidOptions)
+
+	plaintext := testOptions("pw")
+	plaintext.Plaintext = true
+	require.NoError(t, plaintext.Validate())
+}
+
+func TestOpenRejectsUnknownAuditFlags(t *testing.T) {
+	opts := testOptions("pw")
+	opts.Audit = 1 << 15
+	_, err := Open(context.Background(), filepath.Join(t.TempDir(), "harbor.db"), 0o600, opts)
+	require.ErrorIs(t, err, ErrInvalidOptions)
+}
+
+// TestOptionsValidateMatchesOpen ties the public validation to Open for a valid
+// and an invalid configuration.
+func TestOptionsValidateMatchesOpen(t *testing.T) {
+	dir := t.TempDir()
+
+	valid := testOptions("pw")
+	require.NoError(t, valid.Validate())
+	store, err := Open(context.Background(), filepath.Join(dir, "valid.db"), 0o600, valid)
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+
+	invalid := testOptions("pw")
+	invalid.KDFTime = system.MaxKDFTime + 1
+	require.ErrorIs(t, invalid.Validate(), ErrInvalidOptions)
+	_, err = Open(context.Background(), filepath.Join(dir, "invalid.db"), 0o600, invalid)
+	require.ErrorIs(t, err, ErrInvalidOptions)
+}
+
+type sessionState struct {
+	User  string   `json:"user"`
+	Roles []string `json:"roles"`
+}
+
+// TestFSSessionSurvivesReopen documents the application-session pattern: a
+// named fstree system holds JSON files, and the store reopens with the same
+// contents.
+func TestFSSessionSurvivesReopen(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "app.db")
+
+	s := mustOpen(t, path, "session-password")
+	fsys, err := s.File().Open("app")
+	require.NoError(t, err)
+	require.NoError(t, fsys.MkdirAll("/sessions", 0o755))
+
+	state := sessionState{User: "alice", Roles: []string{"admin", "editor"}}
+	raw, err := json.Marshal(state)
+	require.NoError(t, err)
+	f, err := fsys.Create("/sessions/alice.json")
+	require.NoError(t, err)
+	_, err = f.Write(raw)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	mustClose(t, s)
+
+	reopened := mustOpen(t, path, "session-password")
+	defer mustClose(t, reopened)
+
+	app, err := reopened.File().Open("app")
+	require.NoError(t, err)
+	body, err := app.ReadFile("/sessions/alice.json")
+	require.NoError(t, err)
+
+	var got sessionState
+	require.NoError(t, json.Unmarshal(body, &got))
+	require.Equal(t, state.User, got.User)
+	require.Equal(t, state.Roles, got.Roles)
+
+	// The session fstree is part of the encrypted at-rest store.
+	_ = ctx
 }

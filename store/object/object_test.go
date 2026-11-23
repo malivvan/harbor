@@ -14,6 +14,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/malivvan/harbor"
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/malivvan/harbor/store/object"
 )
 
@@ -22,7 +23,7 @@ func openDirect(t *testing.T, cfg object.Config) (*object.Store, *bolt.DB) {
 	bdb, err := bolt.Open(filepath.Join(t.TempDir(), "object.db"), 0o600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bdb.Close() })
-	cfg.Root = [][]byte{[]byte(object.Name)}
+	cfg.Root = [][]byte{[]byte(hstore.OBJECT)}
 	s, err := object.Open(context.Background(), bdb, cfg)
 	require.NoError(t, err)
 	return s, bdb
@@ -145,7 +146,7 @@ func TestPersistence(t *testing.T) {
 	_, err := s.Put(ctx, "b", "a/k", strings.NewReader("payload"), 7, "")
 	require.NoError(t, err)
 
-	reopened, err := object.Open(ctx, bdb, object.Config{Root: [][]byte{[]byte(object.Name)}})
+	reopened, err := object.Open(ctx, bdb, object.Config{Root: [][]byte{[]byte(hstore.OBJECT)}})
 	require.NoError(t, err)
 	got, err := reopened.ReadAll(ctx, "b", "a/k")
 	require.NoError(t, err)
@@ -179,7 +180,7 @@ func TestIsolationFromFileStore(t *testing.T) {
 
 	// The object store lives under its own root.
 	require.NoError(t, store.View(func(tx *bolt.Tx) error {
-		require.NotNil(t, tx.Bucket([]byte(object.Name)))
+		require.NotNil(t, tx.Bucket([]byte(hstore.OBJECT)))
 		return nil
 	}))
 }
@@ -270,22 +271,22 @@ func TestEncryptionAndVersion(t *testing.T) {
 	_, err := s.Put(ctx, "b", "k", strings.NewReader("secret"), 6, "")
 	require.NoError(t, err)
 
-	again, err := object.Open(ctx, bdb, object.Config{Root: [][]byte{[]byte(object.Name)}, Secret: secret, EncryptValues: true})
+	again, err := object.Open(ctx, bdb, object.Config{Root: [][]byte{[]byte(hstore.OBJECT)}, Secret: secret, EncryptValues: true})
 	require.NoError(t, err)
 	got, err := again.ReadAll(ctx, "b", "k")
 	require.NoError(t, err)
 	require.Equal(t, "secret", string(got))
 
 	wrong := []byte("fedcba9876543210fedcba9876543210")
-	_, err = object.Open(ctx, bdb, object.Config{Root: [][]byte{[]byte(object.Name)}, Secret: wrong, EncryptValues: true})
+	_, err = object.Open(ctx, bdb, object.Config{Root: [][]byte{[]byte(hstore.OBJECT)}, Secret: wrong, EncryptValues: true})
 	require.Error(t, err)
-	_, err = object.Open(ctx, bdb, object.Config{Root: [][]byte{[]byte(object.Name)}})
+	_, err = object.Open(ctx, bdb, object.Config{Root: [][]byte{[]byte(hstore.OBJECT)}})
 	require.ErrorIs(t, err, object.ErrWrongMode)
 
 	require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(object.Name)).Put([]byte("__version__"), []byte{9, 0, 0, 0, 0, 0, 0, 0})
+		return tx.Bucket([]byte(hstore.OBJECT)).Put([]byte("__version__"), []byte{9, 0, 0, 0, 0, 0, 0, 0})
 	}))
-	_, err = object.Open(ctx, bdb, object.Config{Root: [][]byte{[]byte(object.Name)}, Secret: secret, EncryptValues: true})
+	_, err = object.Open(ctx, bdb, object.Config{Root: [][]byte{[]byte(hstore.OBJECT)}, Secret: secret, EncryptValues: true})
 	require.ErrorIs(t, err, object.ErrIncompatibleVersion)
 }
 

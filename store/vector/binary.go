@@ -24,7 +24,7 @@ import (
 // length is bounds-checked before allocating, and decoding requires the input
 // to be consumed exactly.
 
-var errCorruptPoint = fmt.Errorf("vec: corrupt stored point")
+var errCorruptPoint = fmt.Errorf("vector: corrupt stored point")
 
 // ValueSchemaFingerprint identifies the wire layout of Value. The format is
 // positional, so a layout change must change this value.

@@ -12,7 +12,7 @@ directly from the local replica.
 write ──▶ leader encodes command ──▶ raft.Apply ──▶ committed to quorum
                                                        │
                  every node's FSM applies the command  ▼
-                 to its own *harbor.Store (db/fs/ts/vec)
+                 to its own *harbor.Store (record/fstree/series/vector)
 
 read  ──▶ local *harbor.Store  (no raft round-trip)
 ```
@@ -58,6 +58,17 @@ n2, _ := consensus.Open(ctx, consensus.Config{ /* NodeID node-2, no Bootstrap */
 leader.Join("node-2", "127.0.0.1:7002")
 ```
 
+## Persistence
+
+A node keeps two files under `Dir`: `raft.db` for the raft log and stable store,
+and `snapshots/` for snapshots. The Harbor replica lives at `StorePath`.
+
+`raft.db` is written by a bolt-backed store defined in this package
+(`raftstore.go`) rather than by `hashicorp/raft-boltdb`, so the module carries no
+extra dependency. It keeps that library's layout — the `logs` bucket keyed by
+the 8-byte big-endian raft index with msgpack-encoded entries, and the `conf`
+bucket for the stable key/value pairs — so an existing `raft.db` stays readable.
+
 ## Replicated writes
 
 Each store has a write facade; the local store remains available for reads via
@@ -66,33 +77,33 @@ Each store has a write facade; the local store remains available for reads via
 ```go
 // db (records) — register the record type so followers can apply it.
 consensus.Register((*User)(nil)) // call on every node
-err := node.DB().Save(ctx, &User{ID: "u1", Name: "alice"})
-err = node.DB().From("actor").Save(ctx, &Actor{ID: 1})
-err = node.DB().UpdateField(ctx, &User{ID: "u1"}, "Name", "alicia")
-err = node.DB().DeleteStruct(ctx, &User{ID: "u1"})
+err := node.Record().Save(ctx, &User{ID: "u1", Name: "alice"})
+err = node.Record().From("actor").Save(ctx, &Actor{ID: 1})
+err = node.Record().UpdateField(ctx, &User{ID: "u1"}, "Name", "alicia")
+err = node.Record().DeleteStruct(ctx, &User{ID: "u1"})
 
 // db (raw key/value)
-err = node.DB().Set(ctx, "settings", "theme", "dark")  // value encoded on the leader
-err = node.DB().SetBytes(ctx, "blobs", "raw", raw)     // caller-encoded bytes
-err = node.DB().Delete(ctx, "settings", "theme")
+err = node.Record().Set(ctx, "settings", "theme", "dark")  // value encoded on the leader
+err = node.Record().SetBytes(ctx, "blobs", "raw", raw)     // caller-encoded bytes
+err = node.Record().Delete(ctx, "settings", "theme")
 
 // ts (time series)
-err = node.TS().Insert(ctx, "cpu", series.Point{Timestamp: now, Value: 42.0})
-err = node.TS().InsertMany(ctx, "cpu", pts)
-n, err := node.TS().DeleteRange(ctx, "cpu", start, end) // returns removed count
-err = node.TS().SetLabels(ctx, "cpu", map[string]string{"host": "a"})
-err = node.TS().SetRetention(ctx, "cpu", series.Retention{MaxPoints: 1000})
+err = node.Series().Insert(ctx, "cpu", series.Point{Timestamp: now, Value: 42.0})
+err = node.Series().InsertMany(ctx, "cpu", pts)
+n, err := node.Series().DeleteRange(ctx, "cpu", start, end) // returns removed count
+err = node.Series().SetLabels(ctx, "cpu", map[string]string{"host": "a"})
+err = node.Series().SetRetention(ctx, "cpu", series.Retention{MaxPoints: 1000})
 
 // vec (vectors)
-err = node.Vec().CreateCollection("colors", 2, vector.Dot, false)
-err = node.Vec().CreateCollectionWithOptions(ctx, opts)
-err = node.Vec().EnsureCollection(ctx, "colors")
-err = node.Vec().Upsert("colors", points)
-err = node.Vec().Delete("colors", []string{"red"})
-err = node.Vec().Flush(ctx) // drain every replica's write buffer
+err = node.Vector().CreateCollection("colors", 2, vector.Dot, false)
+err = node.Vector().CreateCollectionWithOptions(ctx, opts)
+err = node.Vector().EnsureCollection(ctx, "colors")
+err = node.Vector().Upsert("colors", points)
+err = node.Vector().Delete("colors", []string{"red"})
+err = node.Vector().Flush(ctx) // drain every replica's write buffer
 
 // fs (files)
-fsys := node.FS().Open("data")
+fsys := node.File().Open("data")
 err = fsys.Mkdir(ctx, "/docs", 0o755)
 err = fsys.MkdirAll(ctx, "/docs/2026/q1", 0o755)
 err = fsys.WriteFile(ctx, "/docs/readme.txt", []byte("hello"), 0o644)

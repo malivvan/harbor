@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -12,7 +13,7 @@ import (
 // with options matches the materialized result.
 func TestRangeOptions(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 
 	plain, _ := openAEADTestStore(t, root, Config{})
 	blocked, _ := openAEADTestStore(t, root, Config{

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	hstore "github.com/malivvan/harbor/store"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -97,14 +98,14 @@ func TestDeriveSeed(t *testing.T) {
 }
 
 func TestHasFlag(t *testing.T) {
-	flags := EncryptDBKeys | EncryptFSContent
-	if !HasFlag(flags, EncryptDBKeys) || !HasFlag(flags, EncryptFSContent) || !HasFlag(flags, EncryptDBKeys|EncryptFSContent) {
+	flags := EncryptRecordKeys | EncryptFileContent
+	if !HasFlag(flags, EncryptRecordKeys) || !HasFlag(flags, EncryptFileContent) || !HasFlag(flags, EncryptRecordKeys|EncryptFileContent) {
 		t.Fatal("Has did not report set flags")
 	}
-	if HasFlag(flags, EncryptDBValues) {
+	if HasFlag(flags, EncryptRecordValues) {
 		t.Fatal("Has reported an unset flag")
 	}
-	if HasFlag(flags, EncryptDBKeys|EncryptDBValues) {
+	if HasFlag(flags, EncryptRecordKeys|EncryptRecordValues) {
 		t.Fatal("Has must require all requested bits")
 	}
 }
@@ -113,7 +114,7 @@ func TestMetadataEncodingRoundTrip(t *testing.T) {
 	md := Metadata{
 		Salt:    []byte("0123456789abcdef"),
 		Time:    DefaultKDFTime,
-		Flags:   EncryptDBKeys | EncryptFSContent,
+		Flags:   EncryptRecordKeys | EncryptFileContent,
 		Memory:  DefaultKDFMemory,
 		Threads: DefaultKDFThreads,
 		Canary:  []byte("canary-ciphertext"),
@@ -189,7 +190,7 @@ func TestReadMetadataRejectsMalformedPayloads(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := bdb.Update(func(tx *bolt.Tx) error {
-				b, err := tx.CreateBucketIfNotExists([]byte("harbor.Metadata"))
+				b, err := tx.CreateBucketIfNotExists([]byte(hstore.SYSTEM))
 				if err != nil {
 					return err
 				}

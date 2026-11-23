@@ -424,7 +424,7 @@ func (se *Series) Get(ctx context.Context, ts int64) (Point, error) {
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("ts: corrupt point at %d", ts)
+			return fmt.Errorf("series: corrupt point at %d", ts)
 		}
 		point = decoded
 		return checkContext(ctx)
@@ -478,7 +478,7 @@ func (se *Series) First(ctx context.Context) (Point, error) {
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("ts: corrupt point")
+			return fmt.Errorf("series: corrupt point")
 		}
 		point = decoded
 		return checkContext(ctx)
@@ -532,7 +532,7 @@ func (se *Series) Last(ctx context.Context) (Point, error) {
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("ts: corrupt point")
+			return fmt.Errorf("series: corrupt point")
 		}
 		point = decoded
 		return checkContext(ctx)

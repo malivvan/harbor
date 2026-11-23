@@ -95,7 +95,7 @@ func (jsonCodec) UnmarshalProjected(b []byte, fields []string, v any) error {
 	for _, requested := range fields {
 		field, ok := projectedField(typ, requested)
 		if !ok {
-			return fmt.Errorf("db: projected field %q does not exist", requested)
+			return fmt.Errorf("record: projected field %q does not exist", requested)
 		}
 		rawValue, ok := raw[jsonFieldName(field)]
 		if !ok {
@@ -103,7 +103,7 @@ func (jsonCodec) UnmarshalProjected(b []byte, fields []string, v any) error {
 		}
 		target := elem.FieldByIndex(field.Index)
 		if !target.CanAddr() {
-			return fmt.Errorf("db: projected field %q is not settable", requested)
+			return fmt.Errorf("record: projected field %q is not settable", requested)
 		}
 		if err := json.Unmarshal(rawValue, target.Addr().Interface()); err != nil {
 			return err
@@ -162,7 +162,7 @@ func unmarshalProjected(codec Codec, b []byte, fields []string, v any) error {
 	for _, name := range fields {
 		field, ok := projectedField(typ, name)
 		if !ok {
-			return fmt.Errorf("db: projected field %q does not exist", name)
+			return fmt.Errorf("record: projected field %q does not exist", name)
 		}
 		keep[field.Name] = struct{}{}
 	}

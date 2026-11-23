@@ -25,8 +25,9 @@ store write ──commit──▶ ledger.Record(Entry)
 - **Start anchoring.** The first event links to a fixed genesis hash,
   `SHA-256("harbor/audit/v1/genesis")`, so the beginning of the chain is fixed.
 
-The trail lives in a top-level `audit/` bucket in the same bbolt file as the
-four stores, so it travels with snapshots and backups automatically.
+The trail lives in a top-level `ledger/` bucket (`store.LEDGER`) in the same
+bbolt file as the stores, so it travels with snapshots and backups
+automatically.
 
 ## Quick start
 
@@ -36,7 +37,7 @@ encryption flags:
 ```go
 store, err := harbor.Open(ctx, "app.db", 0o600, &harbor.Options{
 	Password: "correct horse battery staple",
-	Audit:    harbor.AuditAll, // or AuditDB | AuditTS, …
+	Audit:    harbor.AuditAll, // or AuditRecord | AuditSeries, …
 })
 if err != nil {
 	log.Fatal(err)
@@ -54,10 +55,10 @@ log.Printf("audit: %d events, tip %x", res.Count, res.Tip)
 | Flag | Records |
 |------|---------|
 | `AuditNone` | nothing (default) |
-| `AuditDB` | `record` writes |
-| `AuditFS` | `file` writes |
-| `AuditTS` | `series` writes |
-| `AuditVec` | `vector` writes |
+| `AuditRecord` | `record` writes |
+| `AuditFile` | `file` writes |
+| `AuditSeries` | `series` writes |
+| `AuditVector` | `vector` writes |
 | `AuditAll` | all four |
 
 Unlike encryption flags, audit flags are **not persisted**: they are a per-open
@@ -90,16 +91,16 @@ package can use it too:
 
 ```go
 pub, priv, err := ledger.DeriveKey(seed, "m/0'") // seed = 32-byte Argon2id output
-rec, err := ledger.NewRecorder(bdb, map[string]ed25519.PrivateKey{ledger.StoreDB: priv})
+rec, err := ledger.NewRecorder(bdb, map[string]ed25519.PrivateKey{ledger.StoreRecord: priv})
 
 err = rec.Record(ledger.Entry{
-	Store:  ledger.StoreDB,
+	Store:  ledger.StoreRecord,
 	Op:     "save",
 	Entity: "users:u1",
 	Digest: sha256sum(payload),
 })
 
-res, err := ledger.Verify(bdb, map[string]ed25519.PublicKey{ledger.StoreDB: pub})
+res, err := ledger.Verify(bdb, map[string]ed25519.PublicKey{ledger.StoreRecord: pub})
 ```
 
 `Record` opens its own short write transaction: it reads the head, computes the
@@ -115,10 +116,10 @@ keys, using SLIP-0010 hardened paths:
 
 | Store | Path |
 |-------|------|
-| record (`db`) | `m/0'` |
-| file (`fs`) | `m/1'` |
-| series (`ts`) | `m/2'` |
-| vector (`vec`) | `m/3'` |
+| record (`record`) | `m/0'` |
+| file (`fstree`) | `m/1'` |
+| series (`series`) | `m/2'` |
+| vector (`vector`) | `m/3'` |
 
 SLIP-0010 and SLIP-0021 are domain-separated (different HMAC keys), so deriving
 signing keys and encryption keys from one seed does not couple them. No separate
@@ -129,10 +130,10 @@ and therefore the derived audit keys, is correct.
 
 | Store | Operations |
 |-------|------------|
-| record (`db`) | `save`, `update`, `update_field`, `delete_struct`, `drop`, `set`, `set_bytes`, `delete` |
-| file (`fs`) | `mkdir`, `write`, `truncate`, `remove`, `remove_all`, `rename`, `copy`, `chmod`, `chtimes`, `chown`, `symlink`, `delete_fs` |
-| series (`ts`) | `insert`, `insert_many`, `delete_range`, `set_labels`, `set_retention`, `delete_series` |
-| vector (`vec`) | `create_collection`, `upsert`, `delete`, `drop_collection` |
+| record (`record`) | `save`, `update`, `update_field`, `delete_struct`, `drop`, `set`, `set_bytes`, `delete` |
+| file (`fstree`) | `mkdir`, `write`, `truncate`, `remove`, `remove_all`, `rename`, `copy`, `chmod`, `chtimes`, `chown`, `symlink`, `delete_fs` |
+| series (`series`) | `insert`, `insert_many`, `delete_range`, `set_labels`, `set_retention`, `delete_series` |
+| vector (`vector`) | `create_collection`, `upsert`, `delete`, `drop_collection` |
 
 Each event carries a SHA-256 `Digest` of the written payload (nil for deletes),
 so re-hashing current data against the recorded digest detects content changes.

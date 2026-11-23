@@ -11,11 +11,6 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// Name is the conventional root bucket the harbor root package uses for the db
-// sub-store. It is not applied implicitly: an empty Config.Root means the
-// database root.
-const Name = "db"
-
 // TypeStore stores user defined types in BoltDB.
 type TypeStore interface {
 	Finder

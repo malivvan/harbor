@@ -40,7 +40,7 @@ const (
 	exportKindFooter        = "footer"
 	exportKindDBRecord      = "db.record"
 	exportKindFSDir         = "fs.dir"
-	exportKindFSFile        = "fs.file"
+	exportKindFSFile        = "fs.fstree"
 	exportKindFSSymlink     = "fs.symlink"
 	exportKindTSPoints      = "ts.points"
 	exportKindTSLabels      = "ts.labels"
@@ -68,7 +68,7 @@ var (
 
 // Progress describes how far an export or import has advanced.
 type Progress struct {
-	// Section is the record kind being processed, for example "fs.file".
+	// Section is the record kind being processed, for example "fs.fstree".
 	Section string
 	// Records is the number of records processed so far, including this one.
 	Records int64
@@ -141,8 +141,8 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 
 // Export writes a versioned, checksummed logical snapshot of every store to w.
 //
-// Unlike Backup, which copies the database file byte for byte, Export writes
-// logical records: the db records of the supplied types, every named file
+// Unlike Backup, which copies the database fstree byte for byte, Export writes
+// logical records: the db records of the supplied types, every named fstree
 // system's tree, every time series and every vector collection. Import applies
 // those records to another store, so the container can migrate between
 // encryption modes and between on-disk formats. Each record is

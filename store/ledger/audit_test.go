@@ -35,12 +35,12 @@ func testDB(t *testing.T) *bolt.DB {
 func TestRecordAndVerify(t *testing.T) {
 	pub, priv := testKey(t, "m/0'")
 	b := testDB(t)
-	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreRecord: priv})
 
-	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "users:u1", Digest: []byte("0123456789abcdef0123456789abcdef")}))
-	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "delete", Entity: "users:u1"}))
+	require.NoError(t, rec.Record(Entry{Store: StoreRecord, Op: "save", Entity: "users:u1", Digest: []byte("0123456789abcdef0123456789abcdef")}))
+	require.NoError(t, rec.Record(Entry{Store: StoreRecord, Op: "delete", Entity: "users:u1"}))
 
-	res, err := Verify(b, map[string]ed25519.PublicKey{StoreDB: pub})
+	res, err := Verify(b, map[string]ed25519.PublicKey{StoreRecord: pub})
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), res.Count)
 
@@ -53,8 +53,8 @@ func TestRecordAndVerify(t *testing.T) {
 func TestVerifyRejectsForgery(t *testing.T) {
 	pub, priv := testKey(t, "m/0'")
 	b := testDB(t)
-	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
-	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "a"}))
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreRecord: priv})
+	require.NoError(t, rec.Record(Entry{Store: StoreRecord, Op: "save", Entity: "a"}))
 
 	// Tamper with the stored event payload without re-signing.
 	require.NoError(t, b.Update(func(tx *bolt.Tx) error {
@@ -65,17 +65,17 @@ func TestVerifyRejectsForgery(t *testing.T) {
 		return events.Put(seqKey(0), v)
 	}))
 
-	_, err := Verify(b, map[string]ed25519.PublicKey{StoreDB: pub})
+	_, err := Verify(b, map[string]ed25519.PublicKey{StoreRecord: pub})
 	require.Error(t, err)
 }
 
 func TestVerifyRejectsMissingEvent(t *testing.T) {
 	pub, priv := testKey(t, "m/0'")
 	b := testDB(t)
-	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
-	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "a"}))
-	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "b"}))
-	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "c"}))
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreRecord: priv})
+	require.NoError(t, rec.Record(Entry{Store: StoreRecord, Op: "save", Entity: "a"}))
+	require.NoError(t, rec.Record(Entry{Store: StoreRecord, Op: "save", Entity: "b"}))
+	require.NoError(t, rec.Record(Entry{Store: StoreRecord, Op: "save", Entity: "c"}))
 
 	// Delete the middle event; the chain link must break.
 	require.NoError(t, b.Update(func(tx *bolt.Tx) error {
@@ -84,16 +84,16 @@ func TestVerifyRejectsMissingEvent(t *testing.T) {
 		return events.Delete(seqKey(1))
 	}))
 
-	_, err := Verify(b, map[string]ed25519.PublicKey{StoreDB: pub})
+	_, err := Verify(b, map[string]ed25519.PublicKey{StoreRecord: pub})
 	require.Error(t, err)
 }
 
 func TestVerifyTruncatedTailStillVerifiesPrefix(t *testing.T) {
 	pub, priv := testKey(t, "m/0'")
 	b := testDB(t)
-	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreRecord: priv})
 	for i := 0; i < 3; i++ {
-		require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "e"}))
+		require.NoError(t, rec.Record(Entry{Store: StoreRecord, Op: "save", Entity: "e"}))
 	}
 
 	// Delete the last event: the remaining prefix is internally consistent, so
@@ -104,7 +104,7 @@ func TestVerifyTruncatedTailStillVerifiesPrefix(t *testing.T) {
 		return events.Delete(seqKey(2))
 	}))
 
-	res, err := Verify(b, map[string]ed25519.PublicKey{StoreDB: pub})
+	res, err := Verify(b, map[string]ed25519.PublicKey{StoreRecord: pub})
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), res.Count)
 }
@@ -112,7 +112,7 @@ func TestVerifyTruncatedTailStillVerifiesPrefix(t *testing.T) {
 func TestRecordUnknownStoreFails(t *testing.T) {
 	_, priv := testKey(t, "m/0'")
 	b := testDB(t)
-	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreRecord: priv})
 	err := rec.Record(Entry{Store: "nope", Op: "save"})
 	require.Error(t, err)
 }
@@ -139,8 +139,8 @@ func TestDeriveKeyDeterministic(t *testing.T) {
 func TestRecordFillsTime(t *testing.T) {
 	_, priv := testKey(t, "m/0'")
 	b := testDB(t)
-	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
-	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "a"}))
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreRecord: priv})
+	require.NoError(t, rec.Record(Entry{Store: StoreRecord, Op: "save", Entity: "a"}))
 
 	var ev Event
 	require.NoError(t, b.View(func(tx *bolt.Tx) error {
@@ -159,7 +159,7 @@ func TestRecordFillsTime(t *testing.T) {
 func TestRecordConcurrentSequence(t *testing.T) {
 	_, priv := testKey(t, "m/0'")
 	b := testDB(t)
-	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreRecord: priv})
 
 	const records = 32
 	var wg sync.WaitGroup
@@ -167,7 +167,7 @@ func TestRecordConcurrentSequence(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "e"}); err != nil {
+			if err := rec.Record(Entry{Store: StoreRecord, Op: "save", Entity: "e"}); err != nil {
 				t.Errorf("concurrent Record: %v", err)
 			}
 		}()
@@ -175,7 +175,7 @@ func TestRecordConcurrentSequence(t *testing.T) {
 	wg.Wait()
 
 	pub, _ := testKey(t, "m/0'")
-	res, err := Verify(b, map[string]ed25519.PublicKey{StoreDB: pub})
+	res, err := Verify(b, map[string]ed25519.PublicKey{StoreRecord: pub})
 	require.NoError(t, err)
 	require.Equal(t, uint64(records), res.Count)
 
@@ -191,12 +191,12 @@ func TestRecordConcurrentSequence(t *testing.T) {
 func TestVerifyRejectsWrongKeys(t *testing.T) {
 	_, priv := testKey(t, "m/0'")
 	b := testDB(t)
-	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
-	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "a"}))
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreRecord: priv})
+	require.NoError(t, rec.Record(Entry{Store: StoreRecord, Op: "save", Entity: "a"}))
 
 	wrongPub, _, err := DeriveKey([]byte("different-seed"), "m/0'")
 	require.NoError(t, err)
-	_, err = Verify(b, map[string]ed25519.PublicKey{StoreDB: wrongPub})
+	_, err = Verify(b, map[string]ed25519.PublicKey{StoreRecord: wrongPub})
 	require.Error(t, err)
 }
 
@@ -205,8 +205,8 @@ func TestVerifyRejectsWrongKeys(t *testing.T) {
 func TestEventEncodingIsCanonical(t *testing.T) {
 	_, priv := testKey(t, "m/0'")
 	b := testDB(t)
-	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreDB: priv})
-	require.NoError(t, rec.Record(Entry{Store: StoreDB, Op: "save", Entity: "users:u1"}))
+	rec := NewRecorder(b, map[string]ed25519.PrivateKey{StoreRecord: priv})
+	require.NoError(t, rec.Record(Entry{Store: StoreRecord, Op: "save", Entity: "users:u1"}))
 
 	var stored []byte
 	require.NoError(t, b.View(func(tx *bolt.Tx) error {

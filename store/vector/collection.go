@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/harbor/store"
 )
 
 // Collection represents a single logical group of vectors, similar to a table in SQL databases.
@@ -364,12 +365,12 @@ func (c *Collection) observeFlush(d time.Duration, points int, err error) {
 		return
 	}
 	labels := metrics.Labels{
-		metrics.LabelStore:  "vec",
+		metrics.LabelStore:  store.VECTOR,
 		metrics.LabelOp:     "flush",
 		metrics.LabelResult: resultLabel(err),
 	}
-	metrics.Histogram(c.storage.obs, metrics.MetricVecFlushDuration, float64(d), labels)
-	metrics.Counter(c.storage.obs, metrics.MetricVecFlushTotal, 1, labels)
+	metrics.Histogram(c.storage.obs, metrics.MetricVectorFlushDuration, float64(d), labels)
+	metrics.Counter(c.storage.obs, metrics.MetricVectorFlushTotal, 1, labels)
 }
 
 // Close flushes the collection's buffered points and retires the handle: later
@@ -465,12 +466,12 @@ func (c *Collection) observeSearch(d time.Duration, results int, err error) {
 		return
 	}
 	labels := metrics.Labels{
-		metrics.LabelStore:  "vec",
+		metrics.LabelStore:  store.VECTOR,
 		metrics.LabelOp:     "search",
 		metrics.LabelResult: resultLabel(err),
 	}
-	metrics.Histogram(c.storage.obs, metrics.MetricVecSearchDuration, float64(d), labels)
-	metrics.Counter(c.storage.obs, metrics.MetricVecCandidates, int64(results), labels)
+	metrics.Histogram(c.storage.obs, metrics.MetricVectorSearchDuration, float64(d), labels)
+	metrics.Counter(c.storage.obs, metrics.MetricVectorCandidates, int64(results), labels)
 }
 
 // Count returns the number of points currently stored in the collection.
@@ -710,10 +711,10 @@ func validatePayloadKeys(points []PointStruct) error {
 			continue
 		}
 		if _, ok := p.Payload[payloadJSONKey]; ok {
-			return fmt.Errorf("vec: payload key %q is reserved", payloadJSONKey)
+			return fmt.Errorf("vector: payload key %q is reserved", payloadJSONKey)
 		}
 		if _, ok := p.Payload["__quantized_vector"]; ok {
-			return fmt.Errorf("vec: payload key %q is reserved", "__quantized_vector")
+			return fmt.Errorf("vector: payload key %q is reserved", "__quantized_vector")
 		}
 	}
 	return nil

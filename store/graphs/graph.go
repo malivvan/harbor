@@ -1,38 +1,4 @@
-// Package graph is a reusable, bitemporal property-graph core over a Harbour
-// db sub-store.
-//
-// It owns the portable half of a graph store: nodes and directed edges with
-// typed labels and free-form properties, adjacency reads, breadth-first
-// traversal, counts, and the bitemporal history that makes an as-of question
-// answerable. It deliberately does not know what a node type means, what a
-// property is called, or which labels are the application's bookkeeping. Those
-// belong to the caller.
-//
-// # Storage
-//
-// The records use the same on-disk layout as the graph eidos previously kept in
-// its own package: the bucket names (NodeRecord, NodeVersion, EdgeRecord,
-// EdgeVersion via HarborBucketName) and the field order are pinned, so a file
-// written by eidos's earlier graph implementation is readable by a build whose
-// codec can encode the records. The codec is the store's; the property bytes
-// are produced by a ValueCodec the caller may replace (JSON by default), which
-// is the seam that keeps an existing file byte-compatible.
-//
-// # Time
-//
-// A live record is one row. A version that ended, was replaced, or was
-// retracted moves to a history bucket with its interval closed. ValidFrom and
-// ValidTo are valid time ("when was this true"); RecordedAt is the transaction
-// time ("when did this store believe it"). An as-of read returns the version in
-// force at the instant — its interval covers it and it had been recorded by
-// then — never a version the store learned about later.
-//
-// # Ownership
-//
-// A Graph borrows the db.Store it is created with: it never closes it. Two
-// graphs can share one store by choosing different prefixes (WithPrefix), and
-// the caller still owns the life of the underlying file.
-package graph
+package graphs
 
 import (
 	"context"
@@ -341,7 +307,7 @@ func NewStorage(storage Storage, opts ...Option) *Graph {
 
 // DB returns the legacy record store the graph is built on, or nil for an
 // independent graph.
-func (g *Graph) DB() *hdb.Store { return g.db }
+func (g *Graph) RecordStore() *hdb.Store { return g.db }
 
 // Storage returns the graph's persistence backend.
 func (g *Graph) Storage() Storage { return g.storage }

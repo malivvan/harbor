@@ -19,15 +19,15 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/malivvan/harbor/internal/absfs"
-	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/harbor/store/ledger"
 )
 
 var errNilIno = errors.New("ino is nil")
 
 // ErrIncompatibleVersion is returned when the on-disk filesystem format is not
 // the one this build understands.
-var ErrIncompatibleVersion = errors.New("fs: incompatible on-disk format version")
+var ErrIncompatibleVersion = errors.New("fstree: incompatible on-disk format version")
 
 // formatVersionKey records the on-disk format revision in the state bucket.
 const formatVersionKey = "formatVersion"
@@ -112,7 +112,7 @@ func (fs *FS) auditEntry(op, entity string, digest []byte) error {
 		return nil
 	}
 	return fs.audit.Record(ledger.Entry{
-		Store:  ledger.StoreFS,
+		Store:  ledger.StoreFile,
 		Op:     op,
 		Entity: entity,
 		Digest: digest,
@@ -251,7 +251,7 @@ func initFS(db *bolt.DB, bound *bolt.Tx, forceReadOnly bool, bucketpath string, 
 			return err
 		}
 		if len(data) != 8 {
-			return fmt.Errorf("fs: corrupt root inode value: %d bytes", len(data))
+			return fmt.Errorf("fstree: corrupt root inode value: %d bytes", len(data))
 		}
 		rootIno = b2i(data)
 

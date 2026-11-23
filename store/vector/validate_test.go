@@ -3,6 +3,7 @@ package vector
 import (
 	"testing"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,10 +23,10 @@ func TestConfigValidateAndNormalize(t *testing.T) {
 	require.ErrorIs(t, Config{EncryptPoints: true}.Validate(), ErrInvalidKey)
 	require.ErrorIs(t, Config{Secret: []byte("short"), EncryptPointIDs: true}.Validate(), ErrInvalidKey)
 
-	got, err := Config{UseQuant: true, Root: [][]byte{[]byte("vec"), nil}}.Normalize()
+	got, err := Config{UseQuant: true, Root: [][]byte{[]byte(hstore.VECTOR), nil}}.Normalize()
 	require.NoError(t, err)
 	require.NotNil(t, got.Quantizer)
-	require.Equal(t, [][]byte{[]byte("vec")}, got.Root)
+	require.Equal(t, [][]byte{[]byte(hstore.VECTOR)}, got.Root)
 
 	_, err = Config{EncryptPoints: true}.Normalize()
 	require.ErrorIs(t, err, ErrInvalidKey)

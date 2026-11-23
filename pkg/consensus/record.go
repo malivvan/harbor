@@ -57,23 +57,23 @@ func newValue(name string, raw json.RawMessage) (any, error) {
 	return ptr, nil
 }
 
-// DB is the replicated write view of the db sub-store. Reads should use
+// Record is the replicated write view of the db sub-store. Reads should use
 // Node.Store().Record() directly; writes go through the methods here so they are
 // proposed through raft and applied on every node.
-type DB struct {
+type Record struct {
 	n    *Node
 	path []string
 }
 
-// dbChange is the payload for record-level db writes.
-type dbChange struct {
+// recordChange is the payload for record-level db writes.
+type recordChange struct {
 	Path []string        `json:"path"`
 	Type string          `json:"type"`
 	Data json.RawMessage `json:"data"`
 }
 
-// dbFieldChange is the payload for db.UpdateField.
-type dbFieldChange struct {
+// recordFieldChange is the payload for db.UpdateField.
+type recordFieldChange struct {
 	Path  []string        `json:"path"`
 	Type  string          `json:"type"`
 	Data  json.RawMessage `json:"data"`
@@ -81,66 +81,66 @@ type dbFieldChange struct {
 	Value json.RawMessage `json:"value"`
 }
 
-// dbKVArg is the payload for raw key/value writes. Key and Value are already
+// recordKVArg is the payload for raw key/value writes. Key and Value are already
 // encoded: the leader encodes the key with the store's key encoding and, for
 // Set, the value with the store's codec. Every node seals them with its own
 // key material when applying, so only logical bytes cross the wire.
-type dbKVArg struct {
+type recordKVArg struct {
 	Path   []string `json:"path"`
 	Bucket string   `json:"bucket"`
 	Key    []byte   `json:"key"`
 	Value  []byte   `json:"value,omitempty"`
 }
 
-// DB returns the replicated db sub-store.
-func (n *Node) DB() *DB {
+// Record returns the replicated db sub-store.
+func (n *Node) Record() *Record {
 	if n == nil {
 		return nil
 	}
-	return &DB{n: n}
+	return &Record{n: n}
 }
 
-// From returns a DB view rooted at a nested bucket path, mirroring db.Node.From.
-func (d *DB) From(addend ...string) *DB {
+// From returns a Record view rooted at a nested bucket path, mirroring db.Node.From.
+func (d *Record) From(addend ...string) *Record {
 	if d == nil || d.n == nil {
 		return nil
 	}
 	p := make([]string, 0, len(d.path)+len(addend))
 	p = append(p, d.path...)
 	p = append(p, addend...)
-	return &DB{n: d.n, path: p}
+	return &Record{n: d.n, path: p}
 }
 
 // Save replicates db.Node.Save.
-func (d *DB) Save(ctx context.Context, data any) error {
-	return d.recordWrite(ctx, opDBSave, "", "", data)
+func (d *Record) Save(ctx context.Context, data any) error {
+	return d.recordWrite(ctx, opRecordSave, "", "", data)
 }
 
 // Update replicates db.Node.Update.
-func (d *DB) Update(ctx context.Context, data any) error {
-	return d.recordWrite(ctx, opDBUpdate, "", "", data)
+func (d *Record) Update(ctx context.Context, data any) error {
+	return d.recordWrite(ctx, opRecordUpdate, "", "", data)
 }
 
 // UpdateField replicates db.Node.UpdateField.
-func (d *DB) UpdateField(ctx context.Context, data any, field string, value any) error {
-	return d.recordWrite(ctx, opDBUpdateField, field, value, data)
+func (d *Record) UpdateField(ctx context.Context, data any, field string, value any) error {
+	return d.recordWrite(ctx, opRecordUpdateField, field, value, data)
 }
 
 // DeleteStruct replicates db.Node.DeleteStruct.
-func (d *DB) DeleteStruct(ctx context.Context, data any) error {
-	return d.recordWrite(ctx, opDBDelete, "", "", data)
+func (d *Record) DeleteStruct(ctx context.Context, data any) error {
+	return d.recordWrite(ctx, opRecordDelete, "", "", data)
 }
 
 // Drop replicates db.Node.Drop.
-func (d *DB) Drop(ctx context.Context, data any) error {
-	return d.recordWrite(ctx, opDBDrop, "", "", data)
+func (d *Record) Drop(ctx context.Context, data any) error {
+	return d.recordWrite(ctx, opRecordDrop, "", "", data)
 }
 
 // Set replicates db.Node.Set. The value is encoded with the leader's codec
 // once; the resulting bytes are stored (and sealed) identically on every node,
 // so all nodes must run the same codec. A nil value stores a zero-length
 // value, exactly like the direct API.
-func (d *DB) Set(ctx context.Context, bucket string, key, value any) error {
+func (d *Record) Set(ctx context.Context, bucket string, key, value any) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -159,13 +159,13 @@ func (d *DB) Set(ctx context.Context, bucket string, key, value any) error {
 			return fmt.Errorf("consensus: encode value: %w", err)
 		}
 	}
-	_, err = d.n.apply(opDBSet, dbKVArg{Path: d.path, Bucket: bucket, Key: kb, Value: raw})
+	_, err = d.n.apply(opRecordSet, recordKVArg{Path: d.path, Bucket: bucket, Key: kb, Value: raw})
 	return err
 }
 
 // SetBytes replicates db.Node.SetBytes. The bytes are stored as-is (and
 // sealed per node), so callers can replicate a value they encoded themselves.
-func (d *DB) SetBytes(ctx context.Context, bucket string, key any, value []byte) error {
+func (d *Record) SetBytes(ctx context.Context, bucket string, key any, value []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -177,12 +177,12 @@ func (d *DB) SetBytes(ctx context.Context, bucket string, key any, value []byte)
 	if err != nil {
 		return fmt.Errorf("consensus: encode key: %w", err)
 	}
-	_, err = d.n.apply(opDBSet, dbKVArg{Path: d.path, Bucket: bucket, Key: kb, Value: value})
+	_, err = d.n.apply(opRecordSet, recordKVArg{Path: d.path, Bucket: bucket, Key: kb, Value: value})
 	return err
 }
 
 // Delete replicates db.Node.Delete for a key/value entry.
-func (d *DB) Delete(ctx context.Context, bucket string, key any) error {
+func (d *Record) Delete(ctx context.Context, bucket string, key any) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -194,13 +194,13 @@ func (d *DB) Delete(ctx context.Context, bucket string, key any) error {
 	if err != nil {
 		return fmt.Errorf("consensus: encode key: %w", err)
 	}
-	_, err = d.n.apply(opDBDeleteKey, dbKVArg{Path: d.path, Bucket: bucket, Key: kb})
+	_, err = d.n.apply(opRecordDeleteKey, recordKVArg{Path: d.path, Bucket: bucket, Key: kb})
 	return err
 }
 
 // localNode returns the leader's local db node for this view. It is used to
 // encode keys and values exactly as a direct write would.
-func (d *DB) localNode() (record.Node, error) {
+func (d *Record) localNode() (record.Node, error) {
 	if d == nil || d.n == nil {
 		return nil, ErrClosed
 	}
@@ -208,10 +208,10 @@ func (d *DB) localNode() (record.Node, error) {
 	if st == nil {
 		return nil, ErrClosed
 	}
-	return dbNode(st, d.path), nil
+	return recordNode(st, d.path), nil
 }
 
-func (d *DB) recordWrite(ctx context.Context, op, field string, value, data any) error {
+func (d *Record) recordWrite(ctx context.Context, op, field string, value, data any) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -228,20 +228,20 @@ func (d *DB) recordWrite(ctx context.Context, op, field string, value, data any)
 		return fmt.Errorf("consensus: encode record: %w", err)
 	}
 
-	if op == opDBUpdateField {
+	if op == opRecordUpdateField {
 		vraw, err := json.Marshal(value)
 		if err != nil {
 			return fmt.Errorf("consensus: encode field value: %w", err)
 		}
-		_, err = d.n.apply(op, dbFieldChange{Path: d.path, Type: name, Data: raw, Field: field, Value: vraw})
+		_, err = d.n.apply(op, recordFieldChange{Path: d.path, Type: name, Data: raw, Field: field, Value: vraw})
 		return err
 	}
-	_, err = d.n.apply(op, dbChange{Path: d.path, Type: name, Data: raw})
+	_, err = d.n.apply(op, recordChange{Path: d.path, Type: name, Data: raw})
 	return err
 }
 
-// dbNode resolves the db.Node for a bucket path.
-func dbNode(st *harbor.Store, path []string) record.Node {
+// recordNode resolves the db.Node for a bucket path.
+func recordNode(st *harbor.Store, path []string) record.Node {
 	var node record.Node = st.Record()
 	if len(path) > 0 {
 		node = node.From(path...)
@@ -249,7 +249,7 @@ func dbNode(st *harbor.Store, path []string) record.Node {
 	return node
 }
 
-func (f *fsm) applyDBUpsert(ctx context.Context, a dbChange, update bool) any {
+func (f *fsm) applyRecordUpsert(ctx context.Context, a recordChange, update bool) any {
 	st := f.node.storeHandle()
 	if st == nil {
 		return ErrClosed
@@ -258,14 +258,14 @@ func (f *fsm) applyDBUpsert(ctx context.Context, a dbChange, update bool) any {
 	if err != nil {
 		return err
 	}
-	node := dbNode(st, a.Path)
+	node := recordNode(st, a.Path)
 	if update {
 		return node.Update(ctx, ptr)
 	}
 	return node.Save(ctx, ptr)
 }
 
-func (f *fsm) applyDBUpdateField(ctx context.Context, a dbFieldChange) any {
+func (f *fsm) applyRecordUpdateField(ctx context.Context, a recordFieldChange) any {
 	st := f.node.storeHandle()
 	if st == nil {
 		return ErrClosed
@@ -284,11 +284,11 @@ func (f *fsm) applyDBUpdateField(ctx context.Context, a dbFieldChange) any {
 	if err := json.Unmarshal(a.Value, value); err != nil {
 		return fmt.Errorf("consensus: decode field %q: %w", a.Field, err)
 	}
-	node := dbNode(st, a.Path)
+	node := recordNode(st, a.Path)
 	return node.UpdateField(ctx, ptr, a.Field, reflect.ValueOf(value).Elem().Interface())
 }
 
-func (f *fsm) applyDBDelete(ctx context.Context, a dbChange) any {
+func (f *fsm) applyRecordDelete(ctx context.Context, a recordChange) any {
 	st := f.node.storeHandle()
 	if st == nil {
 		return ErrClosed
@@ -297,10 +297,10 @@ func (f *fsm) applyDBDelete(ctx context.Context, a dbChange) any {
 	if err != nil {
 		return err
 	}
-	return dbNode(st, a.Path).DeleteStruct(ctx, ptr)
+	return recordNode(st, a.Path).DeleteStruct(ctx, ptr)
 }
 
-func (f *fsm) applyDBDrop(ctx context.Context, a dbChange) any {
+func (f *fsm) applyRecordDrop(ctx context.Context, a recordChange) any {
 	st := f.node.storeHandle()
 	if st == nil {
 		return ErrClosed
@@ -309,21 +309,21 @@ func (f *fsm) applyDBDrop(ctx context.Context, a dbChange) any {
 	if err != nil {
 		return err
 	}
-	return dbNode(st, a.Path).Drop(ctx, ptr)
+	return recordNode(st, a.Path).Drop(ctx, ptr)
 }
 
-func (f *fsm) applyDBSet(ctx context.Context, a dbKVArg) any {
+func (f *fsm) applyRecordSet(ctx context.Context, a recordKVArg) any {
 	st := f.node.storeHandle()
 	if st == nil {
 		return ErrClosed
 	}
-	return dbNode(st, a.Path).SetBytes(ctx, a.Bucket, a.Key, a.Value)
+	return recordNode(st, a.Path).SetBytes(ctx, a.Bucket, a.Key, a.Value)
 }
 
-func (f *fsm) applyDBDeleteKey(ctx context.Context, a dbKVArg) any {
+func (f *fsm) applyRecordDeleteKey(ctx context.Context, a recordKVArg) any {
 	st := f.node.storeHandle()
 	if st == nil {
 		return ErrClosed
 	}
-	return dbNode(st, a.Path).Delete(ctx, a.Bucket, a.Key)
+	return recordNode(st, a.Path).Delete(ctx, a.Bucket, a.Key)
 }

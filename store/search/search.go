@@ -23,11 +23,6 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// Name is the conventional root bucket the harbor root package uses for the
-// full-text store. It is not applied implicitly: an empty Config.Root means the
-// database root.
-const Name = "fts"
-
 // FormatVersion is the on-disk full-text format revision this build writes and
 // accepts. Any other value fails the open with ErrIncompatibleVersion.
 const FormatVersion uint64 = 1
@@ -41,29 +36,29 @@ const (
 // Errors returned by the package.
 var (
 	// ErrNilContext is returned when a nil context is passed to an operation.
-	ErrNilContext = errors.New("fts: nil context")
+	ErrNilContext = errors.New("search: nil context")
 
 	// ErrNilParam is returned when a required parameter is nil.
-	ErrNilParam = errors.New("fts: nil parameter")
+	ErrNilParam = errors.New("search: nil parameter")
 
 	// ErrInvalidConfig reports an unusable configuration.
-	ErrInvalidConfig = errors.New("fts: invalid configuration")
+	ErrInvalidConfig = errors.New("search: invalid configuration")
 
 	// ErrInvalidName reports an empty or malformed index name.
-	ErrInvalidName = errors.New("fts: invalid index name")
+	ErrInvalidName = errors.New("search: invalid index name")
 
 	// ErrIncompatibleVersion reports an index written by another format.
-	ErrIncompatibleVersion = errors.New("fts: incompatible on-disk format version")
+	ErrIncompatibleVersion = errors.New("search: incompatible on-disk format version")
 
 	// ErrWrongMode reports an index opened with the wrong encryption mode.
-	ErrWrongMode = errors.New("fts: index encryption mode does not match")
+	ErrWrongMode = errors.New("search: index encryption mode does not match")
 
 	// ErrInTransaction reports an operation that cannot run on a store bound to
 	// a caller-owned transaction (for example key rotation).
-	ErrInTransaction = errors.New("fts: operation is not available inside an explicit transaction")
+	ErrInTransaction = errors.New("search: operation is not available inside an explicit transaction")
 
 	// ErrIndexNotFound reports a missing index.
-	ErrIndexNotFound = errors.New("fts: index not found")
+	ErrIndexNotFound = errors.New("search: index not found")
 )
 
 // Config configures a Store or an Index.

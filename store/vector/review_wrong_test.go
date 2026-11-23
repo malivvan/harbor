@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/bbolt"
 )
@@ -42,7 +43,7 @@ func TestListCollectionsSkipsForeignHarborBuckets(t *testing.T) {
 
 	// Another sub-store joins the same database after the vec store was opened.
 	require.NoError(t, bdb.Update(func(tx *bbolt.Tx) error {
-		for _, name := range []string{"db", "fs", "ts"} {
+		for _, name := range []string{hstore.RECORD, hstore.FSTREE, hstore.SERIES} {
 			if _, err := tx.CreateBucket([]byte(name)); err != nil {
 				return err
 			}

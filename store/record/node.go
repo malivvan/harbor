@@ -4,8 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/harbor/store"
+	"github.com/malivvan/harbor/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -19,7 +20,7 @@ func (s *Store) observeTx(kind string, run func() error) error {
 	start := time.Now()
 	err := run()
 	labels := metrics.Labels{
-		metrics.LabelStore:  "db",
+		metrics.LabelStore:  store.RECORD,
 		metrics.LabelKind:   kind,
 		metrics.LabelResult: resultLabel(err),
 	}

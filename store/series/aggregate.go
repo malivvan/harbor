@@ -150,7 +150,7 @@ func (se *Series) Aggregate(ctx context.Context, start, end int64, step int64, f
 		return nil, ErrInvalidRange
 	}
 	if !validAggregate(fn) {
-		return nil, fmt.Errorf("ts: invalid aggregate %q", fn)
+		return nil, fmt.Errorf("series: invalid aggregate %q", fn)
 	}
 
 	agg := &aggregator{fn: fn, step: step}

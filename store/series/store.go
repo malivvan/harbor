@@ -10,21 +10,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/harbor/store"
+	"github.com/malivvan/harbor/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
-
-// Name is the conventional root bucket the harbor root package uses for the ts
-// sub-store. It is not applied implicitly: an empty Config.Root means the
-// database root.
-const Name = "ts"
 
 const metaBucketName = "__ts_meta__"
 
 // ErrInTransaction reports an operation that cannot run on a store bound to a
 // caller-owned transaction (for example key rotation).
-var ErrInTransaction = errors.New("ts: operation is not available inside an explicit transaction")
+var ErrInTransaction = errors.New("series: operation is not available inside an explicit transaction")
 
 // FormatVersion is the on-disk time-series format revision this build writes
 // and accepts. The first release has a single version 1; any other value fails
@@ -130,7 +126,7 @@ func (s *Store) auditEntry(op, series string, digest []byte) error {
 		return nil
 	}
 	return s.audit.Record(ledger.Entry{
-		Store:  ledger.StoreTS,
+		Store:  ledger.StoreSeries,
 		Op:     op,
 		Entity: series,
 		Digest: digest,
@@ -153,12 +149,12 @@ func (s *Store) observeAggregate(d time.Duration, samples int, err error) {
 		return
 	}
 	labels := metrics.Labels{
-		metrics.LabelStore:  "ts",
+		metrics.LabelStore:  store.SERIES,
 		metrics.LabelOp:     "aggregate",
 		metrics.LabelResult: resultLabel(err),
 	}
-	metrics.Histogram(s.obs, metrics.MetricTSAggregateDuration, float64(d), labels)
-	metrics.Counter(s.obs, metrics.MetricTSDecodedPoints, int64(samples), labels)
+	metrics.Histogram(s.obs, metrics.MetricSeriesAggregateDuration, float64(d), labels)
+	metrics.Counter(s.obs, metrics.MetricSeriesDecodedPoints, int64(samples), labels)
 }
 
 // resultLabel maps an error to the ResultOK/ResultError label value.

@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/harbor/store"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -103,7 +104,7 @@ func (b *fsBucket) observeChunk(op string, n int, err error) {
 		return
 	}
 	labels := metrics.Labels{
-		metrics.LabelStore:  "fs",
+		metrics.LabelStore:  store.FSTREE,
 		metrics.LabelOp:     op,
 		metrics.LabelResult: resultLabel(err),
 	}
@@ -262,7 +263,7 @@ func (b *fsBucket) truncateData(ino uint64, size, chunkSize int64) error {
 	prefix := chunkPrefix(&prefixBuf, ino)
 	if err := b.deleteChunks(prefix, func(key []byte) (bool, error) {
 		if len(key) != 16 {
-			return false, fmt.Errorf("fs: corrupt chunk key for inode %d: %d bytes", ino, len(key))
+			return false, fmt.Errorf("fstree: corrupt chunk key for inode %d: %d bytes", ino, len(key))
 		}
 		idx := int64(binary.BigEndian.Uint64(key[8:]))
 		return idx >= firstDelete, nil

@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/harbor/store"
 )
 
 // inodeCache provides a thread-safe in-memory cache for inodes to improve
@@ -37,7 +38,7 @@ func (c *inodeCache) observeLookup(hit bool) {
 		result = metrics.ResultError
 	}
 	metrics.Counter(c.obs, metrics.MetricCacheHits, 1, metrics.Labels{
-		metrics.LabelStore:  "fs",
+		metrics.LabelStore:  store.FSTREE,
 		metrics.LabelResult: result,
 	})
 }
@@ -248,7 +249,7 @@ func (c *inodeCache) Stats() CacheStats {
 
 	if c.obs != nil {
 		metrics.Gauge(c.obs, metrics.MetricCacheSize, float64(stats.Size), metrics.Labels{
-			metrics.LabelStore: "fs",
+			metrics.LabelStore: store.FSTREE,
 		})
 	}
 	return stats

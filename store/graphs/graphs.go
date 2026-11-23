@@ -1,10 +1,42 @@
-// Package graphs is Harbor's independent property-graph store.
+// Package graphs is Harbor's bitemporal property-graph store and the reusable
+// graph core that operates on it.
 //
-// It owns a dedicated root bucket and its own record encoding, so graph data no
-// longer depends on the record store's buckets or codec. Each named graph has
-// its own bucket with node, edge and version records; values are sealed when
-// encryption is enabled. The public graph API lives in the graph package; this
-// package supplies its persistence backend and lifecycle.
+// A Store owns a dedicated root bucket and its own record encoding, so graph
+// data does not depend on the record store's buckets or codec. Each named graph
+// has its own bucket with node, edge and version records; values are sealed when
+// encryption is enabled.
+//
+// The core is the Graph type: nodes and directed edges with typed labels and
+// free-form properties, adjacency reads, breadth-first traversal, counts, and
+// the bitemporal history that makes an as-of question answerable. It
+// deliberately does not know what a node type means, what a property is called,
+// or which labels are the application's bookkeeping. Those belong to the caller.
+// A Graph runs over a Store's buckets, or over a record.Store for the legacy
+// record-backed layout (New).
+//
+// # Storage
+//
+// The record-backed layout uses the bucket names NodeRecord, NodeVersion,
+// EdgeRecord and EdgeVersion pins the graph kept in eidos, and the same field
+// order, so a file written by that earlier implementation stays readable by a
+// build whose codec can encode the records. The codec is the store's; the
+// property bytes are produced by a ValueCodec the caller may replace (JSON by
+// default), which is the seam that keeps an existing file byte-compatible.
+//
+// # Time
+//
+// A live record is one row. A version that ended, was replaced, or was
+// retracted moves to a history bucket with its interval closed. ValidFrom and
+// ValidTo are valid time ("when was this true"); RecordedAt is the transaction
+// time ("when did this store believe it"). An as-of read returns the version in
+// force at the instant — its interval covers it and it had been recorded by
+// then — never a version the store learned about later.
+//
+// # Ownership
+//
+// A Graph borrows the store it is created with and never closes it. Two graphs
+// can share one store by choosing different prefixes (WithPrefix), and the
+// caller still owns the life of the underlying file.
 package graphs
 
 import (
@@ -15,18 +47,12 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/malivvan/harbor/graph"
 	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/harbor/store/ledger"
 	hrecord "github.com/malivvan/harbor/store/record"
 	bolt "go.etcd.io/bbolt"
 )
-
-// Name is the conventional root bucket the harbor root package uses for the
-// graph store. It is not applied implicitly: an empty Config.Root means the
-// database root.
-const Name = "graphs"
 
 // FormatVersion is the on-disk graph-store format revision this build writes
 // and accepts.
@@ -458,7 +484,7 @@ func (s *Store) openValue(raw []byte) ([]byte, error) {
 }
 
 // Open opens or creates the named graph and returns the graph API value.
-func (s *Store) Open(name string, opts ...graph.Option) (*graph.Graph, error) {
+func (s *Store) Open(name string, opts ...Option) (*Graph, error) {
 	if err := s.checkOpen(); err != nil {
 		return nil, err
 	}
@@ -472,7 +498,7 @@ func (s *Store) Open(name string, opts ...graph.Option) (*graph.Graph, error) {
 			return nil, err
 		}
 	}
-	return graph.NewStorage(&graphStorage{store: s, name: name}, opts...), nil
+	return NewStorage(&graphStorage{store: s, name: name}, opts...), nil
 }
 
 // ensureGraphBucket creates the four record buckets for a graph.
@@ -521,18 +547,18 @@ func (s *Store) Names(ctx context.Context) ([]string, error) {
 // layout into the named independent graph. It copies live records and the full
 // closed-version history, and is idempotent.
 //
-// The legacy data is read with graph.New, which pins the original bucket names
+// The legacy data is read with New, which pins the original bucket names
 // and codec; this package never reinterprets it in place.
 func (s *Store) MigrateFromRecord(ctx context.Context, name string, rec *hrecord.Store, prefix ...string) error {
 	if rec == nil {
 		return ErrNilParam
 	}
-	src := graph.New(rec, graph.WithPrefix(prefix...))
+	src := New(rec, WithPrefix(prefix...))
 	dst, err := s.Open(name)
 	if err != nil {
 		return err
 	}
-	return graph.Copy(ctx, src, dst)
+	return Copy(ctx, src, dst)
 }
 
 // digestOf returns the SHA-256 of data, or nil when empty.

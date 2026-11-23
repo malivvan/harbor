@@ -18,7 +18,8 @@ import (
 	"github.com/malivvan/harbor/internal/argon2"
 	"github.com/malivvan/harbor/internal/crypto"
 	"github.com/malivvan/harbor/internal/slip21"
-	"github.com/malivvan/harbor/pkg/ledger"
+	"github.com/malivvan/harbor/store"
+	"github.com/malivvan/harbor/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -30,46 +31,46 @@ const (
 )
 
 const (
-	// EncryptDBKeys encrypts db primary keys, index values and key/value keys.
-	EncryptDBKeys uint16 = 1 << iota
-	// EncryptDBValues encrypts db record values and typed key/value values.
-	EncryptDBValues
-	// EncryptDBMetadata encrypts db auto-increment counters.
-	EncryptDBMetadata
-	// EncryptFSContent encrypts fs file content and symlink targets.
-	EncryptFSContent
-	// EncryptFSMetadata encrypts fs inode blobs.
-	EncryptFSMetadata
-	// EncryptTSValues encrypts ts point values and series metadata.
-	EncryptTSValues
-	// EncryptTSSeriesNames encrypts ts series bucket and metadata names.
-	EncryptTSSeriesNames
-	// EncryptVecPointIDs encrypts vec point IDs.
-	EncryptVecPointIDs
-	// EncryptVecCollectionNames encrypts vec collection names.
-	EncryptVecCollectionNames
-	// EncryptVecPoints encrypts vec point blobs and collection metadata.
-	EncryptVecPoints
+	// EncryptRecordKeys encrypts db primary keys, index values and key/value keys.
+	EncryptRecordKeys uint16 = 1 << iota
+	// EncryptRecordValues encrypts db record values and typed key/value values.
+	EncryptRecordValues
+	// EncryptRecordMetadata encrypts db auto-increment counters.
+	EncryptRecordMetadata
+	// EncryptFileContent encrypts fs file content and symlink targets.
+	EncryptFileContent
+	// EncryptFileMetadata encrypts fs inode blobs.
+	EncryptFileMetadata
+	// EncryptSeriesValues encrypts ts point values and series metadata.
+	EncryptSeriesValues
+	// EncryptSeriesNames encrypts ts series bucket and metadata names.
+	EncryptSeriesNames
+	// EncryptVectorPointIDs encrypts vec point IDs.
+	EncryptVectorPointIDs
+	// EncryptVectorCollectionNames encrypts vec collection names.
+	EncryptVectorCollectionNames
+	// EncryptVectorPoints encrypts vec point blobs and collection metadata.
+	EncryptVectorPoints
 	// EncryptGraphValues encrypts graph records. New flags are appended so the
 	// existing bit assignments stay stable.
 	EncryptGraphValues
 	// EncryptObjectValues encrypts object-store records.
 	EncryptObjectValues
-	// EncryptDB combines every db encryption flag.
-	EncryptDB = EncryptDBKeys | EncryptDBValues | EncryptDBMetadata
-	// EncryptFS combines every fs encryption flag.
-	EncryptFS = EncryptFSContent | EncryptFSMetadata
-	// EncryptTS combines every ts encryption flag.
-	EncryptTS = EncryptTSValues | EncryptTSSeriesNames
-	// EncryptVec combines every vec encryption flag.
-	EncryptVec = EncryptVecPointIDs | EncryptVecCollectionNames | EncryptVecPoints
+	// EncryptRecord combines every db encryption flag.
+	EncryptRecord = EncryptRecordKeys | EncryptRecordValues | EncryptRecordMetadata
+	// EncryptFile combines every fs encryption flag.
+	EncryptFile = EncryptFileContent | EncryptFileMetadata
+	// EncryptSeries combines every ts encryption flag.
+	EncryptSeries = EncryptSeriesValues | EncryptSeriesNames
+	// EncryptVector combines every vec encryption flag.
+	EncryptVector = EncryptVectorPointIDs | EncryptVectorCollectionNames | EncryptVectorPoints
 	// EncryptGraph combines every graph encryption flag.
 	EncryptGraph = EncryptGraphValues
 	// EncryptObject combines every object-store encryption flag.
 	EncryptObject = EncryptObjectValues
 	// EncryptAll enables encryption for every sub-store and is the default for
 	// a new store that does not set Config.Encrypt.
-	EncryptAll = EncryptDB | EncryptFS | EncryptTS | EncryptVec | EncryptGraph | EncryptObject
+	EncryptAll = EncryptRecord | EncryptFile | EncryptSeries | EncryptVector | EncryptGraph | EncryptObject
 )
 
 // Audit flags. Every bit enables the audit trail for one sub-store. Unlike
@@ -78,21 +79,21 @@ const (
 	// AuditNone disables the audit trail.
 	AuditNone uint16 = 0
 
-	// AuditDB records db writes.
-	AuditDB uint16 = 1 << iota
-	// AuditFS records fs writes.
-	AuditFS
-	// AuditTS records ts writes.
-	AuditTS
-	// AuditVec records vec writes.
-	AuditVec
+	// AuditRecord records db writes.
+	AuditRecord uint16 = 1 << iota
+	// AuditFile records fs writes.
+	AuditFile
+	// AuditSeries records ts writes.
+	AuditSeries
+	// AuditVector records vec writes.
+	AuditVector
 	// AuditGraphs records graph writes.
 	AuditGraphs
 	// AuditObject records object-store writes.
 	AuditObject
 
 	// AuditAll records writes for every sub-store.
-	AuditAll = AuditDB | AuditFS | AuditTS | AuditVec | AuditGraphs | AuditObject
+	AuditAll = AuditRecord | AuditFile | AuditSeries | AuditVector | AuditGraphs | AuditObject
 )
 
 // HasFlag reports whether all bits in other are set in flags.
@@ -146,9 +147,10 @@ var (
 	ErrInvalidOptions = errors.New("harbor: invalid options")
 )
 
-// Metadata bucket and record names.
+// Metadata bucket and record names. The header lives in its own top-level
+// bucket, named by the store registry.
 var (
-	metadataBucket    = []byte("harbor.Metadata")
+	metadataBucket    = []byte(store.SYSTEM)
 	metadataRecordKey = []byte("Metadata")
 )
 
@@ -414,25 +416,26 @@ func cryptoVerifyCanary(keychain *crypto.Keychain, sealed []byte, want string) e
 	return crypto.VerifyCanary(keychain, sealed, want)
 }
 
-// Key labels. They are persisted indirectly through derived keys, so existing
-// labels must never change.
+// Key labels. Each value is a fixed /v1 derivation domain: it is persisted
+// indirectly through the derived keys, so the strings must never change even
+// though the identifiers were renamed to follow the store names.
 const (
 	LabelCanary = "harbor/canary/v1"
-	LabelDB     = "harbor/db/v1"
-	LabelFS     = "harbor/fs/v1"
-	LabelTS     = "harbor/ts/v1"
-	LabelVec    = "harbor/vec/v1"
-	LabelFTS    = "harbor/fts/v1"
+	LabelRecord = "harbor/db/v1"
+	LabelFile   = "harbor/fs/v1"
+	LabelSeries = "harbor/ts/v1"
+	LabelVector = "harbor/vec/v1"
+	LabelSearch = "harbor/fts/v1"
 	LabelGraphs = "harbor/graphs/v1"
 	LabelObject = "harbor/object/v1"
 )
 
 // SLIP-10 hardened paths for the per-store audit signing keys.
 const (
-	AuditPathDB     = "m/0'"
-	AuditPathFS     = "m/1'"
-	AuditPathTS     = "m/2'"
-	AuditPathVec    = "m/3'"
+	AuditPathRecord = "m/0'"
+	AuditPathFile   = "m/1'"
+	AuditPathSeries = "m/2'"
+	AuditPathVector = "m/3'"
 	AuditPathGraphs = "m/4'"
 	AuditPathObject = "m/5'"
 )
@@ -449,10 +452,10 @@ type Keys struct {
 	Graphs []byte
 	Object []byte
 
-	AuditDB     ed25519.PrivateKey
-	AuditFS     ed25519.PrivateKey
-	AuditTS     ed25519.PrivateKey
-	AuditVec    ed25519.PrivateKey
+	AuditRecord ed25519.PrivateKey
+	AuditFile   ed25519.PrivateKey
+	AuditSeries ed25519.PrivateKey
+	AuditVector ed25519.PrivateKey
 	AuditGraphs ed25519.PrivateKey
 	AuditObject ed25519.PrivateKey
 }
@@ -463,7 +466,7 @@ func (k *Keys) Wipe() {
 		return
 	}
 	for _, b := range [][]byte{k.Canary, k.Record, k.File, k.Series, k.Vector, k.Search, k.Graphs, k.Object,
-		k.AuditDB, k.AuditFS, k.AuditTS, k.AuditVec, k.AuditGraphs, k.AuditObject} {
+		k.AuditRecord, k.AuditFile, k.AuditSeries, k.AuditVector, k.AuditGraphs, k.AuditObject} {
 		wipe(b)
 	}
 }
@@ -508,11 +511,11 @@ func Derive(password string, salt []byte, time, memory uint32, threads uint8) (*
 		dst   *[]byte
 	}{
 		{LabelCanary, &keys.Canary},
-		{LabelDB, &keys.Record},
-		{LabelFS, &keys.File},
-		{LabelTS, &keys.Series},
-		{LabelVec, &keys.Vector},
-		{LabelFTS, &keys.Search},
+		{LabelRecord, &keys.Record},
+		{LabelFile, &keys.File},
+		{LabelSeries, &keys.Series},
+		{LabelVector, &keys.Vector},
+		{LabelSearch, &keys.Search},
 		{LabelGraphs, &keys.Graphs},
 		{LabelObject, &keys.Object},
 	}
@@ -528,10 +531,10 @@ func Derive(password string, salt []byte, time, memory uint32, threads uint8) (*
 		path string
 		dst  *ed25519.PrivateKey
 	}{
-		{AuditPathDB, &keys.AuditDB},
-		{AuditPathFS, &keys.AuditFS},
-		{AuditPathTS, &keys.AuditTS},
-		{AuditPathVec, &keys.AuditVec},
+		{AuditPathRecord, &keys.AuditRecord},
+		{AuditPathFile, &keys.AuditFile},
+		{AuditPathSeries, &keys.AuditSeries},
+		{AuditPathVector, &keys.AuditVector},
 		{AuditPathGraphs, &keys.AuditGraphs},
 		{AuditPathObject, &keys.AuditObject},
 	}

@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/harbor/store/ledger"
 	"go.etcd.io/bbolt"
 )
 

@@ -3,6 +3,7 @@ package series
 import (
 	"testing"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -11,7 +12,7 @@ import (
 // a valid key, and Normalize returns the configuration unchanged.
 func TestConfigValidateAndNormalize(t *testing.T) {
 	key := testKey(3)
-	root := [][]byte{[]byte("ts")}
+	root := [][]byte{[]byte(hstore.SERIES)}
 
 	require.NoError(t, Config{}.Validate())
 	require.NoError(t, Config{Root: root, Secret: key, EncryptValues: true}.Validate())

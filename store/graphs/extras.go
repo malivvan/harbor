@@ -1,4 +1,4 @@
-package graph
+package graphs
 
 // Diff, vocabulary and whole-graph interchange: the read surfaces built on the
 // core's as-of reads.

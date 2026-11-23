@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -12,7 +13,7 @@ import (
 // A failed chunked write must not advance the handle offset or the in-memory
 // size: a retry would otherwise write at the wrong position and leave a hole.
 func TestChunkedWriteFailureKeepsOffset(t *testing.T) {
-	store, db := openEncStore(t, []byte("ts"), Config{Secret: testEncKey(31), ChunkSize: 8})
+	store, db := openEncStore(t, []byte(hstore.SERIES), Config{Secret: testEncKey(31), ChunkSize: 8})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, fsys, "/f", "abc")
@@ -37,13 +38,13 @@ func TestChunkedWriteFailureKeepsOffset(t *testing.T) {
 // A truncated dirent value must return a corrupt-data error instead of
 // panicking in binary.BigEndian.Uint64.
 func TestCorruptDirentValueReturnsError(t *testing.T) {
-	store, db := openEncStore(t, []byte("ts"), Config{})
+	store, db := openEncStore(t, []byte(hstore.SERIES), Config{})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	ino := fsys.rootIno
 
 	require.NoError(t, db.Update(func(tx *bolt.Tx) error {
-		bb, err := openBucket(tx, fsPath([]byte("ts"), "fs"))
+		bb, err := openBucket(tx, fsPath([]byte(hstore.SERIES), "fs"))
 		if err != nil {
 			return err
 		}
@@ -52,7 +53,7 @@ func TestCorruptDirentValueReturnsError(t *testing.T) {
 	}))
 
 	err = db.View(func(tx *bolt.Tx) error {
-		bb, err := openBucket(tx, fsPath([]byte("ts"), "fs"))
+		bb, err := openBucket(tx, fsPath([]byte(hstore.SERIES), "fs"))
 		if err != nil {
 			return err
 		}

@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"testing"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -135,7 +136,7 @@ func TestSaveDataBranches(t *testing.T) {
 	require.Equal(t, "external", string(data))
 
 	// Chunked storage.
-	chunked, _ := chunkedStore(t, []byte("ts"), 66, 8)
+	chunked, _ := chunkedStore(t, []byte(hstore.SERIES), 66, 8)
 	chunkedFS, err := chunked.Open("fs")
 	require.NoError(t, err)
 	cnode := newInode(0644)
@@ -151,7 +152,7 @@ func TestSaveDataBranches(t *testing.T) {
 }
 
 func TestCreateSnapshotError(t *testing.T) {
-	store, db := openEncStore(t, []byte("ts"), Config{})
+	store, db := openEncStore(t, []byte(hstore.SERIES), Config{})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
@@ -216,14 +217,14 @@ func TestVerifyAll(t *testing.T) {
 	ctx := context.Background()
 
 	// Plaintext filesystems verify successfully.
-	plain, _ := openEncStore(t, []byte("ts"), Config{})
+	plain, _ := openEncStore(t, []byte(hstore.SERIES), Config{})
 	plainFS, err := plain.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, plainFS, "/f", "data")
 	require.NoError(t, plain.VerifyAll(ctx))
 
 	// A corrupted encrypted inode fails verification.
-	enc, encDB := openEncStore(t, []byte("ts"), Config{Secret: testEncKey(82), EncryptMetadata: true, EncryptContent: true})
+	enc, encDB := openEncStore(t, []byte(hstore.SERIES), Config{Secret: testEncKey(82), EncryptMetadata: true, EncryptContent: true})
 	encFS, err := enc.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, encFS, "/f", "data")
@@ -270,7 +271,7 @@ func TestSnapshotReleaseIdempotent(t *testing.T) {
 }
 
 func TestNewFSRejectsCorruptRootInode(t *testing.T) {
-	store, db := openEncStore(t, []byte("ts"), Config{})
+	store, db := openEncStore(t, []byte(hstore.SERIES), Config{})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, fsys, "/f", "data")
@@ -289,7 +290,7 @@ func TestNewFSRejectsCorruptRootInode(t *testing.T) {
 }
 
 func TestHasUserDataKinds(t *testing.T) {
-	store, _ := openEncStore(t, []byte("ts"), Config{})
+	store, _ := openEncStore(t, []byte(hstore.SERIES), Config{})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	path := store.bucketPath("fs")
@@ -305,7 +306,7 @@ func TestHasUserDataKinds(t *testing.T) {
 	require.True(t, has)
 
 	// Content in chunks counts as user data.
-	chunkStore, _ := chunkedStore(t, []byte("ts"), 67, 8)
+	chunkStore, _ := chunkedStore(t, []byte(hstore.SERIES), 67, 8)
 	chunkFS, err := chunkStore.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, chunkFS, "/f", "0123456789")
@@ -314,7 +315,7 @@ func TestHasUserDataKinds(t *testing.T) {
 	require.True(t, has)
 
 	// Content in the data bucket counts as user data.
-	dataStore, _ := openEncStore(t, []byte("ts"), Config{})
+	dataStore, _ := openEncStore(t, []byte(hstore.SERIES), Config{})
 	dataFS, err := dataStore.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, dataFS, "/f", "data")

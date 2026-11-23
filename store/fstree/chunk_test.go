@@ -9,6 +9,7 @@ import (
 	"sort"
 	"testing"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -55,7 +56,7 @@ func chunkEntries(t *testing.T, db *bolt.DB, root []byte, name string) []chunkEn
 }
 
 func TestChunkedRoundTrip(t *testing.T) {
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := chunkedStore(t, root, 20, 8)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -168,7 +169,7 @@ func TestChunkedRoundTrip(t *testing.T) {
 }
 
 func TestChunkedWritesTouchOnlyAffectedChunks(t *testing.T) {
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := chunkedStore(t, root, 21, 8)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -195,7 +196,7 @@ func TestChunkedWritesTouchOnlyAffectedChunks(t *testing.T) {
 }
 
 func TestChunkedEmptyFile(t *testing.T) {
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := chunkedStore(t, root, 22, 8)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -208,7 +209,7 @@ func TestChunkedEmptyFile(t *testing.T) {
 }
 
 func TestChunkedTamper(t *testing.T) {
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	cfg := Config{Secret: testEncKey(23), ChunkSize: 8}
 	store, db := openEncStore(t, root, cfg)
 	fsys, err := store.Open("fs")
@@ -245,7 +246,7 @@ func TestChunkedTamper(t *testing.T) {
 }
 
 func TestChunkedMatchesPlaintext(t *testing.T) {
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 
 	plain, _ := openEncStore(t, root, Config{})
 	chunked, _ := chunkedStore(t, root, 24, 5)
@@ -286,7 +287,7 @@ func TestChunkedMatchesPlaintext(t *testing.T) {
 }
 
 func TestChunkedSnapshot(t *testing.T) {
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, _ := chunkedStore(t, root, 25, 4)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -308,7 +309,7 @@ func TestChunkedSnapshot(t *testing.T) {
 }
 
 func TestChunkedConfigMismatch(t *testing.T) {
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	dbPath := filepath.Join(t.TempDir(), "chunk-mode.db")
 
 	store, db, err := openEncStoreAt(t, dbPath, root, Config{Secret: testEncKey(26), ChunkSize: 8})
@@ -356,7 +357,7 @@ func TestChunkedConfigMismatch(t *testing.T) {
 }
 
 func TestChunkedOptionalWhenDisabled(t *testing.T) {
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := openEncStore(t, root, Config{Secret: testEncKey(28), EncryptContent: true})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -369,7 +370,7 @@ func TestChunkedOptionalWhenDisabled(t *testing.T) {
 }
 
 func TestChunkedZeroLengthWrite(t *testing.T) {
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := chunkedStore(t, root, 29, 8)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -389,7 +390,7 @@ func TestChunkedZeroLengthWrite(t *testing.T) {
 }
 
 func TestChunkedRandomAccessRead(t *testing.T) {
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, _ := chunkedStore(t, root, 30, 4)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -424,7 +425,7 @@ func TestChunkedRandomAccessRead(t *testing.T) {
 }
 
 func TestChunkedFreshNonce(t *testing.T) {
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := chunkedStore(t, root, 31, 8)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -440,7 +441,7 @@ func TestChunkedFreshNonce(t *testing.T) {
 // TestChunkedWriteDoesNotPadTail verifies that a partial tail chunk is stored
 // at its logical length instead of being zero-padded to a full chunk.
 func TestChunkedWriteDoesNotPadTail(t *testing.T) {
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := chunkedStore(t, root, 33, 1024)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -476,7 +477,7 @@ func TestChunkedWriteDoesNotPadTail(t *testing.T) {
 // cursor is iterating the bucket, so this guards that pattern against leaving
 // chunks behind.
 func TestDeleteChunksMany(t *testing.T) {
-	store, db := chunkedStore(t, []byte("ts"), 61, 8)
+	store, db := chunkedStore(t, []byte(hstore.SERIES), 61, 8)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 
@@ -489,7 +490,7 @@ func TestDeleteChunksMany(t *testing.T) {
 
 	node, err := fsys.resolve("/big")
 	require.NoError(t, err)
-	require.Len(t, chunkEntries(t, db, []byte("ts"), "fs"), 32)
+	require.Len(t, chunkEntries(t, db, []byte(hstore.SERIES), "fs"), 32)
 
 	// Rewriting the whole file deletes all 32 chunks while iterating.
 	require.NoError(t, fsys.db.Update(func(tx *bolt.Tx) error {
@@ -499,7 +500,7 @@ func TestDeleteChunksMany(t *testing.T) {
 		}
 		return b.writeAllChunks(node.Ino, []byte("short"), 8)
 	}))
-	require.Len(t, chunkEntries(t, db, []byte("ts"), "fs"), 1)
+	require.Len(t, chunkEntries(t, db, []byte(hstore.SERIES), "fs"), 1)
 
 	// Deleting the inode releases the remaining chunk.
 	require.NoError(t, fsys.db.Update(func(tx *bolt.Tx) error {
@@ -509,21 +510,21 @@ func TestDeleteChunksMany(t *testing.T) {
 		}
 		return b.deleteAllChunks(node.Ino)
 	}))
-	require.Empty(t, chunkEntries(t, db, []byte("ts"), "fs"))
+	require.Empty(t, chunkEntries(t, db, []byte(hstore.SERIES), "fs"))
 }
 
 // TestFullChunkOverwriteFastPath verifies that a write replacing a whole chunk
 // produces the same bytes as a partial write, and does not leave extra chunks
 // behind.
 func TestFullChunkOverwriteFastPath(t *testing.T) {
-	store, db := chunkedStore(t, []byte("ts"), 61, 8)
+	store, db := chunkedStore(t, []byte(hstore.SERIES), 61, 8)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 
 	writeTestFile(t, fsys, "/f", "0123456789ABCDEF") // two 8-byte chunks
 	node, err := fsys.resolve("/f")
 	require.NoError(t, err)
-	require.Len(t, chunkEntries(t, db, []byte("ts"), "fs"), 2)
+	require.Len(t, chunkEntries(t, db, []byte(hstore.SERIES), "fs"), 2)
 
 	// Overwrite the first chunk exactly.
 	require.NoError(t, fsys.writeRange(node.Ino, 0, []byte("abcdefgh")))
@@ -531,7 +532,7 @@ func TestFullChunkOverwriteFastPath(t *testing.T) {
 	got, err := fsys.readRange(node.Ino, 0, 16)
 	require.NoError(t, err)
 	require.Equal(t, "abcdefgh89ABCDEF", string(got))
-	require.Len(t, chunkEntries(t, db, []byte("ts"), "fs"), 2)
+	require.Len(t, chunkEntries(t, db, []byte(hstore.SERIES), "fs"), 2)
 
 	// Overwrite the second chunk exactly as well.
 	require.NoError(t, fsys.writeRange(node.Ino, 8, []byte("IJKLMNOP")))
@@ -539,5 +540,5 @@ func TestFullChunkOverwriteFastPath(t *testing.T) {
 	got, err = fsys.readRange(node.Ino, 0, 16)
 	require.NoError(t, err)
 	require.Equal(t, "abcdefghIJKLMNOP", string(got))
-	require.Len(t, chunkEntries(t, db, []byte("ts"), "fs"), 2)
+	require.Len(t, chunkEntries(t, db, []byte(hstore.SERIES), "fs"), 2)
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -82,7 +83,7 @@ func markerBytes(t *testing.T, db *bolt.DB, root []byte) []byte {
 
 func TestEncryptionIsOptional(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := openAEADTestStore(t, root, Config{})
 	se := store.Series("cpu")
 	require.NoError(t, se.InsertMany(ctx, []Point{{Timestamp: 1, Value: 1}, {Timestamp: 2, Value: 2}}))
@@ -103,7 +104,7 @@ func TestEncryptionIsOptional(t *testing.T) {
 
 func TestOpenEncryptionMatchesPlaintext(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 
 	plain, plainDB := openAEADTestStore(t, root, Config{})
 	configured, configuredDB := openAEADTestStore(t, root, Config{})
@@ -146,7 +147,7 @@ func dumpRoot(t *testing.T, db *bolt.DB, root []byte) map[string][]byte {
 
 func TestEncryptValuesRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := openAEADTestStore(t, root, Config{Secret: testKey(1), EncryptValues: true})
 	se := store.Series("cpu")
 
@@ -213,7 +214,7 @@ func TestEncryptValuesRoundTrip(t *testing.T) {
 
 func TestEncryptValuesMetadataAndMarker(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := openAEADTestStore(t, root, Config{Secret: testKey(2), EncryptValues: true})
 	se := store.Series("cpu")
 	require.NoError(t, se.Insert(ctx, Point{Timestamp: 1, Value: 1}))
@@ -240,7 +241,7 @@ func TestEncryptValuesMetadataAndMarker(t *testing.T) {
 
 func TestEncryptValuesNoncesAreFresh(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := openAEADTestStore(t, root, Config{Secret: testKey(3), EncryptValues: true})
 	se := store.Series("cpu")
 
@@ -257,7 +258,7 @@ func TestEncryptValuesNoncesAreFresh(t *testing.T) {
 
 func TestEncryptValuesWrongKey(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	path := filepath.Join(t.TempDir(), "wrong-key.db")
 
 	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
@@ -284,7 +285,7 @@ func TestEncryptValuesWrongKey(t *testing.T) {
 
 func TestEncryptValuesTamper(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := openAEADTestStore(t, root, Config{Secret: testKey(6), EncryptValues: true})
 	se := store.Series("cpu")
 	require.NoError(t, se.InsertMany(ctx, []Point{{Timestamp: 1, Value: 1}, {Timestamp: 2, Value: 2}}))
@@ -311,7 +312,7 @@ func TestEncryptValuesTamper(t *testing.T) {
 
 func TestEncryptedStoreRequiresKey(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := openAEADTestStore(t, root, Config{Secret: testKey(7), EncryptValues: true})
 	require.NoError(t, store.Series("cpu").Insert(ctx, Point{Timestamp: 1, Value: 1}))
 
@@ -323,7 +324,7 @@ func TestEncryptedStoreRequiresKey(t *testing.T) {
 
 func TestEncryptionOnPlaintextDataIsRejected(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := openAEADTestStore(t, root, Config{})
 	require.NoError(t, store.Series("cpu").Insert(ctx, Point{Timestamp: 1, Value: 1}))
 
@@ -333,7 +334,7 @@ func TestEncryptionOnPlaintextDataIsRejected(t *testing.T) {
 
 func TestEncryptionConfigValidation(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 
 	tests := []struct {
 		name string
@@ -369,7 +370,7 @@ func TestEncryptionConfigValidation(t *testing.T) {
 
 func TestEncryptValuesRetention(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, _ := openAEADTestStore(t, root, Config{Secret: testKey(12), EncryptValues: true})
 	se := store.Series("cpu")
 
@@ -387,7 +388,7 @@ func TestEncryptValuesRetention(t *testing.T) {
 
 func TestEncryptedStoreDrop(t *testing.T) {
 	ctx := context.Background()
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, _ := openAEADTestStore(t, root, Config{Secret: testKey(13), EncryptValues: true})
 	se := store.Series("cpu")
 	require.NoError(t, se.Insert(ctx, Point{Timestamp: 1, Value: 1}))

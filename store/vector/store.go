@@ -12,19 +12,15 @@ import (
 	"sync/atomic"
 	"unicode/utf8"
 
-	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/harbor/store"
+	"github.com/malivvan/harbor/store/ledger"
 	"go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
 )
 
-// Name is the conventional root bucket the harbor root package uses for the
-// vec sub-store. It is not applied implicitly: an empty Config.Root means the
-// database root.
-const Name = "vec"
-
 // ErrClosed is returned when an operation targets a closed store.
-var ErrClosed = errors.New("vec: storage is closed")
+var ErrClosed = errors.New("vector: storage is closed")
 
 const collectionsMetaBucket = "__collections_meta__"
 
@@ -33,11 +29,15 @@ const collectionsMetaBucket = "__collections_meta__"
 // opened at the database root.
 var reservedTopLevelBuckets = map[string]bool{
 	collectionsMetaBucket: true,
-	"db":                  true,
-	"fs":                  true,
-	"ts":                  true,
-	"vec":                 true,
-	"harbor.Metadata":     true,
+	store.SYSTEM:          true,
+	store.LEDGER:          true,
+	store.RECORD:          true,
+	store.SERIES:          true,
+	store.VECTOR:          true,
+	store.SEARCH:          true,
+	store.GRAPHS:          true,
+	store.FSTREE:          true,
+	store.OBJECT:          true,
 }
 
 // Store handles local persistence using BoltDB (bbolt).
@@ -105,7 +105,7 @@ func (s *Store) auditEntry(op, collection string, digest []byte) error {
 		return nil
 	}
 	return s.audit.Record(ledger.Entry{
-		Store:  ledger.StoreVec,
+		Store:  ledger.StoreVector,
 		Op:     op,
 		Entity: collection,
 		Digest: digest,

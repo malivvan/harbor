@@ -20,7 +20,7 @@ type txRecord struct {
 	Name string `db:"index"`
 }
 
-// txSeed writes one record, one file, one point and one vector through the live
+// txSeed writes one record, one fstree, one point and one vector through the live
 // stores, so a rollback test has state to preserve.
 func txSeed(t *testing.T, s *Store) {
 	t.Helper()

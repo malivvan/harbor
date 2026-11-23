@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"testing"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -93,7 +94,7 @@ func TestMkdirAllRejectsExistingFile(t *testing.T) {
 }
 
 func TestEncryptedEmptyCiphertextIsRejected(t *testing.T) {
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := openEncStore(t, root, Config{Secret: testEncKey(90), EncryptContent: true})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)

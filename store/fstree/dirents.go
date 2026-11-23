@@ -102,7 +102,7 @@ func (f *fsBucket) decodeDirents(ino uint64, node *iNode) error {
 		}
 		// A truncated value would make b2i panic on a corrupted database.
 		if len(value) != 8 {
-			return fmt.Errorf("fs: corrupt directory entry %q for inode %d: value is %d bytes", key[8:], ino, len(value))
+			return fmt.Errorf("fstree: corrupt directory entry %q for inode %d: value is %d bytes", key[8:], ino, len(value))
 		}
 		children = append(children, &entry{
 			Name: string(key[8:]),

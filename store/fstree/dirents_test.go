@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	hstore "github.com/malivvan/harbor/store"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -35,7 +36,7 @@ func direntCount(t *testing.T, db *bolt.DB, root []byte, ino uint64) int {
 // TestDirentsStoredSeparately verifies that directory entries live in the
 // dirents bucket and the inode blob no longer carries the children list.
 func TestDirentsStoredSeparately(t *testing.T) {
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := openEncStore(t, root, Config{})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -91,7 +92,7 @@ func TestDirentsStoredSeparately(t *testing.T) {
 // dirents bucket existed still reads its children from the blob, and that the
 // next mutation migrates it.
 func TestDirentsLegacyBlobFallback(t *testing.T) {
-	root := []byte("ts")
+	root := []byte(hstore.SERIES)
 	store, db := openEncStore(t, root, Config{})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)

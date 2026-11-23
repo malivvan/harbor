@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/harbor/store"
 	"github.com/malivvan/harbor/store/vector/hnsw"
 )
 
@@ -290,11 +291,11 @@ func (h *HNSWIndex) observeFallback(scanned int) {
 		return
 	}
 	labels := metrics.Labels{
-		metrics.LabelStore: "vec",
+		metrics.LabelStore: store.VECTOR,
 		metrics.LabelOp:    "search",
 	}
-	metrics.Counter(h.obs, metrics.MetricVecFallbacks, 1, labels)
-	metrics.Histogram(h.obs, metrics.MetricVecScanSize, float64(scanned), labels)
+	metrics.Counter(h.obs, metrics.MetricVectorFallbacks, 1, labels)
+	metrics.Histogram(h.obs, metrics.MetricVectorScanSize, float64(scanned), labels)
 }
 
 // graphVector returns the representation stored in the graph. Cosine uses

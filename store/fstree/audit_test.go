@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	audit "github.com/malivvan/harbor/pkg/ledger"
+	hstore "github.com/malivvan/harbor/store"
+	audit "github.com/malivvan/harbor/store/ledger"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -25,8 +26,8 @@ func openAuditedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	rec := audit.NewRecorder(db, map[string]ed25519.PrivateKey{audit.StoreFS: priv})
-	store, err := Open(context.Background(), db, Config{Root: [][]byte{[]byte("fs")}, Audit: rec})
+	rec := audit.NewRecorder(db, map[string]ed25519.PrivateKey{audit.StoreFile: priv})
+	store, err := Open(context.Background(), db, Config{Root: [][]byte{[]byte(hstore.FSTREE)}, Audit: rec})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return store, db, pub
@@ -48,18 +49,18 @@ func TestAuditRecordsFSWrites(t *testing.T) {
 	require.NoError(t, fsys.RemoveAll("/dir"))
 	require.NoError(t, store.DeleteFS("fs"))
 
-	res, err := audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreFS: pub})
+	res, err := audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreFile: pub})
 	require.NoError(t, err)
 	require.Equal(t, uint64(11), res.Count)
 }
 
 func TestAuditDisabledRecordsNothing(t *testing.T) {
-	store, db := openEncStore(t, []byte("fs"), Config{})
+	store, db := openEncStore(t, []byte(hstore.FSTREE), Config{})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	require.NoError(t, fsys.Mkdir("/dir", 0o755))
 
-	_, err = audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreFS: nil})
+	_, err = audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreFile: nil})
 	require.ErrorIs(t, err, audit.ErrNoLog)
 }
 
@@ -88,7 +89,7 @@ func TestAuditRecordsCopy(t *testing.T) {
 	require.NoError(t, writeFile(t, fsys, "/src.txt", "hello"))
 	require.NoError(t, fsys.Copy("/src.txt", "/dst.txt"))
 
-	res, err := audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreFS: pub})
+	res, err := audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreFile: pub})
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), res.Count, "write, close and copy must be recorded")
 

@@ -10,26 +10,21 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/harbor/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 
-// Name is the conventional root bucket the harbor root package uses for the fs
-// sub-store. It is not applied implicitly: an empty Config.Root means the
-// database root.
-const Name = "fs"
-
 var (
 	// ErrNilContext is returned when a nil context is passed to an operation.
-	ErrNilContext = errors.New("fs: nil context")
+	ErrNilContext = errors.New("fstree: nil context")
 
 	// ErrNilParam is returned when a required parameter is nil.
-	ErrNilParam = errors.New("fs: nil parameter")
+	ErrNilParam = errors.New("fstree: nil parameter")
 
 	// ErrInTransaction reports an operation that cannot run on a store bound
 	// to a caller-owned transaction (for example key rotation).
-	ErrInTransaction = errors.New("fs: operation is not available inside an explicit transaction")
+	ErrInTransaction = errors.New("fstree: operation is not available inside an explicit transaction")
 )
 
 // Store manages named file systems backed by a caller-owned bbolt database.
@@ -393,7 +388,7 @@ func (s *Store) DeleteFS(name string) error {
 	}
 	if s.audit != nil {
 		return s.audit.Record(ledger.Entry{
-			Store:  ledger.StoreFS,
+			Store:  ledger.StoreFile,
 			Op:     "delete_fs",
 			Entity: name,
 		})

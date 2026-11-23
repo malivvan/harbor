@@ -290,7 +290,7 @@ func TestCompactTo(t *testing.T) {
 	src := mustOpen(t, filepath.Join(dir, "source.db"), "pw")
 	seedExportStore(t, src)
 
-	// Delete a record so the compacted file has less live data to carry.
+	// Delete a record so the compacted fstree has less live data to carry.
 	require.NoError(t, src.Record().DeleteStruct(ctx, &exportTestRecord{ID: 2}))
 
 	compacted := filepath.Join(dir, "compacted.db")

@@ -235,7 +235,7 @@ func (s *Store) loadMeta(b *bolt.Bucket) (indexMeta, bool, error) {
 		return meta, false, err
 	}
 	if err := json.Unmarshal(plain, &meta); err != nil {
-		return meta, false, fmt.Errorf("fts: decode metadata: %w", err)
+		return meta, false, fmt.Errorf("search: decode metadata: %w", err)
 	}
 	return meta, true, nil
 }
@@ -244,7 +244,7 @@ func (s *Store) loadMeta(b *bolt.Bucket) (indexMeta, bool, error) {
 func (s *Store) saveMeta(b *bolt.Bucket, meta indexMeta) error {
 	raw, err := json.Marshal(meta)
 	if err != nil {
-		return fmt.Errorf("fts: encode metadata: %w", err)
+		return fmt.Errorf("search: encode metadata: %w", err)
 	}
 	sealed, err := s.seal(raw)
 	if err != nil {
@@ -282,7 +282,7 @@ func (idx *Index) loadDoc(docs *bolt.Bucket, id string) (docRecord, bool, error)
 		return doc, false, err
 	}
 	if err := json.Unmarshal(plain, &doc); err != nil {
-		return doc, false, fmt.Errorf("fts: decode document %q: %w", id, err)
+		return doc, false, fmt.Errorf("search: decode document %q: %w", id, err)
 	}
 	if doc.TF == nil {
 		doc.TF = map[string]int{}
@@ -294,7 +294,7 @@ func (idx *Index) loadDoc(docs *bolt.Bucket, id string) (docRecord, bool, error)
 func (idx *Index) saveDoc(docs *bolt.Bucket, id string, doc docRecord) error {
 	raw, err := json.Marshal(doc)
 	if err != nil {
-		return fmt.Errorf("fts: encode document %q: %w", id, err)
+		return fmt.Errorf("search: encode document %q: %w", id, err)
 	}
 	sealed, err := idx.store.seal(raw)
 	if err != nil {
@@ -319,7 +319,7 @@ func (idx *Index) loadTerm(terms *bolt.Bucket, term string) (termRecord, bool, e
 		return rec, false, err
 	}
 	if err := json.Unmarshal(plain, &rec); err != nil {
-		return rec, false, fmt.Errorf("fts: decode posting list: %w", err)
+		return rec, false, fmt.Errorf("search: decode posting list: %w", err)
 	}
 	return rec, true, nil
 }
@@ -336,7 +336,7 @@ func (idx *Index) saveTerm(terms *bolt.Bucket, term string, rec termRecord) erro
 	sort.Strings(rec.Docs)
 	raw, err := json.Marshal(rec)
 	if err != nil {
-		return fmt.Errorf("fts: encode posting list: %w", err)
+		return fmt.Errorf("search: encode posting list: %w", err)
 	}
 	sealed, err := idx.store.seal(raw)
 	if err != nil {

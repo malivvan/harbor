@@ -30,16 +30,11 @@ import (
 	"time"
 
 	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
 	"github.com/malivvan/harbor/store/fstree"
+	"github.com/malivvan/harbor/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
-
-// Name is the conventional root bucket the harbor root package uses for the
-// object store. It is not applied implicitly: an empty Config.Root means the
-// database root.
-const Name = "object"
 
 // FormatVersion is the on-disk object-store format revision this build writes
 // and accepts.

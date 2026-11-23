@@ -14,14 +14,14 @@ import (
 	"github.com/malivvan/harbor/store/fstree"
 )
 
-// FS is the replicated write view of a named file system in the fs sub-store.
-type FS struct {
-	n      *Node
-	fsName string
+// File is the replicated write view of a named file system in the fs sub-store.
+type File struct {
+	n        *Node
+	fileName string
 }
 
-type fsPathArg struct {
-	FS    string      `json:"fs"`
+type filePathArg struct {
+	File  string      `json:"file"`
 	Name  string      `json:"name"`
 	New   string      `json:"new,omitempty"`
 	Perm  os.FileMode `json:"perm"`
@@ -33,26 +33,26 @@ type fsPathArg struct {
 	Gid   int         `json:"gid,omitempty"`
 }
 
-// FS returns the replicated fs sub-store root.
-func (n *Node) FS() *FS {
+// File returns the replicated fs sub-store root.
+func (n *Node) File() *File {
 	if n == nil {
 		return nil
 	}
-	return &FS{n: n}
+	return &File{n: n}
 }
 
 // Open returns a replicated view of the named file system, creating it on
 // demand.
-func (f *FS) Open(name string) *FS {
+func (f *File) Open(name string) *File {
 	if f == nil || f.n == nil {
 		return nil
 	}
-	return &FS{n: f.n, fsName: name}
+	return &File{n: f.n, fileName: name}
 }
 
-// Mkdir replicates fs.FS.Mkdir. Times are pinned at proposal time so every
+// Mkdir replicates fs.File.Mkdir. Times are pinned at proposal time so every
 // replica records the same directory metadata.
-func (f *FS) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
+func (f *File) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -60,49 +60,49 @@ func (f *FS) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
 		return ErrClosed
 	}
 	now := time.Now()
-	_, err := f.n.apply(opFSMkdir, fsPathArg{FS: f.fsName, Name: name, Perm: perm, Atime: now, Mtime: now})
+	_, err := f.n.apply(opFileMkdir, filePathArg{File: f.fileName, Name: name, Perm: perm, Atime: now, Mtime: now})
 	return err
 }
 
-// Remove replicates fs.FS.Remove.
-func (f *FS) Remove(ctx context.Context, name string) error {
+// Remove replicates fs.File.Remove.
+func (f *File) Remove(ctx context.Context, name string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFSRemove, fsPathArg{FS: f.fsName, Name: name})
+	_, err := f.n.apply(opFileRemove, filePathArg{File: f.fileName, Name: name})
 	return err
 }
 
-// RemoveAll replicates fs.FS.RemoveAll.
-func (f *FS) RemoveAll(ctx context.Context, path string) error {
+// RemoveAll replicates fs.File.RemoveAll.
+func (f *File) RemoveAll(ctx context.Context, path string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFSRemoveAll, fsPathArg{FS: f.fsName, Name: path})
+	_, err := f.n.apply(opFileRemoveAll, filePathArg{File: f.fileName, Name: path})
 	return err
 }
 
-// Rename replicates fs.FS.Rename.
-func (f *FS) Rename(ctx context.Context, oldpath, newpath string) error {
+// Rename replicates fs.File.Rename.
+func (f *File) Rename(ctx context.Context, oldpath, newpath string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFSRename, fsPathArg{FS: f.fsName, Name: oldpath, New: newpath})
+	_, err := f.n.apply(opFileRename, filePathArg{File: f.fileName, Name: oldpath, New: newpath})
 	return err
 }
 
 // WriteFile replicates a create-and-write of a whole file. Times are pinned at
 // proposal time.
-func (f *FS) WriteFile(ctx context.Context, name string, data []byte, perm os.FileMode) error {
+func (f *File) WriteFile(ctx context.Context, name string, data []byte, perm os.FileMode) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -110,14 +110,14 @@ func (f *FS) WriteFile(ctx context.Context, name string, data []byte, perm os.Fi
 		return ErrClosed
 	}
 	now := time.Now()
-	_, err := f.n.apply(opFSWrite, fsPathArg{FS: f.fsName, Name: name, Perm: perm, Atime: now, Mtime: now, Data: data})
+	_, err := f.n.apply(opFileWrite, filePathArg{File: f.fileName, Name: name, Perm: perm, Atime: now, Mtime: now, Data: data})
 	return err
 }
 
-// MkdirAll replicates fs.FS.MkdirAll. Every component missing on the replicas
+// MkdirAll replicates fs.File.MkdirAll. Every component missing on the replicas
 // is created with the times pinned here, so directory metadata matches even
 // though MkdirAll would otherwise stamp each replica's own clock.
-func (f *FS) MkdirAll(ctx context.Context, name string, perm os.FileMode) error {
+func (f *File) MkdirAll(ctx context.Context, name string, perm os.FileMode) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -125,69 +125,69 @@ func (f *FS) MkdirAll(ctx context.Context, name string, perm os.FileMode) error 
 		return ErrClosed
 	}
 	now := time.Now()
-	_, err := f.n.apply(opFSMkdirAll, fsPathArg{FS: f.fsName, Name: name, Perm: perm, Atime: now, Mtime: now})
+	_, err := f.n.apply(opFileMkdirAll, filePathArg{File: f.fileName, Name: name, Perm: perm, Atime: now, Mtime: now})
 	return err
 }
 
-// Truncate replicates fs.FS.Truncate.
-func (f *FS) Truncate(ctx context.Context, name string, size int64) error {
+// Truncate replicates fs.File.Truncate.
+func (f *File) Truncate(ctx context.Context, name string, size int64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFSTruncate, fsPathArg{FS: f.fsName, Name: name, Size: size})
+	_, err := f.n.apply(opFileTruncate, filePathArg{File: f.fileName, Name: name, Size: size})
 	return err
 }
 
-// Chmod replicates fs.FS.Chmod.
-func (f *FS) Chmod(ctx context.Context, name string, mode os.FileMode) error {
+// Chmod replicates fs.File.Chmod.
+func (f *File) Chmod(ctx context.Context, name string, mode os.FileMode) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFSChmod, fsPathArg{FS: f.fsName, Name: name, Perm: mode})
+	_, err := f.n.apply(opFileChmod, filePathArg{File: f.fileName, Name: name, Perm: mode})
 	return err
 }
 
-// Chtimes replicates fs.FS.Chtimes. Both times are explicit, so replicas store
+// Chtimes replicates fs.File.Chtimes. Both times are explicit, so replicas store
 // exactly the values the caller supplied.
-func (f *FS) Chtimes(ctx context.Context, name string, atime, mtime time.Time) error {
+func (f *File) Chtimes(ctx context.Context, name string, atime, mtime time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFSChtimes, fsPathArg{FS: f.fsName, Name: name, Atime: atime, Mtime: mtime})
+	_, err := f.n.apply(opFileChtimes, filePathArg{File: f.fileName, Name: name, Atime: atime, Mtime: mtime})
 	return err
 }
 
-// Chown replicates fs.FS.Chown. Pass -1 to leave a value unchanged, as the
+// Chown replicates fs.File.Chown. Pass -1 to leave a value unchanged, as the
 // direct API does.
-func (f *FS) Chown(ctx context.Context, name string, uid, gid int) error {
+func (f *File) Chown(ctx context.Context, name string, uid, gid int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFSChown, fsPathArg{FS: f.fsName, Name: name, Uid: uid, Gid: gid})
+	_, err := f.n.apply(opFileChown, filePathArg{File: f.fileName, Name: name, Uid: uid, Gid: gid})
 	return err
 }
 
-// Symlink replicates fs.FS.Symlink.
-func (f *FS) Symlink(ctx context.Context, source, destination string) error {
+// Symlink replicates fs.File.Symlink.
+func (f *File) Symlink(ctx context.Context, source, destination string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFSSymlink, fsPathArg{FS: f.fsName, Name: source, New: destination})
+	_, err := f.n.apply(opFileSymlink, filePathArg{File: f.fileName, Name: source, New: destination})
 	return err
 }
 
@@ -195,7 +195,7 @@ func (f *FS) Symlink(ctx context.Context, source, destination string) error {
 // Writes buffer in memory and one command replicates the complete content, so
 // a partial file never enters the raft log. Use WriteFile for small content
 // that is already in memory.
-func (f *FS) Create(ctx context.Context, name string, perm os.FileMode) (*File, error) {
+func (f *File) Create(ctx context.Context, name string, perm os.FileMode) (*FileHandle, error) {
 	return f.newFile(ctx, name, perm, false)
 }
 
@@ -205,11 +205,11 @@ func (f *FS) Create(ctx context.Context, name string, perm os.FileMode) (*File, 
 //
 // Writes made through another replica or a direct store between OpenWriter and
 // Close are not observed; Close replaces the content with this handle's buffer.
-func (f *FS) OpenWriter(ctx context.Context, name string, perm os.FileMode) (*File, error) {
+func (f *File) OpenWriter(ctx context.Context, name string, perm os.FileMode) (*FileHandle, error) {
 	return f.newFile(ctx, name, perm, true)
 }
 
-func (f *FS) newFile(ctx context.Context, name string, perm os.FileMode, appendMode bool) (*File, error) {
+func (f *File) newFile(ctx context.Context, name string, perm os.FileMode, appendMode bool) (*FileHandle, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -220,9 +220,9 @@ func (f *FS) newFile(ctx context.Context, name string, perm os.FileMode, appendM
 	if st == nil {
 		return nil, ErrClosed
 	}
-	file := &File{n: f.n, fsName: f.fsName, name: name, perm: perm}
+	file := &FileHandle{n: f.n, fileName: f.fileName, name: name, perm: perm}
 	if appendMode {
-		fsys, err := st.File().Open(f.fsName)
+		fsys, err := st.File().Open(f.fileName)
 		if err != nil {
 			return nil, err
 		}
@@ -236,21 +236,21 @@ func (f *FS) newFile(ctx context.Context, name string, perm os.FileMode, appendM
 	return file, nil
 }
 
-// File is a replicated file handle. Writes are buffered in memory; Close
+// FileHandle is a replicated file handle. Writes are buffered in memory; Close
 // replicates the whole content in one command. It is safe for concurrent use.
-type File struct {
-	mu     sync.Mutex
-	n      *Node
-	fsName string
-	name   string
-	perm   os.FileMode
-	data   []byte
-	off    int64
-	closed bool
+type FileHandle struct {
+	mu       sync.Mutex
+	n        *Node
+	fileName string
+	name     string
+	perm     os.FileMode
+	data     []byte
+	off      int64
+	closed   bool
 }
 
 // Write appends p at the current offset, like writing to an open file.
-func (f *File) Write(p []byte) (int, error) {
+func (f *FileHandle) Write(p []byte) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.closed {
@@ -263,7 +263,7 @@ func (f *File) Write(p []byte) (int, error) {
 }
 
 // WriteAt writes p at off, growing the buffer with zero bytes as needed.
-func (f *File) WriteAt(p []byte, off int64) (int, error) {
+func (f *FileHandle) WriteAt(p []byte, off int64) (int, error) {
 	if off < 0 {
 		return 0, fmt.Errorf("consensus: write at negative offset: %w", os.ErrInvalid)
 	}
@@ -281,7 +281,7 @@ func (f *File) WriteAt(p []byte, off int64) (int, error) {
 }
 
 // Truncate resizes the buffered content.
-func (f *File) Truncate(size int64) error {
+func (f *FileHandle) Truncate(size int64) error {
 	if size < 0 {
 		return fmt.Errorf("consensus: truncate to negative size: %w", os.ErrInvalid)
 	}
@@ -303,7 +303,7 @@ func (f *File) Truncate(size int64) error {
 }
 
 // Size returns the buffered content length.
-func (f *File) Size() int64 {
+func (f *FileHandle) Size() int64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return int64(len(f.data))
@@ -312,7 +312,7 @@ func (f *File) Size() int64 {
 // Close replicates the complete buffered content and marks the handle closed.
 // It is idempotent; after a failed apply the handle stays open so Close can be
 // retried.
-func (f *File) Close() error {
+func (f *FileHandle) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.closed {
@@ -322,8 +322,8 @@ func (f *File) Close() error {
 		return ErrClosed
 	}
 	now := time.Now()
-	_, err := f.n.apply(opFSWrite, fsPathArg{
-		FS:    f.fsName,
+	_, err := f.n.apply(opFileWrite, filePathArg{
+		File:  f.fileName,
 		Name:  f.name,
 		Perm:  f.perm,
 		Atime: now,
@@ -337,39 +337,39 @@ func (f *File) Close() error {
 	return nil
 }
 
-func (f *File) grow(size int64) {
+func (f *FileHandle) grow(size int64) {
 	if int64(len(f.data)) >= size {
 		return
 	}
 	f.data = append(f.data, make([]byte, size-int64(len(f.data)))...)
 }
 
-// DeleteFS replicates fs.Store.DeleteFS.
-func (n *Node) DeleteFS(ctx context.Context, name string) error {
+// DeleteFileSystem replicates fs.Store.DeleteFileSystem.
+func (n *Node) DeleteFileSystem(ctx context.Context, name string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if n == nil {
 		return ErrClosed
 	}
-	_, err := n.apply(opFSDeleteFS, fsPathArg{FS: name})
+	_, err := n.apply(opFileDeleteFileSystem, filePathArg{File: name})
 	return err
 }
 
-func (f *fsm) openFS(a fsPathArg) (*fstree.FS, error) {
+func (f *fsm) openFileSystem(a filePathArg) (*fstree.FS, error) {
 	st := f.node.storeHandle()
 	if st == nil {
 		return nil, ErrClosed
 	}
-	fsys, err := st.File().Open(a.FS)
+	fsys, err := st.File().Open(a.File)
 	if err != nil {
 		return nil, err
 	}
 	return fsys, nil
 }
 
-func (f *fsm) applyFSMkdir(a fsPathArg) any {
-	fsys, err := f.openFS(a)
+func (f *fsm) applyFileMkdir(a filePathArg) any {
+	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
 	}
@@ -379,11 +379,11 @@ func (f *fsm) applyFSMkdir(a fsPathArg) any {
 	return fsys.Chtimes(a.Name, a.Atime, a.Mtime)
 }
 
-// applyFSMkdirAll creates missing components one at a time so the pinned times
+// applyFileMkdirAll creates missing components one at a time so the pinned times
 // apply to every directory this command creates. fs.MkdirAll would stamp each
 // intermediate directory with the replica's own clock instead.
-func (f *fsm) applyFSMkdirAll(a fsPathArg) any {
-	fsys, err := f.openFS(a)
+func (f *fsm) applyFileMkdirAll(a filePathArg) any {
+	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
 	}
@@ -417,72 +417,72 @@ func (f *fsm) applyFSMkdirAll(a fsPathArg) any {
 	return nil
 }
 
-func (f *fsm) applyFSTruncate(a fsPathArg) any {
-	fsys, err := f.openFS(a)
+func (f *fsm) applyFileTruncate(a filePathArg) any {
+	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
 	}
 	return fsys.Truncate(a.Name, a.Size)
 }
 
-func (f *fsm) applyFSChmod(a fsPathArg) any {
-	fsys, err := f.openFS(a)
+func (f *fsm) applyFileChmod(a filePathArg) any {
+	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
 	}
 	return fsys.Chmod(a.Name, a.Perm)
 }
 
-func (f *fsm) applyFSChtimes(a fsPathArg) any {
-	fsys, err := f.openFS(a)
+func (f *fsm) applyFileChtimes(a filePathArg) any {
+	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
 	}
 	return fsys.Chtimes(a.Name, a.Atime, a.Mtime)
 }
 
-func (f *fsm) applyFSChown(a fsPathArg) any {
-	fsys, err := f.openFS(a)
+func (f *fsm) applyFileChown(a filePathArg) any {
+	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
 	}
 	return fsys.Chown(a.Name, a.Uid, a.Gid)
 }
 
-func (f *fsm) applyFSSymlink(a fsPathArg) any {
-	fsys, err := f.openFS(a)
+func (f *fsm) applyFileSymlink(a filePathArg) any {
+	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
 	}
 	return fsys.Symlink(a.Name, a.New)
 }
 
-func (f *fsm) applyFSRemove(a fsPathArg) any {
-	fsys, err := f.openFS(a)
+func (f *fsm) applyFileRemove(a filePathArg) any {
+	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
 	}
 	return fsys.Remove(a.Name)
 }
 
-func (f *fsm) applyFSRemoveAll(a fsPathArg) any {
-	fsys, err := f.openFS(a)
+func (f *fsm) applyFileRemoveAll(a filePathArg) any {
+	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
 	}
 	return fsys.RemoveAll(a.Name)
 }
 
-func (f *fsm) applyFSRename(a fsPathArg) any {
-	fsys, err := f.openFS(a)
+func (f *fsm) applyFileRename(a filePathArg) any {
+	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
 	}
 	return fsys.Rename(a.Name, a.New)
 }
 
-func (f *fsm) applyFSWrite(a fsPathArg) any {
-	fsys, err := f.openFS(a)
+func (f *fsm) applyFileWrite(a filePathArg) any {
+	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
 	}
@@ -500,10 +500,10 @@ func (f *fsm) applyFSWrite(a fsPathArg) any {
 	return fsys.Chtimes(a.Name, a.Atime, a.Mtime)
 }
 
-func (f *fsm) applyFSDeleteFS(a fsPathArg) any {
+func (f *fsm) applyFileDeleteFileSystem(a filePathArg) any {
 	st := f.node.storeHandle()
 	if st == nil {
 		return ErrClosed
 	}
-	return st.File().DeleteFS(a.FS)
+	return st.File().DeleteFS(a.File)
 }

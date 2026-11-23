@@ -9,27 +9,27 @@ import (
 
 var (
 	// ErrNilParam is returned when a required parameter is nil.
-	ErrNilParam = errors.New("ts: nil parameter")
+	ErrNilParam = errors.New("series: nil parameter")
 
 	// ErrNilContext is returned when a nil context is passed to an operation.
-	ErrNilContext = errors.New("ts: nil context")
+	ErrNilContext = errors.New("series: nil context")
 
 	// ErrNotFound is returned when a series or point does not exist.
-	ErrNotFound = errors.New("ts: not found")
+	ErrNotFound = errors.New("series: not found")
 
 	// ErrInvalidRange is returned when start is greater than end.
-	ErrInvalidRange = errors.New("ts: invalid range")
+	ErrInvalidRange = errors.New("series: invalid range")
 
 	// ErrInvalidOptions is returned for range options with a negative limit or
 	// offset.
-	ErrInvalidOptions = errors.New("ts: invalid options")
+	ErrInvalidOptions = errors.New("series: invalid options")
 
 	// ErrInvalidStep is returned when an aggregation step is not positive.
-	ErrInvalidStep = errors.New("ts: invalid step")
+	ErrInvalidStep = errors.New("series: invalid step")
 
 	// ErrInvalidRetention is returned for a retention policy with a negative
 	// MaxAge or negative MaxPoints.
-	ErrInvalidRetention = errors.New("ts: invalid retention")
+	ErrInvalidRetention = errors.New("series: invalid retention")
 
 	// ErrAuthFailed is returned when encrypted data fails authentication.
 	ErrAuthFailed = crypto.ErrAuthFailed
@@ -42,7 +42,7 @@ var (
 
 	// ErrIncompatibleVersion is returned when the on-disk format revision is
 	// not the one this build understands.
-	ErrIncompatibleVersion = errors.New("ts: incompatible on-disk format version")
+	ErrIncompatibleVersion = errors.New("series: incompatible on-disk format version")
 
 	// ErrWrongMode is returned when a store is opened with an encryption mode
 	// that does not match what is stored on disk.

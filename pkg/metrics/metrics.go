@@ -93,34 +93,34 @@ const (
 	// MetricCacheSize is the current number of entries in the fs inode cache.
 	MetricCacheSize = "harbor.fs.cache.size"
 
-	// MetricTSDecodedPoints counts time-series points decoded from blocks.
-	MetricTSDecodedPoints = "harbor.ts.points.decoded"
+	// MetricSeriesDecodedPoints counts time-series points decoded from blocks.
+	MetricSeriesDecodedPoints = "harbor.ts.points.decoded"
 
-	// MetricTSAggregateDuration is the duration of a time-series aggregate
+	// MetricSeriesAggregateDuration is the duration of a time-series aggregate
 	// call, in nanoseconds.
-	MetricTSAggregateDuration = "harbor.ts.aggregate.duration"
+	MetricSeriesAggregateDuration = "harbor.ts.aggregate.duration"
 
-	// MetricVecCandidates counts vectors examined during a vector search.
-	MetricVecCandidates = "harbor.vec.search.candidates"
+	// MetricVectorCandidates counts vectors examined during a vector search.
+	MetricVectorCandidates = "harbor.vec.search.candidates"
 
-	// MetricVecFallbacks counts vector searches that fell back to an exact
+	// MetricVectorFallbacks counts vector searches that fell back to an exact
 	// scan because the index could not prove enough matches.
-	MetricVecFallbacks = "harbor.vec.search.fallbacks"
+	MetricVectorFallbacks = "harbor.vec.search.fallbacks"
 
-	// MetricVecScanSize is the number of points scanned by an exact fallback,
+	// MetricVectorScanSize is the number of points scanned by an exact fallback,
 	// which signals how sparse a filter is.
-	MetricVecScanSize = "harbor.vec.search.scan.size"
+	MetricVectorScanSize = "harbor.vec.search.scan.size"
 
-	// MetricVecSearchDuration is the duration of a vector search, in
+	// MetricVectorSearchDuration is the duration of a vector search, in
 	// nanoseconds.
-	MetricVecSearchDuration = "harbor.vec.search.duration"
+	MetricVectorSearchDuration = "harbor.vec.search.duration"
 
-	// MetricVecFlushDuration is the duration of a vector flush to disk, in
+	// MetricVectorFlushDuration is the duration of a vector flush to disk, in
 	// nanoseconds.
-	MetricVecFlushDuration = "harbor.vec.flush.duration"
+	MetricVectorFlushDuration = "harbor.vec.flush.duration"
 
-	// MetricVecFlushTotal counts vector flushes, labelled by result.
-	MetricVecFlushTotal = "harbor.vec.flush.total"
+	// MetricVectorFlushTotal counts vector flushes, labelled by result.
+	MetricVectorFlushTotal = "harbor.vec.flush.total"
 
 	// MetricRotateDuration is the duration of a key rotation, in
 	// nanoseconds.

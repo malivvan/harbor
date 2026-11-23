@@ -289,7 +289,7 @@ func (im *importer) applyFSDir(rec exportRecord) error {
 
 func (im *importer) applyFSFile(rec exportRecord) error {
 	if rec.Container == "" || rec.Path == "" {
-		return fmt.Errorf("%w: fs.file without container or path", ErrExportFormat)
+		return fmt.Errorf("%w: fs.fstree without container or path", ErrExportFormat)
 	}
 	if im.dryRun {
 		return nil

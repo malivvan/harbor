@@ -19,12 +19,14 @@ import (
 
 	"github.com/malivvan/harbor/internal/slip10"
 	"github.com/malivvan/harbor/pkg/sign/canonical"
+	"github.com/malivvan/harbor/store"
 	bolt "go.etcd.io/bbolt"
 )
 
-// Reserved bucket and record names under the database root.
+// Reserved bucket and record names under the database root. The audit trail
+// lives in its own top-level bucket, named by the store registry.
 const (
-	auditBucket  = "audit"
+	auditBucket  = store.LEDGER
 	eventsBucket = "events"
 	headKey      = "head"
 
@@ -35,15 +37,16 @@ const (
 	genesisDomain = "harbor/audit/v1/genesis"
 )
 
-// Store names used by the sub-stores. They are persisted in event records, so
-// existing values are never renumbered or renamed.
+// Store names used by the sub-stores. They are the root bucket names from the
+// store registry and are persisted in event records, so existing values are
+// never renamed.
 const (
-	StoreDB     = "db"
-	StoreFS     = "fs"
-	StoreTS     = "ts"
-	StoreVec    = "vec"
-	StoreGraphs = "graphs"
-	StoreObject = "object"
+	StoreRecord = store.RECORD
+	StoreFile   = store.FSTREE
+	StoreSeries = store.SERIES
+	StoreVector = store.VECTOR
+	StoreGraphs = store.GRAPHS
+	StoreObject = store.OBJECT
 )
 
 var (

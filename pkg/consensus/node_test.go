@@ -143,8 +143,8 @@ func TestReplicateDB(t *testing.T) {
 	defer closeAll(nodes...)
 
 	leader := waitLeader(t, nodes...)
-	require.NoError(t, leader.DB().Save(ctx, &testUser{ID: "u1", Name: "alice"}))
-	require.NoError(t, leader.DB().Save(ctx, &testUser{ID: "u2", Name: "bob"}))
+	require.NoError(t, leader.Record().Save(ctx, &testUser{ID: "u1", Name: "alice"}))
+	require.NoError(t, leader.Record().Save(ctx, &testUser{ID: "u2", Name: "bob"}))
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
@@ -154,8 +154,8 @@ func TestReplicateDB(t *testing.T) {
 	}
 
 	// UpdateField and delete also replicate.
-	require.NoError(t, leader.DB().UpdateField(ctx, &testUser{ID: "u1"}, "Name", "alicia"))
-	require.NoError(t, leader.DB().DeleteStruct(ctx, &testUser{ID: "u2"}))
+	require.NoError(t, leader.Record().UpdateField(ctx, &testUser{ID: "u1"}, "Name", "alicia"))
+	require.NoError(t, leader.Record().DeleteStruct(ctx, &testUser{ID: "u2"}))
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
@@ -172,8 +172,8 @@ func TestReplicateTS(t *testing.T) {
 	defer closeAll(nodes...)
 
 	leader := waitLeader(t, nodes...)
-	require.NoError(t, leader.TS().Insert(ctx, "cpu", series.Point{Timestamp: 1, Value: 1.5}))
-	require.NoError(t, leader.TS().InsertMany(ctx, "cpu", []series.Point{
+	require.NoError(t, leader.Series().Insert(ctx, "cpu", series.Point{Timestamp: 1, Value: 1.5}))
+	require.NoError(t, leader.Series().InsertMany(ctx, "cpu", []series.Point{
 		{Timestamp: 2, Value: 2.5},
 		{Timestamp: 3, Value: 3.5},
 	}))
@@ -195,8 +195,8 @@ func TestReplicateVec(t *testing.T) {
 	defer closeAll(nodes...)
 
 	leader := waitLeader(t, nodes...)
-	require.NoError(t, leader.Vec().CreateCollection("colors", 2, vector.Dot, false))
-	require.NoError(t, leader.Vec().Upsert("colors", []vector.PointStruct{
+	require.NoError(t, leader.Vector().CreateCollection("colors", 2, vector.Dot, false))
+	require.NoError(t, leader.Vector().Upsert("colors", []vector.PointStruct{
 		{ID: "red", Vector: []float32{1, 0}},
 		{ID: "blue", Vector: []float32{0, 1}},
 	}))
@@ -217,7 +217,7 @@ func TestReplicateFS(t *testing.T) {
 	defer closeAll(nodes...)
 
 	leader := waitLeader(t, nodes...)
-	fs := leader.FS().Open("data")
+	fs := leader.File().Open("data")
 	require.NoError(t, fs.Mkdir(ctx, "/docs", 0o755))
 	require.NoError(t, fs.WriteFile(ctx, "/docs/readme.txt", []byte("hello harbor"), 0o644))
 	waitApplied(t, leader, nodes...)
@@ -238,7 +238,7 @@ func TestSnapshotRestore(t *testing.T) {
 
 	leader := waitLeader(t, nodes...)
 	for i := 1; i <= 5; i++ {
-		require.NoError(t, leader.DB().Save(ctx, &testUser{ID: "u" + string(rune('0'+i)), Name: "n"}))
+		require.NoError(t, leader.Record().Save(ctx, &testUser{ID: "u" + string(rune('0'+i)), Name: "n"}))
 	}
 	waitApplied(t, leader, nodes...)
 
@@ -289,9 +289,9 @@ func TestReplicatedRetentionIsDeterministic(t *testing.T) {
 
 	// MaxAge of one hour with points one minute apart: the leader's clock keeps
 	// all of them, and every replica must agree.
-	require.NoError(t, leader.TS().SetRetention(ctx, "cpu", series.Retention{MaxAge: time.Hour}))
+	require.NoError(t, leader.Series().SetRetention(ctx, "cpu", series.Retention{MaxAge: time.Hour}))
 	for i := int64(0); i < 5; i++ {
-		require.NoError(t, leader.TS().Insert(ctx, "cpu", series.Point{
+		require.NoError(t, leader.Series().Insert(ctx, "cpu", series.Point{
 			Timestamp: base - i*int64(time.Minute),
 			Value:     float64(i),
 		}))
@@ -325,8 +325,8 @@ func TestReplicatedRetentionPrunesIdentically(t *testing.T) {
 		n.SetNow(func() int64 { return base - int64(10*365*24*time.Hour) })
 	}
 
-	require.NoError(t, leader.TS().SetRetention(ctx, "cpu", series.Retention{MaxAge: time.Hour}))
-	require.NoError(t, leader.TS().InsertMany(ctx, "cpu", []series.Point{
+	require.NoError(t, leader.Series().SetRetention(ctx, "cpu", series.Retention{MaxAge: time.Hour}))
+	require.NoError(t, leader.Series().InsertMany(ctx, "cpu", []series.Point{
 		{Timestamp: base - int64(30*time.Minute), Value: 1}, // kept
 		{Timestamp: base - int64(2*time.Hour), Value: 2},    // pruned by MaxAge
 		{Timestamp: base - int64(3*time.Hour), Value: 3},    // pruned by MaxAge
@@ -373,17 +373,17 @@ func TestApplyErrorsAreStructured(t *testing.T) {
 	})
 
 	t.Run("malformed argument", func(t *testing.T) {
-		data, err := json.Marshal(Command{Op: opTSInsert, Arg: json.RawMessage(`{"series":42}`)})
+		data, err := json.Marshal(Command{Op: opSeriesInsert, Arg: json.RawMessage(`{"series":42}`)})
 		require.NoError(t, err)
 		resp := f.Apply(&raft.Log{Index: 9, Data: data})
 		var ae *ApplyError
 		require.ErrorAs(t, resp.(error), &ae)
 		require.Equal(t, uint64(9), ae.Index)
-		require.Equal(t, opTSInsert, ae.Op)
+		require.Equal(t, opSeriesInsert, ae.Op)
 	})
 
 	t.Run("node stays usable", func(t *testing.T) {
-		require.NoError(t, node.TS().Insert(context.Background(), "cpu", series.Point{Timestamp: 1, Value: 1}))
+		require.NoError(t, node.Series().Insert(context.Background(), "cpu", series.Point{Timestamp: 1, Value: 1}))
 		count, err := node.Store().Series().Series("cpu").Count(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, 1, count)

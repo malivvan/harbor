@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/malivvan/harbor/pkg/ledger"
+	"github.com/malivvan/harbor/store/ledger"
 )
 
 // ChangeOp is the kind of mutation a record bucket saw.
@@ -137,7 +137,7 @@ func (n *node) auditEntry(op, entity string, digest []byte) error {
 		return nil
 	}
 	return sink.Record(ledger.Entry{
-		Store:  ledger.StoreDB,
+		Store:  ledger.StoreRecord,
 		Op:     op,
 		Entity: n.auditEntity(entity),
 		Digest: digest,
