@@ -10,18 +10,20 @@ stores you can use together or on their own:
 
 - **`record`** — a structured record store with indexes, unique constraints, a
   matcher-based query API, and callback-managed transactions.
-- **`file`** — a complete in-database file system with symbolic links, snapshots,
-  an inode cache, and chunked content.
+- **`fstree`** — a complete in-database file system with symbolic links,
+  snapshots, an inode cache, and chunked content.
 - **`series`** — a time-series store with ordered range scans, aggregation,
   labels, and retention policies.
 - **`vector`** — a vector store with Flat and HNSW indexes, payload filters, SQ8
   quantization, and buffered writes.
 - **`search`** — a full-text index with BM25 ranking and word/CJK tokenizers.
+- **`graphs`** — an independent bitemporal property-graph store.
+- **`object`** — an independent flat object store with buckets and atomic puts.
 
 The root `harbor` package opens a single bbolt file behind one password, derives
-a separate key for each store, and exposes them through `Record()`, `File()`,
-`Series()`, `Vector()` and `Search()`. Each accessor accepts optional bucket-path
-segments that select a rooted view of the already-open store. Every store can also be used directly with its own `*bolt.DB`.
+a separate key for each store, and exposes them through `Record()`, `File()`, `Series()`, `Vector()`,
+`Search()`, `Graphs()` and `Objects()`. Each accessor accepts optional
+bucket-path segments that select a rooted view of the already-open store. Every store can also be used directly with its own `*bolt.DB`.
 
 ## Table of contents
 
@@ -30,11 +32,11 @@ segments that select a rooted view of the already-open store. Every store can al
 - [Quick start](#quick-start)
 - [Opening a store](#opening-a-store)
 - [Records with `record`](#records-with-record)
-- [Files with `file`](#files-with-file)
+- [Files with `fstree`](#files-with-fstree)
 - [Time series with `series`](#time-series-with-series)
 - [Vectors with `vector`](#vectors-with-vector)
 - [Full-text search with `search`](#full-text-search-with-search)
-- [Object storage: `blob` and `snapshot`](#object-storage-blob-and-snapshot)
+- [Object storage: `object` and `snapshot`](#object-storage-object-and-snapshot)
 - [Utilities](#utilities)
 - [Clustering](#clustering)
 - [Encryption](#encryption)
@@ -84,10 +86,13 @@ The module contains the root `harbor` package and the store packages under
 |---------|-------------|-------|
 | `harbor` | `github.com/malivvan/harbor` | this file |
 | `record` | `github.com/malivvan/harbor/store/record` | [store/record/README.md](store/record/README.md) |
-| `file` | `github.com/malivvan/harbor/store/file` | [store/file/README.md](store/file/README.md) |
+| `fstree` | `github.com/malivvan/harbor/store/fstree` | [store/fstree/README.md](store/fstree/README.md) |
 | `series` | `github.com/malivvan/harbor/store/series` | [store/series/README.md](store/series/README.md) |
 | `vector` | `github.com/malivvan/harbor/store/vector` | [store/vector/README.md](store/vector/README.md) |
 | `search` | `github.com/malivvan/harbor/store/search` | [store/search/README.md](store/search/README.md) |
+| `graphs` | `github.com/malivvan/harbor/store/graphs` | [store/graphs/README.md](store/graphs/README.md) |
+| `object` | `github.com/malivvan/harbor/store/object` | [store/object/README.md](store/object/README.md) |
+| `system` | `github.com/malivvan/harbor/store/system` | [store/system/README.md](store/system/README.md) |
 
 API reference: [pkg.go.dev/github.com/malivvan/harbor](https://pkg.go.dev/github.com/malivvan/harbor).
 
@@ -434,7 +439,7 @@ err = users.Delete(ctx, "sessions", sessionID)
 
 Full reference: [store/record/README.md](store/record/README.md).
 
-## Files with `file`
+## Files with `fstree`
 
 An `absfs`-compatible file system stored in the same bbolt file. File systems
 are named, so one store can hold many independent roots.
@@ -598,7 +603,7 @@ external synchronization. Individual `File` values should be used by a single
 goroutine. See [AGENTS.md](AGENTS.md#internalabsfs) for the interface contracts
 and implementer guidance.
 
-Full reference: [store/file/README.md](store/file/README.md).
+Full reference: [store/fstree/README.md](store/fstree/README.md).
 
 ## Time series with `series`
 
@@ -841,16 +846,15 @@ Values are sealed when value encryption is enabled, following the
 set; encrypting them hides the vocabulary but still leaks equality and result
 sizes. See [store/search/README.md](store/search/README.md) for the layout, errors and limits.
 
-## Object storage: `blob` and `snapshot`
+## Object storage: `object` and `snapshot`
 
-Harbor's `file` store is hierarchical. Two optional packages build an object-store
-shape on top of it:
+Harbor has an independent flat object store and a snapshot package built on it:
 
-- **`pkg/blob`** is a flat namespace over one named file system. A bucket is a
-  top-level directory and a key is the slash-separated path beneath it. Keys
-  containing a `..` segment are rejected, so a key can never address a sibling
-  bucket. `Put` writes through a temporary sibling and renames the result into
-  place, so a failed upload never leaves a partial object behind.
+- **`store/object`** owns a dedicated root bucket, so it works without the file
+  store. A bucket is a namespace and a key is a slash-separated name inside it.
+  Keys containing a `..` segment are rejected, so a key can never address a
+  sibling bucket. `Put` consumes the whole reader before writing, so a failed
+  reader leaves the previous content unchanged.
 - **`pkg/snapshot`** takes content-addressed, incremental point-in-time
   snapshots of the objects under a prefix and restores them. Uploads dedupe by
   content hash, each snapshot carries a complete gzipped manifest, and restore
@@ -858,24 +862,22 @@ shape on top of it:
 
 ```go
 import (
-	"github.com/malivvan/harbor/pkg/blob"
 	"github.com/malivvan/harbor/pkg/snapshot"
 	"github.com/malivvan/harbor/pkg/snapshot/blobstore"
 )
 
-objects, err := blob.Open(store.File(), "app-data")
-if err != nil {
-	return err
-}
-_, err = objects.Put(ctx, "tenant-a", "reports/q3.pdf", reader, 0, "application/pdf")
+objects := store.Objects()
+_, err := objects.Put(ctx, "tenant-a", "reports/q3.pdf", reader, 0, "application/pdf")
 
 snap := snapshot.New(blobstore.New(objects, "os"), snapshot.Config{DataPrefix: "os/"})
 idx, err := snap.Create(ctx, snapshot.KindManual, "") // capture
 err = snap.Restore(ctx, idx.ID)                      // roll back
 ```
 
-Both packages are optional: nothing in the root `Store` depends on them. See
-[pkg/blob/README.md](pkg/blob/README.md) and
+Data written by the previous file-backed blob implementation is not abandoned:
+it remains in the file store, and `object.Store.MigrateFromFile` copies a bucket
+into the independent store explicitly. See
+[store/object/README.md](store/object/README.md) and
 [pkg/snapshot/README.md](pkg/snapshot/README.md).
 
 ## Utilities
@@ -965,9 +967,11 @@ flags:
 | `EncryptVecPointIDs` | vec point IDs; also the stored point value |
 | `EncryptVecCollectionNames` | vec collection names |
 | `EncryptVecPoints` | vec point blobs and collection metadata |
+| `EncryptGraphValues` | graph records |
+| `EncryptObjectValues` | object records |
 
-Aggregates (`EncryptDB`, `EncryptFS`, `EncryptTS`, `EncryptVec`) and
-`EncryptAll` combine these bits. The encryption and KDF fields of `Options`
+Aggregates (`EncryptDB`, `EncryptFS`, `EncryptTS`, `EncryptVec`,
+`EncryptGraph`, `EncryptObject`) and `EncryptAll` combine these bits. The encryption and KDF fields of `Options`
 only apply when creating a store; an existing store always uses its persisted
 settings.
 
@@ -1113,7 +1117,9 @@ log.Printf("audit: %d events, tip %x", res.Count, res.Tip)
 | `AuditFS` | `file` writes |
 | `AuditTS` | `series` writes |
 | `AuditVec` | `vector` writes |
-| `AuditAll` | all four |
+| `AuditGraphs` | `graphs` writes |
+| `AuditObject` | `object` writes |
+| `AuditAll` | every store |
 
 Unlike encryption flags, audit flags are **not persisted**: they are a per-open
 runtime choice, so enabling or disabling auditing never changes the on-disk
@@ -1127,14 +1133,14 @@ signing keys derive from the password, so anyone holding it can produce valid
 events; the trail proves integrity against an attacker *without* the key, the
 same trust boundary as the encryption itself.
 
-See [pkg/audit/README.md](pkg/audit/README.md) for the event model, the recorded
+See [pkg/ledger/README.md](pkg/ledger/README.md) for the event model, the recorded
 operations, the full threat model and how to use the `audit` package directly.
 
 ## Cross-store transactions
 
-`WriteTransaction` runs a callback in one bbolt transaction bound to all four
-sub-stores, so a record, a file, a time-series point and a vector upsert commit
-or roll back together:
+`WriteTransaction` runs a callback in one bbolt transaction bound to every
+sub-store, so a record, a file, a time-series point, a vector upsert, a graph
+write and an object write commit or roll back together:
 
 ```go
 err := store.WriteTransaction(ctx, func(tx *harbor.Tx) error {
@@ -1162,6 +1168,18 @@ err := store.WriteTransaction(ctx, func(tx *harbor.Tx) error {
 		return err
 	}
 	if err := col.Upsert([]vector.PointStruct{{ID: doc.ID, Vector: embedding}}); err != nil {
+		return err
+	}
+
+	if _, err := tx.Objects().Put(ctx, "app-data", "doc.json", payloadReader, 0, "application/json"); err != nil {
+		return err
+	}
+
+	g, err := tx.Graphs().Open("documents")
+	if err != nil {
+		return err
+	}
+	if err := g.UpsertNode(ctx, &graph.Node{ID: doc.ID}); err != nil {
 		return err
 	}
 
@@ -1374,7 +1392,7 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
 
 - [store/record/README.md](store/record/README.md) — models, tags, CRUD, queries, transactions,
   key/value access, and codecs.
-- [store/file/README.md](store/file/README.md) — file systems, snapshots, external content, and
+- [store/fstree/README.md](store/fstree/README.md) — file systems, snapshots, external content, and
   encryption.
 - [store/series/README.md](store/series/README.md) — series, aggregation, retention, and encrypted
   blocks.
@@ -1382,12 +1400,15 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
   and buffering.
 - [store/search/README.md](store/search/README.md) — full-text indexes, tokenizers, BM25 and
   encryption.
-- [store/file/s3fs/README.md](store/file/s3fs/README.md) — the S3-backed `absfs.Filer`.
-- [pkg/audit/README.md](pkg/audit/README.md) — the tamper-evident audit trail:
+- [store/graphs/README.md](store/graphs/README.md) — the independent property-graph store.
+- [store/system/README.md](store/system/README.md) — the store header, KDF settings,
+  flags and key derivation.
+- [store/fstree/s3fs/README.md](store/fstree/s3fs/README.md) — the S3-backed `absfs.Filer`.
+- [pkg/ledger/README.md](pkg/ledger/README.md) — the tamper-evident audit trail:
   event model, recorded operations, threat model, and direct package use.
 - [pkg/store/README.md](pkg/store/README.md) — the process-wide database
   manager, directory layout, and password file.
-- [pkg/blob/README.md](pkg/blob/README.md) — the flat object store, containment,
+- [store/object/README.md](store/object/README.md) — the flat object store, containment,
   and grants.
 - [pkg/snapshot/README.md](pkg/snapshot/README.md) — content-addressed
   incremental snapshots, restore, retention, and scheduling.
@@ -1401,12 +1422,14 @@ Generated API documentation is published on pkg.go.dev:
 
 - [github.com/malivvan/harbor](https://pkg.go.dev/github.com/malivvan/harbor)
 - [github.com/malivvan/harbor/store/record](https://pkg.go.dev/github.com/malivvan/harbor/store/record)
-- [github.com/malivvan/harbor/store/file](https://pkg.go.dev/github.com/malivvan/harbor/store/file)
+- [github.com/malivvan/harbor/store/fstree](https://pkg.go.dev/github.com/malivvan/harbor/store/fstree)
 - [github.com/malivvan/harbor/store/series](https://pkg.go.dev/github.com/malivvan/harbor/store/series)
 - [github.com/malivvan/harbor/store/vector](https://pkg.go.dev/github.com/malivvan/harbor/store/vector)
 - [github.com/malivvan/harbor/store/search](https://pkg.go.dev/github.com/malivvan/harbor/store/search)
-- [github.com/malivvan/harbor/pkg/audit](https://pkg.go.dev/github.com/malivvan/harbor/pkg/audit)
-- [github.com/malivvan/harbor/pkg/blob](https://pkg.go.dev/github.com/malivvan/harbor/pkg/blob)
+- [github.com/malivvan/harbor/pkg/ledger](https://pkg.go.dev/github.com/malivvan/harbor/pkg/ledger)
+- [github.com/malivvan/harbor/store/object](https://pkg.go.dev/github.com/malivvan/harbor/store/object)
+- [github.com/malivvan/harbor/store/graphs](https://pkg.go.dev/github.com/malivvan/harbor/store/graphs)
+- [github.com/malivvan/harbor/store/system](https://pkg.go.dev/github.com/malivvan/harbor/store/system)
 - [github.com/malivvan/harbor/pkg/consensus](https://pkg.go.dev/github.com/malivvan/harbor/pkg/consensus)
 - [github.com/malivvan/harbor/pkg/id](https://pkg.go.dev/github.com/malivvan/harbor/pkg/id)
 - [github.com/malivvan/harbor/pkg/fusion](https://pkg.go.dev/github.com/malivvan/harbor/pkg/fusion)
@@ -1424,13 +1447,13 @@ Where to start:
 - **Records, indexes and transactions:** [store/record/README.md](store/record/README.md).
 - **Full-text search:** [Full-text search with `search`](#full-text-search-with-search)
   and [store/search/README.md](store/search/README.md).
-- **Files, snapshots or external content:** [store/file/README.md](store/file/README.md) and
-  [store/file/s3fs/README.md](store/file/s3fs/README.md).
+- **Files, snapshots or external content:** [store/fstree/README.md](store/fstree/README.md) and
+  [store/fstree/s3fs/README.md](store/fstree/s3fs/README.md).
 - **Metrics and time series:** [store/series/README.md](store/series/README.md).
 - **Embeddings and similarity search:** [store/vector/README.md](store/vector/README.md).
 - **Process-wide database, blobs or object snapshots:**
   [pkg/store/README.md](pkg/store/README.md),
-  [pkg/blob/README.md](pkg/blob/README.md) and
+  [store/object/README.md](store/object/README.md) and
   [pkg/snapshot/README.md](pkg/snapshot/README.md).
 - **IDs, metrics or a document vector facade:**
   [Utilities](#utilities) and [store/vector/doc/README.md](store/vector/doc/README.md).

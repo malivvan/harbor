@@ -16,7 +16,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/malivvan/harbor/store/file"
+	"github.com/malivvan/harbor/store/fstree"
 	"github.com/malivvan/harbor/store/record"
 	"github.com/malivvan/harbor/store/series"
 	"github.com/malivvan/harbor/store/vector"
@@ -330,7 +330,7 @@ func (e *exporter) exportFS() error {
 	return nil
 }
 
-func (e *exporter) exportFSTree(container string, vfs *file.FS, dir string) error {
+func (e *exporter) exportFSTree(container string, vfs *fstree.FS, dir string) error {
 	entries, err := vfs.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("harbor: export fs %q %s: %w", container, dir, err)

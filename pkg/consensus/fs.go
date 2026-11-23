@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/malivvan/harbor/store/file"
+	"github.com/malivvan/harbor/store/fstree"
 )
 
 // FS is the replicated write view of a named file system in the fs sub-store.
@@ -356,7 +356,7 @@ func (n *Node) DeleteFS(ctx context.Context, name string) error {
 	return err
 }
 
-func (f *fsm) openFS(a fsPathArg) (*file.FS, error) {
+func (f *fsm) openFS(a fsPathArg) (*fstree.FS, error) {
 	st := f.node.storeHandle()
 	if st == nil {
 		return nil, ErrClosed

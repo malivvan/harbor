@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/pkg/audit"
+	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
 	"go.etcd.io/bbolt"
 )
@@ -47,7 +47,7 @@ type Config struct {
 	EncryptCollectionNames bool
 
 	// Audit, when non-nil, receives an entry for every committed write.
-	Audit audit.Sink
+	Audit ledger.Sink
 
 	// SharedDB reports that the caller owns the bbolt handle. Store.Close then
 	// flushes buffered points and releases the wrapper without closing the

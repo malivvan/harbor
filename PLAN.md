@@ -1,6 +1,14 @@
+> **Post-backlog restructure (later changes).** In addition to the rename
+> above, `file` became `store/fstree` (`fstree`), `pkg/audit` became
+> `pkg/ledger` (`ledger`), `pkg/blob` became the independent `store/object`
+> (`object`) store, `graph` gained an independent backend in `store/graphs`,
+> and the header/KDF/key derivation moved into `store/system`. The root
+> accessors now include `Graphs()` and `Objects()`. Historical text below uses
+> the names from when each item was implemented.
+
 > **Post-backlog restructure.** After this backlog was completed, the store
 > packages were renamed and moved: `db` → `store/record` (`record`), `ts` →
-> `store/series` (`series`), `fs` → `store/file` (`file`), `vec` →
+> `store/series` (`series`), `fs` → `store/fstree` (`file`), `vec` →
 > `store/vector` (`vector`), and `fts` → `store/search` (`search`). The
 > `harbor.Store` accessors are now `Record/File/Series/Vector/Search` and take
 > optional bucket-path segments; the no-argument forms keep the original
@@ -55,7 +63,7 @@ a mid-stream reader failure (no final key, no leftover temp, previous content
 intact) and the content-address dedupe path. The `pkg/snapshot/blobstore` suite
 (item 0.6) exercises the adapter end to end.
 
-`blob.Store.Put` (`pkg/blob/blob.go`) opens the destination with `fs.Create` and
+`blob.Store.Put` (`store/object/blob.go`) opens the destination with `fs.Create` and
 streams the reader straight into it. A reader that fails mid-copy leaves a
 partial object at the final key. `snapshot.Create` (`pkg/snapshot/snapshot.go`)
 skips an upload when `Stat` says the content-addressed blob exists, so a failed
@@ -66,8 +74,8 @@ Proposal: write to a temporary sibling key in the same bucket, then `fs.Rename`
 it into place (fs rename is atomic); remove the temporary key on any error. No
 public API change.
 
-Steps: helper `putAtomic` in `pkg/blob/blob.go`; failing-reader test in
-`pkg/blob/blob_test.go` (final key absent or previous content unchanged); snapshot
+Steps: helper `putAtomic` in `store/object/blob.go`; failing-reader test in
+`store/object/blob_test.go` (final key absent or previous content unchanged); snapshot
 test that reuses a blob only after a complete upload.
 Acceptance: fault-injected upload leaves no object and no dedupe entry;
 snapshot create/restore still passes.
@@ -80,7 +88,7 @@ a `vec/doc` guide link and pkg.go.dev links. AGENTS.md's repository map now list
 `vec/doc` and notes the password-file lifecycle, blob atomicity/containment and
 snapshot manifest verification. Relative links resolve.
 
-`pkg/store`, `pkg/blob`, `pkg/snapshot`, `pkg/snapshot/blobstore`, `pkg/id`,
+`pkg/store`, `store/object`, `pkg/snapshot`, `pkg/snapshot/blobstore`, `pkg/id`,
 `pkg/sign/canonical` and `vec/doc` now have AGENTS map entries and pkg.go.dev
 links (added with the package move). Still needed: short README sections for
 `store`, `blob` and `snapshot`, and a usage paragraph or guide for `id`,
@@ -110,7 +118,7 @@ Acceptance: manager and singleton expose all four stores.
 ### 0.5 Decide `pkg/sign/canonical` — DONE
 
 Done: `audit` now signs `canonical.Bytes(event)`; the same bytes are stored and
-hashed into the chain. `pkg/audit/README.md` gained an "Event encoding" section,
+hashed into the chain. `pkg/ledger/README.md` gained an "Event encoding" section,
 and tests pin the stored bytes to the canonical form and prove that a
 map-carrying event has one signature regardless of insertion order. The package
 is no longer unexplained.
@@ -120,7 +128,7 @@ importer. `audit` signs `json.Marshal(event)`; struct field order is stable, but
 a future event carrying a map would not be canonical.
 
 Recommendation: sign `canonical.Bytes(event)` in `audit`, pin the encoding in
-`pkg/audit/README.md`, and test that reordered map fields produce the same signature.
+`pkg/ledger/README.md`, and test that reordered map fields produce the same signature.
 If it stays standalone, document it in README/AGENTS as a general utility.
 Acceptance: no unexplained exported package; audit encoding is canonical or
 explicitly documented.
@@ -810,7 +818,7 @@ intervals and meanings out of harbor.
 ## 13. P2 — `fs` for application files and sessions — DONE
 
 Done: the pattern is documented in the root README ("Application files and
-sessions") and `store/file/README.md`, and `TestFSSessionSurvivesReopen` writes a JSON
+sessions") and `store/fstree/README.md`, and `TestFSSessionSurvivesReopen` writes a JSON
 session file, closes the store, reopens it and reads the state back. fs
 operations already participate in `tx.FS()`, so no new primitive was needed.
 
@@ -819,7 +827,7 @@ snapshots, symlinks, content encryption and external content. Harbor work:
 
 - Document the pattern (`store.FS().Open("app.fs")`, sessions as JSON files on
   the virtual FS, optional separate database file if the application requires
-  it) in README and `store/file/README.md`.
+  it) in README and `store/fstree/README.md`.
 - Ensure fs operations participate in the cross-store transaction (item 1).
 - Add an example/test that writes a session file, reopens the store and reads it
   back; keep the application's session semantics outside harbor.

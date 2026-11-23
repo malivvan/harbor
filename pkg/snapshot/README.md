@@ -5,7 +5,7 @@ objects and restores them.
 
 The core is written against a narrow `ObjectStore` interface (List/Get/Put/Delete/
 Stat over prefix-keyed objects), so it has no opinion about where bytes live. The
-`blobstore` subpackage adapts it to [`blob`](../blob).
+`blobstore` subpackage adapts it to [`object`](../../store/object).
 
 ```go
 import (
@@ -13,7 +13,7 @@ import (
     "github.com/malivvan/harbor/pkg/snapshot/blobstore"
 )
 
-st := blobstore.New(myBlobStore, "app-data")
+st := blobstore.New(store.Objects(), "app-data")
 snap := snapshot.New(st, snapshot.Config{DataPrefix: "os/"})
 
 idx, err := snap.Create(ctx, snapshot.KindManual, "")   // capture

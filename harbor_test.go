@@ -12,9 +12,10 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/pkg/audit"
+	audit "github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/store/record"
 	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/harbor/store/system"
 	"github.com/malivvan/harbor/store/vector"
 )
 
@@ -387,7 +388,7 @@ func TestOpenRejectsBadMetadata(t *testing.T) {
 			t.Fatalf("bolt.Open: %v", err)
 		}
 		if err := bdb.Update(func(tx *bolt.Tx) error {
-			_, err := tx.CreateBucket(metadataBucket)
+			_, err := tx.CreateBucket([]byte("harbor.Metadata"))
 			return err
 		}); err != nil {
 			t.Fatalf("create meta bucket: %v", err)
@@ -406,7 +407,7 @@ func TestOpenRejectsBadMetadata(t *testing.T) {
 			t.Fatalf("bolt.Open: %v", err)
 		}
 		if err := bdb.Update(func(tx *bolt.Tx) error {
-			meta, err := tx.CreateBucket(metadataBucket)
+			meta, err := tx.CreateBucket([]byte("harbor.Metadata"))
 			if err != nil {
 				return err
 			}
@@ -418,8 +419,8 @@ func TestOpenRejectsBadMetadata(t *testing.T) {
 				Threads: FastKDFThreads,
 				Canary:  []byte("canary"),
 			}
-			truncated := md.encode()
-			return meta.Put(metadataRecordKey, truncated[:len(truncated)-1])
+			truncated := md.Encode()
+			return meta.Put([]byte("Metadata"), truncated[:len(truncated)-1])
 		}); err != nil {
 			t.Fatalf("write Metadata: %v", err)
 		}
@@ -443,13 +444,13 @@ func TestCanaryBindsEncryptionFlags(t *testing.T) {
 		t.Fatalf("bolt.Open: %v", err)
 	}
 	if err := bdb.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(metadataBucket)
-		md, err := decodeMetadata(append([]byte(nil), b.Get(metadataRecordKey)...))
+		b := tx.Bucket([]byte("harbor.Metadata"))
+		md, err := system.DecodeMetadata(append([]byte(nil), b.Get([]byte("Metadata"))...))
 		if err != nil {
 			return err
 		}
 		md.Flags &^= EncryptDBKeys
-		return b.Put(metadataRecordKey, md.encode())
+		return b.Put([]byte("Metadata"), md.Encode())
 	}); err != nil {
 		_ = bdb.Close()
 		t.Fatalf("tamper flags: %v", err)
@@ -502,18 +503,18 @@ func TestMissingMetadataBucketIsCorrupt(t *testing.T) {
 
 func TestDeriveKeys(t *testing.T) {
 	salt := []byte("0123456789abcdef")
-	first, err := deriveKeys("password", salt, FastKDFTime, FastKDFMemory, FastKDFThreads)
+	first, err := system.Derive("password", salt, FastKDFTime, FastKDFMemory, FastKDFThreads)
 	if err != nil {
 		t.Fatalf("deriveKeys: %v", err)
 	}
-	t.Cleanup(first.wipe)
+	t.Cleanup(first.Wipe)
 
 	keys := map[string][]byte{
-		"canary": first.canary,
-		"db":     first.record,
-		"fs":     first.file,
-		"ts":     first.series,
-		"vec":    first.vector,
+		"canary": first.Canary,
+		"db":     first.Record,
+		"fs":     first.File,
+		"ts":     first.Series,
+		"vec":    first.Vector,
 	}
 	seen := make(map[string]string, len(keys))
 	for name, key := range keys {
@@ -526,53 +527,53 @@ func TestDeriveKeys(t *testing.T) {
 		seen[string(key)] = name
 	}
 
-	again, err := deriveKeys("password", salt, FastKDFTime, FastKDFMemory, FastKDFThreads)
+	again, err := system.Derive("password", salt, FastKDFTime, FastKDFMemory, FastKDFThreads)
 	if err != nil {
 		t.Fatalf("deriveKeys again: %v", err)
 	}
-	t.Cleanup(again.wipe)
-	if !bytes.Equal(first.record, again.record) {
+	t.Cleanup(again.Wipe)
+	if !bytes.Equal(first.Record, again.Record) {
 		t.Fatal("deriveKeys is not deterministic for the same password and salt")
 	}
 
-	otherPassword, err := deriveKeys("other", salt, FastKDFTime, FastKDFMemory, FastKDFThreads)
+	otherPassword, err := system.Derive("other", salt, FastKDFTime, FastKDFMemory, FastKDFThreads)
 	if err != nil {
 		t.Fatalf("deriveKeys other password: %v", err)
 	}
-	t.Cleanup(otherPassword.wipe)
-	if bytes.Equal(first.record, otherPassword.record) {
+	t.Cleanup(otherPassword.Wipe)
+	if bytes.Equal(first.Record, otherPassword.Record) {
 		t.Fatal("different passwords derived the same key")
 	}
 
-	otherSalt, err := deriveKeys("password", []byte("fedcba9876543210"), FastKDFTime, FastKDFMemory, FastKDFThreads)
+	otherSalt, err := system.Derive("password", []byte("fedcba9876543210"), FastKDFTime, FastKDFMemory, FastKDFThreads)
 	if err != nil {
 		t.Fatalf("deriveKeys other salt: %v", err)
 	}
-	t.Cleanup(otherSalt.wipe)
-	if bytes.Equal(first.record, otherSalt.record) {
+	t.Cleanup(otherSalt.Wipe)
+	if bytes.Equal(first.Record, otherSalt.Record) {
 		t.Fatal("different salts derived the same key")
 	}
 }
 
 func TestStoreKeysWipe(t *testing.T) {
-	keys, err := deriveKeys("password", []byte("0123456789abcdef"), FastKDFTime, FastKDFMemory, FastKDFThreads)
+	keys, err := system.Derive("password", []byte("0123456789abcdef"), FastKDFTime, FastKDFMemory, FastKDFThreads)
 	if err != nil {
 		t.Fatalf("deriveKeys: %v", err)
 	}
-	keys.wipe()
+	keys.Wipe()
 	for name, key := range map[string][]byte{
-		"canary": keys.canary,
-		"db":     keys.record,
-		"fs":     keys.file,
-		"ts":     keys.series,
-		"vec":    keys.vector,
+		"canary": keys.Canary,
+		"db":     keys.Record,
+		"fs":     keys.File,
+		"ts":     keys.Series,
+		"vec":    keys.Vector,
 	} {
 		if !bytes.Equal(key, make([]byte, len(key))) {
 			t.Errorf("%s key was not wiped", name)
 		}
 	}
-	var nilKeys *storeKeys
-	nilKeys.wipe() // must not panic
+	var nilKeys *system.Keys
+	nilKeys.Wipe() // must not panic
 }
 
 func TestCanaryHelpers(t *testing.T) {
@@ -581,26 +582,26 @@ func TestCanaryHelpers(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bdb.Close() })
 
-	md, keys, err := loadOrCreateState(bdb, testOptions("pw"))
+	md, keys, err := system.LoadOrCreate(bdb, testOptions("pw").systemConfig())
 	require.NoError(t, err)
-	defer keys.wipe()
+	defer keys.Wipe()
 
-	sealed, err := sealCanary(keys.canary, md.Flags)
+	sealed, err := system.SealCanary(keys.Canary, md.Flags)
 	require.NoError(t, err)
-	require.NoError(t, verifyCanary(keys.canary, sealed, md.Flags))
+	require.NoError(t, system.VerifyCanary(keys.Canary, sealed, md.Flags))
 
 	// Flags are authenticated: flipping one breaks verification.
-	require.Error(t, verifyCanary(keys.canary, sealed, md.Flags^1))
+	require.Error(t, system.VerifyCanary(keys.Canary, sealed, md.Flags^1))
 	// Corrupt ciphertext and a wrong-size key fail cleanly.
-	require.Error(t, verifyCanary(keys.canary, []byte("garbage"), md.Flags))
-	require.Error(t, verifyCanary(make([]byte, crypto.KeySize), sealed, md.Flags))
-	require.Error(t, verifyCanary([]byte("short"), sealed, md.Flags))
+	require.Error(t, system.VerifyCanary(keys.Canary, []byte("garbage"), md.Flags))
+	require.Error(t, system.VerifyCanary(make([]byte, crypto.KeySize), sealed, md.Flags))
+	require.Error(t, system.VerifyCanary([]byte("short"), sealed, md.Flags))
 
-	_, err = sealCanary([]byte("short"), md.Flags)
+	_, err = system.SealCanary([]byte("short"), md.Flags)
 	require.Error(t, err)
 
 	// The state was persisted; reading it again is not a create.
-	again, creating, err := readMetadata(bdb)
+	again, creating, err := system.ReadMetadata(bdb)
 	require.NoError(t, err)
 	require.False(t, creating)
 	require.Equal(t, md.Flags, again.Flags)
@@ -628,12 +629,12 @@ func TestValidateAndWriteMetadata(t *testing.T) {
 		{Salt: valid.Salt, Canary: valid.Canary, Time: valid.Time, Memory: valid.Memory, Threads: valid.Threads, Flags: 1 << 15},
 	}
 	for i, md := range invalid {
-		require.ErrorIs(t, validateMetadata(md), ErrCorruptStore, "case %d", i)
-		require.ErrorIs(t, writeMetadata(bdb, md), ErrCorruptStore, "case %d", i)
+		require.ErrorIs(t, system.ValidateMetadata(md), ErrCorruptStore, "case %d", i)
+		require.ErrorIs(t, system.WriteMetadata(bdb, md), ErrCorruptStore, "case %d", i)
 	}
 
-	require.NoError(t, writeMetadata(bdb, valid))
-	read, creating, err := readMetadata(bdb)
+	require.NoError(t, system.WriteMetadata(bdb, valid))
+	read, creating, err := system.ReadMetadata(bdb)
 	require.NoError(t, err)
 	require.False(t, creating)
 	require.Equal(t, valid.Flags, read.Flags)
@@ -656,9 +657,9 @@ func TestLoadOrCreateStateRejectsTampering(t *testing.T) {
 	bdb, err := bolt.Open(path, 0600, nil)
 	require.NoError(t, err)
 
-	md, keys, err := loadOrCreateState(bdb, testOptions("pw"))
+	md, keys, err := system.LoadOrCreate(bdb, testOptions("pw").systemConfig())
 	require.NoError(t, err)
-	keys.wipe()
+	keys.Wipe()
 	require.NoError(t, bdb.Close())
 
 	tamper := func(mutate func(*Metadata)) error {
@@ -670,16 +671,16 @@ func TestLoadOrCreateStateRejectsTampering(t *testing.T) {
 			}
 		}()
 		require.NoError(t, db.Update(func(tx *bolt.Tx) error {
-			b := tx.Bucket(metadataBucket)
-			raw := b.Get(metadataRecordKey)
-			parsed, err := decodeMetadata(raw)
+			b := tx.Bucket([]byte("harbor.Metadata"))
+			raw := b.Get([]byte("Metadata"))
+			parsed, err := system.DecodeMetadata(raw)
 			if err != nil {
 				return err
 			}
 			mutate(&parsed)
-			return b.Put(metadataRecordKey, parsed.encode())
+			return b.Put([]byte("Metadata"), parsed.Encode())
 		}))
-		_, _, err = loadOrCreateState(db, testOptions("pw"))
+		_, _, err = system.LoadOrCreate(db, testOptions("pw").systemConfig())
 		return err
 	}
 
@@ -719,15 +720,15 @@ func TestReadMetadataMissingRecord(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bdb.Close() })
 
-	_, creating, err := readMetadata(bdb)
+	_, creating, err := system.ReadMetadata(bdb)
 	require.NoError(t, err)
 	require.True(t, creating)
 
 	require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucket(metadataBucket)
+		_, err := tx.CreateBucket([]byte("harbor.Metadata"))
 		return err
 	}))
-	_, _, err = readMetadata(bdb)
+	_, _, err = system.ReadMetadata(bdb)
 	require.True(t, errors.Is(err, ErrCorruptStore))
 }
 
@@ -790,7 +791,7 @@ func TestWriteMetadataClosedDatabase(t *testing.T) {
 		Threads: FastKDFThreads,
 		Flags:   EncryptAll,
 	}
-	require.Error(t, writeMetadata(bdb, md))
+	require.Error(t, system.WriteMetadata(bdb, md))
 }
 
 func TestLoadOrCreateStateReadOnly(t *testing.T) {
@@ -808,7 +809,7 @@ func TestLoadOrCreateStateReadOnly(t *testing.T) {
 	}()
 
 	// A new store needs to persist metadata, which a read-only handle cannot do.
-	_, _, err = loadOrCreateState(ro, testOptions("pw"))
+	_, _, err = system.LoadOrCreate(ro, testOptions("pw").systemConfig())
 	require.Error(t, err)
 }
 
@@ -821,14 +822,14 @@ func TestOpenRejectsCorruptCanaryAndFlags(t *testing.T) {
 	raw, err := bolt.Open(path, 0600, nil)
 	require.NoError(t, err)
 	require.NoError(t, raw.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(metadataBucket)
-		value := b.Get(metadataRecordKey)
-		md, err := decodeMetadata(append([]byte(nil), value...))
+		b := tx.Bucket([]byte("harbor.Metadata"))
+		value := b.Get([]byte("Metadata"))
+		md, err := system.DecodeMetadata(append([]byte(nil), value...))
 		if err != nil {
 			return err
 		}
 		md.Canary[0] ^= 0xff
-		return b.Put(metadataRecordKey, md.encode())
+		return b.Put([]byte("Metadata"), md.Encode())
 	}))
 	require.NoError(t, raw.Close())
 

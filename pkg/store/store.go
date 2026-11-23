@@ -39,7 +39,9 @@ import (
 	"sync"
 
 	"github.com/malivvan/harbor"
-	"github.com/malivvan/harbor/store/file"
+	"github.com/malivvan/harbor/store/fstree"
+	"github.com/malivvan/harbor/store/graphs"
+	"github.com/malivvan/harbor/store/object"
 	"github.com/malivvan/harbor/store/record"
 	"github.com/malivvan/harbor/store/search"
 	"github.com/malivvan/harbor/store/series"
@@ -205,7 +207,7 @@ func (m *Manager) Record(path ...string) *record.Store {
 
 // File returns the in-database filesystem store, or nil before Open. Extra path
 // segments select a rooted view.
-func (m *Manager) File(path ...string) *file.Store {
+func (m *Manager) File(path ...string) *fstree.Store {
 	if st := m.Store(); st != nil {
 		return st.File(path...)
 	}
@@ -235,6 +237,24 @@ func (m *Manager) Vector(path ...string) *vector.Store {
 func (m *Manager) Search(path ...string) *search.Store {
 	if st := m.Store(); st != nil {
 		return st.Search(path...)
+	}
+	return nil
+}
+
+// Graphs returns the property-graph store, or nil before Open. Extra path
+// segments select a rooted view.
+func (m *Manager) Graphs(path ...string) *graphs.Store {
+	if st := m.Store(); st != nil {
+		return st.Graphs(path...)
+	}
+	return nil
+}
+
+// Objects returns the flat object store, or nil before Open. Extra path
+// segments select a rooted view.
+func (m *Manager) Objects(path ...string) *object.Store {
+	if st := m.Store(); st != nil {
+		return st.Objects(path...)
 	}
 	return nil
 }
@@ -301,7 +321,7 @@ func Record(path ...string) *record.Store {
 
 // File returns the process-wide filesystem store, or nil before Open. Extra
 // path segments select a rooted view.
-func File(path ...string) *file.Store {
+func File(path ...string) *fstree.Store {
 	if m := Default(); m != nil {
 		return m.File(path...)
 	}
@@ -331,6 +351,24 @@ func Vector(path ...string) *vector.Store {
 func Search(path ...string) *search.Store {
 	if m := Default(); m != nil {
 		return m.Search(path...)
+	}
+	return nil
+}
+
+// Graphs returns the process-wide property-graph store, or nil before Open.
+// Extra path segments select a rooted view.
+func Graphs(path ...string) *graphs.Store {
+	if m := Default(); m != nil {
+		return m.Graphs(path...)
+	}
+	return nil
+}
+
+// Objects returns the process-wide object store, or nil before Open. Extra path
+// segments select a rooted view.
+func Objects(path ...string) *object.Store {
+	if m := Default(); m != nil {
+		return m.Objects(path...)
 	}
 	return nil
 }

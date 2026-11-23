@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/malivvan/harbor/pkg/audit"
-	"github.com/malivvan/harbor/store/file"
+	"github.com/malivvan/harbor/pkg/ledger"
+	"github.com/malivvan/harbor/store/fstree"
+	"github.com/malivvan/harbor/store/graphs"
+	"github.com/malivvan/harbor/store/object"
 	"github.com/malivvan/harbor/store/record"
 	"github.com/malivvan/harbor/store/search"
 	"github.com/malivvan/harbor/store/series"
@@ -34,15 +36,17 @@ type Tx struct {
 	writable bool
 
 	record record.Tx
-	file   *file.Store
+	file   *fstree.Store
 	series *series.Store
 	vector *vector.Store
 	search *search.Store
+	graphs *graphs.Store
+	object *object.Store
 }
 
 // newTx binds the sub-stores to btx. sink, when non-nil, collects audit events
 // so they can be recorded after the transaction commits.
-func newTx(s *Store, btx *bolt.Tx, writable bool, sink audit.Sink) (*Tx, error) {
+func newTx(s *Store, btx *bolt.Tx, writable bool, sink ledger.Sink) (*Tx, error) {
 	attached, err := s.record.AttachWithAudit(btx, sink)
 	if err != nil {
 		return nil, err
@@ -56,17 +60,23 @@ func newTx(s *Store, btx *bolt.Tx, writable bool, sink audit.Sink) (*Tx, error) 
 		series:   s.series.WithTransaction(btx),
 		vector:   s.vector.WithTransaction(btx),
 		search:   s.search.WithTransaction(btx),
+		graphs:   s.graphs.WithTransaction(btx),
+		object:   s.object.WithTransaction(btx),
 	}
 	if sink != nil {
 		tx.file.SetAuditSink(sink)
 		tx.series.SetAuditSink(sink)
 		tx.vector.SetAuditSink(sink)
+		tx.graphs.SetAuditSink(sink)
+		tx.object.SetAuditSink(sink)
 	} else {
 		// Never let a bound view call the recorder: its Record opens its own
 		// write transaction, which would deadlock against the one we hold.
 		tx.file.SetAuditSink(nil)
 		tx.series.SetAuditSink(nil)
 		tx.vector.SetAuditSink(nil)
+		tx.graphs.SetAuditSink(nil)
+		tx.object.SetAuditSink(nil)
 	}
 	return tx, nil
 }
@@ -83,7 +93,7 @@ func (tx *Tx) Record() record.Tx {
 // File returns the file sub-store bound to this transaction, or nil after the
 // transaction ended. File systems opened through it are bound to the same
 // transaction.
-func (tx *Tx) File() *file.Store {
+func (tx *Tx) File() *fstree.Store {
 	if tx == nil {
 		return nil
 	}
@@ -119,6 +129,24 @@ func (tx *Tx) Search() *search.Store {
 	return tx.search
 }
 
+// Graphs returns the property-graph sub-store bound to this transaction, or nil
+// after the transaction ended.
+func (tx *Tx) Graphs() *graphs.Store {
+	if tx == nil {
+		return nil
+	}
+	return tx.graphs
+}
+
+// Objects returns the flat object sub-store bound to this transaction, or nil
+// after the transaction ended.
+func (tx *Tx) Objects() *object.Store {
+	if tx == nil {
+		return nil
+	}
+	return tx.object
+}
+
 // Writable reports whether the transaction accepts writes.
 func (tx *Tx) Writable() bool {
 	return tx != nil && tx.writable
@@ -129,17 +157,17 @@ func (tx *Tx) Writable() bool {
 // own bbolt write transaction, which would deadlock against ours. The root
 // package replays the collected entries after a successful commit.
 type txAuditSink struct {
-	entries []audit.Entry
+	entries []ledger.Entry
 }
 
 // Record implements audit.Sink.
-func (t *txAuditSink) Record(e audit.Entry) error {
+func (t *txAuditSink) Record(e ledger.Entry) error {
 	t.entries = append(t.entries, e)
 	return nil
 }
 
 // replay records the collected entries in the live audit trail.
-func (t *txAuditSink) replay(rec *audit.Recorder) error {
+func (t *txAuditSink) replay(rec *ledger.Recorder) error {
 	if rec == nil {
 		return nil
 	}
@@ -200,7 +228,7 @@ func (s *Store) WriteTransaction(ctx context.Context, fn func(tx *Tx) error) err
 	defer s.txMu.Unlock()
 
 	var sink *txAuditSink
-	var collector audit.Sink
+	var collector ledger.Sink
 	if s.audit != nil {
 		sink = &txAuditSink{}
 		collector = sink

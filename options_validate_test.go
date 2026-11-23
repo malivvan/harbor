@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/malivvan/harbor/store/system"
 )
 
 // TestOptionsValidate covers the creation-time option checks exposed by
@@ -37,7 +39,7 @@ func TestOptionsValidate(t *testing.T) {
 	require.ErrorIs(t, unknownAudit.Validate(), ErrInvalidOptions)
 
 	beyondLimits := testOptions("pw")
-	beyondLimits.KDFTime = maxKDFTime + 1
+	beyondLimits.KDFTime = system.MaxKDFTime + 1
 	require.ErrorIs(t, beyondLimits.Validate(), ErrInvalidOptions)
 
 	plaintext := testOptions("pw")
@@ -64,7 +66,7 @@ func TestOptionsValidateMatchesOpen(t *testing.T) {
 	require.NoError(t, store.Close())
 
 	invalid := testOptions("pw")
-	invalid.KDFTime = maxKDFTime + 1
+	invalid.KDFTime = system.MaxKDFTime + 1
 	require.ErrorIs(t, invalid.Validate(), ErrInvalidOptions)
 	_, err = Open(context.Background(), filepath.Join(dir, "invalid.db"), 0o600, invalid)
 	require.ErrorIs(t, err, ErrInvalidOptions)

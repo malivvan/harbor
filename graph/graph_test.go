@@ -7,20 +7,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/harbor"
+	bolt "go.etcd.io/bbolt"
+
+	"github.com/malivvan/harbor/store/record"
 )
 
 // newTestGraph opens a graph on a fresh harbor file with a controllable clock.
 func newTestGraph(t *testing.T) (*Graph, *clock) {
 	t.Helper()
 	c := &clock{at: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
-	store, err := harbor.Open(context.Background(), filepath.Join(t.TempDir(), "graph.db"), 0o600,
-		&harbor.Options{Password: "test", Plaintext: true})
+	bdb, err := bolt.Open(filepath.Join(t.TempDir(), "graph.db"), 0o600, nil)
 	if err != nil {
-		t.Fatalf("open store: %v", err)
+		t.Fatalf("open database: %v", err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
-	return New(store.Record(), WithClock(c.Now)), c
+	t.Cleanup(func() { _ = bdb.Close() })
+	store, err := record.Open(context.Background(), bdb, record.Config{Root: [][]byte{[]byte("db")}})
+	if err != nil {
+		t.Fatalf("open record store: %v", err)
+	}
+	return New(store, WithClock(c.Now)), c
 }
 
 // clock is a clock the tests move by hand.

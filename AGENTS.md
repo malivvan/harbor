@@ -2,30 +2,33 @@
 
 This file is for contributors, reviewers and coding agents working on Harbor.
 User-facing documentation lives in [README.md](README.md); per-package guides
-live next to their code (`store/record/README.md`, `store/file/README.md`, `store/series/README.md`,
-`store/vector/README.md`, `store/file/s3fs/README.md`). Keep it that way: do not recreate a
+live next to their code (`store/record/README.md`, `store/fstree/README.md`, `store/series/README.md`,
+`store/vector/README.md`, `store/fstree/s3fs/README.md`). Keep it that way: do not recreate a
 separate `docs/` tree.
 
 ## Repository map
 
 | Package | Responsibility |
 |---------|----------------|
-| `github.com/malivvan/harbor` | Opens one bbolt file, derives per-store keys from a password, and exposes `Record()`, `File()`, `Series()`, `Vector()`, `Search()`, `Flags()` and `Meta()`. Each accessor takes optional bucket-path segments. |
+| `github.com/malivvan/harbor` | Opens one bbolt file, derives per-store keys from a password, and exposes `Record()`, `File()`, `Series()`, `Vector()`, `Search()`, `Graphs()`, `Objects()`, `Flags()` and `Meta()`. Each accessor takes optional bucket-path segments. |
 | `.../store/record` | Struct-to-bucket mapping, indexes, matchers, managed transactions, key/value access, codecs. |
 | `.../graph` | A reusable bitemporal property graph over `record`: nodes, directed edges, adjacency and traversal, counts, history/as-of/diff/purge, JSON interchange. |
-| `.../store/file` | Named file systems implementing the `absfs` interfaces, with symlinks, snapshots, inode cache and chunked content. |
+| `.../store/fstree` | Named file systems implementing the `absfs` interfaces, with symlinks, snapshots, inode cache and chunked content. |
 | `.../store/series` | Named time series with ordered scans, aggregation, labels and retention. |
 | `.../store/vector` | Vector collections with Flat/HNSW indexes, payload filters and quantization. |
 | `.../store/search` | Full-text indexes: BM25 ranking, word and CJK tokenizers, posting lists and corpus statistics. |
-| `.../store/file/s3fs` | An `absfs.Filer` backed by S3-compatible object storage. |
+| `.../store/graphs` | Independent bitemporal property-graph store: node/edge records and closed versions in their own root bucket. |
+| `.../store/system` | Store header manager: metadata record, KDF settings, encryption/audit flags, canary and every per-store key derivation. |
+| `.../store` | The stable numeric identifier registry for the sub-stores (`RECORD`, `SERIES`, `VECTOR`, `FSTREE`, `SEARCH`, `GRAPHS`, `OBJECT`, `SYSTEM`, `Audit`). Append new identifiers; never renumber. |
+| `.../store/fstree/s3fs` | An `absfs.Filer` backed by S3-compatible object storage. |
 | `.../store/vector/hnsw` | The vendored HNSW graph implementation used by `vector`. |
 | `.../store/vector/hnsw/heap` | The heap used on the HNSW search hot path. |
 | `.../store/vector/doc` | Document-oriented facade over `vector`: id, content, embedding and string metadata; the collection dimension is taken from the first upsert. |
 | `.../pkg/metrics` | Dependency-free observer interface and nil-safe metric helpers used by every store; a nil observer means no instrumentation. |
-| `.../pkg/audit` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write. |
+| `.../pkg/ledger` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write. |
 | `.../pkg/consensus` | Raft-backed cluster replication of a whole store. |
 | `.../pkg/store` | Process-wide database manager: resolves a directory, reads or creates the password file (`O_EXCL`, mode 0600, never logged), and opens one handle. |
-| `.../pkg/blob` | Flat, contained object store over a named file system: `..` keys are rejected and `Put` installs through a temporary sibling rename. |
+| `.../store/object` | Independent flat object store with buckets, path containment and atomic `Put`; works without the file store and migrates file-backed blobs explicitly. |
 | `.../pkg/snapshot` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore. |
 | `.../pkg/snapshot/blobstore` | Adapter from `snapshot.ObjectStore` to `blob`. |
 | `.../pkg/id` | ULID generation: 26-character Crockford base32, time-sortable. |
@@ -39,7 +42,7 @@ not a required layer: each store can be opened directly with a caller-owned
 
 ## Architecture
 
-### One file, five key spaces
+### One file, seven key spaces
 
 The root package creates one bbolt database with this top-level shape:
 
@@ -50,9 +53,12 @@ fs/                        file store root bucket (persisted name)
 ts/                        series store root bucket (persisted name)
 vec/                       vector store root bucket (persisted name)
 fts/                       search store root bucket (persisted name)
+graphs/                    graph store root bucket
+object/                    object store root bucket
 ```
 
-The Go package names (`record`, `file`, `series`, `vector`, `search`) differ
+The Go package names (`record`, `fstree`, `series`, `vector`, `search`,
+`graphs`, `object`) differ
 from these persisted bucket names on purpose: the bucket names are part of the
 on-disk format and do not change. The no-argument accessors use them; passing
 explicit path segments selects a different root.
@@ -97,7 +103,7 @@ __database/
 `Attach` binds the same operations to a caller-owned transaction. It resolves
 the store's root bucket in that transaction and never commits or rolls back.
 
-### file layout
+### fstree layout
 
 Each named file system is a bucket containing:
 
@@ -193,6 +199,41 @@ Inside the configured root:
 - `Upsert` removes the previous postings before adding the new ones and adjusts
   the document count and total length in one transaction.
 
+### graphs layout
+
+Inside the configured root, one bucket per graph:
+
+```text
+<graph>/
+  nodes/<id>                    live node record
+  node_versions/<version id>    closed node version
+  edges/<id>                    live edge record
+  edge_versions/<version id>    closed edge version
+```
+
+- Records are JSON and are sealed when value encryption is enabled; keys stay
+  readable.
+- The store keeps its own format version, mode marker and canary under the root
+  bucket. Unknown versions fail closed.
+- `MigrateFromRecord` copies a graph from the legacy record-backed layout,
+  including closed versions, into the independent store.
+
+### object layout
+
+Inside the configured root, one bucket per logical object bucket:
+
+```text
+<bucket>/
+  <key>                         sealed object record (content, size, SHA-256)
+```
+
+- `Put` reads the complete reader before writing, so a failing reader leaves the
+  previous content unchanged. Keys are flat slash-separated names and a `..`
+  segment is rejected.
+- Records are sealed when value encryption is enabled; keys stay readable.
+- The store keeps its own format version, mode marker and canary. Existing
+  file-backed blobs remain in `fstree`; `MigrateFromFile` copies a bucket.
+
 ### Transactions and concurrency
 
 bbolt provides one writer and many readers, and Harbor follows that model:
@@ -203,7 +244,7 @@ bbolt provides one writer and many readers, and Harbor follows that model:
 - `Attach` lets a caller own the bbolt transaction and mix Harbor operations
   with raw bucket writes. Harbor never opens a nested managed transaction for
   an attached handle.
-- `record.TransactionManager`, `file.Walk`, `series.Store`, and `vector.Collection` all use
+- `record.TransactionManager`, `fstree.Walk`, `series.Store`, and `vector.Collection` all use
   the same bbolt handle and therefore share the single-writer constraint.
 - `Store.WriteTransaction`/`ReadTransaction` bind every sub-store to one
   caller-owned bbolt transaction. `file`, `series` and `vector` carry an optional `tx`
@@ -234,7 +275,7 @@ Every bbolt commit is an fsync. Harbor batches where it can:
 - `record.WriteTransaction` groups entity operations into one write transaction.
 - `series.Series.InsertMany` writes a batch in one transaction.
 - `vector.Collection.Upsert` buffers points and flushes in batches.
-- `file` merges the inode and content writes of a single `Write` into one
+- `fstree` merges the inode and content writes of a single `Write` into one
   transaction, and chunking avoids rewriting unaffected content.
 
 ### Compatibility and versioning
@@ -242,7 +283,7 @@ Every bbolt commit is an fsync. Harbor batches where it can:
 - The module requires Go 1.27.4 or later.
 - The first release has exactly one on-disk version, number 1, and no v2 or
   dual-version compatibility path. The exported constants are `record.Version`
-  (`"1.0.0"`), `file.FormatVersion`, `series.FormatVersion`,
+  (`"1.0.0"`), `fstree.FormatVersion`, `series.FormatVersion`,
   `vector.CollectionFormatVersion` and `audit.FormatVersion`; all are 1.
 - `record.Version` is stored in `__database`. Opening a different version returns
   `ErrIncompatibleVersion`; file, series and vector likewise check their persisted
@@ -260,9 +301,9 @@ Every bbolt commit is an fsync. Harbor batches where it can:
 
 ## internal/absfs
 
-`internal/absfs` is the vendored abstraction layer behind `file`, `store/file/s3fs`,
-`file.Snapshot`, and `file.Walk`/`FastWalk`. It is internal: other modules cannot
-import it. The external-content hook is not part of it: `file.ContentFS` is an
+`internal/absfs` is the vendored abstraction layer behind `fstree`, `store/fstree/s3fs`,
+`fstree.Snapshot`, and `fstree.Walk`/`FastWalk`. It is internal: other modules cannot
+import it. The external-content hook is not part of it: `fstree.ContentFS` is an
 exported whole-object interface using standard library types only. The old
 per-package absfs Markdown documents were consolidated into this section and
 the user-facing path/thread notes in
@@ -448,7 +489,7 @@ per-instance `cwd`. Safe patterns:
 2. Use absolute paths only on a shared wrapper.
 3. Guard `Chdir` plus relative-path operations with a mutex.
 
-The concrete `*file.FS` serializes its own cwd and inode mutations, but callers
+The concrete `*fstree.FS` serializes its own cwd and inode mutations, but callers
 should still prefer absolute paths for shared instances. Individual `File`
 values should be used by a single goroutine unless the implementation
 explicitly documents otherwise.
@@ -460,8 +501,8 @@ explicitly documents otherwise.
   `Filer`/`FileSystem` and delegate to the layer below.
 - Upstream implementations (`osfs`, `memfs`, `basefs`, `rofs`, `cowfs`,
   `corfs`, `s3fs`, `sftpfs`) are external projects and are not dependencies of
-  this module. In this repository the concrete implementations are `*file.FS`,
-  `*file.Snapshot`, and the `fs/s3fs` `Filer` adapter.
+  this module. In this repository the concrete implementations are `*fstree.FS`,
+  `*fstree.Snapshot`, and the `store/fstree/s3fs` `Filer` adapter.
 - Test implementations through the interfaces: basic file/directory
   operations, error conditions (`ErrNotExist`, `ErrExist`, `ErrPermission`),
   `ExtendFiler` defaults, `Sub`/`io/fs` views, and concurrent access. Use
@@ -481,7 +522,7 @@ explicitly documents otherwise.
 - For an atomic write, write a temporary sibling, `Sync`, close it, then
   `Rename` it into place.
 - Copy files with `io.Copy` between `Open` and `Create`; walk trees with
-  `file.Walk`/`FastWalk` for `Filer` values, or `fs.WalkDir` for read-only
+  `fstree.Walk`/`FastWalk` for `Filer` values, or `fs.WalkDir` for read-only
   `io/fs` views.
 - `ReadDir`, `ReadFile` and `Sub` follow `io/fs`; `Sub` is read-only.
 
@@ -611,12 +652,12 @@ decrypting. Per-entity rotation installs the new key while keeping the previous
 keys as fallbacks and deliberately leaves the marker under the current key;
 the store is only self-consistent for a fresh process after `RotateAll`.
 
-Full rotation (`record.ReEncrypt`/`RotateAll`, `file.RotateAll`, `series.RotateAll`,
+Full rotation (`record.ReEncrypt`/`RotateAll`, `fstree.RotateAll`, `series.RotateAll`,
 `vector.RotateAll`) rewrites data atomically within the store, adopts the new key,
 and drops the old one. It requires exclusive access. `VerifyAll` re-reads every
 value and fails with the authentication sentinel if any value does not decrypt.
 
-Partial rotation (`file.ReEncryptFS`, `series.ReEncryptSeries`,
+Partial rotation (`fstree.ReEncryptFS`, `series.ReEncryptSeries`,
 `vector.ReEncryptCollection`) must be followed by `RotateAll` before close. It
 cannot run when deterministic names are encrypted (`series.EncryptSeriesNames`,
 `vector.EncryptPointIDs`, `vector.EncryptCollectionNames`), because the physical names
@@ -657,9 +698,9 @@ read transaction after flushing vec buffers. `BackupFile` hashes the stream,
 returns `BackupInfo` and can write a JSON sidecar
 (`<path>.manifest.json`). `VerifyBackup` reopens the copy with
 `bolt.Options{ReadOnly: true}` and validates the metadata canary plus each
-sub-store's marker and version through the normal `record.Open`/`file.Open`/`series.Open`/
+sub-store's marker and version through the normal `record.Open`/`fstree.Open`/`series.Open`/
 `vector.Open` paths. Those paths therefore must not write when the data is intact:
-`series.ensureFormatVersion` reads before it writes, `file.OpenReadOnly` and
+`series.ensureFormatVersion` reads before it writes, `fstree.OpenReadOnly` and
 `search.OpenReadOnly` exist for read-only traversal, and fs filesystems are opened
 with `OpenReadOnly` per name. The manifest is a sidecar, so the backup bytes are
 unchanged. Verification never mutates the copy.
@@ -687,7 +728,7 @@ go tool cover -func=coverage.out
 
 # Benchmarks (distance kernels, encrypted overhead, filtered search, FS I/O,
 # FastWalk, TS aggregates/retention, db queries and S3 multipart)
-go test -run '^$' -bench . -benchmem -benchtime=100ms ./store/vector ./store/series ./store/file ./store/record ./store/file/s3fs
+go test -run '^$' -bench . -benchmem -benchtime=100ms ./store/vector ./store/series ./store/fstree ./store/record ./store/fstree/s3fs
 ```
 
 CI runs formatting, vet, build, tests, race tests, coverage, staticcheck,
@@ -704,9 +745,10 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
   usage for every store, encryption behavior, lifecycle and performance.
 - `AGENTS.md` (this file) is developer/agent-facing: architecture, on-disk
   layouts, encryption internals, invariants, development workflow.
-- Per-package guides live in `store/record/README.md`, `store/file/README.md`, `store/series/README.md`,
-  `store/vector/README.md`, `store/file/s3fs/README.md`, `pkg/audit/README.md`,
-  `pkg/consensus/README.md`, `pkg/store/README.md`, `pkg/blob/README.md` and
+- Per-package guides live in `store/record/README.md`, `store/fstree/README.md`, `store/series/README.md`,
+  `store/vector/README.md`, `store/fstree/s3fs/README.md`, `pkg/ledger/README.md`,
+  `pkg/consensus/README.md`, `pkg/store/README.md`, `store/object/README.md`,
+  `store/graphs/README.md`, `store/system/README.md` and
   `pkg/snapshot/README.md`. Package doc comments are the source of truth for
   behavior; package guides are the source of truth for usage.
 - Every public package has a package-level doc comment, and every exported
@@ -726,7 +768,7 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 - Keep the public API and on-disk formats stable. A format change requires a
   version bump and a compatibility path; unknown versions must fail closed.
 - Preserve ownership contracts: `harbor.Store.Close` closes the handle it
-  opened; `record.Open`, `file.Open`, `series.Open` and `vector.Open` borrow a caller-owned
+  opened; `record.Open`, `fstree.Open`, `series.Open` and `vector.Open` borrow a caller-owned
   `*bolt.DB` and must never close it.
 - Preserve context semantics: check at boundaries and loop checkpoints, do not
   spawn goroutines to fake cancellation, and never rewrite committed writes or
@@ -746,29 +788,33 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 ## Package guides and API reference
 
 - [store/record/README.md](store/record/README.md)
-- [store/file/README.md](store/file/README.md)
+- [store/fstree/README.md](store/fstree/README.md)
 - [store/series/README.md](store/series/README.md)
 - [store/vector/README.md](store/vector/README.md)
 - [store/search/README.md](store/search/README.md)
-- [store/file/s3fs/README.md](store/file/s3fs/README.md)
+- [store/graphs/README.md](store/graphs/README.md)
+- [store/fstree/s3fs/README.md](store/fstree/s3fs/README.md)
 - [store/vector/doc/README.md](store/vector/doc/README.md)
 - [graph/README.md](graph/README.md)
-- [pkg/audit/README.md](pkg/audit/README.md)
+- [pkg/ledger/README.md](pkg/ledger/README.md)
+- [store/object/README.md](store/object/README.md)
 - [pkg/consensus/README.md](pkg/consensus/README.md)
 - [pkg/store/README.md](pkg/store/README.md)
-- [pkg/blob/README.md](pkg/blob/README.md)
 - [pkg/snapshot/README.md](pkg/snapshot/README.md)
+- [store/system/README.md](store/system/README.md)
 
 Generated API documentation:
 
 - [github.com/malivvan/harbor](https://pkg.go.dev/github.com/malivvan/harbor)
 - [github.com/malivvan/harbor/store/record](https://pkg.go.dev/github.com/malivvan/harbor/store/record)
-- [github.com/malivvan/harbor/store/file](https://pkg.go.dev/github.com/malivvan/harbor/store/file)
+- [github.com/malivvan/harbor/store/fstree](https://pkg.go.dev/github.com/malivvan/harbor/store/fstree)
 - [github.com/malivvan/harbor/store/series](https://pkg.go.dev/github.com/malivvan/harbor/store/series)
 - [github.com/malivvan/harbor/store/vector](https://pkg.go.dev/github.com/malivvan/harbor/store/vector)
 - [github.com/malivvan/harbor/store/search](https://pkg.go.dev/github.com/malivvan/harbor/store/search)
-- [github.com/malivvan/harbor/pkg/audit](https://pkg.go.dev/github.com/malivvan/harbor/pkg/audit)
-- [github.com/malivvan/harbor/pkg/blob](https://pkg.go.dev/github.com/malivvan/harbor/pkg/blob)
+- [github.com/malivvan/harbor/pkg/ledger](https://pkg.go.dev/github.com/malivvan/harbor/pkg/ledger)
+- [github.com/malivvan/harbor/store/object](https://pkg.go.dev/github.com/malivvan/harbor/store/object)
+- [github.com/malivvan/harbor/store/graphs](https://pkg.go.dev/github.com/malivvan/harbor/store/graphs)
+- [github.com/malivvan/harbor/store/system](https://pkg.go.dev/github.com/malivvan/harbor/store/system)
 - [github.com/malivvan/harbor/pkg/consensus](https://pkg.go.dev/github.com/malivvan/harbor/pkg/consensus)
 - [github.com/malivvan/harbor/pkg/id](https://pkg.go.dev/github.com/malivvan/harbor/pkg/id)
 - [github.com/malivvan/harbor/pkg/metrics](https://pkg.go.dev/github.com/malivvan/harbor/pkg/metrics)

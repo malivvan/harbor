@@ -14,9 +14,6 @@ import (
 	"fmt"
 	"sort"
 	"time"
-
-	hdb "github.com/malivvan/harbor/store/record"
-	"github.com/malivvan/harbor/store/record/q"
 )
 
 // NodeRecord is one live node.
@@ -151,7 +148,7 @@ func recordedAtOf(recorded, fallback time.Time) time.Time {
 }
 
 // archiveNode writes a closed node version and removes the live record.
-func (g *Graph) archiveNode(ctx context.Context, n hdb.Node, record *NodeRecord, validTo, recorded time.Time, retracted bool, inv Invalidation) error {
+func (g *Graph) archiveNode(ctx context.Context, w Writer, record *NodeRecord, validTo, recorded time.Time, retracted bool, inv Invalidation) error {
 	version := &NodeVersion{
 		VersionID: g.versionID(record.ID), NodeID: record.ID,
 		Vector: append([]float32(nil), record.Vector...), Content: record.Content,
@@ -165,14 +162,14 @@ func (g *Graph) archiveNode(ctx context.Context, n hdb.Node, record *NodeRecord,
 	if retracted {
 		version.RetractedAt = recorded
 	}
-	if err := n.Save(ctx, version); err != nil {
+	if err := w.PutNodeVersion(ctx, version); err != nil {
 		return err
 	}
-	return n.DeleteStruct(ctx, record)
+	return w.DeleteNode(ctx, record.ID)
 }
 
 // archiveEdge writes a closed edge version and removes the live record.
-func (g *Graph) archiveEdge(ctx context.Context, n hdb.Node, record *EdgeRecord, validTo, recorded time.Time, retracted bool, inv Invalidation) error {
+func (g *Graph) archiveEdge(ctx context.Context, w Writer, record *EdgeRecord, validTo, recorded time.Time, retracted bool, inv Invalidation) error {
 	version := &EdgeVersion{
 		VersionID: g.versionID(record.ID), EdgeID: record.ID,
 		FromNodeID: record.FromNodeID, ToNodeID: record.ToNodeID, EdgeType: record.EdgeType,
@@ -186,23 +183,21 @@ func (g *Graph) archiveEdge(ctx context.Context, n hdb.Node, record *EdgeRecord,
 	if retracted {
 		version.Retracted = recorded
 	}
-	if err := n.Save(ctx, version); err != nil {
+	if err := w.PutEdgeVersion(ctx, version); err != nil {
 		return err
 	}
-	return n.DeleteStruct(ctx, record)
+	return w.DeleteEdge(ctx, record.ID)
 }
 
 // nodeAt returns the node in force at an instant.
-func (g *Graph) nodeAt(ctx context.Context, n hdb.Node, id string, at time.Time) (*NodeRecord, error) {
-	var live NodeRecord
-	haveLive := false
-	if err := n.One(ctx, "ID", id, &live); err == nil {
-		haveLive = true
-	} else if !errors.Is(err, hdb.ErrNotFound) {
+func (g *Graph) nodeAt(ctx context.Context, r Reader, id string, at time.Time) (*NodeRecord, error) {
+	live, err := r.Node(ctx, id)
+	haveLive := err == nil
+	if err != nil && !errors.Is(err, ErrRecordNotFound) {
 		return nil, err
 	}
-	var versions []*NodeVersion
-	if err := n.Select(q.Eq("NodeID", id)).Find(ctx, &versions); err != nil && !errors.Is(err, hdb.ErrNotFound) {
+	versions, err := r.NodeVersionsByNode(ctx, id)
+	if err != nil {
 		return nil, err
 	}
 	var chosen *NodeRecord
@@ -218,7 +213,7 @@ func (g *Graph) nodeAt(ctx context.Context, n hdb.Node, id string, at time.Time)
 		}
 	}
 	if haveLive {
-		consider(&live)
+		consider(live)
 	}
 	for _, version := range versions {
 		consider(nodeRecordFromVersion(version))
@@ -252,17 +247,17 @@ func edgeRecordFromVersion(version *EdgeVersion) *EdgeRecord {
 }
 
 // nodeRecords returns the live nodes, or those in force at the as-of instant.
-func (g *Graph) nodeRecords(ctx context.Context, n hdb.Node) ([]*NodeRecord, error) {
-	var live []*NodeRecord
-	if err := n.All(ctx, &live); err != nil && !errors.Is(err, hdb.ErrNotFound) {
+func (g *Graph) nodeRecords(ctx context.Context, r Reader) ([]*NodeRecord, error) {
+	live, err := r.Nodes(ctx)
+	if err != nil {
 		return nil, err
 	}
 	ro := ReadOptionsFrom(ctx)
 	if !ro.IsAsOf() {
 		return live, nil
 	}
-	var versions []*NodeVersion
-	if err := n.All(ctx, &versions); err != nil && !errors.Is(err, hdb.ErrNotFound) {
+	versions, err := r.NodeVersions(ctx)
+	if err != nil {
 		return nil, err
 	}
 	chosen := make(map[string]*NodeRecord, len(live))
@@ -292,17 +287,17 @@ func (g *Graph) nodeRecords(ctx context.Context, n hdb.Node) ([]*NodeRecord, err
 }
 
 // edgeRecordsAll returns the live edges, or those in force at the as-of instant.
-func (g *Graph) edgeRecordsAll(ctx context.Context, n hdb.Node) ([]*EdgeRecord, error) {
-	var live []*EdgeRecord
-	if err := n.All(ctx, &live); err != nil && !errors.Is(err, hdb.ErrNotFound) {
+func (g *Graph) edgeRecordsAll(ctx context.Context, r Reader) ([]*EdgeRecord, error) {
+	live, err := r.Edges(ctx)
+	if err != nil {
 		return nil, err
 	}
 	ro := ReadOptionsFrom(ctx)
 	if !ro.IsAsOf() {
 		return live, nil
 	}
-	var versions []*EdgeVersion
-	if err := n.All(ctx, &versions); err != nil && !errors.Is(err, hdb.ErrNotFound) {
+	versions, err := r.EdgeVersions(ctx)
+	if err != nil {
 		return nil, err
 	}
 	chosen := make(map[string]*EdgeRecord, len(live))
@@ -332,9 +327,9 @@ func (g *Graph) edgeRecordsAll(ctx context.Context, n hdb.Node) ([]*EdgeRecord, 
 }
 
 // edgeRecords returns the edges on one side of a node.
-func (g *Graph) edgeRecords(ctx context.Context, n hdb.Node, side, nodeID string) ([]*EdgeRecord, error) {
+func (g *Graph) edgeRecords(ctx context.Context, r Reader, side, nodeID string) ([]*EdgeRecord, error) {
 	if ReadOptionsFrom(ctx).IsAsOf() {
-		all, err := g.edgeRecordsAll(ctx, n)
+		all, err := g.edgeRecordsAll(ctx, r)
 		if err != nil {
 			return nil, err
 		}
@@ -346,24 +341,26 @@ func (g *Graph) edgeRecords(ctx context.Context, n hdb.Node, side, nodeID string
 		}
 		return out, nil
 	}
-	field := "FromNodeID"
-	if side == "in" {
-		field = "ToNodeID"
-	}
-	var out []*EdgeRecord
-	if err := n.Select(q.Eq(field, nodeID)).Find(ctx, &out); err != nil && !errors.Is(err, hdb.ErrNotFound) {
+	all, err := r.EdgesTouching(ctx, nodeID)
+	if err != nil {
 		return nil, err
+	}
+	out := make([]*EdgeRecord, 0, len(all))
+	for _, record := range all {
+		if (side == "out" && record.FromNodeID == nodeID) || (side == "in" && record.ToNodeID == nodeID) {
+			out = append(out, record)
+		}
 	}
 	return out, nil
 }
 
 // liveEdgesTouching returns the live edges incident to a node on either side.
-func (g *Graph) liveEdgesTouching(ctx context.Context, n hdb.Node, nodeID string) ([]*EdgeRecord, error) {
-	out, err := g.edgeRecords(ctx, n, "out", nodeID)
+func (g *Graph) liveEdgesTouching(ctx context.Context, r Reader, nodeID string) ([]*EdgeRecord, error) {
+	out, err := g.edgeRecords(ctx, r, "out", nodeID)
 	if err != nil {
 		return nil, err
 	}
-	in, err := g.edgeRecords(ctx, n, "in", nodeID)
+	in, err := g.edgeRecords(ctx, r, "in", nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +379,12 @@ func (g *Graph) liveEdgesTouching(ctx context.Context, n hdb.Node, nodeID string
 // NodeHistory returns every closed version of a node, oldest first.
 func (g *Graph) NodeHistory(ctx context.Context, nodeID string) ([]RecordVersion, error) {
 	var versions []*NodeVersion
-	if err := g.base.Select(q.Eq("NodeID", nodeID)).Find(ctx, &versions); err != nil && !errors.Is(err, hdb.ErrNotFound) {
+	err := g.read(ctx, func(r Reader) error {
+		var err error
+		versions, err = r.NodeVersionsByNode(ctx, nodeID)
+		return err
+	})
+	if err != nil {
 		return nil, err
 	}
 	return g.nodeVersions(ctx, versions)
@@ -393,7 +395,12 @@ func (g *Graph) NodeHistory(ctx context.Context, nodeID string) ([]RecordVersion
 // churn a store has seen without naming an id first.
 func (g *Graph) AllNodeVersions(ctx context.Context) ([]RecordVersion, error) {
 	var versions []*NodeVersion
-	if err := g.base.All(ctx, &versions); err != nil && !errors.Is(err, hdb.ErrNotFound) {
+	err := g.read(ctx, func(r Reader) error {
+		var err error
+		versions, err = r.NodeVersions(ctx)
+		return err
+	})
+	if err != nil {
 		return nil, err
 	}
 	return g.nodeVersions(ctx, versions)
@@ -402,7 +409,12 @@ func (g *Graph) AllNodeVersions(ctx context.Context) ([]RecordVersion, error) {
 // AllEdgeVersions returns every closed edge version in the graph, oldest first.
 func (g *Graph) AllEdgeVersions(ctx context.Context) ([]RecordVersion, error) {
 	var versions []*EdgeVersion
-	if err := g.base.All(ctx, &versions); err != nil && !errors.Is(err, hdb.ErrNotFound) {
+	err := g.read(ctx, func(r Reader) error {
+		var err error
+		versions, err = r.EdgeVersions(ctx)
+		return err
+	})
+	if err != nil {
 		return nil, err
 	}
 	return g.edgeVersions(ctx, versions)
@@ -439,7 +451,12 @@ func (g *Graph) nodeVersions(ctx context.Context, versions []*NodeVersion) ([]Re
 // EdgeHistory returns every closed version of an edge, oldest first.
 func (g *Graph) EdgeHistory(ctx context.Context, edgeID string) ([]RecordVersion, error) {
 	var versions []*EdgeVersion
-	if err := g.base.Select(q.Eq("EdgeID", edgeID)).Find(ctx, &versions); err != nil && !errors.Is(err, hdb.ErrNotFound) {
+	err := g.read(ctx, func(r Reader) error {
+		var err error
+		versions, err = r.EdgeVersionsByEdge(ctx, edgeID)
+		return err
+	})
+	if err != nil {
 		return nil, err
 	}
 	return g.edgeVersions(ctx, versions)
@@ -448,12 +465,13 @@ func (g *Graph) EdgeHistory(ctx context.Context, edgeID string) ([]RecordVersion
 // NodeEdgeHistory returns every closed version of the edges touching a node.
 func (g *Graph) NodeEdgeHistory(ctx context.Context, nodeID string) ([]RecordVersion, error) {
 	var out []*EdgeVersion
-	for _, field := range []string{"FromNodeID", "ToNodeID"} {
-		var versions []*EdgeVersion
-		if err := g.base.Select(q.Eq(field, nodeID)).Find(ctx, &versions); err != nil && !errors.Is(err, hdb.ErrNotFound) {
-			return nil, err
-		}
-		out = append(out, versions...)
+	err := g.read(ctx, func(r Reader) error {
+		var err error
+		out, err = r.EdgeVersionsTouching(ctx, nodeID)
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
 	return g.edgeVersions(ctx, out)
 }
@@ -491,7 +509,12 @@ func (g *Graph) edgeVersions(ctx context.Context, versions []*EdgeVersion) ([]Re
 // since; a zero since means the whole history.
 func (g *Graph) EndedEdgeVersions(ctx context.Context, since time.Time) ([]RecordVersion, error) {
 	var versions []*EdgeVersion
-	if err := g.base.All(ctx, &versions); err != nil && !errors.Is(err, hdb.ErrNotFound) {
+	err := g.read(ctx, func(r Reader) error {
+		var err error
+		versions, err = r.EdgeVersions(ctx)
+		return err
+	})
+	if err != nil {
 		return nil, err
 	}
 	kept := make([]*EdgeVersion, 0, len(versions))
@@ -520,14 +543,19 @@ func (g *Graph) Purge(ctx context.Context, before time.Time, dryRun bool) (*Purg
 	}
 	report := &PurgeReport{DryRun: dryRun}
 	var nodeVersions []*NodeVersion
-	if err := g.base.All(ctx, &nodeVersions); err != nil && !errors.Is(err, hdb.ErrNotFound) {
-		return nil, err
-	}
 	var edgeVersions []*EdgeVersion
-	if err := g.base.All(ctx, &edgeVersions); err != nil && !errors.Is(err, hdb.ErrNotFound) {
+	if err := g.read(ctx, func(r Reader) error {
+		var err error
+		nodeVersions, err = r.NodeVersions(ctx)
+		if err != nil {
+			return err
+		}
+		edgeVersions, err = r.EdgeVersions(ctx)
+		return err
+	}); err != nil {
 		return nil, err
 	}
-	return report, g.write(ctx, func(n hdb.Node) error {
+	return report, g.write(ctx, func(w Writer) error {
 		for _, version := range nodeVersions {
 			end := version.RetractedAt
 			if end.IsZero() {
@@ -538,7 +566,7 @@ func (g *Graph) Purge(ctx context.Context, before time.Time, dryRun bool) (*Purg
 			}
 			report.Nodes++
 			if !dryRun {
-				if err := n.DeleteStruct(ctx, version); err != nil {
+				if err := w.DeleteNodeVersion(ctx, version.VersionID); err != nil {
 					return err
 				}
 			}
@@ -553,7 +581,7 @@ func (g *Graph) Purge(ctx context.Context, before time.Time, dryRun bool) (*Purg
 			}
 			report.Edges++
 			if !dryRun {
-				if err := n.DeleteStruct(ctx, version); err != nil {
+				if err := w.DeleteEdgeVersion(ctx, version.VersionID); err != nil {
 					return err
 				}
 			}
@@ -569,21 +597,21 @@ func (g *Graph) RetractNodeAt(ctx context.Context, nodeID string, at time.Time) 
 	if at.IsZero() {
 		at = g.now()
 	}
-	return g.write(ctx, func(n hdb.Node) error {
-		var record NodeRecord
-		if err := n.One(ctx, "ID", nodeID, &record); err != nil {
+	return g.write(ctx, func(w Writer) error {
+		record, err := w.Node(ctx, nodeID)
+		if err != nil {
 			return nodeErr(nodeID, err)
 		}
-		edges, err := g.liveEdgesTouching(ctx, n, nodeID)
+		edges, err := g.liveEdgesTouching(ctx, w, nodeID)
 		if err != nil {
 			return err
 		}
 		for _, edge := range edges {
-			if err := g.archiveEdge(ctx, n, edge, at.UTC(), at.UTC(), true, InvalidationFrom(ctx)); err != nil {
+			if err := g.archiveEdge(ctx, w, edge, at.UTC(), at.UTC(), true, InvalidationFrom(ctx)); err != nil {
 				return err
 			}
 		}
-		return g.archiveNode(ctx, n, &record, at.UTC(), at.UTC(), true, InvalidationFrom(ctx))
+		return g.archiveNode(ctx, w, record, at.UTC(), at.UTC(), true, InvalidationFrom(ctx))
 	})
 }
 
@@ -592,12 +620,12 @@ func (g *Graph) RetractEdgeAt(ctx context.Context, edgeID string, at time.Time) 
 	if at.IsZero() {
 		at = g.now()
 	}
-	return g.write(ctx, func(n hdb.Node) error {
-		var record EdgeRecord
-		if err := n.One(ctx, "ID", edgeID, &record); err != nil {
+	return g.write(ctx, func(w Writer) error {
+		record, err := w.Edge(ctx, edgeID)
+		if err != nil {
 			return edgeErr(edgeID, err)
 		}
-		return g.archiveEdge(ctx, n, &record, at.UTC(), at.UTC(), true, InvalidationFrom(ctx))
+		return g.archiveEdge(ctx, w, record, at.UTC(), at.UTC(), true, InvalidationFrom(ctx))
 	})
 }
 
@@ -612,12 +640,12 @@ func (g *Graph) EndEdge(ctx context.Context, edgeID string, at time.Time) error 
 	if at.IsZero() {
 		at = g.now()
 	}
-	return g.write(ctx, func(n hdb.Node) error {
-		var record EdgeRecord
-		if err := n.One(ctx, "ID", edgeID, &record); err != nil {
+	return g.write(ctx, func(w Writer) error {
+		record, err := w.Edge(ctx, edgeID)
+		if err != nil {
 			return edgeErr(edgeID, err)
 		}
-		return g.archiveEdge(ctx, n, &record, at.UTC(), g.now(), false, InvalidationFrom(ctx))
+		return g.archiveEdge(ctx, w, record, at.UTC(), g.now(), false, InvalidationFrom(ctx))
 	})
 }
 
@@ -626,10 +654,14 @@ func (g *Graph) EndEdge(ctx context.Context, edgeID string, at time.Time) error 
 func (g *Graph) RetractNodes(ctx context.Context, nodeIDs []string) (nodes int, edges int, err error) {
 	for _, id := range nodeIDs {
 		var out, in []*EdgeRecord
-		if out, err = g.edgeRecords(ctx, g.base, "out", id); err != nil {
-			return nodes, edges, err
-		}
-		if in, err = g.edgeRecords(ctx, g.base, "in", id); err != nil {
+		if err = g.read(ctx, func(r Reader) error {
+			var err error
+			if out, err = g.edgeRecords(ctx, r, "out", id); err != nil {
+				return err
+			}
+			in, err = g.edgeRecords(ctx, r, "in", id)
+			return err
+		}); err != nil {
 			return nodes, edges, err
 		}
 		if err = g.RetractNodeAt(ctx, id, g.now()); err != nil {

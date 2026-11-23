@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/harbor/pkg/audit"
+	audit "github.com/malivvan/harbor/pkg/ledger"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )

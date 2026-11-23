@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/malivvan/harbor"
-	"github.com/malivvan/harbor/pkg/blob"
 	"github.com/malivvan/harbor/pkg/snapshot"
 )
 
@@ -25,11 +24,7 @@ func newStore(t *testing.T, bucket string) *Store {
 	}
 	t.Cleanup(func() { _ = harborStore.Close() })
 
-	objects, err := blob.Open(harborStore.File(), bucket)
-	if err != nil {
-		t.Fatalf("blob.Open: %v", err)
-	}
-	return New(objects, bucket)
+	return New(harborStore.Objects(), bucket)
 }
 
 func readAll(t *testing.T, s *Store, key string) (string, error) {

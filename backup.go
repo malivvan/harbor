@@ -12,10 +12,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/malivvan/harbor/store/file"
+	"github.com/malivvan/harbor/store/fstree"
+	"github.com/malivvan/harbor/store/graphs"
+	"github.com/malivvan/harbor/store/object"
 	"github.com/malivvan/harbor/store/record"
 	"github.com/malivvan/harbor/store/search"
 	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/harbor/store/system"
 	"github.com/malivvan/harbor/store/vector"
 	bolt "go.etcd.io/bbolt"
 )
@@ -136,11 +139,13 @@ func writeBackupManifest(path string, info BackupInfo) error {
 	m := backupManifest{
 		BackupInfo: info,
 		Formats: map[string]string{
-			"db":  record.Version,
-			"fs":  fmt.Sprint(file.FormatVersion),
-			"ts":  fmt.Sprint(series.FormatVersion),
-			"vec": fmt.Sprint(vector.CollectionFormatVersion),
-			"fts": fmt.Sprint(search.FormatVersion),
+			"db":     record.Version,
+			"fs":     fmt.Sprint(fstree.FormatVersion),
+			"ts":     fmt.Sprint(series.FormatVersion),
+			"vec":    fmt.Sprint(vector.CollectionFormatVersion),
+			"fts":    fmt.Sprint(search.FormatVersion),
+			"graphs": fmt.Sprint(graphs.FormatVersion),
+			"object": fmt.Sprint(object.FormatVersion),
 		},
 	}
 	raw, err := json.MarshalIndent(m, "", "  ")
@@ -259,7 +264,7 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 	}
 	defer func() { _ = bdb.Close() }()
 
-	md, creating, err := readMetadata(bdb)
+	md, creating, err := system.ReadMetadata(bdb)
 	if err != nil {
 		return info, fmt.Errorf("%w: %w", ErrInvalidBackup, err)
 	}
@@ -267,12 +272,12 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		return info, fmt.Errorf("%w: %s holds no Harbor metadata", ErrInvalidBackup, path)
 	}
 
-	keys, err := deriveKeys(password, md.Salt, md.Time, md.Memory, md.Threads)
+	keys, err := system.Derive(password, md.Salt, md.Time, md.Memory, md.Threads)
 	if err != nil {
 		return info, err
 	}
-	defer keys.wipe()
-	if err := verifyCanary(keys.canary, md.Canary, md.Flags); err != nil {
+	defer keys.Wipe()
+	if err := system.VerifyCanary(keys.Canary, md.Canary, md.Flags); err != nil {
 		return info, fmt.Errorf("%w: %w", ErrInvalidPassword, err)
 	}
 	if hasManifest && manifest.Flags != md.Flags {
@@ -286,19 +291,19 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 	if _, err := record.Open(ctx, bdb, record.Config{
 		Root:            namedRoot(record.Name),
 		Codec:           codec,
-		Secret:          keys.record,
-		EncryptKeys:     hasFlag(md.Flags, EncryptDBKeys),
-		EncryptValues:   hasFlag(md.Flags, EncryptDBValues),
-		EncryptMetadata: hasFlag(md.Flags, EncryptDBMetadata),
+		Secret:          keys.Record,
+		EncryptKeys:     system.HasFlag(md.Flags, EncryptDBKeys),
+		EncryptValues:   system.HasFlag(md.Flags, EncryptDBValues),
+		EncryptMetadata: system.HasFlag(md.Flags, EncryptDBMetadata),
 	}); err != nil {
 		return info, fmt.Errorf("harbor: verify backup: db: %w", err)
 	}
 
-	fsStore, err := file.Open(ctx, bdb, file.Config{
-		Root:            namedRoot(file.Name),
-		Secret:          keys.file,
-		EncryptMetadata: hasFlag(md.Flags, EncryptFSMetadata),
-		EncryptContent:  hasFlag(md.Flags, EncryptFSContent),
+	fsStore, err := fstree.Open(ctx, bdb, fstree.Config{
+		Root:            namedRoot(fstree.Name),
+		Secret:          keys.File,
+		EncryptMetadata: system.HasFlag(md.Flags, EncryptFSMetadata),
+		EncryptContent:  system.HasFlag(md.Flags, EncryptFSContent),
 	})
 	if err != nil {
 		return info, fmt.Errorf("harbor: verify backup: fs: %w", err)
@@ -315,19 +320,19 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 
 	if _, err := series.Open(ctx, bdb, series.Config{
 		Root:               namedRoot(series.Name),
-		Secret:             keys.series,
-		EncryptValues:      hasFlag(md.Flags, EncryptTSValues),
-		EncryptSeriesNames: hasFlag(md.Flags, EncryptTSSeriesNames),
+		Secret:             keys.Series,
+		EncryptValues:      system.HasFlag(md.Flags, EncryptTSValues),
+		EncryptSeriesNames: system.HasFlag(md.Flags, EncryptTSSeriesNames),
 	}); err != nil {
 		return info, fmt.Errorf("harbor: verify backup: ts: %w", err)
 	}
 
 	vecStore, err := vector.Open(ctx, bdb, vector.Config{
 		Root:                   namedRoot(vector.Name),
-		Secret:                 keys.vector,
-		EncryptPoints:          hasFlag(md.Flags, EncryptVecPoints),
-		EncryptPointIDs:        hasFlag(md.Flags, EncryptVecPointIDs),
-		EncryptCollectionNames: hasFlag(md.Flags, EncryptVecCollectionNames),
+		Secret:                 keys.Vector,
+		EncryptPoints:          system.HasFlag(md.Flags, EncryptVecPoints),
+		EncryptPointIDs:        system.HasFlag(md.Flags, EncryptVecPointIDs),
+		EncryptCollectionNames: system.HasFlag(md.Flags, EncryptVecCollectionNames),
 		SharedDB:               true,
 	})
 	if err != nil {
@@ -345,8 +350,8 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 
 	ftsStore, err := search.OpenReadOnly(ctx, bdb, search.Config{
 		Root:          namedRoot(search.Name),
-		Secret:        keys.search,
-		EncryptValues: hasFlag(md.Flags, EncryptDBValues),
+		Secret:        keys.Search,
+		EncryptValues: system.HasFlag(md.Flags, EncryptDBValues),
 	})
 	if err != nil {
 		return info, fmt.Errorf("harbor: verify backup: fts: %w", err)
@@ -358,6 +363,36 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 	for _, name := range indexes {
 		if _, err := ftsStore.Open(name, search.Config{}); err != nil {
 			return info, fmt.Errorf("harbor: verify backup: fts %q: %w", name, err)
+		}
+	}
+
+	if bucketExists(bdb, graphs.Name) {
+		graphStore, err := graphs.OpenReadOnly(ctx, bdb, graphs.Config{
+			Root:          namedRoot(graphs.Name),
+			Secret:        keys.Graphs,
+			EncryptValues: system.HasFlag(md.Flags, EncryptGraphValues) || system.HasFlag(md.Flags, EncryptDBValues),
+		})
+		if err != nil {
+			return info, fmt.Errorf("harbor: verify backup: graphs: %w", err)
+		}
+		graphNames, err := graphStore.Names(ctx)
+		if err != nil {
+			return info, fmt.Errorf("harbor: verify backup: graphs: %w", err)
+		}
+		for _, name := range graphNames {
+			if _, err := graphStore.Open(name); err != nil {
+				return info, fmt.Errorf("harbor: verify backup: graph %q: %w", name, err)
+			}
+		}
+	}
+
+	if bucketExists(bdb, object.Name) {
+		if _, err := object.OpenReadOnly(ctx, bdb, object.Config{
+			Root:          namedRoot(object.Name),
+			Secret:        keys.Object,
+			EncryptValues: system.HasFlag(md.Flags, EncryptObjectValues) || system.HasFlag(md.Flags, EncryptDBValues),
+		}); err != nil {
+			return info, fmt.Errorf("harbor: verify backup: object: %w", err)
 		}
 	}
 
@@ -393,4 +428,14 @@ func hashBackup(ctx context.Context, path string) (string, error) {
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// bucketExists reports whether a top-level bucket exists in bdb.
+func bucketExists(bdb *bolt.DB, name string) bool {
+	found := false
+	_ = bdb.View(func(tx *bolt.Tx) error {
+		found = tx.Bucket([]byte(name)) != nil
+		return nil
+	})
+	return found
 }

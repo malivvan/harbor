@@ -6,7 +6,7 @@ import (
 	"reflect"
 
 	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/pkg/audit"
+	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
 	bolt "go.etcd.io/bbolt"
 )
@@ -46,7 +46,7 @@ type Config struct {
 	EncryptKeys bool
 
 	// Audit, when non-nil, receives an entry for every committed write.
-	Audit audit.Sink
+	Audit ledger.Sink
 
 	// Metrics, when non-nil, receives operation counters, transaction
 	// latencies and tracing spans. A nil Observer disables instrumentation.

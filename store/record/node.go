@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/malivvan/harbor/pkg/audit"
+	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
 	bolt "go.etcd.io/bbolt"
 )
@@ -84,7 +84,7 @@ type node struct {
 	// audit, when non-nil, replaces the store's sink for writes performed
 	// through this node. The root package uses it to stage audit events for a
 	// cross-store transaction instead of recording them inside the transaction.
-	audit audit.Sink
+	audit ledger.Sink
 
 	// project, when non-empty, limits decode to these top-level fields. It is
 	// set on a query's private node copy by Query.Project.

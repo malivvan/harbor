@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/pkg/audit"
+	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
 	bolt "go.etcd.io/bbolt"
 )
@@ -49,7 +49,7 @@ type Config struct {
 	BlockDuration int64
 
 	// Audit, when non-nil, receives an entry for every committed write.
-	Audit audit.Sink
+	Audit ledger.Sink
 
 	// Metrics, when non-nil, receives operation counters, decode/aggregate
 	// timings and tracing spans. A nil Observer disables instrumentation.

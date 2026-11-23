@@ -1,7 +1,7 @@
 package record
 
 import (
-	"github.com/malivvan/harbor/pkg/audit"
+	"github.com/malivvan/harbor/pkg/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -56,11 +56,11 @@ func (s *Store) Attach(tx *bolt.Tx) (Tx, error) {
 //
 // A nil sink attaches with no audit recording at all, even when the store has
 // an audit trail configured.
-func (s *Store) AttachWithAudit(tx *bolt.Tx, sink audit.Sink) (Tx, error) {
+func (s *Store) AttachWithAudit(tx *bolt.Tx, sink ledger.Sink) (Tx, error) {
 	return s.attach(tx, sink)
 }
 
-func (s *Store) attach(tx *bolt.Tx, sink audit.Sink) (Tx, error) {
+func (s *Store) attach(tx *bolt.Tx, sink ledger.Sink) (Tx, error) {
 	if s == nil || tx == nil {
 		return nil, wrapError("attach", ErrNilParam)
 	}

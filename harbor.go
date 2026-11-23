@@ -19,17 +19,17 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"sync"
 
-	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/internal/slip21"
-	"github.com/malivvan/harbor/pkg/audit"
+	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
-	"github.com/malivvan/harbor/store/file"
+	"github.com/malivvan/harbor/store/fstree"
+	"github.com/malivvan/harbor/store/graphs"
+	"github.com/malivvan/harbor/store/object"
 	"github.com/malivvan/harbor/store/record"
 	"github.com/malivvan/harbor/store/search"
 	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/harbor/store/system"
 	"github.com/malivvan/harbor/store/vector"
 	bolt "go.etcd.io/bbolt"
 )
@@ -39,24 +39,6 @@ func namedRoot(name string) [][]byte {
 	return [][]byte{[]byte(name)}
 }
 
-// Domain-separated labels used to derive one key per component.
-const (
-	labelDB  = "harbor/db/v1"
-	labelFS  = "harbor/fs/v1"
-	labelTS  = "harbor/ts/v1"
-	labelVec = "harbor/vec/v1"
-	labelFTS = "harbor/fts/v1"
-)
-
-// SLIP-10 (Ed25519) hardened paths for the per-store audit signing keys. They
-// mirror the per-store SLIP-21 keys above, hanging off the same Argon2id seed.
-const (
-	auditPathDB  = "m/0'"
-	auditPathFS  = "m/1'"
-	auditPathTS  = "m/2'"
-	auditPathVec = "m/3'"
-)
-
 // Errors returned by the package.
 var (
 	// ErrClosed is returned by operations on a closed Store.
@@ -64,11 +46,61 @@ var (
 
 	// ErrInvalidOptions reports a nil Options value or an unusable
 	// configuration.
-	ErrInvalidOptions = errors.New("harbor: invalid options")
+	ErrInvalidOptions = system.ErrInvalidOptions
 
 	// ErrInvalidPassword reports an empty password or a password that does not
 	// decrypt the store canary.
-	ErrInvalidPassword = errors.New("harbor: invalid password")
+	ErrInvalidPassword = system.ErrInvalidPassword
+)
+
+// ErrCorruptStore reports missing or malformed store Metadata.
+var ErrCorruptStore = system.ErrCorruptStore
+
+// Metadata is the unencrypted store configuration owned by store/system.
+type Metadata = system.Metadata
+
+// Encryption, audit and KDF identifiers are re-exported from store/system.
+const (
+	EncryptNone               = system.EncryptNone
+	EncryptDBKeys             = system.EncryptDBKeys
+	EncryptDBValues           = system.EncryptDBValues
+	EncryptDBMetadata         = system.EncryptDBMetadata
+	EncryptFSContent          = system.EncryptFSContent
+	EncryptFSMetadata         = system.EncryptFSMetadata
+	EncryptTSValues           = system.EncryptTSValues
+	EncryptTSSeriesNames      = system.EncryptTSSeriesNames
+	EncryptVecPointIDs        = system.EncryptVecPointIDs
+	EncryptVecCollectionNames = system.EncryptVecCollectionNames
+	EncryptVecPoints          = system.EncryptVecPoints
+	EncryptGraphValues        = system.EncryptGraphValues
+	EncryptObjectValues       = system.EncryptObjectValues
+	EncryptDB                 = system.EncryptDB
+	EncryptFS                 = system.EncryptFS
+	EncryptTS                 = system.EncryptTS
+	EncryptVec                = system.EncryptVec
+	EncryptGraph              = system.EncryptGraph
+	EncryptObject             = system.EncryptObject
+	EncryptAll                = system.EncryptAll
+	AuditNone                 = system.AuditNone
+	AuditDB                   = system.AuditDB
+	AuditFS                   = system.AuditFS
+	AuditTS                   = system.AuditTS
+	AuditVec                  = system.AuditVec
+	AuditGraphs               = system.AuditGraphs
+	AuditObject               = system.AuditObject
+	AuditAll                  = system.AuditAll
+	SaltSize                  = system.SaltSize
+	KeySize                   = system.KeySize
+	MiB                       = system.MiB
+	FastKDFTime               = system.FastKDFTime
+	FastKDFMemory             = system.FastKDFMemory
+	FastKDFThreads            = system.FastKDFThreads
+	DefaultKDFTime            = system.DefaultKDFTime
+	DefaultKDFMemory          = system.DefaultKDFMemory
+	DefaultKDFThreads         = system.DefaultKDFThreads
+	StrongKDFTime             = system.StrongKDFTime
+	StrongKDFMemory           = system.StrongKDFMemory
+	StrongKDFThreads          = system.StrongKDFThreads
 )
 
 // Options configures Open.
@@ -139,13 +171,26 @@ func (o *Options) Validate() error {
 	if o == nil {
 		return fmt.Errorf("%w: options are required", ErrInvalidOptions)
 	}
-	if o.Password == "" {
-		return fmt.Errorf("%w: password is required", ErrInvalidPassword)
-	}
-	if _, _, _, _, err := o.creationParams(); err != nil {
+	if err := o.systemConfig().Validate(); err != nil {
 		return err
 	}
 	return o.validateAuditFlags()
+}
+
+// systemConfig maps the root options onto the header package's configuration.
+func (o *Options) systemConfig() system.Config {
+	if o == nil {
+		return system.Config{}
+	}
+	return system.Config{
+		Password:   o.Password,
+		KDFTime:    o.KDFTime,
+		KDFMemory:  o.KDFMemory,
+		KDFThreads: o.KDFThreads,
+		Encrypt:    o.Encrypt,
+		Plaintext:  o.Plaintext,
+		Audit:      o.Audit,
+	}
 }
 
 // validateAuditFlags rejects audit bits that do not name a sub-store. Open
@@ -158,27 +203,6 @@ func (o *Options) validateAuditFlags() error {
 	return nil
 }
 
-// creationParams resolves the Argon2id cost parameters and encryption flags a
-// new store would use, validating the combination. It is the single source of
-// truth for new-store validation: Open and Options.Validate both use it.
-func (o *Options) creationParams() (time, memory uint32, threads uint8, flags uint16, err error) {
-	time, memory, threads = o.KDFTime, o.KDFMemory, o.KDFThreads
-	switch {
-	case time == 0 && memory == 0 && threads == 0:
-		time, memory, threads = DefaultKDFTime, DefaultKDFMemory, DefaultKDFThreads
-	case time == 0 || memory == 0 || threads == 0:
-		return 0, 0, 0, 0, fmt.Errorf("%w: incomplete KDF parameters", ErrInvalidOptions)
-	}
-	flags, err = encryptionFlags(o)
-	if err != nil {
-		return 0, 0, 0, 0, err
-	}
-	if err := validateKDFParams(time, memory, threads, flags, ErrInvalidOptions); err != nil {
-		return 0, 0, 0, 0, err
-	}
-	return time, memory, threads, flags, nil
-}
-
 // Store is a single bbolt database that hosts the db, fs, ts, vec and fts stores.
 // Each sub-store uses its own domain-separated key derived from Password.
 type Store struct {
@@ -187,13 +211,15 @@ type Store struct {
 	txMu   sync.Mutex
 	bs     *bolt.DB
 	record *record.Store
-	file   *file.Store
+	file   *fstree.Store
 	series *series.Store
 	vector *vector.Store
 	search *search.Store
+	graphs *graphs.Store
+	object *object.Store
 
 	// audit records events for the enabled stores, or nil when disabled.
-	audit *audit.Recorder
+	audit *ledger.Recorder
 	// auditFlags remembers which stores are enabled, for verification.
 	auditFlags uint16
 	// auditPubs holds the public keys matching the recorder's private keys, so
@@ -204,35 +230,12 @@ type Store struct {
 // auditPublicKeys holds the per-store Ed25519 public keys used to verify the
 // audit trail.
 type auditPublicKeys struct {
-	auditDB  ed25519.PublicKey
-	auditFS  ed25519.PublicKey
-	auditTS  ed25519.PublicKey
-	auditVec ed25519.PublicKey
-}
-
-// storeKeys holds the per-component keys derived for one Open call. They are
-// wiped as soon as the sub-stores have copied them.
-type storeKeys struct {
-	canary []byte
-	record []byte
-	file   []byte
-	series []byte
-	vector []byte
-	search []byte
-
-	auditDB  ed25519.PrivateKey
-	auditFS  ed25519.PrivateKey
-	auditTS  ed25519.PrivateKey
-	auditVec ed25519.PrivateKey
-}
-
-func (k *storeKeys) wipe() {
-	if k == nil {
-		return
-	}
-	for _, b := range [][]byte{k.canary, k.record, k.file, k.series, k.vector, k.search, k.auditDB, k.auditFS, k.auditTS, k.auditVec} {
-		wipe(b)
-	}
+	auditDB     ed25519.PublicKey
+	auditFS     ed25519.PublicKey
+	auditTS     ed25519.PublicKey
+	auditVec    ed25519.PublicKey
+	auditGraphs ed25519.PublicKey
+	auditObject ed25519.PublicKey
 }
 
 // Open opens (or creates) a Store at path.
@@ -270,11 +273,11 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		}
 	}()
 
-	md, keys, err := loadOrCreateState(bdb, options)
+	md, keys, err := system.LoadOrCreate(bdb, options.systemConfig())
 	if err != nil {
 		return nil, err
 	}
-	defer keys.wipe()
+	defer keys.Wipe()
 
 	s := &Store{bs: bdb}
 
@@ -282,29 +285,37 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	// private keys so they survive storeKeys.wipe below.
 	if options.Audit != 0 {
 		recKeys := make(map[string]ed25519.PrivateKey, 4)
-		if hasFlag(options.Audit, AuditDB) {
-			recKeys[audit.StoreDB] = append(ed25519.PrivateKey(nil), keys.auditDB...)
+		if system.HasFlag(options.Audit, AuditDB) {
+			recKeys[ledger.StoreDB] = append(ed25519.PrivateKey(nil), keys.AuditDB...)
 		}
-		if hasFlag(options.Audit, AuditFS) {
-			recKeys[audit.StoreFS] = append(ed25519.PrivateKey(nil), keys.auditFS...)
+		if system.HasFlag(options.Audit, AuditFS) {
+			recKeys[ledger.StoreFS] = append(ed25519.PrivateKey(nil), keys.AuditFS...)
 		}
-		if hasFlag(options.Audit, AuditTS) {
-			recKeys[audit.StoreTS] = append(ed25519.PrivateKey(nil), keys.auditTS...)
+		if system.HasFlag(options.Audit, AuditTS) {
+			recKeys[ledger.StoreTS] = append(ed25519.PrivateKey(nil), keys.AuditTS...)
 		}
-		if hasFlag(options.Audit, AuditVec) {
-			recKeys[audit.StoreVec] = append(ed25519.PrivateKey(nil), keys.auditVec...)
+		if system.HasFlag(options.Audit, AuditVec) {
+			recKeys[ledger.StoreVec] = append(ed25519.PrivateKey(nil), keys.AuditVec...)
 		}
-		s.audit = audit.NewRecorder(bdb, recKeys)
+		if system.HasFlag(options.Audit, AuditGraphs) {
+			recKeys[ledger.StoreGraphs] = append(ed25519.PrivateKey(nil), keys.AuditGraphs...)
+		}
+		if system.HasFlag(options.Audit, AuditObject) {
+			recKeys[ledger.StoreObject] = append(ed25519.PrivateKey(nil), keys.AuditObject...)
+		}
+		s.audit = ledger.NewRecorder(bdb, recKeys)
 		s.auditFlags = options.Audit
 		s.auditPubs = auditPublicKeys{
-			auditDB:  publicOf(keys.auditDB),
-			auditFS:  publicOf(keys.auditFS),
-			auditTS:  publicOf(keys.auditTS),
-			auditVec: publicOf(keys.auditVec),
+			auditDB:     publicOf(keys.AuditDB),
+			auditFS:     publicOf(keys.AuditFS),
+			auditTS:     publicOf(keys.AuditTS),
+			auditVec:    publicOf(keys.AuditVec),
+			auditGraphs: publicOf(keys.AuditGraphs),
+			auditObject: publicOf(keys.AuditObject),
 		}
 	}
-	auditSink := func(flag uint16) audit.Sink {
-		if s.audit == nil || !hasFlag(options.Audit, flag) {
+	auditSink := func(flag uint16) ledger.Sink {
+		if s.audit == nil || !system.HasFlag(options.Audit, flag) {
 			return nil
 		}
 		return s.audit
@@ -316,20 +327,20 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	if s.record, err = record.Open(ctx, bdb, record.Config{
 		Root:            namedRoot(record.Name),
 		Codec:           options.Codec,
-		Secret:          keys.record,
-		EncryptKeys:     hasFlag(md.Flags, EncryptDBKeys),
-		EncryptValues:   hasFlag(md.Flags, EncryptDBValues),
-		EncryptMetadata: hasFlag(md.Flags, EncryptDBMetadata),
+		Secret:          keys.Record,
+		EncryptKeys:     system.HasFlag(md.Flags, EncryptDBKeys),
+		EncryptValues:   system.HasFlag(md.Flags, EncryptDBValues),
+		EncryptMetadata: system.HasFlag(md.Flags, EncryptDBMetadata),
 		Audit:           auditSink(AuditDB),
 		Metrics:         options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open db store: %w", err)
 	}
-	if s.file, err = file.Open(ctx, bdb, file.Config{
-		Root:            namedRoot(file.Name),
-		Secret:          keys.file,
-		EncryptMetadata: hasFlag(md.Flags, EncryptFSMetadata),
-		EncryptContent:  hasFlag(md.Flags, EncryptFSContent),
+	if s.file, err = fstree.Open(ctx, bdb, fstree.Config{
+		Root:            namedRoot(fstree.Name),
+		Secret:          keys.File,
+		EncryptMetadata: system.HasFlag(md.Flags, EncryptFSMetadata),
+		EncryptContent:  system.HasFlag(md.Flags, EncryptFSContent),
 		Audit:           auditSink(AuditFS),
 		Metrics:         options.Metrics,
 	}); err != nil {
@@ -337,9 +348,9 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	}
 	if s.series, err = series.Open(ctx, bdb, series.Config{
 		Root:               namedRoot(series.Name),
-		Secret:             keys.series,
-		EncryptValues:      hasFlag(md.Flags, EncryptTSValues),
-		EncryptSeriesNames: hasFlag(md.Flags, EncryptTSSeriesNames),
+		Secret:             keys.Series,
+		EncryptValues:      system.HasFlag(md.Flags, EncryptTSValues),
+		EncryptSeriesNames: system.HasFlag(md.Flags, EncryptTSSeriesNames),
 		Audit:              auditSink(AuditTS),
 		Metrics:            options.Metrics,
 	}); err != nil {
@@ -347,20 +358,40 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	}
 	if s.search, err = search.Open(ctx, bdb, search.Config{
 		Root:          namedRoot(search.Name),
-		Secret:        keys.search,
-		EncryptValues: hasFlag(md.Flags, EncryptDBValues),
+		Secret:        keys.Search,
+		EncryptValues: system.HasFlag(md.Flags, EncryptDBValues),
 		Metrics:       options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open fts store: %w", err)
 	}
+	if s.graphs, err = graphs.Open(ctx, bdb, graphs.Config{
+		Root:   namedRoot(graphs.Name),
+		Secret: keys.Graphs,
+		// Graph values follow the graph flag for new stores and the db value
+		// flag for stores created before the graph flag existed.
+		EncryptValues: system.HasFlag(md.Flags, EncryptGraphValues) || system.HasFlag(md.Flags, EncryptDBValues),
+		Audit:         auditSink(AuditGraphs),
+		Metrics:       options.Metrics,
+	}); err != nil {
+		return nil, fmt.Errorf("harbor: open graphs store: %w", err)
+	}
+	if s.object, err = object.Open(ctx, bdb, object.Config{
+		Root:          namedRoot(object.Name),
+		Secret:        keys.Object,
+		EncryptValues: system.HasFlag(md.Flags, EncryptObjectValues) || system.HasFlag(md.Flags, EncryptDBValues),
+		Audit:         auditSink(AuditObject),
+		Metrics:       options.Metrics,
+	}); err != nil {
+		return nil, fmt.Errorf("harbor: open object store: %w", err)
+	}
 	if s.vector, err = vector.Open(ctx, bdb, vector.Config{
 		Root:                   namedRoot(vector.Name),
-		Secret:                 keys.vector,
+		Secret:                 keys.Vector,
 		UseQuant:               options.UseQuant,
 		Quantizer:              options.Quantizer,
-		EncryptPoints:          hasFlag(md.Flags, EncryptVecPoints),
-		EncryptPointIDs:        hasFlag(md.Flags, EncryptVecPointIDs),
-		EncryptCollectionNames: hasFlag(md.Flags, EncryptVecCollectionNames),
+		EncryptPoints:          system.HasFlag(md.Flags, EncryptVecPoints),
+		EncryptPointIDs:        system.HasFlag(md.Flags, EncryptVecPointIDs),
+		EncryptCollectionNames: system.HasFlag(md.Flags, EncryptVecCollectionNames),
 		Audit:                  auditSink(AuditVec),
 		Metrics:                options.Metrics,
 		// The vec store shares this handle with db, fs and ts; Close must only
@@ -372,206 +403,6 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 
 	opened = true
 	return s, nil
-}
-
-// loadOrCreateState reads the Metadata and derives the component keys. A new
-// store resolves options into Metadata, seals the canary and persists it; an
-// existing store derives keys from the stored parameters and verifies the
-// canary. The returned keys must be wiped by the caller.
-func loadOrCreateState(bdb *bolt.DB, options *Options) (Metadata, *storeKeys, error) {
-	md, creating, err := readMetadata(bdb)
-	if err != nil {
-		return Metadata{}, nil, err
-	}
-	if !creating {
-		keys, err := deriveKeys(options.Password, md.Salt, md.Time, md.Memory, md.Threads)
-		if err != nil {
-			return Metadata{}, nil, err
-		}
-		if err := verifyCanary(keys.canary, md.Canary, md.Flags); err != nil {
-			keys.wipe()
-			return Metadata{}, nil, fmt.Errorf("%w: %w", ErrInvalidPassword, err)
-		}
-		return md, keys, nil
-	}
-
-	salt, kdfTime, kdfMemory, kdfThreads, flags, err := newKDFParams(options)
-	if err != nil {
-		return Metadata{}, nil, err
-	}
-	keys, err := deriveKeys(options.Password, salt, kdfTime, kdfMemory, kdfThreads)
-	if err != nil {
-		return Metadata{}, nil, err
-	}
-	canary, err := sealCanary(keys.canary, flags)
-	if err != nil {
-		keys.wipe()
-		return Metadata{}, nil, err
-	}
-	md = Metadata{
-		Salt:    salt,
-		Time:    kdfTime,
-		Flags:   flags,
-		Memory:  kdfMemory,
-		Threads: kdfThreads,
-		Canary:  canary,
-	}
-	if err := writeMetadata(bdb, md); err != nil {
-		keys.wipe()
-		return Metadata{}, nil, err
-	}
-	return md, keys, nil
-}
-
-// newKDFParams resolves the Argon2id parameters and flags for a new store and
-// generates its salt.
-func newKDFParams(options *Options) (salt []byte, time, memory uint32, threads uint8, flags uint16, err error) {
-	time, memory, threads, flags, err = options.creationParams()
-	if err != nil {
-		return nil, 0, 0, 0, 0, err
-	}
-	salt, err = newSalt()
-	if err != nil {
-		return nil, 0, 0, 0, 0, err
-	}
-	return salt, time, memory, threads, flags, nil
-}
-
-// encryptionFlags resolves the encryption selection for a new store.
-func encryptionFlags(options *Options) (uint16, error) {
-	if options.Plaintext {
-		if options.Encrypt != 0 {
-			return 0, fmt.Errorf("%w: Plaintext conflicts with encryption flags", ErrInvalidOptions)
-		}
-		return EncryptNone, nil
-	}
-
-	flags := options.Encrypt
-	if flags == 0 {
-		flags = EncryptAll
-	}
-	return flags, nil
-}
-
-// canaryKeychain builds the one-key keychain used for the canary checks.
-func canaryKeychain(key []byte) (*crypto.Keychain, error) {
-	return crypto.NewKeychain([][]byte{key})
-}
-
-// canaryPlaintextFor returns the canary plaintext bound to flags. The write
-// access attacker model this protects against is simple: without the binding, a
-// flipped encryption flag still verifies, so Open would silently succeed in a
-// different encryption mode. Binding the flags into the authenticated payload
-// turns that into an authentication failure.
-func canaryPlaintextFor(flags uint16) string {
-	return fmt.Sprintf("%s/0x%04x", canaryPlaintext, flags)
-}
-
-// sealCanary seals the flag-bound canary plaintext with the canary key.
-func sealCanary(key []byte, flags uint16) ([]byte, error) {
-	keychain, err := canaryKeychain(key)
-	if err != nil {
-		return nil, fmt.Errorf("harbor: initialize canary key: %w", err)
-	}
-	sealed, err := keychain.Seal([]byte(canaryPlaintextFor(flags)))
-	if err != nil {
-		return nil, fmt.Errorf("harbor: seal canary: %w", err)
-	}
-	return sealed, nil
-}
-
-// verifyCanary proves that key decrypts the stored canary and that the
-// persisted flags are the ones it was sealed with.
-func verifyCanary(key, sealed []byte, flags uint16) error {
-	keychain, err := canaryKeychain(key)
-	if err != nil {
-		return err
-	}
-	return crypto.VerifyCanary(keychain, sealed, canaryPlaintextFor(flags))
-}
-
-// deriveKeys stretches the password and derives one key per component.
-//
-// The pipeline is: Argon2id(password) -> 32-byte seed -> SLIP-0021 master ->
-// one labelled child per component. SLIP-0021 gives each child an independent
-// HMAC-SHA512 key, so compromise of one sub-store key does not expose the
-// others. The returned keys are fresh slices owned by the caller.
-func deriveKeys(password string, salt []byte, time, memory uint32, threads uint8) (*storeKeys, error) {
-	passwordBytes := []byte(password)
-	defer wipe(passwordBytes)
-
-	seed := deriveSeed(passwordBytes, salt, time, memory, threads)
-	defer wipe(seed)
-
-	master, err := slip21.New(seed)
-	if err != nil {
-		return nil, fmt.Errorf("harbor: derive master key: %w", err)
-	}
-	defer master.Destroy()
-
-	derive := func(label string) ([]byte, error) {
-		node, err := master.Derive([]byte(label))
-		if err != nil {
-			return nil, fmt.Errorf("harbor: derive %s key: %w", label, err)
-		}
-		defer node.Destroy()
-		key := node.Key()
-		if len(key) != KeySize {
-			return nil, fmt.Errorf("harbor: derived %s key has %d bytes", label, len(key))
-		}
-		return key, nil
-	}
-
-	keys := &storeKeys{}
-	labels := []struct {
-		label string
-		dst   *[]byte
-	}{
-		{canaryPlaintext, &keys.canary},
-		{labelDB, &keys.record},
-		{labelFS, &keys.file},
-		{labelTS, &keys.series},
-		{labelVec, &keys.vector},
-		{labelFTS, &keys.search},
-	}
-	for _, item := range labels {
-		*item.dst, err = derive(item.label)
-		if err != nil {
-			keys.wipe()
-			return nil, err
-		}
-	}
-
-	// Derive the audit Ed25519 signing keys from the same seed, one per store,
-	// mirroring the per-store SLIP-21 keys. SLIP-10 derives via hardened
-	// integer indices, so the store order is fixed by the auditPath constants.
-	auditPaths := []struct {
-		path string
-		dst  *ed25519.PrivateKey
-	}{
-		{auditPathDB, &keys.auditDB},
-		{auditPathFS, &keys.auditFS},
-		{auditPathTS, &keys.auditTS},
-		{auditPathVec, &keys.auditVec},
-	}
-	for _, item := range auditPaths {
-		_, priv, err := audit.DeriveKey(seed, item.path)
-		if err != nil {
-			keys.wipe()
-			return nil, err
-		}
-		*item.dst = priv
-	}
-	return keys, nil
-}
-
-// wipe overwrites secret bytes. KeepAlive keeps the compiler from treating the
-// loop as dead once b is no longer otherwise referenced.
-func wipe(b []byte) {
-	for i := range b {
-		b[i] = 0
-	}
-	runtime.KeepAlive(b)
 }
 
 // publicOf returns the Ed25519 public key matching priv. A nil private key
@@ -603,7 +434,7 @@ func (s *Store) Record(path ...string) *record.Store {
 
 // File returns the file sub-store. Extra path segments select a rooted view
 // instead of the conventional root ("fs").
-func (s *Store) File(path ...string) *file.Store {
+func (s *Store) File(path ...string) *fstree.Store {
 	if s == nil {
 		return nil
 	}
@@ -652,6 +483,40 @@ func (s *Store) Vector(path ...string) *vector.Store {
 	return s.vector.WithRoot(path...)
 }
 
+// Objects returns the flat object sub-store. Extra path segments select a
+// rooted view instead of the conventional root ("object").
+func (s *Store) Objects(path ...string) *object.Store {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil || s.object == nil {
+		return nil
+	}
+	if len(path) == 0 {
+		return s.object
+	}
+	return s.object.WithRoot(path...)
+}
+
+// Graphs returns the property-graph sub-store. Extra path segments select a
+// rooted view instead of the conventional root ("graphs").
+func (s *Store) Graphs(path ...string) *graphs.Store {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil || s.graphs == nil {
+		return nil
+	}
+	if len(path) == 0 {
+		return s.graphs
+	}
+	return s.graphs.WithRoot(path...)
+}
+
 // Search returns the full-text sub-store. Extra path segments select a rooted
 // view instead of the conventional root ("fts").
 func (s *Store) Search(path ...string) *search.Store {
@@ -667,6 +532,23 @@ func (s *Store) Search(path ...string) *search.Store {
 		return s.search
 	}
 	return s.search.WithRoot(path...)
+}
+
+// Meta returns the persisted salt, Argon2id cost parameters and encryption
+// flags. A closed store returns ErrClosed.
+func (s *Store) Meta() (salt []byte, time, memory uint32, threads uint8, flags uint16, err error) {
+	err = s.withDB(func(bdb *bolt.DB) error {
+		md, creating, err := system.ReadMetadata(bdb)
+		if err != nil {
+			return err
+		}
+		if creating {
+			return fmt.Errorf("%w: missing Metadata", ErrCorruptStore)
+		}
+		salt, time, memory, threads, flags = md.Salt, md.Time, md.Memory, md.Threads, md.Flags
+		return nil
+	})
+	return
 }
 
 // Flags returns the encryption flags persisted by the store. A closed store
@@ -697,7 +579,7 @@ func (s *Store) AuditFlags() uint16 {
 // Audit returns the recorder backing the audit trail, or nil when the store
 // was opened with AuditNone. Callers use it to record out-of-band events and
 // to anchor the chain tip with Head.
-func (s *Store) Audit() *audit.Recorder {
+func (s *Store) Audit() *ledger.Recorder {
 	if s == nil {
 		return nil
 	}
@@ -710,29 +592,35 @@ func (s *Store) Audit() *audit.Recorder {
 // link. It returns the event count and chain tip. Keys are derived from the
 // store password, so a store opened with a different password fails
 // verification. It returns audit.ErrNoLog when no trail exists.
-func (s *Store) VerifyAudit() (audit.Result, error) {
+func (s *Store) VerifyAudit() (ledger.Result, error) {
 	if s == nil {
-		return audit.Result{}, ErrClosed
+		return ledger.Result{}, ErrClosed
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.bs == nil {
-		return audit.Result{}, ErrClosed
+		return ledger.Result{}, ErrClosed
 	}
 	keys := make(map[string]ed25519.PublicKey, 4)
-	if hasFlag(s.auditFlags, AuditDB) {
-		keys[audit.StoreDB] = s.auditPubs.auditDB
+	if system.HasFlag(s.auditFlags, AuditDB) {
+		keys[ledger.StoreDB] = s.auditPubs.auditDB
 	}
-	if hasFlag(s.auditFlags, AuditFS) {
-		keys[audit.StoreFS] = s.auditPubs.auditFS
+	if system.HasFlag(s.auditFlags, AuditFS) {
+		keys[ledger.StoreFS] = s.auditPubs.auditFS
 	}
-	if hasFlag(s.auditFlags, AuditTS) {
-		keys[audit.StoreTS] = s.auditPubs.auditTS
+	if system.HasFlag(s.auditFlags, AuditTS) {
+		keys[ledger.StoreTS] = s.auditPubs.auditTS
 	}
-	if hasFlag(s.auditFlags, AuditVec) {
-		keys[audit.StoreVec] = s.auditPubs.auditVec
+	if system.HasFlag(s.auditFlags, AuditVec) {
+		keys[ledger.StoreVec] = s.auditPubs.auditVec
 	}
-	return audit.Verify(s.bs, keys)
+	if system.HasFlag(s.auditFlags, AuditGraphs) {
+		keys[ledger.StoreGraphs] = s.auditPubs.auditGraphs
+	}
+	if system.HasFlag(s.auditFlags, AuditObject) {
+		keys[ledger.StoreObject] = s.auditPubs.auditObject
+	}
+	return ledger.Verify(s.bs, keys)
 }
 
 // withDB runs fn with the open database while holding the read lock. The lock
@@ -881,6 +769,8 @@ func (s *Store) Close() error {
 	s.series = nil
 	s.vector = nil
 	s.search = nil
+	s.graphs = nil
+	s.object = nil
 	if flushErr != nil && closeErr != nil {
 		return errors.Join(flushErr, closeErr)
 	}

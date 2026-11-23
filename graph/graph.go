@@ -299,36 +299,52 @@ func WithPrefix(parts ...string) Option {
 	}
 }
 
-// Graph is a property graph over one db sub-store.
+// Graph is a property graph over one graph storage.
 type Graph struct {
-	db     *hdb.Store
-	base   hdb.Node
-	prefix []string
-	now    func() time.Time
-	values ValueCodec
+	db      *hdb.Store // legacy record-backed store, nil for an independent graph
+	storage Storage
+	prefix  []string
+	now     func() time.Time
+	values  ValueCodec
 	// versionSeq keeps two versions recorded in the same nanosecond distinct.
 	versionSeq atomic.Uint64
 }
 
-// New creates a Graph on an open db store. The graph never closes the store.
+// New creates a graph on the legacy record-backed layout. It keeps a file
+// written by earlier builds readable. New graphs should use store/graphs and
+// NewStorage, which do not depend on the record store's buckets or codec.
 func New(db *hdb.Store, opts ...Option) *Graph {
 	g := &Graph{
 		db:     db,
-		base:   db,
 		now:    func() time.Time { return time.Now().UTC() },
 		values: JSONValues{},
 	}
 	for _, opt := range opts {
 		opt(g)
 	}
-	if len(g.prefix) > 0 {
-		g.base = db.From(g.prefix...)
+	g.storage = newRecordStorage(db, g.prefix)
+	return g
+}
+
+// NewStorage creates a graph over an independent Storage implementation.
+func NewStorage(storage Storage, opts ...Option) *Graph {
+	g := &Graph{
+		storage: storage,
+		now:     func() time.Time { return time.Now().UTC() },
+		values:  JSONValues{},
+	}
+	for _, opt := range opts {
+		opt(g)
 	}
 	return g
 }
 
-// DB returns the store the graph is built on.
+// DB returns the legacy record store the graph is built on, or nil for an
+// independent graph.
 func (g *Graph) DB() *hdb.Store { return g.db }
+
+// Storage returns the graph's persistence backend.
+func (g *Graph) Storage() Storage { return g.storage }
 
 // Now is the instant writes are stamped with.
 func (g *Graph) Now() time.Time { return g.now() }
@@ -343,22 +359,17 @@ func (g *Graph) SetClock(now func() time.Time) {
 // Init is a no-op: buckets are created by the first write.
 func (g *Graph) Init(context.Context) error { return nil }
 
-// scoped names the graph's node inside a transaction or the base store.
-func (g *Graph) scoped(n hdb.Node) hdb.Node {
-	if len(g.prefix) == 0 {
-		return n
-	}
-	return n.From(g.prefix...)
+// read runs fn against one consistent graph view.
+func (g *Graph) read(ctx context.Context, fn func(Reader) error) error {
+	return g.storage.Read(ctx, fn)
 }
 
 // write runs fn in one write transaction.
-func (g *Graph) write(ctx context.Context, fn func(n hdb.Node) error) error {
+func (g *Graph) write(ctx context.Context, fn func(w Writer) error) error {
 	if ReadOptionsFrom(ctx).IsAsOf() {
 		return ErrAsOfWrite
 	}
-	return g.db.WriteTransaction(ctx, func(tx hdb.Node) error {
-		return fn(g.scoped(tx))
-	})
+	return g.storage.Write(ctx, fn)
 }
 
 // UpsertNode inserts or updates a node. An unchanged write is a no-op: it
@@ -372,14 +383,17 @@ func (g *Graph) UpsertNode(ctx context.Context, node *Node) error {
 	if err != nil {
 		return err
 	}
-	return g.write(ctx, func(n hdb.Node) error {
+	return g.write(ctx, func(w Writer) error {
 		recorded := g.now()
 		at := recorded
 		if !node.ValidFrom.IsZero() {
 			at = node.ValidFrom.UTC()
 		}
 		var existing NodeRecord
-		err := n.One(ctx, "ID", node.ID, &existing)
+		existingPtr, err := w.Node(ctx, node.ID)
+		if err == nil {
+			existing = *existingPtr
+		}
 		switch {
 		case err == nil:
 			unchanged, cerr := g.nodeUnchanged(&existing, node, properties)
@@ -395,10 +409,10 @@ func (g *Graph) UpsertNode(ctx context.Context, node *Node) error {
 				node.RetractedAt = existing.RetractedAt
 				return nil
 			}
-			if err := g.archiveNode(ctx, n, &existing, at, recorded, false, InvalidationFrom(ctx)); err != nil {
+			if err := g.archiveNode(ctx, w, &existing, at, recorded, false, InvalidationFrom(ctx)); err != nil {
 				return err
 			}
-		case errors.Is(err, hdb.ErrNotFound):
+		case errors.Is(err, ErrRecordNotFound):
 			// New node.
 		default:
 			return err
@@ -417,7 +431,7 @@ func (g *Graph) UpsertNode(ctx context.Context, node *Node) error {
 			Content: node.Content, NodeType: node.Type, Properties: properties,
 			CreatedAt: created, UpdatedAt: recorded, ValidFrom: at, RecordedAt: recorded,
 		}
-		if err := n.Save(ctx, record); err != nil {
+		if err := w.PutNode(ctx, record); err != nil {
 			return err
 		}
 		node.CreatedAt, node.UpdatedAt, node.ValidFrom, node.RecordedAt = created, recorded, at, recorded
@@ -441,18 +455,17 @@ func (g *Graph) nodeUnchanged(existing *NodeRecord, node *Node, properties []byt
 func (g *Graph) GetNode(ctx context.Context, nodeID string) (*Node, error) {
 	ro := ReadOptionsFrom(ctx)
 	var record *NodeRecord
-	var err error
-	if ro.IsAsOf() {
-		record, err = g.nodeAt(ctx, g.base, nodeID, ro.AsOf)
-	} else {
-		var live NodeRecord
-		if err := g.base.One(ctx, "ID", nodeID, &live); err != nil {
-			return nil, nodeErr(nodeID, err)
+	err := g.read(ctx, func(r Reader) error {
+		var err error
+		if ro.IsAsOf() {
+			record, err = g.nodeAt(ctx, r, nodeID, ro.AsOf)
+			return err
 		}
-		record = &live
-	}
+		record, err = r.Node(ctx, nodeID)
+		return err
+	})
 	if err != nil {
-		return nil, err
+		return nil, nodeErr(nodeID, err)
 	}
 	return g.nodeFromRecord(record)
 }
@@ -462,21 +475,21 @@ func (g *Graph) DeleteNode(ctx context.Context, nodeID string) error {
 	if nodeID == "" {
 		return fmt.Errorf("%w: node id is required", ErrInvalidRequest)
 	}
-	return g.write(ctx, func(n hdb.Node) error {
-		var record NodeRecord
-		if err := n.One(ctx, "ID", nodeID, &record); err != nil {
+	return g.write(ctx, func(w Writer) error {
+		record, err := w.Node(ctx, nodeID)
+		if err != nil {
 			return nodeErr(nodeID, err)
 		}
 		now := g.now()
-		if err := g.archiveNode(ctx, n, &record, now, now, true, InvalidationFrom(ctx)); err != nil {
+		if err := g.archiveNode(ctx, w, record, now, now, true, InvalidationFrom(ctx)); err != nil {
 			return err
 		}
-		edges, err := g.liveEdgesTouching(ctx, n, nodeID)
+		edges, err := g.liveEdgesTouching(ctx, w, nodeID)
 		if err != nil {
 			return err
 		}
 		for _, edge := range edges {
-			if err := g.archiveEdge(ctx, n, edge, now, now, true, InvalidationFrom(ctx)); err != nil {
+			if err := g.archiveEdge(ctx, w, edge, now, now, true, InvalidationFrom(ctx)); err != nil {
 				return err
 			}
 		}
@@ -496,11 +509,10 @@ func (g *Graph) UpsertEdge(ctx context.Context, edge *Edge) error {
 	if err != nil {
 		return err
 	}
-	return g.write(ctx, func(n hdb.Node) error {
+	return g.write(ctx, func(w Writer) error {
 		for _, id := range []string{edge.From, edge.To} {
-			var node NodeRecord
-			if err := n.One(ctx, "ID", id, &node); err != nil {
-				if errors.Is(err, hdb.ErrNotFound) {
+			if _, err := w.Node(ctx, id); err != nil {
+				if errors.Is(err, ErrRecordNotFound) {
 					return fmt.Errorf("%w: endpoint %q", ErrNodeNotFound, id)
 				}
 				return err
@@ -515,7 +527,10 @@ func (g *Graph) UpsertEdge(ctx context.Context, edge *Edge) error {
 			edge.Weight = 1
 		}
 		var existing EdgeRecord
-		err := n.One(ctx, "ID", edge.ID, &existing)
+		existingPtr, err := w.Edge(ctx, edge.ID)
+		if err == nil {
+			existing = *existingPtr
+		}
 		switch {
 		case err == nil:
 			unchanged := existing.FromNodeID == edge.From && existing.ToNodeID == edge.To &&
@@ -529,10 +544,10 @@ func (g *Graph) UpsertEdge(ctx context.Context, edge *Edge) error {
 				edge.RetractedAt = existing.Retracted
 				return nil
 			}
-			if err := g.archiveEdge(ctx, n, &existing, at, recorded, false, InvalidationFrom(ctx)); err != nil {
+			if err := g.archiveEdge(ctx, w, &existing, at, recorded, false, InvalidationFrom(ctx)); err != nil {
 				return err
 			}
-		case errors.Is(err, hdb.ErrNotFound):
+		case errors.Is(err, ErrRecordNotFound):
 			// New edge.
 		default:
 			return err
@@ -546,7 +561,7 @@ func (g *Graph) UpsertEdge(ctx context.Context, edge *Edge) error {
 			Weight: edge.Weight, Properties: properties, Vector: append([]float32(nil), edge.Vector...),
 			CreatedAt: created, ValidFrom: at, RecordedAt: recorded,
 		}
-		if err := n.Save(ctx, record); err != nil {
+		if err := w.PutEdge(ctx, record); err != nil {
 			return err
 		}
 		edge.CreatedAt, edge.ValidFrom, edge.RecordedAt = created, at, recorded
@@ -562,12 +577,18 @@ func (g *Graph) GetEdges(ctx context.Context, nodeID, direction string) ([]*Edge
 		direction = "out"
 	}
 	var out []*EdgeRecord
-	for _, side := range edgeSides(direction) {
-		records, err := g.edgeRecords(ctx, g.base, side, nodeID)
-		if err != nil {
-			return nil, err
+	err := g.read(ctx, func(r Reader) error {
+		for _, side := range edgeSides(direction) {
+			records, err := g.edgeRecords(ctx, r, side, nodeID)
+			if err != nil {
+				return err
+			}
+			out = append(out, records...)
 		}
-		out = append(out, records...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	seen := make(map[string]bool, len(out))
 	edges := make([]*Edge, 0, len(out))
@@ -591,13 +612,13 @@ func (g *Graph) DeleteEdge(ctx context.Context, edgeID string) error {
 	if edgeID == "" {
 		return fmt.Errorf("%w: edge id is required", ErrInvalidRequest)
 	}
-	return g.write(ctx, func(n hdb.Node) error {
-		var record EdgeRecord
-		if err := n.One(ctx, "ID", edgeID, &record); err != nil {
+	return g.write(ctx, func(w Writer) error {
+		record, err := w.Edge(ctx, edgeID)
+		if err != nil {
 			return edgeErr(edgeID, err)
 		}
 		now := g.now()
-		return g.archiveEdge(ctx, n, &record, now, now, true, InvalidationFrom(ctx))
+		return g.archiveEdge(ctx, w, record, now, now, true, InvalidationFrom(ctx))
 	})
 }
 
@@ -621,14 +642,19 @@ func (g *Graph) GetNodesBatch(ctx context.Context, ids []string) ([]*Node, error
 func (g *Graph) GetEdgesBatch(ctx context.Context, ids []string) ([]*Edge, error) {
 	out := make([]*Edge, 0, len(ids))
 	for _, id := range ids {
-		var record EdgeRecord
-		if err := g.base.One(ctx, "ID", id, &record); err != nil {
-			if errors.Is(err, hdb.ErrNotFound) {
+		var record *EdgeRecord
+		err := g.read(ctx, func(r Reader) error {
+			var err error
+			record, err = r.Edge(ctx, id)
+			return err
+		})
+		if err != nil {
+			if errors.Is(err, ErrRecordNotFound) {
 				continue
 			}
 			return nil, err
 		}
-		edge, err := g.edgeFromRecord(&record)
+		edge, err := g.edgeFromRecord(record)
 		if err != nil {
 			return nil, err
 		}
@@ -782,7 +808,12 @@ func (g *Graph) CountNodes(ctx context.Context, filter *Filter) (int, error) {
 
 // GetAllNodes returns the live nodes matching filter, in id order.
 func (g *Graph) GetAllNodes(ctx context.Context, filter *Filter) ([]*Node, error) {
-	records, err := g.nodeRecords(ctx, g.base)
+	var records []*NodeRecord
+	err := g.read(ctx, func(r Reader) error {
+		var err error
+		records, err = g.nodeRecords(ctx, r)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -805,7 +836,12 @@ func (g *Graph) GetAllNodes(ctx context.Context, filter *Filter) ([]*Node, error
 
 // GetAllEdges returns the live edges, in id order.
 func (g *Graph) GetAllEdges(ctx context.Context) ([]*Edge, error) {
-	records, err := g.edgeRecordsAll(ctx, g.base)
+	var records []*EdgeRecord
+	err := g.read(ctx, func(r Reader) error {
+		var err error
+		records, err = g.edgeRecordsAll(ctx, r)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -870,15 +906,17 @@ func (g *Graph) Statistics(ctx context.Context) (*Statistics, error) {
 // ExistingNodeIDs reports which ids are live nodes.
 func (g *Graph) ExistingNodeIDs(ctx context.Context, ids []string) (map[string]bool, error) {
 	out := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		var record NodeRecord
-		if err := g.base.One(ctx, "ID", id, &record); err == nil {
-			out[id] = true
-		} else if !errors.Is(err, hdb.ErrNotFound) {
-			return nil, err
+	err := g.read(ctx, func(r Reader) error {
+		for _, id := range ids {
+			if _, err := r.Node(ctx, id); err == nil {
+				out[id] = true
+			} else if !errors.Is(err, ErrRecordNotFound) {
+				return err
+			}
 		}
-	}
-	return out, nil
+		return nil
+	})
+	return out, err
 }
 
 // UpsertNodesBatch applies node upserts, reporting per-node failures.
@@ -963,14 +1001,14 @@ func (g *Graph) ExecuteBatch(ctx context.Context, ops *BatchOperation) (*BatchRe
 // helpers
 
 func nodeErr(id string, err error) error {
-	if errors.Is(err, hdb.ErrNotFound) {
+	if errors.Is(err, ErrRecordNotFound) {
 		return fmt.Errorf("%w: %s", ErrNodeNotFound, id)
 	}
 	return err
 }
 
 func edgeErr(id string, err error) error {
-	if errors.Is(err, hdb.ErrNotFound) {
+	if errors.Is(err, ErrRecordNotFound) {
 		return fmt.Errorf("%w: %s", ErrEdgeNotFound, id)
 	}
 	return err

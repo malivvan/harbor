@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"unicode/utf8"
 
-	"github.com/malivvan/harbor/pkg/audit"
+	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
 	"go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
@@ -89,7 +89,7 @@ type Store struct {
 
 	// audit receives an entry for every committed write, or nil when the store
 	// was opened without audit. It is set once at Open and never mutated.
-	audit audit.Sink
+	audit ledger.Sink
 
 	// obs receives operation metrics and spans, or nil when the store was
 	// opened without instrumentation. It is set once at Open and never
@@ -104,8 +104,8 @@ func (s *Store) auditEntry(op, collection string, digest []byte) error {
 	if s == nil || s.audit == nil {
 		return nil
 	}
-	return s.audit.Record(audit.Entry{
-		Store:  audit.StoreVec,
+	return s.audit.Record(ledger.Entry{
+		Store:  ledger.StoreVec,
 		Op:     op,
 		Entity: collection,
 		Digest: digest,
@@ -231,7 +231,7 @@ func (s *Store) WithRoot(parts ...string) *Store {
 // WithTransaction: the view stages events and the transaction owner records
 // them after it commits. It must not be called concurrently with writes on the
 // same Store.
-func (s *Store) SetAuditSink(sink audit.Sink) *Store {
+func (s *Store) SetAuditSink(sink ledger.Sink) *Store {
 	if s != nil {
 		s.audit = sink
 	}

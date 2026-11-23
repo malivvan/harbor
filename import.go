@@ -14,7 +14,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/malivvan/harbor/store/file"
+	"github.com/malivvan/harbor/store/fstree"
 	"github.com/malivvan/harbor/store/series"
 	"github.com/malivvan/harbor/store/vector"
 )
@@ -80,7 +80,7 @@ func Import(ctx context.Context, dest *Store, r io.Reader, opts ImportOptions) (
 		opts:        opts,
 		dryRun:      opts.DryRun,
 		types:       make(map[string]reflect.Type, len(opts.RecordTypes)),
-		fsystems:    make(map[string]*file.FS),
+		fsystems:    make(map[string]*fstree.FS),
 		collections: make(map[string]*vector.Collection),
 	}
 	for _, sample := range opts.RecordTypes {
@@ -205,7 +205,7 @@ type importer struct {
 	opts        ImportOptions
 	dryRun      bool
 	types       map[string]reflect.Type
-	fsystems    map[string]*file.FS
+	fsystems    map[string]*fstree.FS
 	collections map[string]*vector.Collection
 }
 
@@ -252,7 +252,7 @@ func (im *importer) applyDBRecord(rec exportRecord) error {
 	return im.dest.Record().Save(im.ctx, ptr)
 }
 
-func (im *importer) fsFor(name string) (*file.FS, error) {
+func (im *importer) fsFor(name string) (*fstree.FS, error) {
 	if name == "" {
 		return nil, fmt.Errorf("%w: fs record without container", ErrExportFormat)
 	}

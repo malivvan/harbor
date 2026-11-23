@@ -1,5 +1,5 @@
 > **Post-backlog restructure.** The store packages were renamed and moved:
-> `db` → `store/record`, `ts` → `store/series`, `fs` → `store/file`, `vec` →
+> `db` → `store/record`, `ts` → `store/series`, `fs` → `store/fstree`, `vec` →
 > `store/vector`, `fts` → `store/search`. `harbor.Store` now exposes
 > `Record/File/Series/Vector/Search`, each taking optional bucket-path
 > segments; no-argument accessors keep the original on-disk roots. The
@@ -119,7 +119,7 @@ completed:
 | Old | New |
 |---|---|
 | `db` (`DB()`) | `store/record` (`Record()`) |
-| `fs` (`FS()`) | `store/file` (`File()`) |
+| `fs` (`FS()`) | `store/fstree` (`File()`) |
 | `ts` (`TS()`) | `store/series` (`Series()`) |
 | `vec` (`Vec()`) | `store/vector` (`Vector()`) |
 | `fts` (`FTS()`) | `store/search` (`Search()`) |
@@ -149,3 +149,36 @@ suite, the race suite, the CGO-free suite, `go mod tidy -diff`, staticcheck and
 govulncheck are green. A rooted-view test proves custom roots are isolated from
 the defaults, persist across a close/reopen, and that a base vector flush drains
 its views.
+
+## Later store additions and renames
+
+After the initial restructure, four more changes landed:
+
+- **`file` → `store/fstree`** (package `fstree`). The `File()` accessor kept
+  its name; imports, guides and qualifiers moved.
+- **`audit` → `pkg/ledger`** (package `ledger`). The `Audit*` flags and the
+  persisted audit store identifiers are unchanged; only the package path/name
+  moved.
+- **`pkg/blob` → `store/object`** (package `object`). The object store is now an
+  independent sub-store with its own `object/` root, `EncryptObjectValues` /
+  `AuditObject` flags, key label `harbor/object/v1`, audit path `m/5'`, and
+  `harbor.Store.Objects()` / `Tx.Objects()`. The blob API (buckets, keys,
+  atomic Put, containment, grants) is preserved. Existing file-backed blob
+  data is untouched and readable through `fstree`; `object.Store.MigrateFromFile`
+  copies a bucket explicitly. No `pkg/blob` shim was kept because its
+  constructor was tied to the file store; the migration helper is the supported
+  path.
+- **`graph` became an independent store** under `store/graphs` (package
+  `graphs`). Graph records no longer use the record store's buckets or codec.
+  The legacy record-backed layout remains readable through `graph.New` and is
+  copied with `graphs.Store.MigrateFromRecord`, including closed versions.
+  `Graphs()` / `Tx.Graphs()` expose the new store, with `EncryptGraphValues`,
+  `AuditGraphs`, key label `harbor/graphs/v1` and audit path `m/4'`.
+- **`store/system`** now owns the store header: metadata record, KDF settings,
+  encryption/audit flag vocabulary, canary and every per-store key derivation.
+  The root package re-exports the constants and `Metadata` for compatibility.
+
+The full gate (fmt, vet, build, tests, race, CGO-free tests, tidy, staticcheck,
+govulncheck) is green on this state. The old path compatibility assessment:
+`pkg/blob` has no shim (use `store/object` plus `MigrateFromFile`); `pkg/audit`
+and `store/file` were pure moves, so callers update imports.

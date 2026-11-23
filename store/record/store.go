@@ -12,7 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/malivvan/harbor/pkg/audit"
+	"github.com/malivvan/harbor/pkg/ledger"
 	"github.com/malivvan/harbor/pkg/metrics"
 	bolt "go.etcd.io/bbolt"
 )
@@ -127,7 +127,7 @@ type Store struct {
 
 	// audit receives an entry for every committed write, or nil when the store
 	// was opened without audit. It is set once at Open and never mutated.
-	audit audit.Sink
+	audit ledger.Sink
 
 	// obs receives operation metrics and spans, or nil when the store was
 	// opened without instrumentation. It is set once at Open and never

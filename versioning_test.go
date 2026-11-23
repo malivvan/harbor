@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/malivvan/harbor/pkg/audit"
-	"github.com/malivvan/harbor/store/file"
+	audit "github.com/malivvan/harbor/pkg/ledger"
+	file "github.com/malivvan/harbor/store/fstree"
 	"github.com/malivvan/harbor/store/record"
 	"github.com/malivvan/harbor/store/series"
 	"github.com/malivvan/harbor/store/vector"
