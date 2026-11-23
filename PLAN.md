@@ -83,7 +83,11 @@ sections and documentation links; keep per-package READMEs as the usage source.
 Verify relative links and that snippets compile.
 Acceptance: every package is discoverable from AGENTS.md and README.
 
-### 0.4 `store` parity: expose `TS()`
+### 0.4 `store` parity: expose `TS()` — DONE
+
+Done: `Manager.TS()` and the package-level `store.TS()` were added, with a test
+that every accessor (DB, FS, TS, Vec) is populated for both shapes. The store
+README table and example list all four.
 
 `store.Manager` exposes `DB()`, `FS()` and `Vec()`, but not `TS()`; the
 package-level singleton has the same gap. A manager user must go through

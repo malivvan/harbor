@@ -25,6 +25,7 @@ func main() {
 
     _ = st.DB()
     _ = st.FS()
+    _ = st.TS()
     _ = st.Vec()
 }
 ```
@@ -53,7 +54,7 @@ genuinely fresh database instead of a stale handle.
 
 | Use | API |
 |---|---|
-| One default store for the process | `store.Open(ctx, cfg)`, `store.Store()`, `store.DB()`, `store.FS()`, `store.Vec()`, `store.Close()` |
+| One default store for the process | `store.Open(ctx, cfg)`, `store.Store()`, `store.DB()`, `store.FS()`, `store.TS()`, `store.Vec()`, `store.Close()` |
 | Independent stores (tests, multiple tenants in one process) | `store.NewManager(cfg)` then `Manager.Open` and the same accessors |
 
 ## Config

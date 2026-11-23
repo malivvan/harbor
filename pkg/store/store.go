@@ -41,6 +41,7 @@ import (
 	"github.com/malivvan/harbor"
 	"github.com/malivvan/harbor/db"
 	"github.com/malivvan/harbor/fs"
+	"github.com/malivvan/harbor/ts"
 	"github.com/malivvan/harbor/vec"
 )
 
@@ -208,6 +209,14 @@ func (m *Manager) FS() *fs.Store {
 	return nil
 }
 
+// TS returns the time-series store, or nil before Open.
+func (m *Manager) TS() *ts.Store {
+	if st := m.Store(); st != nil {
+		return st.TS()
+	}
+	return nil
+}
+
 // Vec returns the vector store, or nil before Open.
 func (m *Manager) Vec() *vec.Store {
 	if st := m.Store(); st != nil {
@@ -279,6 +288,14 @@ func DB() *db.Store {
 func FS() *fs.Store {
 	if m := Default(); m != nil {
 		return m.FS()
+	}
+	return nil
+}
+
+// TS returns the process-wide time-series store, or nil before Open.
+func TS() *ts.Store {
+	if m := Default(); m != nil {
+		return m.TS()
 	}
 	return nil
 }

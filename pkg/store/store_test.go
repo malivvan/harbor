@@ -276,3 +276,29 @@ func readKey(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+// Rule: the manager and the process-wide singleton expose all four stores, so a
+// caller never has to reach through Store() for one of them.
+func TestAllFourStoresAreExposed(t *testing.T) {
+	m := NewManager(Config{Dir: t.TempDir(), Password: "test-password"})
+	t.Cleanup(func() { _ = m.Close() })
+	if _, err := m.Open(context.Background()); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if m.DB() == nil || m.FS() == nil || m.TS() == nil || m.Vec() == nil {
+		t.Fatalf("manager accessors: DB=%v FS=%v TS=%v Vec=%v",
+			m.DB() != nil, m.FS() != nil, m.TS() != nil, m.Vec() != nil)
+	}
+	if m.TS() != m.Store().TS() {
+		t.Fatal("Manager.TS does not return the store's ts store")
+	}
+
+	// The process-wide singleton follows the same shape.
+	if _, err := Open(context.Background(), Config{Dir: t.TempDir(), Password: "test-password"}); err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = Close() })
+	if TS() == nil || DB() == nil || FS() == nil || Vec() == nil {
+		t.Fatal("process-wide accessors returned a nil store")
+	}
+}
