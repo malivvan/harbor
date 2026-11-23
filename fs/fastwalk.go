@@ -1,13 +1,16 @@
 package fs
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"path/filepath"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/malivvan/harbor/internal/absfs"
+	"github.com/malivvan/harbor/metrics"
 )
 
 // FastWalkFunc is the callback function type for FastWalk.
@@ -26,10 +29,26 @@ type FastWalkConfig struct {
 	// If 0 or negative, defaults to max(4, runtime.NumCPU()).
 	NumWorkers int
 
+	// QueueSize bounds how many directories may be buffered for traversal and
+	// how many work items may be in flight. A smaller value applies
+	// backpressure sooner; a larger value lets a fast backend keep more work
+	// queued. Zero selects NumWorkers (after the default is applied).
+	QueueSize int
+
 	// FollowSymlinks determines whether symlinks should be followed.
 	// When true, symlinks to directories will be traversed.
 	// The caller must handle potential cycles.
 	FollowSymlinks bool
+
+	// Ctx cancels the traversal. When it is cancelled FastWalk stops scheduling
+	// new directories and returns Ctx.Err(). A callback that is already running
+	// is not interrupted; cancellation is observed at the next boundary. A nil
+	// Ctx means context.Background().
+	Ctx context.Context
+
+	// Metrics, when non-nil, receives a queue-depth gauge and a callback-latency
+	// histogram. A nil observer disables instrumentation.
+	Metrics metrics.Observer
 }
 
 // FastWalk walks the file tree rooted at root concurrently, calling fn for each file.
@@ -52,6 +71,12 @@ func FastWalkWithConfig(filer absfs.Filer, root string, config *FastWalkConfig, 
 	return genericFastWalk(filer, root, config, fn)
 }
 
+// FastWalkContext is FastWalk with a context that cancels the traversal. It is
+// a convenience wrapper around FastWalkWithConfig.
+func FastWalkContext(ctx context.Context, filer absfs.Filer, root string, fn FastWalkFunc) error {
+	return FastWalkWithConfig(filer, root, &FastWalkConfig{Ctx: ctx}, fn)
+}
+
 // genericFastWalk implements concurrent directory walking for any absfs.Filer.
 func genericFastWalk(filer absfs.Filer, root string, config *FastWalkConfig, fn FastWalkFunc) error {
 	numWorkers := 4
@@ -59,6 +84,25 @@ func genericFastWalk(filer absfs.Filer, root string, config *FastWalkConfig, fn 
 		numWorkers = config.NumWorkers
 	} else if n := runtime.NumCPU(); n > numWorkers {
 		numWorkers = n
+	}
+
+	// QueueSize bounds both channels, so a slow callback applies backpressure
+	// to directory reads instead of letting the queue grow without bound.
+	queueSize := numWorkers
+	if config != nil && config.QueueSize > 0 {
+		queueSize = config.QueueSize
+	}
+
+	ctx := context.Background()
+	var obs metrics.Observer
+	if config != nil {
+		if config.Ctx != nil {
+			ctx = config.Ctx
+		}
+		obs = config.Metrics
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	// Wait for all workers to finish
@@ -69,8 +113,10 @@ func genericFastWalk(filer absfs.Filer, root string, config *FastWalkConfig, fn 
 		filer:          filer,
 		fn:             fn,
 		followSymlinks: config != nil && config.FollowSymlinks,
-		enqueuec:       make(chan fastWalkItem, numWorkers),
-		workc:          make(chan fastWalkItem, numWorkers),
+		ctx:            ctx,
+		obs:            obs,
+		enqueuec:       make(chan fastWalkItem, queueSize),
+		workc:          make(chan fastWalkItem, queueSize),
 		donec:          make(chan struct{}),
 		resc:           make(chan error, numWorkers),
 	}
@@ -85,6 +131,10 @@ func genericFastWalk(filer absfs.Filer, root string, config *FastWalkConfig, fn 
 	out := 0
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		workc := w.workc
 		var workItem fastWalkItem
 		if len(todo) == 0 {
@@ -94,6 +144,8 @@ func genericFastWalk(filer absfs.Filer, root string, config *FastWalkConfig, fn 
 		}
 
 		select {
+		case <-ctx.Done():
+			return ctx.Err()
 		case workc <- workItem:
 			todo = todo[:len(todo)-1]
 			out++
@@ -121,6 +173,8 @@ type genericWalker struct {
 	filer          absfs.Filer
 	fn             FastWalkFunc
 	followSymlinks bool
+	ctx            context.Context
+	obs            metrics.Observer
 	donec          chan struct{}
 	workc          chan fastWalkItem
 	enqueuec       chan fastWalkItem
@@ -136,7 +190,29 @@ func (w *genericWalker) enqueue(it fastWalkItem) {
 	select {
 	case w.enqueuec <- it:
 	case <-w.donec:
+	case <-w.ctx.Done():
 	}
+	if w.obs != nil {
+		metrics.Gauge(w.obs, metrics.MetricWalkQueueDepth, float64(len(w.enqueuec)), metrics.Labels{
+			metrics.LabelStore: "fs",
+			metrics.LabelOp:    "walk",
+		})
+	}
+}
+
+// call invokes the user callback, recording its latency when an observer is
+// configured.
+func (w *genericWalker) call(path string, d fs.DirEntry, err error) error {
+	if w.obs == nil {
+		return w.fn(path, d, err)
+	}
+	start := time.Now()
+	cbErr := w.fn(path, d, err)
+	metrics.Histogram(w.obs, metrics.MetricWalkCallbackDuration, float64(time.Since(start)), metrics.Labels{
+		metrics.LabelStore: "fs",
+		metrics.LabelOp:    "walk",
+	})
+	return cbErr
 }
 
 func (w *genericWalker) doWork(wg *sync.WaitGroup) {
@@ -145,9 +221,13 @@ func (w *genericWalker) doWork(wg *sync.WaitGroup) {
 		select {
 		case <-w.donec:
 			return
+		case <-w.ctx.Done():
+			return
 		case it := <-w.workc:
 			select {
 			case <-w.donec:
+				return
+			case <-w.ctx.Done():
 				return
 			case w.resc <- w.walk(it.dir, !it.callbackDone):
 			}
@@ -156,14 +236,18 @@ func (w *genericWalker) doWork(wg *sync.WaitGroup) {
 }
 
 func (w *genericWalker) walk(root string, runUserCallback bool) error {
+	if err := w.ctx.Err(); err != nil {
+		return err
+	}
+
 	// Check if root is a file or directory
 	info, err := w.filer.Stat(root)
 	if err != nil {
-		return w.fn(root, nil, err)
+		return w.call(root, nil, err)
 	}
 
 	if runUserCallback {
-		err := w.fn(root, &fakeDirEntry{name: filepath.Base(root), isDir: info.IsDir(), info: info}, nil)
+		err := w.call(root, &fakeDirEntry{name: filepath.Base(root), isDir: info.IsDir(), info: info}, nil)
 		if err == filepath.SkipDir {
 			return nil
 		}
@@ -192,6 +276,10 @@ func (w *genericWalker) readDir(dirName string) error {
 	}
 
 	for _, entry := range entries {
+		if err := w.ctx.Err(); err != nil {
+			return err
+		}
+
 		// Skip . and ..
 		if entry.Name() == "." || entry.Name() == ".." {
 			continue
@@ -207,7 +295,7 @@ func (w *genericWalker) readDir(dirName string) error {
 
 		if entry.IsDir() {
 			// Call callback for directory first
-			err := w.fn(joined, entry, nil)
+			err := w.call(joined, entry, nil)
 			if err == filepath.SkipDir {
 				continue
 			}
@@ -219,7 +307,7 @@ func (w *genericWalker) readDir(dirName string) error {
 			continue
 		}
 
-		err := w.fn(joined, entry, nil)
+		err := w.call(joined, entry, nil)
 		if entry.Type()&fs.ModeSymlink != 0 {
 			if err == filepath.SkipDir {
 				continue

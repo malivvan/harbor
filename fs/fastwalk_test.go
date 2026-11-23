@@ -2,6 +2,7 @@ package fs_test
 
 import (
 	"context"
+	"errors"
 	gofs "io/fs"
 	"path/filepath"
 	"sort"
@@ -260,5 +261,48 @@ func TestFastWalkSingleFile(t *testing.T) {
 
 	if len(walked) != 1 || walked[0] != "/single.txt" {
 		t.Errorf("Expected [/single.txt], got %v", walked)
+	}
+}
+
+// TestFastWalkCancelled verifies that a cancelled context aborts the walk with
+// ctx.Err() instead of traversing the tree.
+func TestFastWalkCancelled(t *testing.T) {
+	mfs := newFastWalkTestFS(t)
+	if err := mfs.Mkdir("/dir", 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := fs.FastWalkContext(ctx, mfs, "/", func(string, gofs.DirEntry, error) error {
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+// TestFastWalkCancelledDuringCallback verifies that returning from a callback
+// after the context is cancelled stops the walk and reports ctx.Err().
+func TestFastWalkCancelledDuringCallback(t *testing.T) {
+	mfs := newFastWalkTestFS(t)
+	for _, dir := range []string{"/a", "/b", "/c"} {
+		if err := mfs.Mkdir(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	err := fs.FastWalkWithConfig(mfs, "/", &fs.FastWalkConfig{
+		Ctx:        ctx,
+		NumWorkers: 1,
+		QueueSize:  1,
+	}, func(string, gofs.DirEntry, error) error {
+		cancel()
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }

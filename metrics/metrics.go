@@ -129,6 +129,14 @@ const (
 	// MetricConsensusApplyTotal counts applied raft log entries, labelled by
 	// result.
 	MetricConsensusApplyTotal = "harbor.consensus.apply.total"
+
+	// MetricWalkCallbackDuration is the duration of one FastWalk callback, in
+	// nanoseconds.
+	MetricWalkCallbackDuration = "harbor.fs.walk.callback.duration"
+
+	// MetricWalkQueueDepth is the number of directories buffered for traversal
+	// by FastWalk.
+	MetricWalkQueueDepth = "harbor.fs.walk.queue.depth"
 )
 
 // Nop is an Observer that discards everything. It is useful as an explicit
