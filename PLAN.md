@@ -455,7 +455,18 @@ negative radius, dimension mismatch; benchmark.
 
 New methods; no format change.
 
-## 5. P1 — vector facet counts
+## 5. P1 — vector facet counts — DONE
+
+Done: `Collection.FacetCounts` with `FacetRequest`/`FacetResult`. It streams the
+filtered points (no full-result slice), counts string values per requested
+field, skips missing and non-string values, deduplicates fields, orders values
+by count then value and truncates at `MaxValues` (zero = all), reports `Total`
+before truncation, and validates negative caps and empty field names. Facets
+cover the filtered collection; the README documents how to facet a result set.
+
+Tests: counts against a manual pass, filter scoping, `MaxValues`, missing
+fields, numeric values, empty collection and no fields, duplicate fields,
+negative/empty validation, and concurrent upserts with reads (race).
 
 ### Current state
 

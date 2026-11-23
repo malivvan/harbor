@@ -639,6 +639,19 @@ The radius is a distance in the collection's metric space (Euclidean distance,
 `1 - cosine similarity`, or `-dot`), the score is the same value `Search`
 reports, and the scan is exact for both Flat and HNSW collections.
 
+`FacetCounts` counts string payload values over the points a filter selects:
+
+```go
+facets, err := docs.FacetCounts(vec.FacetRequest{
+	Fields:    []string{"kind", "lang"},
+	MaxValues: 10, // 0 keeps every value
+})
+```
+
+Values are ordered by count then value, `MaxValues` keeps the most frequent,
+and `Total` reports the matching points before truncation. Counts cover the
+filtered collection, not a previous search result.
+
 ### Buffering and lifecycle
 
 `Upsert` updates the in-memory index immediately and buffers points for bbolt.

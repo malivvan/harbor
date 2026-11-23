@@ -167,6 +167,28 @@ capped, err := col.RangeSearchN(query, 0.25, filter, 100)
   correctly for an open radius.
 - A non-positive limit (`RangeSearchN`) returns every match; ties order by id.
 
+### Facet counts
+
+`FacetCounts` counts the string values of payload fields over the points that
+match a filter:
+
+```go
+facets, err := col.FacetCounts(vec.FacetRequest{
+	Fields:    []string{"kind", "lang"},
+	Filter:    filter, // optional
+	MaxValues: 10,     // 0 keeps every value
+})
+for _, f := range facets {
+	fmt.Println(f.Field, f.Total, f.Values)
+}
+```
+
+- Only string values are counted; missing keys and numeric values are skipped.
+- Values are ordered by count descending then value, and `MaxValues` keeps the
+  most frequent. `Total` is the number of matching points before truncation.
+- Counts cover the filtered collection, not a previous search result. To facet
+  a result set, pass a filter that selects it or count the result ids yourself.
+
 ## Filters
 
 ```go
