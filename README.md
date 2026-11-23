@@ -6,7 +6,7 @@
 
 Harbor is a self-contained, encrypted storage toolkit built on
 [BoltDB](https://github.com/etcd-io/bbolt). One database file, one password, and
-four stores you can use together or on their own:
+stores you can use together or on their own:
 
 - **`db`** — a structured record store with indexes, unique constraints, a
   matcher-based query API, and callback-managed transactions.
@@ -31,6 +31,7 @@ and `Vec()`. Every store can also be used directly with its own `*bolt.DB`.
 - [Files with `fs`](#files-with-fs)
 - [Time series with `ts`](#time-series-with-ts)
 - [Vectors with `vec`](#vectors-with-vec)
+- [Full-text search with `fts`](#full-text-search-with-fts)
 - [Object storage: `blob` and `snapshot`](#object-storage-blob-and-snapshot)
 - [Utilities](#utilities)
 - [Clustering](#clustering)
@@ -656,6 +657,32 @@ use the same one for every process that opens the collection.
 
 Full reference: [vec/README.md](vec/README.md).
 
+## Full-text search with `fts`
+
+`fts` indexes documents by id and ranks matches with BM25. It lives in the same
+database and participates in cross-store transactions.
+
+```go
+idx, err := store.FTS().Open("articles", fts.Config{})
+if err != nil {
+	return err
+}
+
+err = idx.Upsert(ctx, "article-42", "Harbor keeps records, files, series and vectors")
+hits, err := idx.Search(ctx, "vectors", 10) // []fts.Hit, best first
+```
+
+Two tokenizers are built in: `fts.Words()` (the default) splits on Unicode
+letters and digits and lowercases; `fts.WordsWithCJK()` adds overlapping
+trigrams for Han, Hiragana, Katakana and Hangul so CJK text matches substrings
+without a dictionary segmenter. The tokenizer and BM25 parameters (`K1` 1.2,
+`B` 0.75 by default) are fixed when an index is created and checked on reopen.
+
+Values are sealed when value encryption is enabled, following the
+`EncryptDBValues` flag. Term keys are plaintext unless `Config.EncryptTokens` is
+set; encrypting them hides the vocabulary but still leaks equality and result
+sizes. See [fts/README.md](fts/README.md) for the layout, errors and limits.
+
 ## Object storage: `blob` and `snapshot`
 
 Harbor's `fs` is hierarchical. Two optional packages build an object-store
@@ -1131,6 +1158,8 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
   blocks.
 - [vec/README.md](vec/README.md) — collections, indexes, filters, quantization,
   and buffering.
+- [fts/README.md](fts/README.md) — full-text indexes, tokenizers, BM25 and
+  encryption.
 - [fs/s3fs/README.md](fs/s3fs/README.md) — the S3-backed `absfs.Filer`.
 - [pkg/audit/README.md](pkg/audit/README.md) — the tamper-evident audit trail:
   event model, recorded operations, threat model, and direct package use.
@@ -1153,6 +1182,7 @@ Generated API documentation is published on pkg.go.dev:
 - [github.com/malivvan/harbor/fs](https://pkg.go.dev/github.com/malivvan/harbor/fs)
 - [github.com/malivvan/harbor/ts](https://pkg.go.dev/github.com/malivvan/harbor/ts)
 - [github.com/malivvan/harbor/vec](https://pkg.go.dev/github.com/malivvan/harbor/vec)
+- [github.com/malivvan/harbor/fts](https://pkg.go.dev/github.com/malivvan/harbor/fts)
 - [github.com/malivvan/harbor/pkg/audit](https://pkg.go.dev/github.com/malivvan/harbor/pkg/audit)
 - [github.com/malivvan/harbor/pkg/blob](https://pkg.go.dev/github.com/malivvan/harbor/pkg/blob)
 - [github.com/malivvan/harbor/pkg/consensus](https://pkg.go.dev/github.com/malivvan/harbor/pkg/consensus)
@@ -1169,6 +1199,8 @@ Where to start:
 - **New to Harbor:** [Quick start](#quick-start), then the guide sections for
   the stores you need.
 - **Records, indexes and transactions:** [db/README.md](db/README.md).
+- **Full-text search:** [Full-text search with `fts`](#full-text-search-with-fts)
+  and [fts/README.md](fts/README.md).
 - **Files, snapshots or external content:** [fs/README.md](fs/README.md) and
   [fs/s3fs/README.md](fs/s3fs/README.md).
 - **Metrics and time series:** [ts/README.md](ts/README.md).

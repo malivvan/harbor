@@ -7,6 +7,7 @@ import (
 
 	"github.com/malivvan/harbor/db"
 	"github.com/malivvan/harbor/fs"
+	"github.com/malivvan/harbor/fts"
 	"github.com/malivvan/harbor/pkg/audit"
 	"github.com/malivvan/harbor/ts"
 	"github.com/malivvan/harbor/vec"
@@ -36,6 +37,7 @@ type Tx struct {
 	fs  *fs.Store
 	ts  *ts.Store
 	vec *vec.Store
+	fts *fts.Store
 }
 
 // newTx binds the sub-stores to btx. sink, when non-nil, collects audit events
@@ -53,6 +55,7 @@ func newTx(s *Store, btx *bolt.Tx, writable bool, sink audit.Sink) (*Tx, error) 
 		fs:       s.fs.WithTransaction(btx),
 		ts:       s.ts.WithTransaction(btx),
 		vec:      s.vec.WithTransaction(btx),
+		fts:      s.fts.WithTransaction(btx),
 	}
 	if sink != nil {
 		tx.fs.SetAuditSink(sink)
@@ -105,6 +108,15 @@ func (tx *Tx) Vec() *vec.Store {
 		return nil
 	}
 	return tx.vec
+}
+
+// FTS returns the full-text sub-store bound to this transaction, or nil after
+// the transaction ended.
+func (tx *Tx) FTS() *fts.Store {
+	if tx == nil {
+		return nil
+	}
+	return tx.fts
 }
 
 // Writable reports whether the transaction accepts writes.

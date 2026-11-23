@@ -7,7 +7,7 @@
 // Metadata detects a wrong password even for stores created with encryption
 // disabled.
 //
-// The sub-stores are reached through DB, FS, TS and Vec. Flags reports the
+// The sub-stores are reached through DB, FS, TS, Vec and FTS. Flags reports the
 // persisted encryption flags and Meta reports the KDF parameters. Use
 // EncryptNone/Plaintext to create an unencrypted store.
 package harbor
@@ -25,6 +25,7 @@ import (
 
 	"github.com/malivvan/harbor/db"
 	"github.com/malivvan/harbor/fs"
+	"github.com/malivvan/harbor/fts"
 	"github.com/malivvan/harbor/internal/crypto"
 	"github.com/malivvan/harbor/internal/slip21"
 	"github.com/malivvan/harbor/pkg/audit"
@@ -45,6 +46,7 @@ const (
 	labelFS  = "harbor/fs/v1"
 	labelTS  = "harbor/ts/v1"
 	labelVec = "harbor/vec/v1"
+	labelFTS = "harbor/fts/v1"
 )
 
 // SLIP-10 (Ed25519) hardened paths for the per-store audit signing keys. They
@@ -178,7 +180,7 @@ func (o *Options) creationParams() (time, memory uint32, threads uint8, flags ui
 	return time, memory, threads, flags, nil
 }
 
-// Store is a single bbolt database that hosts the db, fs, ts and vec stores.
+// Store is a single bbolt database that hosts the db, fs, ts, vec and fts stores.
 // Each sub-store uses its own domain-separated key derived from Password.
 type Store struct {
 	mu sync.RWMutex
@@ -189,6 +191,7 @@ type Store struct {
 	fs   *fs.Store
 	ts   *ts.Store
 	vec  *vec.Store
+	fts  *fts.Store
 
 	// audit records events for the enabled stores, or nil when disabled.
 	audit *audit.Recorder
@@ -216,6 +219,7 @@ type storeKeys struct {
 	fs     []byte
 	ts     []byte
 	vec    []byte
+	fts    []byte
 
 	auditDB  ed25519.PrivateKey
 	auditFS  ed25519.PrivateKey
@@ -227,7 +231,7 @@ func (k *storeKeys) wipe() {
 	if k == nil {
 		return
 	}
-	for _, b := range [][]byte{k.canary, k.db, k.fs, k.ts, k.vec, k.auditDB, k.auditFS, k.auditTS, k.auditVec} {
+	for _, b := range [][]byte{k.canary, k.db, k.fs, k.ts, k.vec, k.fts, k.auditDB, k.auditFS, k.auditTS, k.auditVec} {
 		wipe(b)
 	}
 }
@@ -341,6 +345,14 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Metrics:            options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open ts store: %w", err)
+	}
+	if s.fts, err = fts.Open(ctx, bdb, fts.Config{
+		Root:          namedRoot(fts.Name),
+		Secret:        keys.fts,
+		EncryptValues: hasFlag(md.Flags, EncryptDBValues),
+		Metrics:       options.Metrics,
+	}); err != nil {
+		return nil, fmt.Errorf("harbor: open fts store: %w", err)
 	}
 	if s.vec, err = vec.Open(ctx, bdb, vec.Config{
 		Root:                   namedRoot(vec.Name),
@@ -521,6 +533,7 @@ func deriveKeys(password string, salt []byte, time, memory uint32, threads uint8
 		{labelFS, &keys.fs},
 		{labelTS, &keys.ts},
 		{labelVec, &keys.vec},
+		{labelFTS, &keys.fts},
 	}
 	for _, item := range labels {
 		*item.dst, err = derive(item.label)
@@ -603,6 +616,11 @@ func (s *Store) TS() *ts.Store {
 // Vec returns the vec sub-store.
 func (s *Store) Vec() *vec.Store {
 	return storeComponent(s, func(s *Store) *vec.Store { return s.vec })
+}
+
+// FTS returns the full-text sub-store.
+func (s *Store) FTS() *fts.Store {
+	return storeComponent(s, func(s *Store) *fts.Store { return s.fts })
 }
 
 // Flags returns the encryption flags persisted by the store. A closed store
@@ -845,6 +863,7 @@ func (s *Store) Close() error {
 	s.fs = nil
 	s.ts = nil
 	s.vec = nil
+	s.fts = nil
 	if flushErr != nil && closeErr != nil {
 		return errors.Join(flushErr, closeErr)
 	}

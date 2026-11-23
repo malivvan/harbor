@@ -15,6 +15,7 @@ separate `docs/` tree.
 | `.../fs` | Named file systems implementing the `absfs` interfaces, with symlinks, snapshots, inode cache and chunked content. |
 | `.../ts` | Named time series with ordered scans, aggregation, labels and retention. |
 | `.../vec` | Vector collections with Flat/HNSW indexes, payload filters and quantization. |
+| `.../fts` | Full-text indexes: BM25 ranking, word and CJK tokenizers, posting lists and corpus statistics. |
 | `.../fs/s3fs` | An `absfs.Filer` backed by S3-compatible object storage. |
 | `.../vec/hnsw` | The vendored HNSW graph implementation used by `vec`. |
 | `.../vec/hnsw/heap` | The heap used on the HNSW search hot path. |
@@ -30,7 +31,7 @@ separate `docs/` tree.
 | `.../pkg/sign/canonical` | Deterministic JSON encoding for signatures and content addressing: sorted keys, stable numbers, no whitespace. |
 | `.../internal/...` | Shared bbolt helpers, AEAD primitives, Argon2id/BLAKE2b, SLIP-0010/0021 and CPU detection. Not public API. |
 
-The four stores are independent. The root package is a convenience composition,
+The stores are independent. The root package is a convenience composition,
 not a required layer: each store can be opened directly with a caller-owned
 `*bolt.DB` and its own 32-byte key.
 
@@ -46,6 +47,7 @@ db/                        db store root bucket
 fs/                        fs store root bucket
 ts/                        ts store root bucket
 vec/                       vec store root bucket
+fts/                       fts store root bucket
 ```
 
 `harbor.Metadata/Metadata` contains the Argon2id salt and cost parameters, the
@@ -161,6 +163,28 @@ __collections_meta__/         collection metadata records
   When the buffer reaches `DefaultFlushThreshold` (64 points), the batch is
   written in one transaction; `Flush` forces the same path.
 - A `VENC` marker and canary live in the metadata bucket.
+
+### fts layout
+
+Inside the configured root:
+
+```text
+<index>/
+  __version__                8-byte format revision (1)
+  __mode__                   plaintext encryption-mode bits
+  __meta__                   document count, total length, K1/B, tokenizer name
+  docs/<id>                  document length and term frequencies
+  terms/<term>               posting list (term keys may be deterministically encrypted)
+```
+
+- Values (documents, posting lists and metadata) are sealed when value
+  encryption is enabled; the root store follows `EncryptDBValues`.
+- Term keys are plaintext by default. `Config.EncryptTokens` encrypts them with
+  AES-SIV, which hides the vocabulary but leaks term equality and result sizes.
+- The tokenizer and BM25 parameters are persisted and checked on reopen; a
+  mismatch is `ErrInvalidConfig`.
+- `Upsert` removes the previous postings before adding the new ones and adjusts
+  the document count and total length in one transaction.
 
 ### Transactions and concurrency
 
@@ -477,14 +501,16 @@ master key
    ├── harbor/db/v1      → db store key
    ├── harbor/fs/v1      → fs store key
    ├── harbor/ts/v1      → ts store key
-   └── harbor/vec/v1     → vec store key
+   ├── harbor/vec/v1     → vec store key
+   └── harbor/fts/v1     → fts store key
 ```
 
 - The salt is 16 random bytes (`harbor.SaltSize`) generated for each new store.
 - Argon2id produces a 32-byte seed (`harbor.KeySize`). The default parameters
   follow RFC 9106's second recommendation: `t=3`, `m=64 MiB`, `p=4`.
 - SLIP-0021 derives independent child keys. Compromise of one sub-store key
-  does not expose the others.
+  does not expose the others. Full-text values reuse the db encryption flag,
+  under their own `harbor/fts/v1` key.
 - Temporary byte slices are wiped after use. The password is a Go string and
   cannot be reliably wiped from memory; keep it out of long-lived state.
 
@@ -639,7 +665,7 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 ## Documentation conventions
 
 - [README.md](README.md) is the user-facing entry point: install, quick start,
-  usage for all four stores, encryption behavior, lifecycle and performance.
+  usage for every store, encryption behavior, lifecycle and performance.
 - `AGENTS.md` (this file) is developer/agent-facing: architecture, on-disk
   layouts, encryption internals, invariants, development workflow.
 - Per-package guides live in `db/README.md`, `fs/README.md`, `ts/README.md`,
@@ -687,6 +713,7 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 - [fs/README.md](fs/README.md)
 - [ts/README.md](ts/README.md)
 - [vec/README.md](vec/README.md)
+- [fts/README.md](fts/README.md)
 - [fs/s3fs/README.md](fs/s3fs/README.md)
 - [pkg/audit/README.md](pkg/audit/README.md)
 - [pkg/consensus/README.md](pkg/consensus/README.md)
@@ -701,6 +728,7 @@ Generated API documentation:
 - [github.com/malivvan/harbor/fs](https://pkg.go.dev/github.com/malivvan/harbor/fs)
 - [github.com/malivvan/harbor/ts](https://pkg.go.dev/github.com/malivvan/harbor/ts)
 - [github.com/malivvan/harbor/vec](https://pkg.go.dev/github.com/malivvan/harbor/vec)
+- [github.com/malivvan/harbor/fts](https://pkg.go.dev/github.com/malivvan/harbor/fts)
 - [github.com/malivvan/harbor/pkg/audit](https://pkg.go.dev/github.com/malivvan/harbor/pkg/audit)
 - [github.com/malivvan/harbor/pkg/blob](https://pkg.go.dev/github.com/malivvan/harbor/pkg/blob)
 - [github.com/malivvan/harbor/pkg/consensus](https://pkg.go.dev/github.com/malivvan/harbor/pkg/consensus)

@@ -243,7 +243,21 @@ existing sub-store APIs keep working. Document that `vec` staging changes when
 searches observe a write inside a transaction (commit time), and that the
 transaction is a single-writer unit by bbolt design.
 
-## 2. P0 — full-text search (`fts`)
+## 2. P0 — full-text search (`fts`) — DONE
+
+Done: new package `github.com/malivvan/harbor/fts` with `Store`/`Index`,
+`Words`/`WordsWithCJK` tokenizers, BM25 ranking, `Upsert`, `Delete`, `Search`,
+`Count` and `Indexes`. The root store opens it under `fts/`, derives a
+`harbor/fts/v1` key, exposes `Store.FTS()` and `Tx.FTS()`, and value encryption
+follows the `EncryptDBValues` flag (term encryption is opt-in via
+`Config.EncryptTokens`). Each index has its own format version (1), a plaintext
+mode record that fails closed on an encryption mismatch, and persisted
+tokenizer/BM25 settings checked on reopen. `Upsert` removes old postings and
+adjusts corpus statistics in one transaction; `Delete` is idempotent; results
+are ordered by score then id with a non-positive limit meaning all matches.
+Tests cover tokenizers, ranking, re-index, delete, persistence, CJK, limits,
+tie order, encryption mode, token encryption, format-version rejection, and
+transaction commit/abort through `Tx.FTS()`.
 
 ### Current state
 

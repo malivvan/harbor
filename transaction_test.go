@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/malivvan/harbor/fts"
 	"github.com/malivvan/harbor/ts"
 	"github.com/malivvan/harbor/vec"
 )
@@ -407,4 +408,59 @@ func TestReadTransactionVecSnapshot(t *testing.T) {
 		}
 		return nil
 	}))
+}
+
+// TestWriteTransactionFTS proves the full-text index participates in a
+// cross-store transaction: a staged upsert is searchable inside the callback,
+// visible after commit, and absent after an abort.
+func TestWriteTransactionFTS(t *testing.T) {
+	ctx := context.Background()
+	s := mustOpen(t, filepath.Join(t.TempDir(), "tx.db"), "tx-password")
+	defer mustClose(t, s)
+
+	require.NoError(t, s.WriteTransaction(ctx, func(tx *Tx) error {
+		idx, err := tx.FTS().Open("docs", fts.Config{})
+		if err != nil {
+			return err
+		}
+		if err := idx.Upsert(ctx, "d1", "harbor full text"); err != nil {
+			return err
+		}
+		hits, err := idx.Search(ctx, "harbor", 10)
+		if err != nil {
+			return err
+		}
+		if len(hits) != 1 || hits[0].ID != "d1" {
+			t.Fatalf("staged search = %+v", hits)
+		}
+		return nil
+	}))
+
+	idx, err := s.FTS().Open("docs", fts.Config{})
+	require.NoError(t, err)
+	hits, err := idx.Search(ctx, "harbor", 10)
+	require.NoError(t, err)
+	require.Len(t, hits, 1)
+
+	// An aborted upsert is not indexed.
+	err = s.WriteTransaction(ctx, func(tx *Tx) error {
+		idx, err := tx.FTS().Open("docs", fts.Config{})
+		if err != nil {
+			return err
+		}
+		if err := idx.Upsert(ctx, "d2", "aborted"); err != nil {
+			return err
+		}
+		return errors.New("abort")
+	})
+	require.Error(t, err)
+
+	idx, err = s.FTS().Open("docs", fts.Config{})
+	require.NoError(t, err)
+	count, err := idx.Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	hits, err = idx.Search(ctx, "aborted", 10)
+	require.NoError(t, err)
+	require.Empty(t, hits)
 }
