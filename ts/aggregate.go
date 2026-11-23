@@ -3,6 +3,7 @@ package ts
 import (
 	"context"
 	"fmt"
+	"time"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -119,6 +120,7 @@ func (se *Series) Aggregate(ctx context.Context, start, end int64, step int64, f
 	}
 
 	agg := &aggregator{fn: fn, step: step}
+	started := time.Now()
 	err := se.store.b.View(func(tx *bolt.Tx) error {
 		if err := checkContext(ctx); err != nil {
 			return err
@@ -171,6 +173,7 @@ func (se *Series) Aggregate(ctx context.Context, start, end int64, step int64, f
 	if err != nil {
 		return nil, err
 	}
+	se.store.observeAggregate(time.Since(started), len(agg.samples), nil)
 	return agg.samples, nil
 }
 

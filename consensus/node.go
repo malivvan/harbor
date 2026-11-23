@@ -16,6 +16,7 @@ import (
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
 	"github.com/malivvan/harbor"
+	"github.com/malivvan/harbor/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -34,6 +35,11 @@ type Node struct {
 	// now is the clock pinned into replicated ts commands. It defaults to the
 	// wall clock; tests override it to model clock divergence between nodes.
 	now func() int64
+
+	// obs receives operation metrics and spans, or nil when the node was
+	// opened without instrumentation. It is set once at Open and never
+	// mutated.
+	obs metrics.Observer
 
 	mu     sync.RWMutex
 	store  *harbor.Store
@@ -95,7 +101,7 @@ func Open(ctx context.Context, cfg Config) (*Node, error) {
 		return nil, fmt.Errorf("consensus: open harbor store: %w", err)
 	}
 
-	n := &Node{cfg: cfg, store: st}
+	n := &Node{cfg: cfg, store: st, obs: cfg.Metrics}
 	if err := n.startRaft(); err != nil {
 		_ = st.Close()
 		return nil, err

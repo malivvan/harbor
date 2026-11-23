@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/malivvan/harbor/db/index"
 	"github.com/malivvan/harbor/internal/crypto"
+	"github.com/malivvan/harbor/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -68,12 +70,27 @@ func (s *Store) ReEncrypt(ctx context.Context, newKey []byte) error {
 	s.rotMu.Lock()
 	defer s.rotMu.Unlock()
 
+	started := time.Now()
 	if err := s.rewrite(ctx, next); err != nil {
+		s.observeRotate(time.Since(started), err)
 		return wrapError("reencrypt", err)
 	}
 
 	s.adoptEnc(next)
+	s.observeRotate(time.Since(started), nil)
 	return nil
+}
+
+// observeRotate reports one key rotation to the configured observer.
+func (s *Store) observeRotate(d time.Duration, err error) {
+	if s == nil || s.obs == nil {
+		return
+	}
+	metrics.Histogram(s.obs, metrics.MetricRotateDuration, float64(d), metrics.Labels{
+		metrics.LabelStore:  "db",
+		metrics.LabelOp:     "rotate",
+		metrics.LabelResult: resultLabel(err),
+	})
 }
 
 // RotateAll is ReEncrypt under the name used by the ts and fs stores. A Harbor

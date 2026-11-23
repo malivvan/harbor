@@ -3,6 +3,8 @@ package fs
 import (
 	"sync"
 	"time"
+
+	"github.com/malivvan/harbor/metrics"
 )
 
 // inodeCache provides a thread-safe in-memory cache for inodes to improve
@@ -15,6 +17,26 @@ type inodeCache struct {
 	hits    uint64
 	misses  uint64
 	enabled bool
+
+	// obs receives cache lookup counters and the current size, or nil when
+	// the owning store was opened without instrumentation. It is set once
+	// before the cache is shared and never mutated.
+	obs metrics.Observer
+}
+
+// observeLookup reports one cache lookup outcome to the configured observer.
+func (c *inodeCache) observeLookup(hit bool) {
+	if c == nil || c.obs == nil {
+		return
+	}
+	result := metrics.ResultOK
+	if !hit {
+		result = metrics.ResultError
+	}
+	metrics.Counter(c.obs, metrics.MetricCacheHits, 1, metrics.Labels{
+		metrics.LabelStore:  "fs",
+		metrics.LabelResult: result,
+	})
 }
 
 // cacheEntry represents a cached inode with metadata for cache management.
@@ -49,6 +71,7 @@ func (c *inodeCache) Get(ino uint64) *iNode {
 		c.mu.Lock()
 		c.misses++
 		c.mu.Unlock()
+		c.observeLookup(false)
 		return nil
 	}
 
@@ -57,6 +80,7 @@ func (c *inodeCache) Get(ino uint64) *iNode {
 	entry.lastUsed = time.Now()
 	c.hits++
 	c.mu.Unlock()
+	c.observeLookup(true)
 
 	// Return a copy to prevent external modifications
 	return copyInode(entry.node)
@@ -78,6 +102,7 @@ func (c *inodeCache) GetShared(ino uint64) *iNode {
 		c.mu.Lock()
 		c.misses++
 		c.mu.Unlock()
+		c.observeLookup(false)
 		return nil
 	}
 
@@ -86,6 +111,7 @@ func (c *inodeCache) GetShared(ino uint64) *iNode {
 	c.hits++
 	node := entry.node
 	c.mu.Unlock()
+	c.observeLookup(true)
 
 	return node
 }
@@ -202,15 +228,21 @@ func (c *inodeCache) Flush() {
 // Stats returns cache statistics.
 func (c *inodeCache) Stats() CacheStats {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	return CacheStats{
+	stats := CacheStats{
 		Size:    len(c.entries),
 		MaxSize: c.maxSize,
 		Hits:    c.hits,
 		Misses:  c.misses,
 		Enabled: c.enabled,
 	}
+	c.mu.RUnlock()
+
+	if c.obs != nil {
+		metrics.Gauge(c.obs, metrics.MetricCacheSize, float64(stats.Size), metrics.Labels{
+			metrics.LabelStore: "fs",
+		})
+	}
+	return stats
 }
 
 // CacheStats contains statistics about cache performance.

@@ -29,7 +29,7 @@ func TestFile(t *testing.T) {
 	}()
 
 	// setup
-	fs, err := newFS(db, "", nil)
+	fs, err := newFS(db, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,9 +2,38 @@ package db
 
 import (
 	"context"
+	"time"
 
+	"github.com/malivvan/harbor/metrics"
 	bolt "go.etcd.io/bbolt"
 )
+
+// observeTx runs one top-level bbolt transaction, reporting its latency and
+// outcome to the configured observer. It is a no-op wrapper when the store has
+// no observer.
+func (s *Store) observeTx(kind string, run func() error) error {
+	if s == nil || s.obs == nil {
+		return run()
+	}
+	start := time.Now()
+	err := run()
+	labels := metrics.Labels{
+		metrics.LabelStore:  "db",
+		metrics.LabelKind:   kind,
+		metrics.LabelResult: resultLabel(err),
+	}
+	metrics.Histogram(s.obs, metrics.MetricTxDuration, float64(time.Since(start)), labels)
+	metrics.Counter(s.obs, metrics.MetricTxTotal, 1, labels)
+	return err
+}
+
+// resultLabel maps an error to the ResultOK/ResultError label value.
+func resultLabel(err error) string {
+	if err != nil {
+		return metrics.ResultError
+	}
+	return metrics.ResultOK
+}
 
 // Node exposes Harbor operations relative to a bbolt bucket path.
 type Node interface {
@@ -130,7 +159,7 @@ func (n *node) readWriteTx(ctx context.Context, fn func(tx *bolt.Tx) error) erro
 	// and the write.
 	n.s.rotMu.RLock()
 	defer n.s.rotMu.RUnlock()
-	return n.s.bolt.Update(run)
+	return n.s.observeTx("write", func() error { return n.s.bolt.Update(run) })
 }
 
 // Detects if already in transaction or runs a read transaction.
@@ -155,5 +184,5 @@ func (n *node) readTx(ctx context.Context, fn func(tx *bolt.Tx) error) error {
 
 	n.s.rotMu.RLock()
 	defer n.s.rotMu.RUnlock()
-	return n.s.bolt.View(run)
+	return n.s.observeTx("read", func() error { return n.s.bolt.View(run) })
 }

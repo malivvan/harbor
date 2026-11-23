@@ -5,6 +5,7 @@ import (
 
 	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/internal/crypto"
+	"github.com/malivvan/harbor/metrics"
 )
 
 // KeySize is the required key length in bytes (256 bits).
@@ -35,6 +36,10 @@ type Config struct {
 
 	// Audit, when non-nil, receives an entry for every committed write.
 	Audit audit.Sink
+
+	// Metrics, when non-nil, receives chunk/cache counters, byte counts and
+	// tracing spans. A nil Observer disables instrumentation.
+	Metrics metrics.Observer
 }
 
 func (c Config) encryptionEnabled() bool {

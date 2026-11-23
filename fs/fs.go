@@ -20,6 +20,7 @@ import (
 
 	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/internal/absfs"
+	"github.com/malivvan/harbor/metrics"
 )
 
 var errNilIno = errors.New("ino is nil")
@@ -100,8 +101,9 @@ func digestOf(data []byte) []byte {
 }
 
 // newFS creates a new FS in the convention of other `absfs`
-// implementations. It takes a bolt.DB pointer and a bucket path.
-func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FS, error) {
+// implementations. It takes a bolt.DB pointer and a bucket path. obs, when
+// non-nil, receives cache and chunk metrics.
+func newFS(db *bolt.DB, bucketpath string, enc *encState, obs metrics.Observer) (*FS, error) {
 
 	// create buckets
 	err := db.Update(func(tx *bolt.Tx) error {
@@ -113,14 +115,16 @@ func newFS(db *bolt.DB, bucketpath string, enc *encState) (*FS, error) {
 
 	// load or initialize
 	rootIno := uint64(1)
+	cache := newInodeCache(1000) // Default cache size of 1000 inodes
+	cache.obs = obs
 	fs := &FS{
 		db:          db,
 		bucket:      bucketpath,
 		bucketParts: splitBucketPath(bucketpath),
 		rootIno:     rootIno,
 		cwd:         "/",
-		cache:       newInodeCache(1000), // Default cache size of 1000 inodes
-		contentFS:   nil,                 // Use BoltDB by default (backward compatible)
+		cache:       cache,
+		contentFS:   nil, // Use BoltDB by default (backward compatible)
 	}
 	fs.enc.Store(enc)
 	err = db.Update(func(tx *bolt.Tx) error {

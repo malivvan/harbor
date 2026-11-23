@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/malivvan/harbor/audit"
+	"github.com/malivvan/harbor/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -43,6 +45,11 @@ type Store struct {
 	// audit receives an entry for every committed write, or nil when the store
 	// was opened without audit. It is set once at Open and never mutated.
 	audit audit.Sink
+
+	// obs receives operation metrics and spans, or nil when the store was
+	// opened without instrumentation. It is set once at Open and never
+	// mutated.
+	obs metrics.Observer
 }
 
 // auditEntry records one committed write in the store's audit trail. It is a
@@ -67,6 +74,39 @@ func digestOf(data []byte) []byte {
 	}
 	sum := sha256.Sum256(data)
 	return sum[:]
+}
+
+// observeAggregate reports one aggregate call to the configured observer: its
+// latency and the number of samples it produced.
+func (s *Store) observeAggregate(d time.Duration, samples int, err error) {
+	if s == nil || s.obs == nil {
+		return
+	}
+	labels := metrics.Labels{
+		metrics.LabelStore:  "ts",
+		metrics.LabelOp:     "aggregate",
+		metrics.LabelResult: resultLabel(err),
+	}
+	metrics.Histogram(s.obs, metrics.MetricTSAggregateDuration, float64(d), labels)
+	metrics.Counter(s.obs, metrics.MetricTSDecodedPoints, int64(samples), labels)
+}
+
+// observeDecoded reports points decoded from sealed blocks during a scan.
+func (s *Store) observeDecoded(n int) {
+	if s == nil || s.obs == nil || n <= 0 {
+		return
+	}
+	metrics.Counter(s.obs, metrics.MetricTSDecodedPoints, int64(n), metrics.Labels{
+		metrics.LabelStore: "ts",
+	})
+}
+
+// resultLabel maps an error to the ResultOK/ResultError label value.
+func resultLabel(err error) string {
+	if err != nil {
+		return metrics.ResultError
+	}
+	return metrics.ResultOK
 }
 
 // encState returns the current encryption state, or nil for a plaintext store.

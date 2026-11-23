@@ -5,6 +5,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/malivvan/harbor/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -20,11 +21,12 @@ type fsBucket struct {
 	inodes   *bolt.Bucket
 	data     *bolt.Bucket
 	symlinks *bolt.Bucket
-	chunks   *bolt.Bucket // Optional chunked-content bucket
-	dirents  *bolt.Bucket // Optional per-entry directory keys
-	cache    *inodeCache  // Optional cache for read operations
-	enc      *encState    // nil when encryption is disabled
-	parent   bucketer     // parent of the fs buckets, for lazy bucket creation
+	chunks   *bolt.Bucket     // Optional chunked-content bucket
+	dirents  *bolt.Bucket     // Optional per-entry directory keys
+	cache    *inodeCache      // Optional cache for read operations
+	enc      *encState        // nil when encryption is disabled
+	obs      metrics.Observer // Optional metrics sink for chunk activity
+	parent   bucketer         // parent of the fs buckets, for lazy bucket creation
 }
 
 type bucketer interface {
@@ -45,7 +47,8 @@ func newFsBucketWithCache(b bucketer, cache *inodeCache) *fsBucket {
 }
 
 // newFsBucketWithCacheOpts creates a new fsBucket, opening the chunks bucket
-// only when the store actually uses chunked content.
+// only when the store actually uses chunked content. The observer is taken
+// from the cache when one is present, so chunk metrics follow the same sink.
 func newFsBucketWithCacheOpts(b bucketer, cache *inodeCache, withChunks bool) *fsBucket {
 	state := b.Bucket([]byte("state"))
 	if state == nil {
@@ -68,6 +71,11 @@ func newFsBucketWithCacheOpts(b bucketer, cache *inodeCache, withChunks bool) *f
 		chunks = b.Bucket([]byte("chunks"))
 	}
 
+	var obs metrics.Observer
+	if cache != nil {
+		obs = cache.obs
+	}
+
 	return &fsBucket{
 		state:    state,
 		inodes:   inodes,
@@ -76,6 +84,7 @@ func newFsBucketWithCacheOpts(b bucketer, cache *inodeCache, withChunks bool) *f
 		chunks:   chunks,
 		dirents:  b.Bucket([]byte(direntsBucketName)),
 		cache:    cache,
+		obs:      obs,
 		parent:   b,
 	}
 }

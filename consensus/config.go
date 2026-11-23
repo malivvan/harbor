@@ -8,6 +8,7 @@ import (
 
 	"github.com/hashicorp/raft"
 	"github.com/malivvan/harbor"
+	"github.com/malivvan/harbor/metrics"
 )
 
 const (
@@ -58,6 +59,10 @@ type Config struct {
 
 	// LogOutput receives raft logs. Nil discards them.
 	LogOutput io.Writer
+
+	// Metrics, when non-nil, receives consensus apply-lag metrics and tracing
+	// spans. A nil Observer disables instrumentation.
+	Metrics metrics.Observer
 
 	// RaftConfig, when non-nil, replaces the default raft configuration.
 	RaftConfig *raft.Config

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/hashicorp/raft"
+	"github.com/malivvan/harbor/metrics"
 )
 
 // fsm adapts a Node's harbor store to raft.FSM. Apply dispatches commands to
@@ -42,11 +44,45 @@ func (f *fsm) Apply(l *raft.Log) any {
 		}
 	}()
 
+	// Apply lag is the delay between the entry being appended to the raft log
+	// and this node applying it, which is what a follower read must wait out.
+	started := time.Now()
+
 	c, err := decodeCommand(l.Data)
 	if err != nil {
+		f.observeApply(started, err)
 		return &ApplyError{Index: l.Index, Err: err}
 	}
-	return f.applyCommand(l.Index, c)
+	resp := f.applyCommand(l.Index, c)
+	f.observeApply(started, asError(resp))
+	return resp
+}
+
+// observeApply reports one applied log entry to the configured observer: how
+// long it took to apply and whether it succeeded.
+func (f *fsm) observeApply(started time.Time, err error) {
+	if f == nil || f.node == nil || f.node.obs == nil {
+		return
+	}
+	result := metrics.ResultOK
+	if err != nil {
+		result = metrics.ResultError
+	}
+	labels := metrics.Labels{
+		metrics.LabelStore:  "consensus",
+		metrics.LabelOp:     "apply",
+		metrics.LabelResult: result,
+	}
+	metrics.Histogram(f.node.obs, metrics.MetricConsensusApplyLag, float64(time.Since(started)), labels)
+	metrics.Counter(f.node.obs, metrics.MetricConsensusApplyTotal, 1, labels)
+}
+
+// asError returns resp as an error when it is one, and nil otherwise.
+func asError(resp any) error {
+	if err, ok := resp.(error); ok {
+		return err
+	}
+	return nil
 }
 
 // Snapshot returns a serialized snapshot of the harbor database.

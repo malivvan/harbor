@@ -12,6 +12,7 @@ import (
 
 	"github.com/malivvan/harbor/audit"
 	"github.com/malivvan/harbor/internal/absfs"
+	"github.com/malivvan/harbor/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -41,6 +42,10 @@ type Store struct {
 	// audit receives an entry for every committed write, or nil when the store
 	// was opened without audit. It is copied into each FS at Open.
 	audit audit.Sink
+
+	// obs receives operation metrics and spans, or nil when the store was
+	// opened without instrumentation. It is copied into each FS at Open.
+	obs metrics.Observer
 
 	mu          sync.Mutex
 	filesystems []*FS
@@ -80,6 +85,7 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		db:    bdb,
 		root:  cloneRoot(cfg.Root),
 		audit: cfg.Audit,
+		obs:   cfg.Metrics,
 	}
 	store.enc.Store(enc)
 	return store, nil
@@ -129,7 +135,7 @@ func (s *Store) Open(name string) (*FS, error) {
 		return nil, err
 	}
 
-	filesystem, err := newFS(s.db, s.bucketPath(name), s.enc.Load())
+	filesystem, err := newFS(s.db, s.bucketPath(name), s.enc.Load(), s.obs)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +159,7 @@ func (s *Store) OpenWithContentFS(name string, contentFS absfs.FileSystem) (*FS,
 		return nil, err
 	}
 
-	filesystem, err := newFS(s.db, s.bucketPath(name), s.enc.Load())
+	filesystem, err := newFS(s.db, s.bucketPath(name), s.enc.Load(), s.obs)
 	if err != nil {
 		return nil, err
 	}

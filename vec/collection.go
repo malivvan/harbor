@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/malivvan/harbor/metrics"
 )
 
 // Collection represents a single logical group of vectors, similar to a table in SQL databases.
@@ -231,8 +233,10 @@ func (c *Collection) Flush() error {
 	c.storage.flushMu.Lock()
 	c.mu.Unlock()
 
+	started := time.Now()
 	err := c.storage.UpsertPoints(c.Name, flush)
 	c.storage.flushMu.Unlock()
+	c.observeFlush(time.Since(started), len(flush), err)
 	if err != nil {
 		c.mu.Lock()
 		c.rebuffer(flush)
@@ -241,6 +245,20 @@ func (c *Collection) Flush() error {
 	}
 	c.clearTombstones()
 	return nil
+}
+
+// observeFlush reports one vector flush to the store's observer.
+func (c *Collection) observeFlush(d time.Duration, points int, err error) {
+	if c == nil || c.storage == nil || c.storage.obs == nil {
+		return
+	}
+	labels := metrics.Labels{
+		metrics.LabelStore:  "vec",
+		metrics.LabelOp:     "flush",
+		metrics.LabelResult: resultLabel(err),
+	}
+	metrics.Histogram(c.storage.obs, metrics.MetricVecFlushDuration, float64(d), labels)
+	metrics.Counter(c.storage.obs, metrics.MetricVecFlushTotal, 1, labels)
 }
 
 // Close flushes the collection's buffered points. It deliberately does NOT
@@ -268,7 +286,24 @@ func (c *Collection) Search(queryVector []float32, filter *Filter, topK int) ([]
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.index.Search(queryVector, filter, topK)
+	started := time.Now()
+	results, err := c.index.Search(queryVector, filter, topK)
+	c.observeSearch(time.Since(started), len(results), err)
+	return results, err
+}
+
+// observeSearch reports one vector search to the store's observer.
+func (c *Collection) observeSearch(d time.Duration, results int, err error) {
+	if c == nil || c.storage == nil || c.storage.obs == nil {
+		return
+	}
+	labels := metrics.Labels{
+		metrics.LabelStore:  "vec",
+		metrics.LabelOp:     "search",
+		metrics.LabelResult: resultLabel(err),
+	}
+	metrics.Histogram(c.storage.obs, metrics.MetricVecSearchDuration, float64(d), labels)
+	metrics.Counter(c.storage.obs, metrics.MetricVecCandidates, int64(results), labels)
 }
 
 // Count returns the number of points currently stored in the collection.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/malivvan/harbor/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -72,7 +73,9 @@ func (b *fsBucket) readChunk(ino uint64, idx int64) ([]byte, error) {
 	if raw == nil {
 		return nil, nil
 	}
-	return b.enc.openContent(raw)
+	data, err := b.enc.openContent(raw)
+	b.observeChunk("read", len(data), err)
+	return data, err
 }
 
 func (b *fsBucket) writeChunk(ino uint64, idx int64, data []byte) error {
@@ -86,9 +89,34 @@ func (b *fsBucket) writeChunk(ino uint64, idx int64, data []byte) error {
 	}
 	raw, err := b.enc.sealContent(data)
 	if err != nil {
+		b.observeChunk("write", 0, err)
 		return err
 	}
-	return b.chunks.Put(key, raw)
+	err = b.chunks.Put(key, raw)
+	b.observeChunk("write", len(data), err)
+	return err
+}
+
+// observeChunk reports one chunk read or write to the configured observer.
+func (b *fsBucket) observeChunk(op string, n int, err error) {
+	if b == nil || b.obs == nil {
+		return
+	}
+	labels := metrics.Labels{
+		metrics.LabelStore:  "fs",
+		metrics.LabelOp:     op,
+		metrics.LabelResult: resultLabel(err),
+	}
+	metrics.Counter(b.obs, metrics.MetricChunkOps, 1, labels)
+	metrics.Histogram(b.obs, metrics.MetricChunkBytes, float64(n), labels)
+}
+
+// resultLabel maps an error to the ResultOK/ResultError label value.
+func resultLabel(err error) string {
+	if err != nil {
+		return metrics.ResultError
+	}
+	return metrics.ResultOK
 }
 
 // readDataRange reads n bytes at off, zero-filling missing chunks.

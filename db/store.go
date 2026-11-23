@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 
 	"github.com/malivvan/harbor/audit"
+	"github.com/malivvan/harbor/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -71,7 +72,7 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		return nil, wrapError("open", err)
 	}
 
-	s := &Store{bolt: bdb, audit: cfg.Audit}
+	s := &Store{bolt: bdb, audit: cfg.Audit, obs: cfg.Metrics}
 	s.enc.Store(enc)
 
 	root := cloneBucketPath(cfg.Root)
@@ -121,6 +122,11 @@ type Store struct {
 	// audit receives an entry for every committed write, or nil when the store
 	// was opened without audit. It is set once at Open and never mutated.
 	audit audit.Sink
+
+	// obs receives operation metrics and spans, or nil when the store was
+	// opened without instrumentation. It is set once at Open and never
+	// mutated.
+	obs metrics.Observer
 }
 
 // Close releases the Harbor wrapper. The underlying bbolt database is owned by

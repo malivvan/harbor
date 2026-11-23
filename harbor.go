@@ -26,6 +26,7 @@ import (
 	"github.com/malivvan/harbor/fs"
 	"github.com/malivvan/harbor/internal/crypto"
 	"github.com/malivvan/harbor/internal/slip21"
+	"github.com/malivvan/harbor/metrics"
 	"github.com/malivvan/harbor/ts"
 	"github.com/malivvan/harbor/vec"
 	bolt "go.etcd.io/bbolt"
@@ -115,6 +116,15 @@ type Options struct {
 	// Quantizer compresses vectors when UseQuant is enabled. A nil Quantizer
 	// selects the default SQ8 quantizer.
 	Quantizer vec.Quantizer
+
+	// Metrics, when non-nil, receives operation counters, latency histograms
+	// and tracing spans from every sub-store. A nil Observer disables
+	// instrumentation and costs only a nil check per operation.
+	//
+	// Harbor does not depend on a metrics library: implement
+	// metrics.Observer to forward to Prometheus, OpenTelemetry or anything
+	// else. See the metrics package for the metric names and labels.
+	Metrics metrics.Observer
 }
 
 // Store is a single bbolt database that hosts the db, fs, ts and vec stores.
@@ -252,6 +262,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptValues:   hasFlag(md.Flags, EncryptDBValues),
 		EncryptMetadata: hasFlag(md.Flags, EncryptDBMetadata),
 		Audit:           auditSink(AuditDB),
+		Metrics:         options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open db store: %w", err)
 	}
@@ -261,6 +272,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptMetadata: hasFlag(md.Flags, EncryptFSMetadata),
 		EncryptContent:  hasFlag(md.Flags, EncryptFSContent),
 		Audit:           auditSink(AuditFS),
+		Metrics:         options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open fs store: %w", err)
 	}
@@ -270,6 +282,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptValues:      hasFlag(md.Flags, EncryptTSValues),
 		EncryptSeriesNames: hasFlag(md.Flags, EncryptTSSeriesNames),
 		Audit:              auditSink(AuditTS),
+		Metrics:            options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open ts store: %w", err)
 	}
@@ -282,6 +295,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptPointIDs:        hasFlag(md.Flags, EncryptVecPointIDs),
 		EncryptCollectionNames: hasFlag(md.Flags, EncryptVecCollectionNames),
 		Audit:                  auditSink(AuditVec),
+		Metrics:                options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open vec store: %w", err)
 	}

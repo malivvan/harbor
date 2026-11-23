@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/malivvan/harbor/audit"
+	"github.com/malivvan/harbor/metrics"
 	"go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
 )
@@ -73,6 +74,11 @@ type Store struct {
 	// audit receives an entry for every committed write, or nil when the store
 	// was opened without audit. It is set once at Open and never mutated.
 	audit audit.Sink
+
+	// obs receives operation metrics and spans, or nil when the store was
+	// opened without instrumentation. It is set once at Open and never
+	// mutated.
+	obs metrics.Observer
 }
 
 // auditEntry records one committed write in the store's audit trail. It is a
@@ -97,6 +103,14 @@ func digestOf(data []byte) []byte {
 	}
 	sum := sha256.Sum256(data)
 	return sum[:]
+}
+
+// resultLabel maps an error to the ResultOK/ResultError label value.
+func resultLabel(err error) string {
+	if err != nil {
+		return metrics.ResultError
+	}
+	return metrics.ResultOK
 }
 
 // view runs a read-only transaction while excluding rotation.
@@ -342,6 +356,7 @@ func Open(ctx context.Context, bdb *bbolt.DB, cfg Config) (*Store, error) {
 		root:        root,
 		collections: make(map[string]*Collection),
 		audit:       cfg.Audit,
+		obs:         cfg.Metrics,
 	}
 	store.enc.Store(enc)
 	store.ownsDB.Store(true)
