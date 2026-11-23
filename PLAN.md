@@ -115,7 +115,13 @@ If it stays standalone, document it in README/AGENTS as a general utility.
 Acceptance: no unexplained exported package; audit encoding is canonical or
 explicitly documented.
 
-### 0.6 `pkg/snapshot/blobstore` tests
+### 0.6 `pkg/snapshot/blobstore` tests — DONE
+
+Done: `blobstore_test.go` covers `List` (recursive, prefix-scoped, absent
+prefix), `Get`/`Put` (including `size == -1`), `Delete` (idempotent), `Stat`
+(missing key is not an error), the not-configured and nil-receiver paths, a full
+snapshot create/verify/restore round trip through the adapter, and a failed
+upload staying invisible.
 
 `pkg/snapshot/blobstore` has no test files. Add a conformance test over a temporary
 `fs`/`blob` store: `List`, `Get`, `Put`, `Delete`, `Stat`, prefix behavior,
