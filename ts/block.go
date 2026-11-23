@@ -66,25 +66,32 @@ func mergePoints(existing, incoming []Point) []Point {
 		return existing
 	}
 
-	// Copy before sorting: callers own their input slices.
-	inc := append([]Point(nil), incoming...)
-	sort.SliceStable(inc, func(i, j int) bool {
-		return inc[i].Timestamp < inc[j].Timestamp
-	})
+	// Fast path: an already sorted, duplicate-free batch needs neither a copy
+	// nor a sort; the merge below only reads it.
+	inc := incoming
+	if !sortedUniqueByTimestamp(incoming) {
+		inc = append([]Point(nil), incoming...)
+		sort.SliceStable(inc, func(i, j int) bool {
+			return inc[i].Timestamp < inc[j].Timestamp
+		})
 
-	// Duplicate timestamps in incoming: the last value wins.
-	deduped := inc[:0]
-	for _, point := range inc {
-		if n := len(deduped); n > 0 && deduped[n-1].Timestamp == point.Timestamp {
-			deduped[n-1] = point
-			continue
+		// Duplicate timestamps in incoming: the last value wins.
+		deduped := inc[:0]
+		for _, point := range inc {
+			if n := len(deduped); n > 0 && deduped[n-1].Timestamp == point.Timestamp {
+				deduped[n-1] = point
+				continue
+			}
+			deduped = append(deduped, point)
 		}
-		deduped = append(deduped, point)
+		inc = deduped
 	}
-	inc = deduped
 
 	if len(existing) == 0 {
-		return inc
+		// Copy so the result does not alias the caller's slice.
+		out := make([]Point, len(inc))
+		copy(out, inc)
+		return out
 	}
 
 	// Common append case: everything is after the last existing timestamp.
@@ -113,6 +120,17 @@ func mergePoints(existing, incoming []Point) []Point {
 	}
 	out = append(out, existing[i:]...)
 	return append(out, inc[j:]...)
+}
+
+// sortedUniqueByTimestamp reports whether points are strictly increasing by
+// timestamp, so an insert batch needs neither a copy nor a sort.
+func sortedUniqueByTimestamp(points []Point) bool {
+	for i := 1; i < len(points); i++ {
+		if points[i].Timestamp <= points[i-1].Timestamp {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Store) sealBlock(points []Point) ([]byte, error) {
@@ -266,10 +284,28 @@ func (s *Store) writeBlock(bucket *bolt.Bucket, start int64, points []Point) err
 
 // insertBlocks merges points into the encrypted blocks of a bucket.
 func (s *Store) insertBlocks(ctx context.Context, bucket *bolt.Bucket, points []Point) (int, error) {
-	added := 0
+	if len(points) == 0 {
+		return 0, nil
+	}
+	dur := s.blockDuration()
+
+	// Fast path: every point falls in the same block, so skip the group map and
+	// the start sort entirely.
+	firstStart := blockStart(points[0].Timestamp, dur)
+	singleBlock := true
+	for i := 1; i < len(points); i++ {
+		if blockStart(points[i].Timestamp, dur) != firstStart {
+			singleBlock = false
+			break
+		}
+	}
+	if singleBlock {
+		return s.insertBlockBatch(ctx, bucket, firstStart, points)
+	}
+
 	groups := make(map[int64][]Point)
 	for _, point := range points {
-		start := blockStart(point.Timestamp, s.blockDuration())
+		start := blockStart(point.Timestamp, dur)
 		groups[start] = append(groups[start], point)
 	}
 
@@ -279,19 +315,30 @@ func (s *Store) insertBlocks(ctx context.Context, bucket *bolt.Bucket, points []
 	}
 	sort.Slice(starts, func(i, j int) bool { return starts[i] < starts[j] })
 
+	added := 0
 	for _, start := range starts {
 		if err := checkContext(ctx); err != nil {
 			return 0, err
 		}
-		existing, _, err := s.readBlock(bucket, start)
+		n, err := s.insertBlockBatch(ctx, bucket, start, groups[start])
 		if err != nil {
 			return 0, err
 		}
-		merged := mergePoints(existing, groups[start])
-		added += len(merged) - len(existing)
-		if err := s.writeBlock(bucket, start, merged); err != nil {
-			return 0, err
-		}
+		added += n
+	}
+	return added, nil
+}
+
+// insertBlockBatch merges one block's incoming points into the stored block.
+func (s *Store) insertBlockBatch(ctx context.Context, bucket *bolt.Bucket, start int64, incoming []Point) (int, error) {
+	existing, _, err := s.readBlock(bucket, start)
+	if err != nil {
+		return 0, err
+	}
+	merged := mergePoints(existing, incoming)
+	added := len(merged) - len(existing)
+	if err := s.writeBlock(bucket, start, merged); err != nil {
+		return 0, err
 	}
 	return added, nil
 }
@@ -317,15 +364,26 @@ func (s *Store) insertBlockPoint(ctx context.Context, bucket *bolt.Bucket, point
 
 // mergePoint inserts or replaces one point in a sorted block.
 func mergePoint(existing []Point, point Point) []Point {
-	i := sort.Search(len(existing), func(i int) bool {
+	n := len(existing)
+	if n == 0 {
+		return []Point{point}
+	}
+	// Common append case: the point is newer than everything stored, so skip
+	// the binary search.
+	if point.Timestamp > existing[n-1].Timestamp {
+		out := make([]Point, 0, n+1)
+		out = append(out, existing...)
+		return append(out, point)
+	}
+	i := sort.Search(n, func(i int) bool {
 		return existing[i].Timestamp >= point.Timestamp
 	})
-	if i < len(existing) && existing[i].Timestamp == point.Timestamp {
+	if i < n && existing[i].Timestamp == point.Timestamp {
 		out := append([]Point(nil), existing...)
 		out[i] = point
 		return out
 	}
-	out := make([]Point, 0, len(existing)+1)
+	out := make([]Point, 0, n+1)
 	out = append(out, existing[:i]...)
 	out = append(out, point)
 	return append(out, existing[i:]...)
