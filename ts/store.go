@@ -94,16 +94,6 @@ func (s *Store) observeAggregate(d time.Duration, samples int, err error) {
 	metrics.Counter(s.obs, metrics.MetricTSDecodedPoints, int64(samples), labels)
 }
 
-// observeDecoded reports points decoded from sealed blocks during a scan.
-func (s *Store) observeDecoded(n int) {
-	if s == nil || s.obs == nil || n <= 0 {
-		return
-	}
-	metrics.Counter(s.obs, metrics.MetricTSDecodedPoints, int64(n), metrics.Labels{
-		metrics.LabelStore: "ts",
-	})
-}
-
 // resultLabel maps an error to the ResultOK/ResultError label value.
 func resultLabel(err error) string {
 	if err != nil {

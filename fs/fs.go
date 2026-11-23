@@ -1190,11 +1190,6 @@ func (fs *FS) CopyContext(ctx context.Context, source, destination string, opts 
 	return nil
 }
 
-// copyNode deep-copies src into a newly allocated inode with default options.
-func (fs *FS) copyNode(src *iNode) (uint64, error) {
-	return fs.copyNodeCtx(src, &copyState{ctx: context.Background()})
-}
-
 // copyNodeCtx deep-copies src into a newly allocated inode, returning the new
 // inode number. It copies the file content (data bucket, chunks, external
 // contentFS file) and symlink targets, and recursively copies directory

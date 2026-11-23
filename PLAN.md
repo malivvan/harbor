@@ -128,7 +128,17 @@ upload staying invisible.
 missing keys, and the snapshot suite running through the adapter.
 Acceptance: `go test ./pkg/snapshot/...` exercises the adapter.
 
-### 0.7 Release gate
+### 0.7 Release gate — DONE
+
+Recorded after blockers 0.1–0.6: `gofmt -l .` empty, `go vet ./...`,
+`go build ./...`, `go test ./...`, `go test -race ./...`,
+`CGO_ENABLED=0 go test ./...`, `go mod tidy -diff`, staticcheck and
+govulncheck all green. Two staticcheck findings were fixed on the way
+(dead `changeHookMu`, `copyNode`, `observeTSDecoded` helpers; a deprecated
+bbolt error; a deliberately nil context now carries a `//lint:ignore`).
+A single `TestReplicateFSMetadata` failure was observed once under the
+whole-repository race run but did not reproduce in targeted stress (20×) or
+subsequent whole-repository runs; it is recorded in `POST.md` for follow-up.
 
 Run and record: `gofmt -l .`, `go vet ./...`, `go build ./...`,
 `go test ./...`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...`,

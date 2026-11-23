@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"sync"
 
 	"github.com/malivvan/harbor/pkg/audit"
 )
@@ -32,8 +31,6 @@ type Change struct {
 // ChangeHook receives committed record mutations. Hooks run synchronously after
 // the transaction commits and must not block for long.
 type ChangeHook func(Change)
-
-var changeHookMu sync.Mutex
 
 // AddChangeHook registers a hook and returns a function that removes it.
 // Multiple hooks may be registered; each receives every change.

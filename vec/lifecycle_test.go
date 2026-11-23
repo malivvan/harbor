@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/bbolt"
+	bbolterrors "go.etcd.io/bbolt/errors"
 )
 
 func openSharedStore(t *testing.T) (*Store, *bbolt.DB) {
@@ -58,7 +59,7 @@ func TestStandaloneStoreClosesHandle(t *testing.T) {
 	require.NoError(t, store.Close())
 	require.True(t, store.Closed())
 	require.ErrorIs(t, store.Flush(), ErrClosed)
-	require.ErrorIs(t, bdb.Update(func(tx *bbolt.Tx) error { return nil }), bbolt.ErrDatabaseNotOpen)
+	require.ErrorIs(t, bdb.Update(func(tx *bbolt.Tx) error { return nil }), bbolterrors.ErrDatabaseNotOpen)
 }
 
 // TestCollectionCloseIsTerminal checks the explicit collection state: Close

@@ -163,6 +163,7 @@ func TestCopyContextNilAndPreCancelled(t *testing.T) {
 	fsys := openCopyTestFS(t)
 	writeStoreFile(t, fsys, "/src.txt", "data")
 
+	//lint:ignore SA1012 intentionally exercising the nil-context guard
 	require.ErrorIs(t, fsys.CopyContext(nil, "/src.txt", "/dst.txt", CopyOptions{}), ErrNilContext)
 
 	ctx, cancel := context.WithCancel(context.Background())
