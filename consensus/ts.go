@@ -15,7 +15,7 @@ type tsInsertArg struct {
 }
 
 type tsInsertManyArg struct {
-	Series string    `json:"series"`
+	Series string     `json:"series"`
 	Points []ts.Point `json:"points"`
 }
 
