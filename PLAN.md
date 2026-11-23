@@ -749,7 +749,14 @@ func (s *Store) Migrate(ctx context.Context, schema Schema) error
 - Tests: forward migration, idempotent re-run, too-new refusal, failing step
   rollback, concurrent open, empty schema.
 
-## 11. P2 — input-ordered multi-get in `db`
+## 11. P2 — input-ordered multi-get in `db` — DONE
+
+Done: `Node.GetMany(ctx, ids, to)` in `db/getmany.go`. It validates a pointer
+to a slice of structs/pointers, reads every key in one read transaction, keeps
+request order, repeats duplicates, returns missing IDs in request order, and
+reports a missing bucket as "all missing". Encrypted keys work through the
+existing key encoding. Tests cover order/missing/duplicates, pointer and value
+slices, empty input, wrong destinations and an encrypted store.
 
 ### Current state
 

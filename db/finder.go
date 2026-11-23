@@ -13,6 +13,10 @@ import (
 
 // Finder retrieves records from Harbor buckets.
 type Finder interface {
+	// GetMany returns records by primary key in one read transaction, in
+	// request order, and reports the IDs it did not find.
+	GetMany(ctx context.Context, ids []any, to any) (missing []any, err error)
+
 	// One returns one record by the specified index. It returns ErrNotFound
 	// when no record matches.
 	One(ctx context.Context, fieldName string, value any, to any) error

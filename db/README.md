@@ -311,6 +311,20 @@ type Chunk struct {
 - The relation registry (`__harbor_refs__`) is metadata: it stores bucket and
   field names, not record values.
 
+### Multi-get by key
+
+`GetMany` reads a batch by primary key in one transaction:
+
+```go
+var users []User
+missing, err := records.GetMany(ctx, []any{"u1", "u2", "absent"}, &users)
+```
+
+Results follow the request order, duplicates are returned once per occurrence,
+and `missing` lists the absent IDs in request order. `to` must be a pointer to
+a slice of structs or pointers to structs. A missing bucket reports every ID as
+missing rather than failing.
+
 ### Projection
 
 `Project` decodes only the named top-level fields of each record:

@@ -288,6 +288,16 @@ err = users.Prefix(ctx, "Name", "al", &prefixed)
 `All` if you want an empty slice contract. Pagination and ordering are
 `FindOption` values: `db.Limit`, `db.Skip` and `db.Reverse`.
 
+### Multi-get by key
+
+`GetMany` reads a batch of records by primary key in one transaction, in request
+order, returning the missing IDs separately:
+
+```go
+var users []User
+missing, err := store.DB().GetMany(ctx, []any{"u1", "u2"}, &users)
+```
+
 ### Projection
 
 `Project` limits decoding to the fields you need:
@@ -589,6 +599,16 @@ Timestamps are Unix nanoseconds and ranges are inclusive on both ends. Points
 are stored in chronological key order, so `Range` and `RangeEach` stream in
 time order without an index. `Insert` replaces a point with the same timestamp;
 `InsertMany` accepts out-of-order timestamps and the last value wins.
+
+### Multi-get by key
+
+`GetMany` reads a batch of records by primary key in one transaction, in request
+order, returning the missing IDs separately:
+
+```go
+var users []User
+missing, err := store.DB().GetMany(ctx, []any{"u1", "u2"}, &users)
+```
 
 ### Projection
 
