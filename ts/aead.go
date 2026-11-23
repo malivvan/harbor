@@ -60,6 +60,47 @@ func (c Config) encryptionEnabled() bool {
 	return c.EncryptValues || c.EncryptSeriesNames || c.BlockDuration > 0
 }
 
+// Validate reports whether the configuration can be opened:
+//   - the block duration must be non-negative;
+//   - encryption requires a non-empty Root, because at the database root the
+//     store cannot distinguish its series buckets from unrelated top-level
+//     buckets;
+//   - an encryption secret is required (and must have a valid key length) when
+//     encryption or block mode is enabled.
+func (c Config) Validate() error {
+	if c.BlockDuration < 0 {
+		return fmt.Errorf("%w: block duration cannot be negative", ErrInvalidConfig)
+	}
+	if !c.encryptionEnabled() {
+		return nil
+	}
+	if !hasRootPath(c.Root) {
+		return fmt.Errorf("%w: encryption requires a non-empty Root", ErrInvalidConfig)
+	}
+	_, err := crypto.ResolveKey(c.Secret)
+	return err
+}
+
+// Normalize validates the configuration and returns it unchanged; ts.Config has
+// no implicit defaults. Open calls Normalize, so the public validation and the
+// open path cannot drift.
+func (c Config) Normalize() (Config, error) {
+	if err := c.Validate(); err != nil {
+		return Config{}, err
+	}
+	return c, nil
+}
+
+// hasRootPath reports whether root contains at least one non-empty element.
+func hasRootPath(root [][]byte) bool {
+	for _, part := range root {
+		if len(part) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // encState is the resolved encryption state of a store: the cipher engines
 // (through a Keychain) plus the enabled features. A nil keychain means
 // plaintext, and every helper below is then a passthrough.
@@ -268,14 +309,14 @@ func (s *Store) ensureFormatVersion() error {
 		raw := bucket.Get([]byte(versionKey))
 		if raw == nil {
 			var buf [8]byte
-			binary.BigEndian.PutUint64(buf[:], tsFormatVersion)
+			binary.BigEndian.PutUint64(buf[:], FormatVersion)
 			return bucket.Put([]byte(versionKey), buf[:])
 		}
 		if len(raw) != 8 {
 			return fmt.Errorf("%w: malformed version marker", ErrIncompatibleVersion)
 		}
-		if v := binary.BigEndian.Uint64(raw); v != tsFormatVersion {
-			return fmt.Errorf("%w: timeseries format %d, this build supports %d", ErrIncompatibleVersion, v, tsFormatVersion)
+		if v := binary.BigEndian.Uint64(raw); v != FormatVersion {
+			return fmt.Errorf("%w: timeseries format %d, this build supports %d", ErrIncompatibleVersion, v, FormatVersion)
 		}
 		return nil
 	})
@@ -333,6 +374,11 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		return nil, ErrNilParam
 	}
 
+	cfg, err := cfg.Normalize()
+	if err != nil {
+		return nil, err
+	}
+
 	// Drop empty path elements: they would make rootBucket and createRootBucket
 	// disagree and could hand createSeriesBucket a nil root.
 	var root [][]byte
@@ -346,11 +392,6 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 	settings, err := resolveConfig(cfg)
 	if err != nil {
 		return nil, err
-	}
-	if settings != nil && len(root) == 0 {
-		// At the database root unrelated top-level buckets cannot be told
-		// apart from series, so encryption and rotation are refused.
-		return nil, fmt.Errorf("%w: encryption requires a non-empty Root", ErrInvalidConfig)
 	}
 
 	s := &Store{

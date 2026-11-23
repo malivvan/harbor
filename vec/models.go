@@ -96,8 +96,10 @@ type CollectionMeta struct {
 	SchemaFingerprint string `json:"schema_fingerprint,omitempty"`
 }
 
-// collectionFormatVersion is the current collection metadata revision.
-const collectionFormatVersion = 1
+// CollectionFormatVersion is the on-disk collection metadata revision this
+// build writes and accepts. The first release has a single version 1; a newer
+// value fails the load with ErrInvalidConfig.
+const CollectionFormatVersion uint32 = 1
 
 // MatchFilter evaluates whether a given payload matches the filter criteria.
 // It returns true if:

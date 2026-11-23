@@ -4,36 +4,27 @@ import (
 	"errors"
 	"os"
 	"testing"
-
-	"github.com/malivvan/harbor/internal/absfs"
 )
 
-// failingContentFS wraps a real filesystem and can be taken offline to make
+// failingContentFS wraps a real ContentFS and can be taken offline to make
 // external content writes fail.
 type failingContentFS struct {
-	*FS
+	ContentFS
 	offline bool
 }
 
-func (f *failingContentFS) OpenFile(name string, flag int, perm os.FileMode) (absfs.File, error) {
-	if f.offline {
-		return nil, errors.New("content store offline")
-	}
-	return f.FS.OpenFile(name, flag, perm)
-}
-
-func (f *failingContentFS) MkdirAll(path string, perm os.FileMode) error {
+func (f *failingContentFS) WriteFile(name string, data []byte, perm os.FileMode) error {
 	if f.offline {
 		return errors.New("content store offline")
 	}
-	return f.FS.MkdirAll(path, perm)
+	return f.ContentFS.WriteFile(name, data, perm)
 }
 
 // A failed external-content write must not commit a larger size into the
 // inode: that would advertise bytes that never reached the store, and a later
 // read would silently shrink the logical file to the content length.
 func TestContentFSFailedWriteDoesNotGrowInode(t *testing.T) {
-	content := &failingContentFS{FS: newContentStorageFS(t)}
+	content := &failingContentFS{ContentFS: newContentStorageFS(t).AsContentFS()}
 	fsys, err := openFSWithContentForTest(t, tempFile(t), "", content)
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +57,7 @@ func TestContentFSFailedWriteDoesNotGrowInode(t *testing.T) {
 // A content/metadata size mismatch must be reported rather than silently
 // adopting the shorter content as the new file size.
 func TestContentFSSizeMismatchIsReported(t *testing.T) {
-	content := &failingContentFS{FS: newContentStorageFS(t)}
+	content := &failingContentFS{ContentFS: newContentStorageFS(t).AsContentFS()}
 	fsys, err := openFSWithContentForTest(t, tempFile(t), "", content)
 	if err != nil {
 		t.Fatal(err)

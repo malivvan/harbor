@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/harbor/internal/absfs"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -46,7 +45,7 @@ func openEncryptedFSForTest(t *testing.T) *FS {
 	return filesystem
 }
 
-func openEncryptedFSWithContentForTest(t *testing.T, contentFS absfs.FileSystem) *FS {
+func openEncryptedFSWithContentForTest(t *testing.T, contentFS ContentFS) *FS {
 	t.Helper()
 
 	db, err := bolt.Open(filepath.Join(t.TempDir(), "enc-content.db"), 0644, &bolt.Options{Timeout: time.Second})
@@ -113,7 +112,7 @@ func TestCopyDirectoryIntoOwnSubtree(t *testing.T) {
 // never hold the plaintext.
 func TestEncryptContentWithExternalContentFS(t *testing.T) {
 	content := newContentStorageFS(t)
-	fsys := openEncryptedFSWithContentForTest(t, content)
+	fsys := openEncryptedFSWithContentForTest(t, content.AsContentFS())
 
 	const secret = "top-secret-payload"
 	writeStoreFile(t, fsys, "/secret.txt", secret)

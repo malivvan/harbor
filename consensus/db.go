@@ -81,6 +81,17 @@ type dbFieldChange struct {
 	Value json.RawMessage `json:"value"`
 }
 
+// dbKVArg is the payload for raw key/value writes. Key and Value are already
+// encoded: the leader encodes the key with the store's key encoding and, for
+// Set, the value with the store's codec. Every node seals them with its own
+// key material when applying, so only logical bytes cross the wire.
+type dbKVArg struct {
+	Path   []string `json:"path"`
+	Bucket string   `json:"bucket"`
+	Key    []byte   `json:"key"`
+	Value  []byte   `json:"value,omitempty"`
+}
+
 // DB returns the replicated db sub-store.
 func (n *Node) DB() *DB {
 	if n == nil {
@@ -123,6 +134,81 @@ func (d *DB) DeleteStruct(ctx context.Context, data any) error {
 // Drop replicates db.Node.Drop.
 func (d *DB) Drop(ctx context.Context, data any) error {
 	return d.recordWrite(ctx, opDBDrop, "", "", data)
+}
+
+// Set replicates db.Node.Set. The value is encoded with the leader's codec
+// once; the resulting bytes are stored (and sealed) identically on every node,
+// so all nodes must run the same codec. A nil value stores a zero-length
+// value, exactly like the direct API.
+func (d *DB) Set(ctx context.Context, bucket string, key, value any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	node, err := d.localNode()
+	if err != nil {
+		return err
+	}
+	kb, err := db.EncodeKey(key, node.Codec())
+	if err != nil {
+		return fmt.Errorf("consensus: encode key: %w", err)
+	}
+	var raw []byte
+	if value != nil {
+		raw, err = node.Codec().Marshal(value)
+		if err != nil {
+			return fmt.Errorf("consensus: encode value: %w", err)
+		}
+	}
+	_, err = d.n.apply(opDBSet, dbKVArg{Path: d.path, Bucket: bucket, Key: kb, Value: raw})
+	return err
+}
+
+// SetBytes replicates db.Node.SetBytes. The bytes are stored as-is (and
+// sealed per node), so callers can replicate a value they encoded themselves.
+func (d *DB) SetBytes(ctx context.Context, bucket string, key any, value []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	node, err := d.localNode()
+	if err != nil {
+		return err
+	}
+	kb, err := db.EncodeKey(key, node.Codec())
+	if err != nil {
+		return fmt.Errorf("consensus: encode key: %w", err)
+	}
+	_, err = d.n.apply(opDBSet, dbKVArg{Path: d.path, Bucket: bucket, Key: kb, Value: value})
+	return err
+}
+
+// Delete replicates db.Node.Delete for a key/value entry.
+func (d *DB) Delete(ctx context.Context, bucket string, key any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	node, err := d.localNode()
+	if err != nil {
+		return err
+	}
+	kb, err := db.EncodeKey(key, node.Codec())
+	if err != nil {
+		return fmt.Errorf("consensus: encode key: %w", err)
+	}
+	_, err = d.n.apply(opDBDeleteKey, dbKVArg{Path: d.path, Bucket: bucket, Key: kb})
+	return err
+}
+
+// localNode returns the leader's local db node for this view. It is used to
+// encode keys and values exactly as a direct write would.
+func (d *DB) localNode() (db.Node, error) {
+	if d == nil || d.n == nil {
+		return nil, ErrClosed
+	}
+	st := d.n.storeHandle()
+	if st == nil {
+		return nil, ErrClosed
+	}
+	return dbNode(st, d.path), nil
 }
 
 func (d *DB) recordWrite(ctx context.Context, op, field string, value, data any) error {
@@ -224,4 +310,20 @@ func (f *fsm) applyDBDrop(ctx context.Context, a dbChange) any {
 		return err
 	}
 	return dbNode(st, a.Path).Drop(ctx, ptr)
+}
+
+func (f *fsm) applyDBSet(ctx context.Context, a dbKVArg) any {
+	st := f.node.storeHandle()
+	if st == nil {
+		return ErrClosed
+	}
+	return dbNode(st, a.Path).SetBytes(ctx, a.Bucket, a.Key, a.Value)
+}
+
+func (f *fsm) applyDBDeleteKey(ctx context.Context, a dbKVArg) any {
+	st := f.node.storeHandle()
+	if st == nil {
+		return ErrClosed
+	}
+	return dbNode(st, a.Path).Delete(ctx, a.Bucket, a.Key)
 }

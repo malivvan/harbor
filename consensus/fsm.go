@@ -139,6 +139,18 @@ func (f *fsm) applyCommand(index uint64, c Command) any {
 			return err
 		}
 		return f.applyDBDrop(ctx, a)
+	case opDBSet:
+		var a dbKVArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyDBSet(ctx, a)
+	case opDBDeleteKey:
+		var a dbKVArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyDBDeleteKey(ctx, a)
 
 	// ts
 	case opTSInsert:
@@ -191,6 +203,20 @@ func (f *fsm) applyCommand(index uint64, c Command) any {
 			return err
 		}
 		return f.applyVecCreate(ctx, a)
+	case opVecCreateCollectionOptions:
+		var a vecCreateOptionsArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyVecCreateOptions(ctx, a)
+	case opVecEnsureCollection:
+		var a vecNameArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyVecEnsure(ctx, a)
+	case opVecFlush:
+		return f.applyVecFlush(ctx)
 	case opVecUpsert:
 		var a vecUpsertArg
 		if err := decodeArg(index, c, &a); err != nil {
@@ -217,6 +243,42 @@ func (f *fsm) applyCommand(index uint64, c Command) any {
 			return err
 		}
 		return f.applyFSMkdir(a)
+	case opFSMkdirAll:
+		var a fsPathArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyFSMkdirAll(a)
+	case opFSTruncate:
+		var a fsPathArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyFSTruncate(a)
+	case opFSChmod:
+		var a fsPathArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyFSChmod(a)
+	case opFSChtimes:
+		var a fsPathArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyFSChtimes(a)
+	case opFSChown:
+		var a fsPathArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyFSChown(a)
+	case opFSSymlink:
+		var a fsPathArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyFSSymlink(a)
 	case opFSRemove:
 		var a fsPathArg
 		if err := decodeArg(index, c, &a); err != nil {

@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/harbor/internal/absfs"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -246,7 +245,7 @@ func TestFileSystemWithExternalContentFS(t *testing.T) {
 	contentFS := newContentStorageFS(t)
 
 	// Open filesystem with external content storage
-	fs, err := openFSWithContentForTest(t, tmpfile, "", contentFS)
+	fs, err := openFSWithContentForTest(t, tmpfile, "", contentFS.AsContentFS())
 	if err != nil {
 		t.Fatalf("OpenWithContentFS failed: %v", err)
 	}
@@ -384,7 +383,7 @@ func TestRemoveAllWithExternalStorage(t *testing.T) {
 	contentFS := newContentStorageFS(t)
 
 	// Open filesystem with external content storage
-	fs, err := openFSWithContentForTest(t, tmpfile, "", contentFS)
+	fs, err := openFSWithContentForTest(t, tmpfile, "", contentFS.AsContentFS())
 	if err != nil {
 		t.Fatalf("OpenWithContentFS failed: %v", err)
 	}
@@ -454,7 +453,7 @@ func TestSetContentFS(t *testing.T) {
 	contentFS := newContentStorageFS(t)
 
 	// Set content filesystem
-	fs.SetContentFS(contentFS)
+	fs.SetContentFS(contentFS.AsContentFS())
 
 	// Create a test file
 	f, err := fs.OpenFile("/test.txt", os.O_CREATE|os.O_WRONLY, 0644)
@@ -498,7 +497,7 @@ func TestOpenWithContentFS(t *testing.T) {
 	contentFS := newContentStorageFS(t)
 
 	// Create filesystem with content filesystem
-	fs, err := newFSWithContentForTest(db, "", contentFS)
+	fs, err := newFSWithContentForTest(db, "", contentFS.AsContentFS())
 	if err != nil {
 		t.Fatalf("OpenWithContentFS failed: %v", err)
 	}
@@ -534,7 +533,8 @@ func TestOpenWithContentFS(t *testing.T) {
 // openFSForTest opens a path-backed file system through a Store. The helper
 // owns the bbolt database and closes it during test cleanup.
 // newContentStorageFS returns an in-repo filesystem to use as the external
-// content storage of another filesystem.
+// content storage of another filesystem. Pass AsContentFS() where a ContentFS
+// is expected; the raw *FS is kept for assertions about stored content.
 func newContentStorageFS(t *testing.T) *FS {
 	t.Helper()
 
@@ -565,7 +565,7 @@ func openFSForTest(tb testing.TB, path, bucketpath string) (*FS, error) {
 	return store.Open(bucketpath)
 }
 
-func openFSWithContentForTest(tb testing.TB, path, bucketpath string, contentFS absfs.FileSystem) (*FS, error) {
+func openFSWithContentForTest(tb testing.TB, path, bucketpath string, contentFS ContentFS) (*FS, error) {
 	tb.Helper()
 
 	filesystem, err := openFSForTest(tb, path, bucketpath)
@@ -576,7 +576,7 @@ func openFSWithContentForTest(tb testing.TB, path, bucketpath string, contentFS 
 	return filesystem, nil
 }
 
-func newFSWithContentForTest(db *bolt.DB, bucketpath string, contentFS absfs.FileSystem) (*FS, error) {
+func newFSWithContentForTest(db *bolt.DB, bucketpath string, contentFS ContentFS) (*FS, error) {
 	filesystem, err := newFS(db, bucketpath, nil, nil)
 	if err != nil {
 		return nil, err

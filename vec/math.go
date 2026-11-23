@@ -51,12 +51,8 @@ func CalculateDistance(metric Distance, a, b []float32) float32 {
 // dotProduct computes the dot product (inner product) of two vectors.
 // It is the sum of element-wise products. Higher values indicate more similar vectors.
 func dotProduct(a, b []float32) float32 {
-	var sum float32
 	n := min(len(a), len(b))
-	for i := 0; i < n; i++ {
-		sum += a[i] * b[i]
-	}
-	return sum
+	return dotF32(a[:n], b[:n])
 }
 
 // cosineSimilarity computes the cosine similarity between two vectors.
@@ -95,11 +91,31 @@ func euclideanDistance(a, b []float32) float32 {
 // is equivalent to ranking by the true distance, but avoids a square root per
 // comparison; callers take the root for the final score.
 func euclideanDistanceSquared(a, b []float32) float32 {
-	var sum float32
 	n := min(len(a), len(b))
-	for i := 0; i < n; i++ {
-		diff := a[i] - b[i]
-		sum += diff * diff
+	return l2SquaredF32(a[:n], b[:n])
+}
+
+// cosineWithNorm is cosineSimilarity with the query's squared norm precomputed
+// once, so a scan over many points does not recompute it per comparison. a and
+// b must have equal length.
+func cosineWithNorm(a, b []float32, normA float32) float32 {
+	var dot, normB float32
+	for i := range a {
+		dot += a[i] * b[i]
+		normB += b[i] * b[i]
+	}
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+	return dot / float32(math.Sqrt(float64(normA))*math.Sqrt(float64(normB)))
+}
+
+// squaredNormF32 returns the squared Euclidean norm of a, precomputed once per
+// query for the cosine scan.
+func squaredNormF32(a []float32) float32 {
+	var sum float32
+	for _, x := range a {
+		sum += x * x
 	}
 	return sum
 }

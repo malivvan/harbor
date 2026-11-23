@@ -262,7 +262,14 @@ func containsBboltType(typ reflect.Type, bboltPkg string) bool {
 			}
 		case reflect.Struct:
 			for i := 0; i < typ.NumField(); i++ {
-				if visit(typ.Field(i).Type) {
+				f := typ.Field(i)
+				// Unexported fields are not part of the public surface. An
+				// anonymous unexported field still promotes its exported
+				// fields, so it is inspected.
+				if !f.IsExported() && !f.Anonymous {
+					continue
+				}
+				if visit(f.Type) {
 					return true
 				}
 			}

@@ -71,23 +71,63 @@ err = node.DB().From("actor").Save(ctx, &Actor{ID: 1})
 err = node.DB().UpdateField(ctx, &User{ID: "u1"}, "Name", "alicia")
 err = node.DB().DeleteStruct(ctx, &User{ID: "u1"})
 
+// db (raw key/value)
+err = node.DB().Set(ctx, "settings", "theme", "dark")  // value encoded on the leader
+err = node.DB().SetBytes(ctx, "blobs", "raw", raw)     // caller-encoded bytes
+err = node.DB().Delete(ctx, "settings", "theme")
+
 // ts (time series)
 err = node.TS().Insert(ctx, "cpu", ts.Point{Timestamp: now, Value: 42.0})
 err = node.TS().InsertMany(ctx, "cpu", pts)
 n, err := node.TS().DeleteRange(ctx, "cpu", start, end) // returns removed count
 err = node.TS().SetLabels(ctx, "cpu", map[string]string{"host": "a"})
+err = node.TS().SetRetention(ctx, "cpu", ts.Retention{MaxPoints: 1000})
 
 // vec (vectors)
 err = node.Vec().CreateCollection("colors", 2, vec.Dot, false)
+err = node.Vec().CreateCollectionWithOptions(ctx, opts)
+err = node.Vec().EnsureCollection(ctx, "colors")
 err = node.Vec().Upsert("colors", points)
 err = node.Vec().Delete("colors", []string{"red"})
+err = node.Vec().Flush(ctx) // drain every replica's write buffer
 
 // fs (files)
-fs := node.FS().Open("data")
-err = fs.Mkdir(ctx, "/docs", 0o755)
-err = fs.WriteFile(ctx, "/docs/readme.txt", []byte("hello"), 0o644)
-err = fs.Rename(ctx, "/docs/readme.txt", "/docs/README.txt")
+fsys := node.FS().Open("data")
+err = fsys.Mkdir(ctx, "/docs", 0o755)
+err = fsys.MkdirAll(ctx, "/docs/2026/q1", 0o755)
+err = fsys.WriteFile(ctx, "/docs/readme.txt", []byte("hello"), 0o644)
+err = fsys.Rename(ctx, "/docs/readme.txt", "/docs/README.txt")
+err = fsys.Truncate(ctx, "/docs/README.txt", 0)
+err = fsys.Chmod(ctx, "/docs/README.txt", 0o600)
+err = fsys.Chtimes(ctx, "/docs/README.txt", atime, mtime)
+err = fsys.Chown(ctx, "/docs/README.txt", uid, gid)
+err = fsys.Symlink(ctx, "/docs/README.txt", "/docs/latest")
 ```
+
+Streaming writes buffer in memory and are replicated once, on `Close`, so a
+partial file never enters the raft log:
+
+```go
+f, err := fsys.Create(ctx, "/docs/report.txt", 0o644)
+if err != nil {
+	return err
+}
+if _, err := io.Copy(f, source); err != nil { // many Write calls
+	return err
+}
+err = f.Close() // one command with the complete content
+```
+
+`OpenWriter` opens the leader's current content for appending; `WriteAt` and
+`Truncate` edit the buffer before `Close` publishes it. Writes made elsewhere
+between `OpenWriter` and `Close` are not observed: the buffer replaces the
+content.
+
+Records and raw key/value writes are encoded on the leader and applied
+verbatim, so all nodes must run the same codec. Keys use the same
+type-sensitive encoding as direct access, so an int key and a string key never
+collide. Directory times are pinned into `Mkdir`/`MkdirAll` commands, and
+snapshots drain the vector buffer first, so buffered points survive a restore.
 
 ## Reading
 

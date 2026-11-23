@@ -24,6 +24,8 @@ const (
 	opDBUpdateField = "db.update_field"
 	opDBDelete      = "db.delete"
 	opDBDrop        = "db.drop"
+	opDBSet         = "db.set"
+	opDBDeleteKey   = "db.delete_key"
 
 	// ts store
 	opTSInsert       = "ts.insert"
@@ -35,17 +37,26 @@ const (
 	opTSDeleteSeries = "ts.delete_series"
 
 	// vec store
-	opVecCreateCollection = "vec.create_collection"
-	opVecUpsert           = "vec.upsert"
-	opVecDelete           = "vec.delete"
-	opVecDropCollection   = "vec.drop_collection"
+	opVecCreateCollection        = "vec.create_collection"
+	opVecCreateCollectionOptions = "vec.create_collection_options"
+	opVecEnsureCollection        = "vec.ensure_collection"
+	opVecUpsert                  = "vec.upsert"
+	opVecDelete                  = "vec.delete"
+	opVecDropCollection          = "vec.drop_collection"
+	opVecFlush                   = "vec.flush"
 
 	// fs store
 	opFSMkdir     = "fs.mkdir"
+	opFSMkdirAll  = "fs.mkdir_all"
 	opFSRemove    = "fs.remove"
 	opFSRename    = "fs.rename"
 	opFSRemoveAll = "fs.remove_all"
 	opFSWrite     = "fs.write"
+	opFSTruncate  = "fs.truncate"
+	opFSChmod     = "fs.chmod"
+	opFSChtimes   = "fs.chtimes"
+	opFSChown     = "fs.chown"
+	opFSSymlink   = "fs.symlink"
 	opFSDeleteFS  = "fs.delete_fs"
 )
 

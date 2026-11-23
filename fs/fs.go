@@ -1,11 +1,11 @@
 package fs
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -32,8 +32,10 @@ var ErrIncompatibleVersion = errors.New("fs: incompatible on-disk format version
 // formatVersionKey records the on-disk format revision in the state bucket.
 const formatVersionKey = "formatVersion"
 
-// fsFormatVersion is the current filesystem format revision.
-const fsFormatVersion uint64 = 1
+// FormatVersion is the on-disk file-system format revision this build writes
+// and accepts. The first release has a single version 1; any other value fails
+// the open with ErrIncompatibleVersion instead of being reinterpreted.
+const FormatVersion uint64 = 1
 
 // FS implements absfs.FileSystem on top of bbolt.
 type FS struct {
@@ -43,7 +45,7 @@ type FS struct {
 	rootIno     uint64
 	cwd         string
 	cache       *inodeCache
-	contentFS   absfs.FileSystem // Optional external filesystem for storing file content
+	contentFS   ContentFS // Optional external content store (see ContentFS)
 
 	// enc holds the encryption state. It is an atomic pointer so that key
 	// rotation (Store.adoptEnc) can swap it while other goroutines are doing
@@ -225,11 +227,11 @@ func (fs *FS) Close() error {
 	return nil
 }
 
-// SetContentFS sets an external filesystem for storing file content. The
-// backend must implement the module-internal absfs.FileSystem interface; an
-// *FS from this package qualifies. File content is then stored in that
-// filesystem instead of in BoltDB. Call this before any file operations.
-func (fs *FS) SetContentFS(contentFS absfs.FileSystem) {
+// SetContentFS sets an external store for file content. The backend implements
+// the exported ContentFS interface; an *FS from this package can be adapted
+// with AsContentFS. File content is then stored in that backend instead of in
+// BoltDB. Call this before any file operations.
+func (fs *FS) SetContentFS(contentFS ContentFS) {
 	fs.contentFS = contentFS
 }
 
@@ -239,14 +241,14 @@ func checkFormatVersion(b *fsBucket) error {
 	raw := b.state.Get([]byte(formatVersionKey))
 	if raw == nil {
 		var buf [8]byte
-		binary.BigEndian.PutUint64(buf[:], fsFormatVersion)
+		binary.BigEndian.PutUint64(buf[:], FormatVersion)
 		return b.state.Put([]byte(formatVersionKey), buf[:])
 	}
 	if len(raw) != 8 {
 		return fmt.Errorf("%w: malformed version marker", ErrIncompatibleVersion)
 	}
-	if v := binary.BigEndian.Uint64(raw); v != fsFormatVersion {
-		return fmt.Errorf("%w: filesystem format %d, this build supports %d", ErrIncompatibleVersion, v, fsFormatVersion)
+	if v := binary.BigEndian.Uint64(raw); v != FormatVersion {
+		return fmt.Errorf("%w: filesystem format %d, this build supports %d", ErrIncompatibleVersion, v, FormatVersion)
 	}
 	return nil
 }
@@ -647,31 +649,12 @@ func (fs *FS) saveData(ino uint64, data []byte) error {
 
 	// Use external content filesystem if available, otherwise fall back to BoltDB data bucket
 	if fs.contentFS != nil {
-		contentPath := inoToPath(ino)
-
-		// Ensure parent directory exists
-		dir := path.Dir(contentPath)
-		if err := fs.contentFS.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
-		}
-
-		f, err := fs.contentFS.OpenFile(contentPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-		if err != nil {
-			return fmt.Errorf("failed to create file: %w", err)
-		}
-
 		sealed, err := fs.enc.Load().sealContent(data)
-		if err == nil {
-			_, err = f.Write(sealed)
-		}
-		// The external filesystem may flush/upload on Close (s3fs does), so the
-		// Close error is part of the write result.
-		closeErr := f.Close()
 		if err != nil {
-			return fmt.Errorf("failed to write data: %w", err)
+			return err
 		}
-		if closeErr != nil {
-			return fmt.Errorf("failed to finalize data: %w", closeErr)
+		if err := fs.contentFS.WriteFile(inoToPath(ino), sealed, 0o644); err != nil {
+			return fmt.Errorf("failed to write content: %w", err)
 		}
 		return nil
 	}
@@ -702,22 +685,12 @@ func (fs *FS) loadData(ino uint64) ([]byte, error) {
 
 	// Use external content filesystem if available, otherwise fall back to BoltDB data bucket
 	if fs.contentFS != nil {
-		contentPath := inoToPath(ino)
-
-		f, err := fs.contentFS.OpenFile(contentPath, os.O_RDONLY, 0)
+		data, err := fs.contentFS.ReadFile(inoToPath(ino))
 		if err != nil {
 			if os.IsNotExist(err) {
 				return []byte{}, nil
 			}
-			return nil, fmt.Errorf("failed to open file: %w", err)
-		}
-		defer func() {
-			_ = f.Close()
-		}()
-
-		data, err := io.ReadAll(f)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read file: %w", err)
+			return nil, fmt.Errorf("failed to read content: %w", err)
 		}
 
 		plain, err := fs.enc.Load().openContent(data)
@@ -1018,9 +991,65 @@ func (fs *FS) Rename(oldpath, newpath string) error {
 	return fs.auditEntry("rename", path.Join(dstDir, dstFilename), digestOf([]byte(path.Join(srcDir, srcFilename))))
 }
 
+// CopyOptions controls CopyWithOptions and CopyContext. Its zero value keeps
+// the behavior of Copy: fail when the destination exists, preserve metadata
+// and recreate symlinks.
+type CopyOptions struct {
+	// Overwrite replaces an existing destination. The new content is committed
+	// before the old destination is released, so a failed copy leaves the
+	// destination intact.
+	Overwrite bool
+
+	// SkipSymlinks omits symlinks from a copied directory instead of
+	// recreating them. Copying a symlink itself with this option fails with
+	// os.ErrInvalid.
+	SkipSymlinks bool
+
+	// SkipMetadata gives the copy default permissions (0644 files, 0755
+	// directories), no owner and fresh timestamps instead of preserving the
+	// source's mode, owner and times.
+	SkipMetadata bool
+
+	// Progress, when non-nil, is called after each regular file's content is
+	// written with the number of content bytes copied so far. It is called
+	// with the file system locked, so it must not call back into the same FS.
+	Progress func(copied int64)
+}
+
+// copyState carries the options and cumulative progress through a copy.
+type copyState struct {
+	ctx    context.Context
+	opts   CopyOptions
+	copied int64
+}
+
 // Copy is a convenience function that duplicates the `source` path to the
-// `newpath`
+// `newpath`, failing if the destination exists.
 func (fs *FS) Copy(source, destination string) error {
+	return fs.CopyWithOptions(source, destination, CopyOptions{})
+}
+
+// CopyWithOptions copies source to destination with explicit options. It is
+// CopyContext with a background context.
+func (fs *FS) CopyWithOptions(source, destination string, opts CopyOptions) error {
+	return fs.CopyContext(context.Background(), source, destination, opts)
+}
+
+// CopyContext copies source to destination, checking ctx as it walks and
+// recursively copies the tree. Cancellation stops at the next loop checkpoint
+// and removes the partially written copy; the destination name is only
+// published once the whole copy has succeeded.
+//
+// The error for a canceled context is ctx.Err() itself, so callers can match
+// it with errors.Is.
+func (fs *FS) CopyContext(ctx context.Context, source, destination string, opts CopyOptions) error {
+	if ctx == nil {
+		return ErrNilContext
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -1045,7 +1074,7 @@ func (fs *FS) Copy(source, destination string) error {
 		pathErr.Path = dstDir
 		return pathErr
 	}
-	if dstChild != nil {
+	if dstChild != nil && !opts.Overwrite {
 		pathErr.Err = os.ErrExist
 		pathErr.Path = path.Join(dstDir, dstFilename)
 		return pathErr
@@ -1057,34 +1086,129 @@ func (fs *FS) Copy(source, destination string) error {
 		return pathErr
 	}
 
-	ino, err := fs.copyNode(srcChild)
+	// Replacing a file with a directory (or the reverse) would discard the
+	// shape the caller asked for; report it like Rename does. Directory over
+	// directory is allowed when the destination is empty (checked below).
+	if dstChild != nil && (srcChild.IsDir() || dstChild.IsDir()) {
+		pathErr.Path = path.Join(dstDir, dstFilename)
+		switch {
+		case dstChild.IsDir() && !srcChild.IsDir():
+			pathErr.Err = syscall.EISDIR
+		case !dstChild.IsDir() && srcChild.IsDir():
+			pathErr.Err = syscall.EEXIST
+		}
+		if pathErr.Err != nil {
+			return pathErr
+		}
+	}
+
+	// Replacing a non-empty directory would orphan its children; require the
+	// caller to clear it first.
+	if dstChild != nil && dstChild.IsDir() && len(dstChild.Children) > 0 {
+		pathErr.Path = path.Join(dstDir, dstFilename)
+		pathErr.Err = syscall.ENOTEMPTY
+		return pathErr
+	}
+
+	if opts.SkipSymlinks && srcChild.Mode&os.ModeSymlink != 0 {
+		pathErr.Err = fmt.Errorf("%w: source is a symlink and SkipSymlinks is set", os.ErrInvalid)
+		return pathErr
+	}
+
+	st := &copyState{ctx: ctx, opts: opts}
+	ino, err := fs.copyNodeCtx(srcChild, st)
 	if err != nil {
 		pathErr.Err = err
 		return pathErr
 	}
 
-	_, err = dstParent.Link(dstFilename, ino)
-	if err != nil {
+	// Do not publish a copy that cancellation superseded.
+	if err := ctx.Err(); err != nil {
+		_ = fs.deleteInode(ino)
+		return err
+	}
+
+	published := false
+	defer func() {
+		if !published {
+			_ = fs.deleteInode(ino)
+		}
+	}()
+
+	if _, err := dstParent.Link(dstFilename, ino); err != nil {
 		pathErr.Err = err
 		return pathErr
 	}
 
-	_, err = fs.saveInode(dstParent)
+	// Persist the new destination name and release a replaced inode in one
+	// transaction, like Rename: a failure cannot leave the new name without its
+	// inode or the old inode dangling with an inflated link count.
+	deleteReplaced := false
+	err = fs.db.Update(func(tx *bolt.Tx) error {
+		b, err := fs.openFsBucketWithCache(tx)
+		if err != nil {
+			return err
+		}
+		if err := b.PutInode(dstParent.Ino, dstParent); err != nil {
+			return err
+		}
+		if dstChild == nil {
+			return nil
+		}
+		if dstChild.countDown() == 0 {
+			deleteReplaced = true
+			key := i2b(dstChild.Ino)
+			if err := b.inodes.Delete(key); err != nil {
+				return err
+			}
+			if fs.contentFS == nil {
+				if err := b.data.Delete(key); err != nil {
+					return err
+				}
+			}
+			if err := b.symlinks.Delete(key); err != nil {
+				return err
+			}
+			if err := b.deleteAllChunks(dstChild.Ino); err != nil {
+				return err
+			}
+			return b.deleteDirents(dstChild.Ino)
+		}
+		return b.PutInode(dstChild.Ino, dstChild)
+	})
 	if err != nil {
 		pathErr.Err = err
 		return pathErr
 	}
+	if deleteReplaced && fs.contentFS != nil {
+		if err := fs.contentFS.Remove(inoToPath(dstChild.Ino)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
 
+	published = true
 	return nil
 }
 
-// copyNode deep-copies src into a newly allocated inode, returning the new
+// copyNode deep-copies src into a newly allocated inode with default options.
+func (fs *FS) copyNode(src *iNode) (uint64, error) {
+	return fs.copyNodeCtx(src, &copyState{ctx: context.Background()})
+}
+
+// copyNodeCtx deep-copies src into a newly allocated inode, returning the new
 // inode number. It copies the file content (data bucket, chunks, external
 // contentFS file) and symlink targets, and recursively copies directory
 // children into brand-new inodes so the copy is fully independent of the
 // source.
-func (fs *FS) copyNode(src *iNode) (uint64, error) {
+func (fs *FS) copyNodeCtx(src *iNode, st *copyState) (uint64, error) {
+	if err := st.ctx.Err(); err != nil {
+		return 0, err
+	}
+
 	node := copyInode(src)
+	if st.opts.SkipMetadata {
+		resetInodeMetadata(node)
+	}
 	node.Ino = 0
 	node.Nlink = 1
 	if src.IsDir() {
@@ -1120,11 +1244,17 @@ func (fs *FS) copyNode(src *iNode) (uint64, error) {
 		}
 	case src.IsDir():
 		for _, child := range src.Children {
+			if err := st.ctx.Err(); err != nil {
+				return 0, err
+			}
 			childNode, err := fs.loadInode(child.Ino)
 			if err != nil {
 				return 0, err
 			}
-			childIno, err := fs.copyNode(childNode)
+			if st.opts.SkipSymlinks && childNode.Mode&os.ModeSymlink != 0 {
+				continue
+			}
+			childIno, err := fs.copyNodeCtx(childNode, st)
 			if err != nil {
 				return 0, err
 			}
@@ -1140,13 +1270,39 @@ func (fs *FS) copyNode(src *iNode) (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
+		// Check between reading and writing, when cancelling does no damage.
+		if err := st.ctx.Err(); err != nil {
+			return 0, err
+		}
 		if err := fs.saveData(newIno, data); err != nil {
 			return 0, err
+		}
+		st.copied += int64(len(data))
+		if st.opts.Progress != nil {
+			st.opts.Progress(st.copied)
 		}
 	}
 
 	copied = true
 	return newIno, nil
+}
+
+// resetInodeMetadata gives a copied inode default permissions, no owner and
+// fresh timestamps, keeping only its file type.
+func resetInodeMetadata(node *iNode) {
+	switch {
+	case node.Mode&os.ModeSymlink != 0:
+		node.Mode = os.ModeSymlink | 0o777
+	case node.IsDir():
+		node.Mode = os.ModeDir | 0o755
+	default:
+		node.Mode = 0o644
+	}
+	node.Uid, node.Gid = 0, 0
+	now := time.Now()
+	node.SetCtime(now)
+	node.SetAtime(now)
+	node.SetMtime(now)
 }
 
 // readLink returns the symlink target stored for ino.

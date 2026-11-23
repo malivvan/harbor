@@ -30,6 +30,7 @@ type Collection struct {
 	writeBuf       []PointStruct // points buffered for the next batch write
 	flushThreshold int           // flush when writeBuf reaches this size
 	lastVersion    uint64        // last store-managed Version handed out
+	closed         bool          // Close has flushed and retired this handle
 
 	// tombMu guards tombstones: IDs deleted while a flush batch was detached.
 	// A failed flush re-buffers the detached batch; filtering it against these
@@ -87,6 +88,15 @@ func (o CollectionOptions) resolve() (CollectionOptions, error) {
 		o.FlushThreshold = DefaultFlushThreshold
 	}
 	return o, nil
+}
+
+// Validate reports whether the options describe a usable collection. It applies
+// the same checks as NewCollectionWithOptions without creating anything: a name
+// is required, the dimension must be positive, the metric must be Cosine,
+// Euclid or Dot, and HNSW parameters are normalized when UseHNSW is set.
+func (o CollectionOptions) Validate() error {
+	_, err := o.resolve()
+	return err
 }
 
 // NewCollection initializes a new vector collection, optionally loading from storage.
@@ -210,7 +220,7 @@ func (s *Store) newCollection(opts CollectionOptions) (*Collection, error) {
 			UseHNSW:           useHNSW,
 			HNSWParams:        hnswParams,
 			UseQuant:          s.useQuant,
-			FormatVersion:     collectionFormatVersion,
+			FormatVersion:     CollectionFormatVersion,
 			SchemaFingerprint: StoredPointSchemaFingerprint,
 		}
 		if err := s.SaveCollectionMeta(name, meta); err != nil {
@@ -237,6 +247,10 @@ func (c *Collection) Upsert(points []PointStruct) error {
 		return err
 	}
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return ErrClosed
+	}
 
 	// 1. Validate and deep-copy: the caller may reuse its vectors/payloads
 	// after Upsert, and Version is store-managed.
@@ -298,9 +312,14 @@ func (c *Collection) Upsert(points []PointStruct) error {
 	return nil
 }
 
-// Flush writes every buffered point in writeBuf to bbolt.
+// Flush writes every buffered point in writeBuf to bbolt. It returns ErrClosed
+// after Close.
 func (c *Collection) Flush() error {
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return ErrClosed
+	}
 	flush := c.writeBuf
 	c.writeBuf = nil
 	if c.storage == nil || len(flush) == 0 {
@@ -311,6 +330,13 @@ func (c *Collection) Flush() error {
 	c.storage.flushMu.Lock()
 	c.mu.Unlock()
 
+	return c.commitFlush(flush)
+}
+
+// commitFlush persists a detached buffer. The caller holds flushMu and must
+// have released c.mu; commitFlush releases flushMu and re-takes c.mu only to
+// re-buffer a failed batch.
+func (c *Collection) commitFlush(flush []PointStruct) error {
 	started := time.Now()
 	err := c.storage.UpsertPoints(c.Name, flush)
 	c.storage.flushMu.Unlock()
@@ -339,13 +365,66 @@ func (c *Collection) observeFlush(d time.Duration, points int, err error) {
 	metrics.Counter(c.storage.obs, metrics.MetricVecFlushTotal, 1, labels)
 }
 
-// Close flushes the collection's buffered points. It deliberately does NOT
-// close the Store's bbolt handle: that handle is shared with every sibling
-// collection (and, in the harbor root package, with the other sub-stores) and
-// is owned by whoever created it. Call Store.Flush/Store.Close to finish the
-// whole store.
+// Close flushes the collection's buffered points and retires the handle: later
+// operations return ErrClosed. Close is idempotent. If the flush fails, the
+// collection stays open so Close can be retried.
+//
+// Close deliberately does NOT close the Store's bbolt handle: that handle is
+// shared with every sibling collection (and, in the harbor root package, with
+// the other sub-stores) and is owned by whoever created it. Call
+// Store.Flush/Store.Close to finish the whole store.
 func (c *Collection) Close() error {
-	return c.Flush()
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil
+	}
+	c.closed = true
+	flush := c.writeBuf
+	c.writeBuf = nil
+	if c.storage == nil || len(flush) == 0 {
+		c.mu.Unlock()
+		if c.storage != nil {
+			c.storage.untrackCollection(c.Name)
+		}
+		return nil
+	}
+
+	c.storage.flushMu.Lock()
+	c.mu.Unlock()
+
+	if err := c.commitFlush(flush); err != nil {
+		c.mu.Lock()
+		c.closed = false
+		c.mu.Unlock()
+		return err
+	}
+	c.storage.untrackCollection(c.Name)
+	return nil
+}
+
+// Closed reports whether Close has retired this handle.
+func (c *Collection) Closed() bool {
+	if c == nil {
+		return true
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.closed
+}
+
+// Pending reports how many points are buffered in memory and not yet durable.
+// Flush or Close drains them.
+func (c *Collection) Pending() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.writeBuf)
 }
 
 // Search performs a similarity search using the underlying VectorIndex.
@@ -363,6 +442,9 @@ func (c *Collection) Search(queryVector []float32, filter *Filter, topK int) ([]
 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	if c.closed {
+		return nil, ErrClosed
+	}
 
 	started := time.Now()
 	results, err := c.index.Search(queryVector, filter, topK)
@@ -395,6 +477,9 @@ func (c *Collection) Count() int {
 func (c *Collection) GetPointsByFilter(filter *Filter) ([]PointStruct, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	if c.closed {
+		return nil, ErrClosed
+	}
 
 	// A nil filter matches every point, consistent with Search.
 	return c.index.GetPointsByFilter(filter), nil
@@ -406,6 +491,9 @@ func (c *Collection) GetPointsByFilter(filter *Filter) ([]PointStruct, error) {
 func (c *Collection) Get(id string) (*PointStruct, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	if c.closed {
+		return nil, ErrClosed
+	}
 
 	point, err := c.index.Get(id)
 	if err != nil {
@@ -450,6 +538,10 @@ func (c *Collection) ListPoints(filter *Filter, opts ListOptions) ([]PointStruct
 	}
 
 	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return nil, ErrClosed
+	}
 	ids := c.sortedFilterIDs(filter)
 	c.mu.RUnlock()
 
@@ -487,6 +579,10 @@ func (c *Collection) ForEachPoint(filter *Filter, fn func(PointStruct) error) er
 	}
 
 	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return ErrClosed
+	}
 	ids := c.sortedFilterIDs(filter)
 	c.mu.RUnlock()
 
@@ -517,6 +613,9 @@ func (c *Collection) ForEachPoint(filter *Filter, fn func(PointStruct) error) er
 func (c *Collection) Delete(points []string, filter *Filter) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return 0, ErrClosed
+	}
 
 	// First, determine which IDs to delete
 	var targetIDs []string

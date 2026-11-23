@@ -49,6 +49,13 @@ type Config struct {
 	// Audit, when non-nil, receives an entry for every committed write.
 	Audit audit.Sink
 
+	// SharedDB reports that the caller owns the bbolt handle. Store.Close then
+	// flushes buffered points and releases the wrapper without closing the
+	// handle, which is what an embedding store (the harbor root package) needs.
+	// It is equivalent to calling SetOwnsDB(false) after Open. The zero value
+	// keeps standalone ownership: Close closes the handle.
+	SharedDB bool
+
 	// Metrics, when non-nil, receives search/flush counters, candidate counts
 	// and tracing spans. A nil Observer disables instrumentation.
 	Metrics metrics.Observer
@@ -56,6 +63,41 @@ type Config struct {
 
 func (c Config) encryptionEnabled() bool {
 	return c.EncryptPoints || c.EncryptPointIDs || c.EncryptCollectionNames
+}
+
+// Validate reports whether the configuration can be opened. Encryption needs a
+// valid secret; UseQuant without a Quantizer is valid because Normalize fills in
+// the default SQ8 quantizer.
+func (c Config) Validate() error {
+	if !c.encryptionEnabled() {
+		return nil
+	}
+	_, err := crypto.ResolveKey(c.Secret)
+	return err
+}
+
+// Normalize returns the configuration with defaults applied and validates it:
+// UseQuant selects the default quantizer when none is set, and empty Root
+// elements are dropped. Open calls Normalize, so the public validation and the
+// open path cannot drift.
+func (c Config) Normalize() (Config, error) {
+	if err := c.Validate(); err != nil {
+		return Config{}, err
+	}
+	if c.UseQuant && c.Quantizer == nil {
+		c.Quantizer = NewSQ8Quantizer()
+	}
+	if len(c.Root) > 0 {
+		root := make([][]byte, 0, len(c.Root))
+		for _, part := range c.Root {
+			if len(part) == 0 {
+				continue
+			}
+			root = append(root, append([]byte(nil), part...))
+		}
+		c.Root = root
+	}
+	return c, nil
 }
 
 // Key domains. Deterministic key encryption is domain-separated, so the same

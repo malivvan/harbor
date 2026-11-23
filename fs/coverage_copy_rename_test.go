@@ -78,7 +78,7 @@ func TestCopyFileDirectoryAndSymlink(t *testing.T) {
 
 func TestCopyWithContentFS(t *testing.T) {
 	fsys := openTestFS(t)
-	fsys.SetContentFS(newContentStorageFS(t))
+	fsys.SetContentFS(newContentStorageFS(t).AsContentFS())
 	writeTestFile(t, fsys, "/external.txt", "external")
 	require.NoError(t, fsys.Mkdir("/dir", 0755))
 	writeTestFile(t, fsys, "/dir/child", "child")

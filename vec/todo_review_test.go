@@ -43,7 +43,8 @@ func TestStoreCloseFlushesBufferedPoints(t *testing.T) {
 	require.Len(t, loaded, 1)
 }
 
-// TestCollectionCloseKeepsSharedStoreUsable guards V2.
+// TestCollectionCloseKeepsSharedStoreUsable guards collection Close keeping the
+// shared store usable.
 func TestCollectionCloseKeepsSharedStoreUsable(t *testing.T) {
 	store := newTempStore(t)
 
@@ -265,7 +266,7 @@ func TestCollectionMetaRecordsSchemaFingerprint(t *testing.T) {
 
 	meta, err := store.LoadCollectionMeta("docs")
 	require.NoError(t, err)
-	require.Equal(t, uint32(collectionFormatVersion), meta.FormatVersion)
+	require.Equal(t, uint32(CollectionFormatVersion), meta.FormatVersion)
 	require.Equal(t, StoredPointSchemaFingerprint, meta.SchemaFingerprint)
 
 	// A different fingerprint means the stored blobs cannot be reinterpreted.

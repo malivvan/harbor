@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 
 	"github.com/malivvan/harbor/audit"
-	"github.com/malivvan/harbor/internal/absfs"
 	"github.com/malivvan/harbor/metrics"
 	bolt "go.etcd.io/bbolt"
 )
@@ -74,6 +73,11 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		if err := validateBucketName(string(part)); err != nil {
 			return nil, err
 		}
+	}
+
+	cfg, err := cfg.Normalize()
+	if err != nil {
+		return nil, err
 	}
 
 	enc, err := resolveConfig(cfg)
@@ -145,9 +149,9 @@ func (s *Store) Open(name string) (*FS, error) {
 }
 
 // OpenWithContentFS creates or opens the named file system with an external
-// content filesystem. The backend must implement the module-internal
-// absfs.FileSystem interface; an *FS from this package qualifies.
-func (s *Store) OpenWithContentFS(name string, contentFS absfs.FileSystem) (*FS, error) {
+// content store. The backend implements the exported ContentFS interface; an
+// *FS from this package can be adapted with AsContentFS.
+func (s *Store) OpenWithContentFS(name string, contentFS ContentFS) (*FS, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrNilParam
 	}

@@ -128,7 +128,7 @@ func TestSaveDataBranches(t *testing.T) {
 
 	// Content filesystem storage.
 	content := newContentStorageFS(t)
-	fsys.SetContentFS(content)
+	fsys.SetContentFS(content.AsContentFS())
 	require.NoError(t, fsys.saveData(ino, []byte("external")))
 	data, err = fsys.loadData(ino)
 	require.NoError(t, err)
@@ -180,7 +180,7 @@ func TestStoreHelpers(t *testing.T) {
 	_, err = store.Open("a/b")
 	require.ErrorIs(t, err, ErrNilParam)
 
-	fsys, err := store.OpenWithContentFS("actual", newContentStorageFS(t))
+	fsys, err := store.OpenWithContentFS("actual", newContentStorageFS(t).AsContentFS())
 	require.NoError(t, err)
 	require.NotNil(t, fsys)
 

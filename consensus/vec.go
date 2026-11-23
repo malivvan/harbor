@@ -30,6 +30,16 @@ type vecDropArg struct {
 	Name string `json:"name"`
 }
 
+// vecNameArg is the payload for operations that only name a collection.
+type vecNameArg struct {
+	Name string `json:"name"`
+}
+
+// vecCreateOptionsArg is the payload for CreateCollectionWithOptions.
+type vecCreateOptionsArg struct {
+	Options vec.CollectionOptions `json:"options"`
+}
+
 // Vec returns the replicated vec sub-store.
 func (n *Node) Vec() *Vec {
 	if n == nil {
@@ -44,6 +54,46 @@ func (v *Vec) CreateCollection(name string, vectorLen int, metric vec.Distance, 
 		return ErrClosed
 	}
 	_, err := v.n.apply(opVecCreateCollection, vecCreateArg{Name: name, VectorLen: vectorLen, Metric: metric, UseHNSW: useHNSW})
+	return err
+}
+
+// CreateCollectionWithOptions replicates vec.Store.NewCollectionWithOptions,
+// including the per-collection flush threshold and HNSW parameters.
+func (v *Vec) CreateCollectionWithOptions(ctx context.Context, opts vec.CollectionOptions) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if v == nil || v.n == nil {
+		return ErrClosed
+	}
+	_, err := v.n.apply(opVecCreateCollectionOptions, vecCreateOptionsArg{Options: opts})
+	return err
+}
+
+// EnsureCollection replicates vec.Store.EnsureCollection, creating the
+// collection when it does not exist.
+func (v *Vec) EnsureCollection(ctx context.Context, name string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if v == nil || v.n == nil {
+		return ErrClosed
+	}
+	_, err := v.n.apply(opVecEnsureCollection, vecNameArg{Name: name})
+	return err
+}
+
+// Flush replicates vec.Store.Flush. Because vector writes are buffered, this
+// is the log point at which every replica drains its buffer, so a snapshot or
+// read taken afterwards sees the same points on every node.
+func (v *Vec) Flush(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if v == nil || v.n == nil {
+		return ErrClosed
+	}
+	_, err := v.n.apply(opVecFlush, nil)
 	return err
 }
 
@@ -81,6 +131,31 @@ func (f *fsm) applyVecCreate(ctx context.Context, a vecCreateArg) any {
 	}
 	_, err := st.Vec().NewCollection(a.Name, a.VectorLen, a.Metric, a.UseHNSW)
 	return err
+}
+
+func (f *fsm) applyVecCreateOptions(ctx context.Context, a vecCreateOptionsArg) any {
+	st := f.node.storeHandle()
+	if st == nil {
+		return ErrClosed
+	}
+	_, err := st.Vec().NewCollectionWithOptions(a.Options)
+	return err
+}
+
+func (f *fsm) applyVecEnsure(ctx context.Context, a vecNameArg) any {
+	st := f.node.storeHandle()
+	if st == nil {
+		return ErrClosed
+	}
+	return st.Vec().EnsureCollection(a.Name)
+}
+
+func (f *fsm) applyVecFlush(ctx context.Context) any {
+	st := f.node.storeHandle()
+	if st == nil {
+		return ErrClosed
+	}
+	return st.Vec().Flush()
 }
 
 func (f *fsm) applyVecUpsert(ctx context.Context, a vecUpsertArg) any {

@@ -22,6 +22,10 @@ series := tsStore.Series("cpu")
 `ts.Open` borrows the database; the caller owns its lifecycle. `Store.Close`
 releases the wrapper only.
 
+`ts.Config` exposes `Validate()` and `Normalize()`, matching the checks in
+`ts.Open`: `BlockDuration` must be non-negative, and encryption needs a
+non-empty `Root` plus a 32-byte `Secret`.
+
 ## Points and series
 
 ```go

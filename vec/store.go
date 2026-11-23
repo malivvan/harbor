@@ -321,22 +321,9 @@ func Open(ctx context.Context, bdb *bbolt.DB, cfg Config) (*Store, error) {
 		return nil, err
 	}
 
-	var useQuant bool
-	var quantizer Quantizer
-	if cfg.UseQuant {
-		useQuant = cfg.UseQuant
-		quantizer = cfg.Quantizer
-	}
-	if useQuant && quantizer == nil {
-		quantizer = NewSQ8Quantizer()
-	}
-
-	var root [][]byte
-	for _, part := range cfg.Root {
-		if len(part) == 0 {
-			continue
-		}
-		root = append(root, append([]byte(nil), part...))
+	cfg, err := cfg.Normalize()
+	if err != nil {
+		return nil, err
 	}
 
 	enc, err := resolveConfig(cfg)
@@ -351,15 +338,17 @@ func Open(ctx context.Context, bdb *bbolt.DB, cfg Config) (*Store, error) {
 
 	store := &Store{
 		db:          bdb,
-		quantizer:   quantizer,
-		useQuant:    useQuant,
-		root:        root,
+		quantizer:   cfg.Quantizer,
+		useQuant:    cfg.UseQuant,
+		root:        cfg.Root,
 		collections: make(map[string]*Collection),
 		audit:       cfg.Audit,
 		obs:         cfg.Metrics,
 	}
 	store.enc.Store(enc)
-	store.ownsDB.Store(true)
+	// Standalone use owns the handle; an embedding store sets SharedDB so
+	// Close never closes a handle it did not open.
+	store.ownsDB.Store(!cfg.SharedDB)
 
 	if err := store.checkMode(ctx); err != nil {
 		return nil, err
@@ -374,8 +363,12 @@ var ErrStorageNotOpen = errors.New("storage is not open")
 
 // checkOpen reports whether the store can serve requests. Every exported
 // method calls it before touching the database so that a Store without a
-// database returns an error instead of panicking.
+// database returns an error instead of panicking. A nil or zero-value Store is
+// reported as closed or not open, never as a panic.
 func (s *Store) checkOpen() error {
+	if s == nil {
+		return ErrClosed
+	}
 	if s.closed.Load() {
 		return ErrClosed
 	}
@@ -570,6 +563,9 @@ func (s *Store) metaBucket(tx *bbolt.Tx, create bool) (*bbolt.Bucket, error) {
 // (the harbor root package) must call Flush instead of Close and close the
 // handle itself. Close is idempotent.
 func (s *Store) Close() error {
+	if s == nil {
+		return nil
+	}
 	s.closeMu.Lock()
 	defer s.closeMu.Unlock()
 
@@ -595,16 +591,23 @@ func (s *Store) Close() error {
 
 // SetOwnsDB controls whether Close closes the bbolt handle. An embedding store
 // that shares one handle (the harbor root package) sets it to false; standalone
-// users keep the default true.
+// users keep the default true. Config.SharedDB sets the same flag at Open time.
 func (s *Store) SetOwnsDB(owns bool) {
 	if s != nil {
 		s.ownsDB.Store(owns)
 	}
 }
 
+// Closed reports whether Close has finished. A closed store rejects every
+// operation with ErrClosed. A nil store is reported as closed.
+func (s *Store) Closed() bool {
+	return s == nil || s.closed.Load()
+}
+
 // Flush writes the buffered points of every collection created by this Store
 // without closing the database. Embedders that own the bbolt handle use it
-// before closing the handle.
+// before closing the handle. A closed collection is skipped: Close already
+// flushed it.
 func (s *Store) Flush() error {
 	if err := s.checkOpen(); err != nil {
 		return err
@@ -625,6 +628,17 @@ func (s *Store) trackCollection(c *Collection) {
 	s.mu.Unlock()
 }
 
+// untrackCollection forgets a collection whose Close already flushed it, so
+// Store.Flush and Store.Close no longer visit it.
+func (s *Store) untrackCollection(name string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	delete(s.collections, name)
+	s.mu.Unlock()
+}
+
 // flushCollections drains the write buffer of every tracked collection.
 func (s *Store) flushCollections() error {
 	// No store-wide flush lock here: each Collection.Flush serializes its own
@@ -637,6 +651,9 @@ func (s *Store) flushCollections() error {
 	s.mu.Unlock()
 
 	for _, c := range collections {
+		if c.Closed() {
+			continue
+		}
 		if err := c.Flush(); err != nil {
 			return err
 		}
@@ -1015,8 +1032,8 @@ func (s *Store) LoadCollectionMeta(name string) (*CollectionMeta, error) {
 		if err := json.Unmarshal(plain, &meta); err != nil {
 			return err
 		}
-		if meta.FormatVersion > collectionFormatVersion {
-			return fmt.Errorf("%w: collection %q has format version %d, this build supports %d", ErrInvalidConfig, name, meta.FormatVersion, collectionFormatVersion)
+		if meta.FormatVersion > CollectionFormatVersion {
+			return fmt.Errorf("%w: collection %q has format version %d, this build supports %d", ErrInvalidConfig, name, meta.FormatVersion, CollectionFormatVersion)
 		}
 		return nil
 	})

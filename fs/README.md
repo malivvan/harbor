@@ -27,6 +27,10 @@ defer vfs.Close() // does not close bdb
 `Store.Close` and `FS.Close` release wrappers only. The caller owns the bbolt
 handle and must keep it open while the file systems are in use.
 
+`fs.Config` exposes `Validate()` and `Normalize()`. They check the same
+invariants as `fs.Open`: `ChunkSize` must be non-negative, and any encryption
+mode requires a 32-byte `Secret`.
+
 A store can list and remove the file systems it manages:
 
 ```go
@@ -88,6 +92,31 @@ err = vfs.Chown("/reports/2026/q1-final.txt", uid, gid)
 mode := vfs.Umask()
 vfs.SetUmask(0o022)
 ```
+
+`Copy` fails when the destination exists. `CopyWithOptions` and `CopyContext`
+add overwrite, metadata and symlink control, progress and cancellation:
+
+```go
+ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+defer cancel()
+
+err := vfs.CopyContext(ctx, "/reports", "/archive/reports", fs.CopyOptions{
+	Overwrite:    true,  // replace a file or an empty directory
+	SkipSymlinks: true,  // omit links instead of recreating them
+	SkipMetadata: true,  // default permissions, no owner, fresh times
+	Progress: func(copied int64) {
+		log.Printf("copied %d content bytes", copied)
+	},
+})
+```
+
+The copy is built under a new inode and published only after it succeeds: a
+cancelled or failed copy removes its partial output and leaves an existing
+destination untouched. Overwriting a non-empty directory returns
+`ENOTEMPTY` (clear it first), and replacing a file with a directory (or the
+reverse) fails like `Rename`. `Progress` is called with cumulative content
+bytes while the file system is locked, so it must not call back into the same
+`FS`.
 
 ### Links
 
@@ -197,9 +226,24 @@ vfs.FlushCache()
 
 ## External content
 
-Content can live in another file system while metadata stays in the database.
-The content backend must implement the module-internal `absfs.FileSystem`
-interface, so an in-module file system is the supported option:
+Content can live in another backend while metadata stays in the database. The
+backend implements the exported `ContentFS` interface, which uses only standard
+library types and stores whole objects:
+
+```go
+type ContentFS interface {
+	ReadFile(name string) ([]byte, error)
+	WriteFile(name string, data []byte, perm os.FileMode) error
+	Remove(name string) error
+}
+```
+
+`ReadFile` must return an error satisfying `os.IsNotExist` for a missing
+object; the FS treats that as an empty file. Neither `ReadFile` nor
+`WriteFile` is partial: the FS never seeks or appends. This maps directly onto
+an object store (`GET`/`PUT`/`DELETE`) and needs no module-internal types.
+
+An in-module `*fs.FS` can be adapted with `AsContentFS`:
 
 ```go
 content, err := fsStore.Open("content") // a plain fs.FS in another bucket
@@ -207,19 +251,18 @@ if err != nil {
 	return err
 }
 
-vfs, err := fsStore.OpenWithContentFS("documents", content)
+vfs, err := fsStore.OpenWithContentFS("documents", content.AsContentFS())
 if err != nil {
 	return err
 }
 ```
 
-`FileSystem` values returned by this package (including snapshots) satisfy the
-interface. `fs/s3fs` implements `absfs.Filer`, not the full `FileSystem`, so
-using it as a content backend currently requires an adapter inside this module.
-External implementations of `absfs.FileSystem` cannot be passed directly from
-another module, because `internal/absfs` is not importable. External content is
-not encrypted by `fs`; `EncryptContent` applies to content stored in the bbolt
-`data`/`chunks` buckets.
+The same method works on snapshots and on an S3-backed `*fs.FS`. `fs/s3fs`
+itself is an `absfs.Filer`; implement `ContentFS` directly over your object
+store, or mount S3 through this package, when content should go to S3.
+`EncryptContent` seals content before it reaches the backend, so the backend
+never holds plaintext in that mode. External content is stored as one sealed
+blob per file; chunking applies only to the bbolt `data`/`chunks` buckets.
 
 ## Encryption
 

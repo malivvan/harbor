@@ -21,8 +21,10 @@ const Name = "ts"
 
 const metaBucketName = "__ts_meta__"
 
-// tsFormatVersion is the current time-series on-disk format revision.
-const tsFormatVersion uint64 = 1
+// FormatVersion is the on-disk time-series format revision this build writes
+// and accepts. The first release has a single version 1; any other value fails
+// the open with ErrIncompatibleVersion.
+const FormatVersion uint64 = 1
 
 // nowProvider wraps the pluggable clock so it can be stored in an atomic
 // pointer.

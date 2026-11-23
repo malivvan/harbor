@@ -1,7 +1,9 @@
 package vec
 
 import (
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -281,5 +283,72 @@ func TestHNSWIndexReinsertAfterEmpty(t *testing.T) {
 	}
 	if idx.Count() != 1 {
 		t.Fatalf("expected count 1 after re-upsert, got %d", idx.Count())
+	}
+}
+
+// TestHNSWConcurrentSearchAndUpsert exercises the narrowed read-lock scope:
+// searches filter, clone payloads and rank after releasing the lock while
+// writers keep replacing points and mutating the graph. Run with -race.
+func TestHNSWConcurrentSearchAndUpsert(t *testing.T) {
+	idx := NewHNSWIndex(Cosine)
+
+	seed := make([]PointStruct, 64)
+	for i := range seed {
+		seed[i] = PointStruct{
+			ID:      fmt.Sprintf("p%d", i),
+			Vector:  []float32{float32(i%5) + 1, float32(i%3) + 1, float32(i%7) + 1},
+			Payload: map[string]any{"group": i % 4},
+		}
+	}
+	if err := idx.Upsert(seed); err != nil {
+		t.Fatalf("seed upsert: %v", err)
+	}
+
+	query := []float32{1, 2, 3}
+	var wg sync.WaitGroup
+
+	for w := 0; w < 4; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < 50; i++ {
+				if _, err := idx.Search(query, nil, 5); err != nil {
+					t.Errorf("unfiltered search: %v", err)
+					return
+				}
+				filter := &Filter{
+					Must: []Condition{{Key: "group", Match: MatchValue{Value: (w + i) % 4}}},
+				}
+				if _, err := idx.Search(query, filter, 3); err != nil {
+					t.Errorf("filtered search: %v", err)
+					return
+				}
+			}
+		}(w)
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			point := PointStruct{
+				ID:      fmt.Sprintf("p%d", i%64),
+				Vector:  []float32{float32(i%5) + 1, 1, 2},
+				Payload: map[string]any{"group": i % 4},
+			}
+			if err := idx.Upsert([]PointStruct{point}); err != nil {
+				t.Errorf("concurrent upsert: %v", err)
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	if got := idx.Count(); got != 64 {
+		t.Fatalf("count after concurrent writes = %d, want 64", got)
+	}
+	if _, err := idx.Search(query, nil, 5); err != nil {
+		t.Fatalf("search after concurrent writes: %v", err)
 	}
 }

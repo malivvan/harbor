@@ -22,7 +22,7 @@ func TestLoadCollectionRejectsNewerFormat(t *testing.T) {
 		Name:          "docs",
 		VectorLen:     3,
 		Metric:        Cosine,
-		FormatVersion: collectionFormatVersion + 1,
+		FormatVersion: CollectionFormatVersion + 1,
 	}))
 	_, err = store.LoadCollectionMeta("docs")
 	require.ErrorIs(t, err, ErrInvalidConfig)

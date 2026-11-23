@@ -20,8 +20,16 @@ docs, err := vstore.NewCollection("docs", 3, vec.Cosine, true)
 
 `vec.Open` borrows the database and rejects a nil handle with
 `vec.ErrInvalidConfig`. By default `Store.Close` flushes buffered points and
-closes the handle; an embedding store that shares the handle should call
-`SetOwnsDB(false)` and close the handle itself.
+closes the handle. An embedding store that shares the handle sets
+`Config.SharedDB` (or calls `SetOwnsDB(false)`); `Close` then only flushes and
+releases the wrapper, and the caller closes the handle. `Store.Closed()`
+reports the state.
+
+`vec.Config` exposes `Validate()` and `Normalize()` with the same checks as
+`vec.Open`: encryption needs a 32-byte `Secret`, `UseQuant` fills in the default
+quantizer, and empty `Root` elements are dropped. `CollectionOptions.Validate()`
+checks a collection's name, dimension and metric before creation, and
+`HNSWParams.Normalize()` previews the effective index parameters.
 
 ## Collections
 
@@ -110,11 +118,16 @@ err = vstore.Flush() // every collection created by this Store
 ```
 
 A failed flush re-buffers the batch, while preventing points deleted in the
-meantime from being resurrected.
+meantime from being resurrected. `Collection.Pending()` reports how many
+points are buffered and not yet durable.
 
-`Collection.Close` flushes that collection and deliberately does not close the
-shared bbolt handle. `Store.Close` flushes every collection and closes the
-handle only when `SetOwnsDB(true)` (the default).
+`Collection.Close` flushes the collection, retires the handle, and deliberately
+does not close the shared bbolt handle. After Close, `Closed()` is true and
+later calls on the collection return `vec.ErrClosed`; Close is idempotent, and
+`Store.Flush`/`Store.Close` skip retired collections. `Store.Close` flushes
+every remaining collection and closes the handle only when it owns it (the
+default; `Config.SharedDB` or `SetOwnsDB(false)` for embeddings). Use
+`Store.Closed()` to check the store state.
 
 ## Search
 
@@ -291,7 +304,8 @@ See [Encryption](../README.md#encryption) and [AGENTS.md](../AGENTS.md#encryptio
 - Use HNSW for large collections; Flat search is exact but O(n) per query.
 - Batch points in `Upsert`; the store merges writes up to the flush threshold
   into one transaction.
-- Call `Flush` before closing your own bbolt handle.
+- Call `Flush` (or `Store.Close` with `Config.SharedDB`) before closing your own
+  bbolt handle.
 - Quantization trades recall for storage size; validate the trade-off on your
   data.
 - Payload filters are applied after candidate retrieval in HNSW mode, so very

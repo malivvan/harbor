@@ -62,10 +62,11 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		return nil, wrapError("open", ErrNilParam)
 	}
 
-	c := defaultCodec
-	if cfg.Codec != nil {
-		c = cfg.Codec
+	cfg, err := cfg.Normalize()
+	if err != nil {
+		return nil, wrapError("open", err)
 	}
+	c := cfg.Codec
 
 	enc, err := resolveConfig(cfg)
 	if err != nil {
@@ -260,6 +261,21 @@ func toBytes(key interface{}, c Codec) ([]byte, error) {
 	default:
 		return c.Marshal(key)
 	}
+}
+
+// EncodeKey returns the logical byte encoding Harbor uses for a bucket key,
+// before the at-rest encryption a store applies. A replicated layer can send
+// this encoding to another node and pass it back as a []byte key: toBytes
+// treats []byte as already encoded, so the receiver seals the same logical key
+// with its own key material.
+//
+// The encoding is type-sensitive: an int key and a string key that look alike
+// produce different bytes. Use the same encoding for writes and reads.
+func EncodeKey(key any, codec Codec) ([]byte, error) {
+	if codec == nil {
+		codec = defaultCodec
+	}
+	return toBytes(key, codec)
 }
 
 // encodeIntKey maps a signed integer to 8 bytes whose byte order matches the

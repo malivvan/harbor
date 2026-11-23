@@ -34,6 +34,51 @@ func benchQuery(dim int) []float32 {
 	return q
 }
 
+// benchSink keeps kernel results observable so the compiler cannot elide the
+// benchmarked loops.
+var benchSink float32
+
+func BenchmarkDistanceKernels(b *testing.B) {
+	a, bv := kernelVectors(128)
+	norm := squaredNormF32(a)
+
+	b.Run("Dot", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			benchSink = dotF32(a, bv)
+		}
+	})
+	b.Run("L2Squared", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			benchSink = l2SquaredF32(a, bv)
+		}
+	})
+	b.Run("CosineWithNorm", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			benchSink = cosineWithNorm(a, bv, norm)
+		}
+	})
+}
+
+func BenchmarkFlatSearchCosine(b *testing.B) {
+	const (
+		n   = 5000
+		dim = 128
+	)
+	idx := NewFlatIndex(Cosine)
+	if err := idx.Upsert(benchPoints(n, dim)); err != nil {
+		b.Fatal(err)
+	}
+	query := benchQuery(dim)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := idx.Search(query, nil, 10); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkFlatSearch(b *testing.B) {
 	const (
 		n   = 5000

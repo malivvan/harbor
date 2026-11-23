@@ -46,6 +46,31 @@ func (c Config) encryptionEnabled() bool {
 	return c.EncryptContent || c.EncryptMetadata || c.ChunkSize != 0
 }
 
+// Validate reports whether the configuration can be opened: the chunk size must
+// be non-negative, and an encryption secret is required (and must have a valid
+// key length) when encryption or chunking is enabled. A nil Secret is valid for
+// a plaintext store.
+func (c Config) Validate() error {
+	if c.ChunkSize < 0 {
+		return fmt.Errorf("%w: chunk size cannot be negative", ErrInvalidConfig)
+	}
+	if !c.encryptionEnabled() {
+		return nil
+	}
+	_, err := crypto.ResolveKey(c.Secret)
+	return err
+}
+
+// Normalize validates the configuration and returns it unchanged; fs.Config has
+// no implicit defaults. Open calls Normalize, so the public validation and the
+// open path cannot drift.
+func (c Config) Normalize() (Config, error) {
+	if err := c.Validate(); err != nil {
+		return Config{}, err
+	}
+	return c, nil
+}
+
 // encState is the shared encryption configuration of a Store. A nil encState
 // means plaintext.
 type encState struct {

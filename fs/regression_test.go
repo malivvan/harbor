@@ -353,7 +353,7 @@ func TestRemoveAllReleasesChunks(t *testing.T) {
 // --- High: snapshot reads must consult the external contentFS ---
 
 func TestSnapshotReadsExternalContentFS(t *testing.T) {
-	fsys, err := openFSWithContentForTest(t, path.Join(t.TempDir(), "snap.db"), "", newContentStorageFS(t))
+	fsys, err := openFSWithContentForTest(t, path.Join(t.TempDir(), "snap.db"), "", newContentStorageFS(t).AsContentFS())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +391,7 @@ func TestSnapshotReadsExternalContentFS(t *testing.T) {
 // --- Medium: O_TRUNC and Truncate must honour the external contentFS ---
 
 func TestTruncateExternalContentFS(t *testing.T) {
-	fsys, err := openFSWithContentForTest(t, path.Join(t.TempDir(), "ext.db"), "", newContentStorageFS(t))
+	fsys, err := openFSWithContentForTest(t, path.Join(t.TempDir(), "ext.db"), "", newContentStorageFS(t).AsContentFS())
 	if err != nil {
 		t.Fatal(err)
 	}

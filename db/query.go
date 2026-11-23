@@ -22,19 +22,24 @@ func (n *node) Select(matchers ...q.Matcher) Query {
 
 // Query configures and executes scans over records in a bucket.
 type Query interface {
-	// Skip matching records by the given number
+	// Skip matching records by the given number.
+	// It returns a new query; the receiver is not modified.
 	Skip(int) Query
 
-	// Limit the results by the given number
+	// Limit the results by the given number.
+	// It returns a new query; the receiver is not modified.
 	Limit(int) Query
 
 	// Order by the given fields, in descending precedence, left-to-right.
+	// It returns a new query; the receiver is not modified.
 	OrderBy(...string) Query
 
-	// Reverse the order of the results
+	// Reverse the order of the results.
+	// It returns a new query; the receiver is not modified.
 	Reverse() Query
 
-	// Bucket specifies the bucket name
+	// Bucket specifies the bucket name.
+	// It returns a new query; the receiver is not modified.
 	Bucket(string) Query
 
 	// Find a list of matching records
@@ -65,6 +70,16 @@ type Query interface {
 	// If the callback returns an error, processing stops and that error is returned.
 	// Cancellation prevents further callbacks but does not undo callbacks already executed.
 	Each(ctx context.Context, kind any, fn func(any) error) error
+
+	// Iter starts a streaming scan over the matching records.
+	//
+	// kind is a sample record (a pointer to a struct) used to resolve the bucket
+	// name and decode values for matchers; pass nil only when the query has no
+	// matchers or the bucket is selected with Bucket.
+	//
+	// Skip, Limit, Reverse and Bucket are honored; OrderBy is not supported and
+	// returns ErrStreamOrdered. The caller must Close the returned Iterator.
+	Iter(ctx context.Context, kind any) (*Iterator, error)
 }
 
 func newQuery(n *node, tree q.Matcher) *query {
@@ -87,29 +102,50 @@ type query struct {
 	hasMatchers bool
 }
 
+// clone returns a shallow copy that a builder method can safely modify. The
+// node, matcher tree and derived bucket name are immutable, so sharing them
+// between copies is safe.
+func (q *query) clone() *query {
+	next := *q
+	return &next
+}
+
+// Skip returns a copy of the query that skips the given number of matching
+// records. The receiver is left untouched, so it can be reused as a base for
+// several variants.
 func (q *query) Skip(nb int) Query {
-	q.skip = nb
-	return q
+	next := q.clone()
+	next.skip = nb
+	return next
 }
 
+// Limit returns a copy of the query limited to the given number of results.
 func (q *query) Limit(nb int) Query {
-	q.limit = nb
-	return q
+	next := q.clone()
+	next.limit = nb
+	return next
 }
 
+// OrderBy returns a copy of the query ordered by the given fields. The field
+// names are copied, so mutating the caller's slice cannot change the query.
 func (q *query) OrderBy(field ...string) Query {
-	q.orderBy = field
-	return q
+	next := q.clone()
+	next.orderBy = append([]string(nil), field...)
+	return next
 }
 
+// Reverse returns a copy of the query that walks the records backwards.
 func (q *query) Reverse() Query {
-	q.reverse = true
-	return q
+	next := q.clone()
+	next.reverse = true
+	return next
 }
 
+// Bucket returns a copy of the query bound to the given bucket name.
 func (q *query) Bucket(bucketName string) Query {
-	q.bucket = bucketName
-	return q
+	next := q.clone()
+	next.bucket = bucketName
+	return next
 }
 
 func (q *query) Find(ctx context.Context, to any) error {
@@ -125,6 +161,8 @@ func (q *query) Find(ctx context.Context, to any) error {
 	return wrapError("query find", q.runQuery(ctx, sink))
 }
 
+// First gets the first matching record. It limits a copy of the query, so the
+// receiver remains usable for a subsequent Find over the full result set.
 func (q *query) First(ctx context.Context, to any) error {
 	if err := checkContext(ctx); err != nil {
 		return wrapError("query first", err)
@@ -135,8 +173,9 @@ func (q *query) First(ctx context.Context, to any) error {
 		return wrapError("query first", err)
 	}
 
-	q.limit = 1
-	return wrapError("query first", q.runQuery(ctx, sink))
+	limited := q.clone()
+	limited.limit = 1
+	return wrapError("query first", limited.runQuery(ctx, sink))
 }
 
 func (q *query) Delete(ctx context.Context, kind any) error {

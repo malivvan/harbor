@@ -189,25 +189,34 @@ Every bbolt commit is an fsync. Harbor batches where it can:
 ### Compatibility and versioning
 
 - The module requires Go 1.27.4 or later.
-- `db.Version` (`"1.0.0"`) is stored in `__database`. Opening a different
-  version returns `ErrIncompatibleVersion`.
-- `fs` format version 1, `ts` format version 1 and `vec` collection format
-  versions are checked on open.
+- The first release has exactly one on-disk version, number 1, and no v2 or
+  dual-version compatibility path. The exported constants are `db.Version`
+  (`"1.0.0"`), `fs.FormatVersion`, `ts.FormatVersion`,
+  `vec.CollectionFormatVersion` and `audit.FormatVersion`; all are 1.
+- `db.Version` is stored in `__database`. Opening a different version returns
+  `ErrIncompatibleVersion`; fs, ts and vec likewise check their persisted
+  revision on open and fail closed.
+- Key derivation labels, canary domains and SIV name prefixes are also `/v1`,
+  so keys and formats advance together. A future format change bumps the
+  relevant constant and ships a compatibility path; unknown versions are never
+  reinterpreted.
 - Encryption markers are versioned (`DENC`, `FENC`, `TENC`, `VENC`), and the
   sealed canary binds the mode flags.
 - Vector schema fingerprints detect a reordered or otherwise incompatible
   point codec.
-- A first release refuses unknown versions instead of misinterpreting them.
-  There is no plaintext ↔ encrypted in-place migration; export and re-import.
+- There is no plaintext ↔ encrypted in-place migration; use `Export`/`Import`
+  or rotate through sub-stores opened with caller-managed keys.
 
 ## internal/absfs
 
 `internal/absfs` is the vendored abstraction layer behind `fs`, `fs/s3fs`,
-`fs.Snapshot`, `fs.Walk`/`FastWalk`, and the external-content hooks. It is
-internal: other modules cannot import it. The old per-package absfs Markdown
-documents were consolidated into this section and the user-facing path/thread
-notes in [README.md](README.md#the-absfs-interface-and-paths); keep both in
-sync when changing the interfaces.
+`fs.Snapshot`, and `fs.Walk`/`FastWalk`. It is internal: other modules cannot
+import it. The external-content hook is not part of it: `fs.ContentFS` is an
+exported whole-object interface using standard library types only. The old
+per-package absfs Markdown documents were consolidated into this section and
+the user-facing path/thread notes in
+[README.md](README.md#the-absfs-interface-and-paths); keep both in sync when
+changing the interfaces.
 
 ### Interfaces
 
@@ -594,8 +603,9 @@ go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 go test -count=1 -timeout 180s -covermode=atomic -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out
 
-# Benchmarks (vector and time-series hot paths)
-go test -run '^$' -bench . -benchmem -benchtime=100ms ./vec ./ts
+# Benchmarks (distance kernels, encrypted overhead, filtered search, FS I/O,
+# FastWalk, TS aggregates/retention, db queries and S3 multipart)
+go test -run '^$' -bench . -benchmem -benchtime=100ms ./vec ./ts ./fs ./db ./fs/s3fs
 ```
 
 CI runs formatting, vet, build, tests, race tests, coverage, staticcheck,

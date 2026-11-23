@@ -27,8 +27,8 @@ const (
 	eventsBucket = "events"
 	headKey      = "head"
 
-	// formatVersion is the on-disk audit format. Unknown versions fail closed.
-	formatVersion = 1
+	// FormatVersion is the on-disk audit format. Unknown versions fail closed.
+	FormatVersion = 1
 
 	// genesisDomain anchors the start of every chain.
 	genesisDomain = "harbor/audit/v1/genesis"
@@ -263,7 +263,7 @@ func readHead(root *bolt.Bucket) (count uint64, tip []byte, err error) {
 	if len(raw) != 1+8+sha256.Size {
 		return 0, nil, fmt.Errorf("audit: corrupt head record")
 	}
-	if raw[0] != formatVersion {
+	if raw[0] != FormatVersion {
 		return 0, nil, fmt.Errorf("audit: unsupported audit format %d", raw[0])
 	}
 	count = binary.BigEndian.Uint64(raw[1 : 1+8])
@@ -273,7 +273,7 @@ func readHead(root *bolt.Bucket) (count uint64, tip []byte, err error) {
 
 func writeHead(root *bolt.Bucket, count uint64, tip [32]byte) error {
 	raw := make([]byte, 1+8+sha256.Size)
-	raw[0] = formatVersion
+	raw[0] = FormatVersion
 	binary.BigEndian.PutUint64(raw[1:1+8], count)
 	copy(raw[1+8:], tip[:])
 	return root.Put([]byte(headKey), raw)

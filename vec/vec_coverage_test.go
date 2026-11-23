@@ -203,7 +203,7 @@ func TestStoreMetaAndDropBranches(t *testing.T) {
 		Name:              "c",
 		VectorLen:         4,
 		Metric:            Cosine,
-		FormatVersion:     collectionFormatVersion,
+		FormatVersion:     CollectionFormatVersion,
 		SchemaFingerprint: StoredPointSchemaFingerprint,
 	}
 	require.NoError(t, store.SaveCollectionMeta("c", meta))

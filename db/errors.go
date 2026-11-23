@@ -57,10 +57,15 @@ var (
 	// behind; delete and re-save instead.
 	ErrImmutableID = errors.New("the primary key cannot be updated")
 
-	// ErrSampleRequired is returned by Raw/RawEach when a nil sample is used
-	// together with matchers or ordering, because the query cannot decode the
-	// records needed to evaluate them.
+	// ErrSampleRequired is returned by Raw/RawEach/Iter when a nil sample is
+	// used together with matchers or ordering, because the query cannot decode
+	// the records needed to evaluate them.
 	ErrSampleRequired = errors.New("a sample record is required for matchers or ordering")
+
+	// ErrStreamOrdered is returned by Iter when the query has an OrderBy
+	// clause. Ordered results require materializing the whole result set, so
+	// they cannot be streamed.
+	ErrStreamOrdered = errors.New("streaming queries do not support OrderBy")
 
 	// ErrDifferentCodec is returned when using a codec different than the first codec used with the bucket.
 	ErrDifferentCodec = errors.New("the selected codec is incompatible with this bucket")

@@ -3,6 +3,7 @@ package vec
 import (
 	"container/heap"
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 )
@@ -69,8 +70,12 @@ func (f *FlatIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 		topK = len(f.points)
 	}
 
-	// Keep only the best topK candidates in a max-heap whose root is the
-	// current worst, so the scan is O(n log topK) with O(topK) memory.
+	// Pick the ranking kernel and score conversion once per search instead of
+	// switching on the metric for every point. Euclid ranks by squared
+	// distance and takes the root only for the survivors; Cosine precomputes
+	// the query norm so it is not recomputed for every comparison.
+	rank := f.rankFunc(query)
+	score := f.scoreFunc()
 	h := &flatTopK{euclid: f.metric == Euclid}
 	h.data = make([]flatCandidate, 0, topK)
 
@@ -79,10 +84,17 @@ func (f *FlatIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 			continue
 		}
 
+		dist := float32(math.Inf(1))
+		if len(point.Vector) == len(query) {
+			dist = rank(query, point.Vector)
+		} else if f.metric != Euclid {
+			dist = 0
+		}
+
 		c := flatCandidate{
 			id:      id,
 			version: point.Version,
-			dist:    CalculateDistance(f.metric, query, point.Vector),
+			dist:    dist,
 			point:   point,
 		}
 
@@ -107,11 +119,41 @@ func (f *FlatIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 		results[i] = ScoredPoint{
 			ID:      c.id,
 			Version: c.version,
-			Score:   c.dist,
+			Score:   score(c.dist),
 			Payload: clonePayload(c.point.Payload),
 		}
 	}
 	return results, nil
+}
+
+// rankFunc returns the ranking kernel for a query. The ranking order matches
+// the public metric; for Euclid it is the squared distance, which orders the
+// same way but is cheaper to compute, so callers must convert it with
+// scoreFunc before exposing it.
+func (f *FlatIndex) rankFunc(query []float32) func(a, b []float32) float32 {
+	switch f.metric {
+	case Euclid:
+		return euclideanDistanceSquared
+	case Dot:
+		return dotProduct
+	default:
+		// Cosine: the query norm is constant across the scan.
+		norm := squaredNormF32(query)
+		return func(a, b []float32) float32 {
+			return cosineWithNorm(a, b, norm)
+		}
+	}
+}
+
+// scoreFunc converts a rank to the public score. Only Euclid needs work: it
+// takes the square root once per surviving result instead of per comparison.
+func (f *FlatIndex) scoreFunc() func(rank float32) float32 {
+	if f.metric == Euclid {
+		return func(rank float32) float32 {
+			return float32(math.Sqrt(float64(rank)))
+		}
+	}
+	return func(rank float32) float32 { return rank }
 }
 
 // flatCandidate is a lightweight search hit that keeps a reference to the

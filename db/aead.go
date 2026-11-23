@@ -57,6 +57,31 @@ func (c Config) encryptionEnabled() bool {
 	return c.EncryptValues || c.EncryptMetadata || c.EncryptKeys
 }
 
+// Validate reports whether the configuration can be opened. It checks the same
+// invariants Open enforces, without opening a database: an encryption secret is
+// required (and must have a valid key length) when any encryption flag is set.
+// A nil Codec is valid and selects the default codec.
+func (c Config) Validate() error {
+	if !c.encryptionEnabled() {
+		return nil
+	}
+	_, err := crypto.ResolveKey(c.Secret)
+	return err
+}
+
+// Normalize returns the configuration with defaults applied and validates it. A
+// nil Codec selects the default JSON codec. Open calls Normalize, so the public
+// validation and the open path cannot drift.
+func (c Config) Normalize() (Config, error) {
+	if c.Codec == nil {
+		c.Codec = defaultCodec
+	}
+	if err := c.Validate(); err != nil {
+		return Config{}, err
+	}
+	return c, nil
+}
+
 // Key domains. Every deterministic key encryption is domain-separated, so the
 // same logical value yields a different physical key in each context.
 const (

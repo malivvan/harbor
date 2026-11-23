@@ -85,6 +85,13 @@ func normalizeHNSWParams(params HNSWParams) HNSWParams {
 	return params
 }
 
+// Normalize returns the parameters with non-positive fields replaced by their
+// defaults. NewCollectionWithOptions applies it when UseHNSW is set, so callers
+// can preview the effective index parameters without creating a collection.
+func (p HNSWParams) Normalize() HNSWParams {
+	return normalizeHNSWParams(p)
+}
+
 // NewHNSWIndexWithParams creates a new HNSW index engine with custom parameters.
 // It allows fine-tuning of HNSW parameters for specific use cases: M sizes the
 // neighbor lists, EfConstruction is used while inserting nodes, EfSearch while
@@ -207,31 +214,41 @@ func (h *HNSWIndex) upsertOwned(points []PointStruct) error {
 // Search performs an approximate nearest neighbor search using the HNSW algorithm.
 // It uses a post-filtering strategy: over-fetches results to account for filtered points,
 // then applies the payload filter and returns the topK matches.
+//
+// The read lock covers only the graph traversal and the point lookups that
+// resolve candidate IDs. Payload matching, payload cloning and ranking run
+// after it is released, so a slow filter or a large topK does not block
+// concurrent upserts for the whole scan.
 func (h *HNSWIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredPoint, error) {
 	if topK <= 0 {
 		return nil, fmt.Errorf("topK must be greater than 0, got %d", topK)
 	}
 
 	h.mu.RLock()
-	defer h.mu.RUnlock()
-
 	if h.graph == nil {
+		h.mu.RUnlock()
 		return nil, fmt.Errorf("HNSW graph is nil, cannot search")
 	}
-	if dims := h.graph.Dims(); dims > 0 && len(query) != dims {
+	dims := h.graph.Dims()
+	total := len(h.points)
+	h.mu.RUnlock()
+
+	if dims > 0 && len(query) != dims {
 		return nil, fmt.Errorf("query vector dimension %d does not match the index dimension %d", len(query), dims)
 	}
-	if len(h.points) == 0 {
+	if total == 0 {
 		return nil, nil
 	}
-	total := len(h.points)
 	if topK > total {
 		topK = total
 	}
 
+	// Normalize the query once per search rather than once per collect round.
+	graphQuery := h.graphVector(query)
+
 	// Without a filter the graph result is already the answer.
 	if filter == nil {
-		return h.collect(query, nil, topK), nil
+		return h.scoreCandidates(h.candidates(graphQuery, topK), nil), nil
 	}
 
 	// Post-filtering over-fetches. Graph search only visits candidates close to
@@ -247,7 +264,7 @@ func (h *HNSWIndex) Search(query []float32, filter *Filter, topK int) ([]ScoredP
 		if fetchK > total {
 			fetchK = total
 		}
-		results := h.collect(query, filter, fetchK)
+		results := h.scoreCandidates(h.candidates(graphQuery, fetchK), filter)
 		if len(results) >= topK {
 			if len(results) > topK {
 				results = results[:topK]
@@ -305,10 +322,7 @@ func (h *HNSWIndex) scoreFromGraphDistance(d float32) float32 {
 // normalizeVector returns a unit-length copy of v. A zero vector is returned
 // unchanged; its similarity is already well-defined as zero.
 func normalizeVector(v []float32) []float32 {
-	var sum float32
-	for _, x := range v {
-		sum += x * x
-	}
+	sum := squaredNormF32(v)
 	if sum == 0 {
 		return v
 	}
@@ -323,9 +337,20 @@ func normalizeVector(v []float32) []float32 {
 // scan evaluates the filter against every indexed point and returns the
 // matching points ranked by the configured metric. It is the exact fallback
 // used when a filtered graph search cannot fill the requested result set.
+//
+// Only the point snapshot is taken under the read lock. Stored records are
+// immutable, so distance calculation, filtering and payload cloning run after
+// the lock is released.
 func (h *HNSWIndex) scan(query []float32, filter *Filter) []ScoredPoint {
-	results := make([]ScoredPoint, 0, len(h.points))
+	h.mu.RLock()
+	points := make([]*PointStruct, 0, len(h.points))
 	for _, point := range h.points {
+		points = append(points, point)
+	}
+	h.mu.RUnlock()
+
+	results := make([]ScoredPoint, 0, len(points))
+	for _, point := range points {
 		if !MatchFilter(point.Payload, filter) {
 			continue
 		}
@@ -345,28 +370,58 @@ func (h *HNSWIndex) scan(query []float32, filter *Filter) []ScoredPoint {
 	return results
 }
 
-// collect fetches fetchK graph candidates, applies filter and returns the
-// matching points ranked by the configured metric.
-func (h *HNSWIndex) collect(query []float32, filter *Filter, fetchK int) []ScoredPoint {
-	// The graph has already computed every visited distance. Convert it to
-	// the public score instead of recomputing the metric for each result.
-	graphQuery := h.graphVector(query)
-	neighbors := h.graph.SearchWithDistances(graphQuery, fetchK)
+// hnswCandidate is a graph hit with the metadata search needs after the lock
+// is released. Stored point records are immutable once published (upserts
+// replace the map entry with a new record), so holding the pointer past the
+// lock is safe: Delete only removes the map entry and the record stays alive
+// through this reference.
+type hnswCandidate struct {
+	id       string
+	distance float32
+	point    *PointStruct
+}
 
-	results := make([]ScoredPoint, 0, len(neighbors))
+// candidates runs the graph traversal and resolves the visited IDs to point
+// records while holding the read lock. The lock is released before the caller
+// filters, clones payloads and ranks, keeping it off the expensive tail of a
+// search.
+func (h *HNSWIndex) candidates(graphQuery []float32, fetchK int) []hnswCandidate {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if h.graph == nil {
+		return nil
+	}
+	neighbors := h.graph.SearchWithDistances(graphQuery, fetchK)
+	out := make([]hnswCandidate, 0, len(neighbors))
 	for _, neighbor := range neighbors {
 		point, exists := h.points[neighbor.Node.Key]
 		if !exists {
 			continue
 		}
-		if !MatchFilter(point.Payload, filter) {
+		out = append(out, hnswCandidate{
+			id:       neighbor.Node.Key,
+			distance: neighbor.Distance,
+			point:    point,
+		})
+	}
+	return out
+}
+
+// scoreCandidates applies the payload filter, converts graph distances to
+// public scores, clones the surviving payloads and orders the results. It runs
+// outside the index lock.
+func (h *HNSWIndex) scoreCandidates(candidates []hnswCandidate, filter *Filter) []ScoredPoint {
+	results := make([]ScoredPoint, 0, len(candidates))
+	for _, candidate := range candidates {
+		if !MatchFilter(candidate.point.Payload, filter) {
 			continue
 		}
 		results = append(results, ScoredPoint{
-			ID:      point.ID,
-			Version: point.Version,
-			Score:   h.scoreFromGraphDistance(neighbor.Distance),
-			Payload: clonePayload(point.Payload),
+			ID:      candidate.id,
+			Version: candidate.point.Version,
+			Score:   h.scoreFromGraphDistance(candidate.distance),
+			Payload: clonePayload(candidate.point.Payload),
 		})
 	}
 

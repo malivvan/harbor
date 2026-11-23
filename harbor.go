@@ -17,7 +17,9 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 
@@ -127,6 +129,55 @@ type Options struct {
 	Metrics metrics.Observer
 }
 
+// Validate checks the options that apply when a store is created: the password,
+// the Argon2id parameter set, the encryption selection and the audit flags.
+// Open ignores the KDF costs and the encryption selection for an existing
+// store; this method validates them as they would apply to a new file, so
+// callers can check their configuration before creating one.
+func (o *Options) Validate() error {
+	if o == nil {
+		return fmt.Errorf("%w: options are required", ErrInvalidOptions)
+	}
+	if o.Password == "" {
+		return fmt.Errorf("%w: password is required", ErrInvalidPassword)
+	}
+	if _, _, _, _, err := o.creationParams(); err != nil {
+		return err
+	}
+	return o.validateAuditFlags()
+}
+
+// validateAuditFlags rejects audit bits that do not name a sub-store. Open
+// applies the same check, because audit flags are a per-open runtime choice
+// even for an existing store.
+func (o *Options) validateAuditFlags() error {
+	if unknown := o.Audit &^ AuditAll; unknown != 0 {
+		return fmt.Errorf("%w: unknown audit flags %#x", ErrInvalidOptions, unknown)
+	}
+	return nil
+}
+
+// creationParams resolves the Argon2id cost parameters and encryption flags a
+// new store would use, validating the combination. It is the single source of
+// truth for new-store validation: Open and Options.Validate both use it.
+func (o *Options) creationParams() (time, memory uint32, threads uint8, flags uint16, err error) {
+	time, memory, threads = o.KDFTime, o.KDFMemory, o.KDFThreads
+	switch {
+	case time == 0 && memory == 0 && threads == 0:
+		time, memory, threads = DefaultKDFTime, DefaultKDFMemory, DefaultKDFThreads
+	case time == 0 || memory == 0 || threads == 0:
+		return 0, 0, 0, 0, fmt.Errorf("%w: incomplete KDF parameters", ErrInvalidOptions)
+	}
+	flags, err = encryptionFlags(o)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	if err := validateKDFParams(time, memory, threads, flags, ErrInvalidOptions); err != nil {
+		return 0, 0, 0, 0, err
+	}
+	return time, memory, threads, flags, nil
+}
+
 // Store is a single bbolt database that hosts the db, fs, ts and vec stores.
 // Each sub-store uses its own domain-separated key derived from Password.
 type Store struct {
@@ -192,6 +243,9 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	}
 	if options.Password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidPassword)
+	}
+	if err := options.validateAuditFlags(); err != nil {
+		return nil, err
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -296,12 +350,12 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptCollectionNames: hasFlag(md.Flags, EncryptVecCollectionNames),
 		Audit:                  auditSink(AuditVec),
 		Metrics:                options.Metrics,
+		// The vec store shares this handle with db, fs and ts; Close must only
+		// flush its buffers and never close the handle.
+		SharedDB: true,
 	}); err != nil {
 		return nil, fmt.Errorf("harbor: open vec store: %w", err)
 	}
-	// The vec store shares this handle with db, fs and ts; it must never close
-	// it on its own.
-	s.vec.SetOwnsDB(false)
 
 	opened = true
 	return s, nil
@@ -356,21 +410,11 @@ func loadOrCreateState(bdb *bolt.DB, options *Options) (Metadata, *storeKeys, er
 	return md, keys, nil
 }
 
-// newKDFParams resolves the Argon2id parameters and flags for a new store.
+// newKDFParams resolves the Argon2id parameters and flags for a new store and
+// generates its salt.
 func newKDFParams(options *Options) (salt []byte, time, memory uint32, threads uint8, flags uint16, err error) {
-	time, memory, threads = options.KDFTime, options.KDFMemory, options.KDFThreads
-	switch {
-	case time == 0 && memory == 0 && threads == 0:
-		time, memory, threads = DefaultKDFTime, DefaultKDFMemory, DefaultKDFThreads
-	case time == 0 || memory == 0 || threads == 0:
-		return nil, 0, 0, 0, 0, fmt.Errorf("%w: incomplete KDF parameters", ErrInvalidOptions)
-	}
-
-	flags, err = encryptionFlags(options)
+	time, memory, threads, flags, err = options.creationParams()
 	if err != nil {
-		return nil, 0, 0, 0, 0, err
-	}
-	if err := validateKDFParams(time, memory, threads, flags, ErrInvalidOptions); err != nil {
 		return nil, 0, 0, 0, 0, err
 	}
 	salt, err = newSalt()
@@ -646,6 +690,128 @@ func (s *Store) withDB(fn func(*bolt.DB) error) error {
 // fn must not write to the database.
 func (s *Store) View(fn func(*bolt.Tx) error) error {
 	return s.withDB(func(b *bolt.DB) error { return b.View(fn) })
+}
+
+// Backup writes a consistent, point-in-time snapshot of the whole database to
+// w.
+//
+// Buffered vector points are flushed first, so the snapshot contains every
+// upsert the store has accepted, including points still waiting for the
+// collection flush threshold. The snapshot is taken inside one bbolt read
+// transaction: concurrent writers are not blocked and do not appear in it.
+// The store lock is held for the duration, so Close waits for a running
+// backup and a backup started after Close returns ErrClosed.
+//
+// The bytes are the on-disk representation of the database. An encrypted store
+// produces an encrypted backup: it contains the same markers and ciphertext and
+// is opened with the same password. Nothing is decrypted or exported in
+// plaintext, so a backup is safe to store next to the original.
+//
+// The snapshot is complete only when Backup returns nil. A writer failure or a
+// canceled context leaves w holding a partial copy; use BackupTo for an atomic
+// file destination.
+func (s *Store) Backup(ctx context.Context, w io.Writer) error {
+	if w == nil {
+		return fmt.Errorf("harbor: backup: %w: writer is required", ErrInvalidOptions)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil {
+		return ErrClosed
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.bs == nil {
+		return ErrClosed
+	}
+
+	// The vec store buffers points in memory; drain them so the snapshot is
+	// consistent with what the store has accepted.
+	if s.vec != nil {
+		if err := s.vec.Flush(); err != nil && !errors.Is(err, vec.ErrClosed) {
+			return fmt.Errorf("harbor: backup: flush vec store: %w", err)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	err := s.bs.View(func(tx *bolt.Tx) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if _, err := tx.WriteTo(ctxWriter{ctx: ctx, w: w}); err != nil {
+			return fmt.Errorf("harbor: backup: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		// bbolt wraps its write errors with %s, which breaks the cause chain;
+		// report cancellation directly so callers can match it with errors.Is.
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
+		return err
+	}
+	return nil
+}
+
+// BackupTo writes the snapshot produced by Backup to path atomically: the
+// bytes go to a temporary file in the same directory, are synced and closed,
+// and only then replace path by rename. A failed or canceled backup therefore
+// never truncates or corrupts an existing backup at path, and no partial file
+// is left behind.
+func (s *Store) BackupTo(ctx context.Context, path string) error {
+	if path == "" {
+		return fmt.Errorf("harbor: backup: %w: path is required", ErrInvalidOptions)
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".harbor-backup-*")
+	if err != nil {
+		return fmt.Errorf("harbor: backup to %q: %w", path, err)
+	}
+	tmpPath := tmp.Name()
+	discard := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}
+
+	if err := s.Backup(ctx, tmp); err != nil {
+		discard()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		discard()
+		return fmt.Errorf("harbor: backup to %q: sync: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("harbor: backup to %q: close: %w", path, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("harbor: backup to %q: %w", path, err)
+	}
+	return nil
+}
+
+// ctxWriter aborts a long write (such as a bbolt snapshot) when the context is
+// canceled, so a backup cannot outlive its deadline.
+type ctxWriter struct {
+	ctx context.Context
+	w   io.Writer
+}
+
+func (cw ctxWriter) Write(p []byte) (int, error) {
+	if err := cw.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return cw.w.Write(p)
 }
 
 // Close closes the underlying database. It is safe to call more than once, and

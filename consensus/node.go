@@ -17,7 +17,6 @@ import (
 	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
 	"github.com/malivvan/harbor"
 	"github.com/malivvan/harbor/metrics"
-	bolt "go.etcd.io/bbolt"
 )
 
 // Node is one member of a Harbor cluster. It owns the local *harbor.Store
@@ -362,16 +361,17 @@ func (n *Node) storeHandle() *harbor.Store {
 }
 
 // serializeStore writes a consistent snapshot of the harbor database.
+//
+// Backup drains the vector write buffer first, so a point the leader accepted
+// but has not yet flushed is part of the snapshot instead of being silently
+// dropped when a follower restores it.
 func (n *Node) serializeStore() ([]byte, error) {
 	st := n.storeHandle()
 	if st == nil {
 		return nil, ErrClosed
 	}
 	var buf bytes.Buffer
-	if err := st.View(func(tx *bolt.Tx) error {
-		_, err := tx.WriteTo(&buf)
-		return err
-	}); err != nil {
+	if err := st.Backup(context.Background(), &buf); err != nil {
 		return nil, fmt.Errorf("consensus: serialize store: %w", err)
 	}
 	return buf.Bytes(), nil

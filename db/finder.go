@@ -93,7 +93,7 @@ func (n *node) One(ctx context.Context, fieldName string, value any, to any) err
 	field, ok := cfg.Fields[fieldName]
 	if !ok || (!field.IsID && field.Index == "") {
 		query := newQuery(n, q.StrictEq(fieldName, value))
-		query.Limit(1)
+		query.limit = 1
 
 		err = n.readTx(ctx, func(tx *bolt.Tx) error {
 			return query.query(ctx, tx, sink)
@@ -222,11 +222,9 @@ func (n *node) Find(ctx context.Context, fieldName string, value any, to any, op
 	field, ok := cfg.Fields[fieldName]
 	if !ok || (!field.IsID && (field.Index == "" || value == nil)) {
 		query := newQuery(n, q.Eq(fieldName, value))
-		query.Skip(opts.Skip).Limit(opts.Limit)
-
-		if opts.Reverse {
-			query.Reverse()
-		}
+		query.skip = opts.Skip
+		query.limit = opts.Limit
+		query.reverse = opts.Reverse
 
 		err = n.readTx(ctx, func(tx *bolt.Tx) error {
 			return query.query(ctx, tx, sink)
@@ -467,10 +465,10 @@ func (n *node) All(ctx context.Context, to any, options ...FindOption) error {
 		return wrapError("all", err)
 	}
 
-	query := newQuery(n, nil).Limit(opts.Limit).Skip(opts.Skip)
-	if opts.Reverse {
-		query.Reverse()
-	}
+	query := newQuery(n, nil)
+	query.limit = opts.Limit
+	query.skip = opts.Skip
+	query.reverse = opts.Reverse
 
 	err := query.Find(ctx, to)
 	if err != nil && !errors.Is(err, ErrNotFound) {
@@ -520,11 +518,9 @@ func (n *node) Range(ctx context.Context, fieldName string, min any, max any, to
 	field, ok := cfg.Fields[fieldName]
 	if !ok || (!field.IsID && field.Index == "") {
 		query := newQuery(n, q.And(q.Gte(fieldName, min), q.Lte(fieldName, max)))
-		query.Skip(opts.Skip).Limit(opts.Limit)
-
-		if opts.Reverse {
-			query.Reverse()
-		}
+		query.skip = opts.Skip
+		query.limit = opts.Limit
+		query.reverse = opts.Reverse
 
 		err = n.readTx(ctx, func(tx *bolt.Tx) error {
 			return query.query(ctx, tx, sink)
@@ -657,11 +653,9 @@ func (n *node) Prefix(ctx context.Context, fieldName string, prefix string, to a
 	field, ok := cfg.Fields[fieldName]
 	if !ok || (!field.IsID && field.Index == "") {
 		query := newQuery(n, q.Re(fieldName, "^"+regexp.QuoteMeta(prefix)))
-		query.Skip(opts.Skip).Limit(opts.Limit)
-
-		if opts.Reverse {
-			query.Reverse()
-		}
+		query.skip = opts.Skip
+		query.limit = opts.Limit
+		query.reverse = opts.Reverse
 
 		err = n.readTx(ctx, func(tx *bolt.Tx) error {
 			return query.query(ctx, tx, sink)

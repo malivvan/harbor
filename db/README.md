@@ -24,6 +24,10 @@ defer records.Close() // does not close bdb
 `db.Open` borrows the database; the caller must keep it open for the lifetime of
 the store and close it afterwards. `Store.Close` releases the wrapper only.
 
+`db.Config` exposes `Validate()` and `Normalize()`. `db.Open` uses the
+normalized configuration, so the same checks apply: a nil `Codec` selects the
+default JSON codec, and any encryption flag requires a 32-byte `Secret`.
+
 ## Models
 
 The struct name becomes the bucket name. The primary key is the field tagged
@@ -187,6 +191,23 @@ count, err := records.Select(q.Lt("Age", 18)).Count(ctx, &User{})
 err = records.Select(q.Eq("Team", "blocked")).Delete(ctx, &User{})
 ```
 
+Builder methods (`Skip`, `Limit`, `OrderBy`, `Reverse` and `Bucket`) return a
+new query and never modify the receiver, so one base query can be reused for
+several variants:
+
+```go
+base := records.Select(q.Gte("Age", 18))
+
+var firstPage []User
+err := base.Limit(20).Find(ctx, &firstPage)   // base keeps no limit
+
+var all []User
+err = base.Find(ctx, &all)                    // still the full result set
+```
+
+`First` limits an internal copy for the same reason: a query used for `First`
+can still `Find` every match afterwards.
+
 Available matchers: `q.Eq`, `q.StrictEq`, `q.Gt`, `q.Gte`, `q.Lt`, `q.Lte`,
 `q.In`, `q.Re`, `q.EqF`, `q.GtF`, `q.GteF`, `q.LtF`, `q.LteF`, `q.True`, plus
 the combinators `q.And`, `q.Or` and `q.Not`.
@@ -215,8 +236,39 @@ err = records.Select(q.Eq("Team", "core")).
 
 A non-nil sample record (`&User{}`) is required when the query has matchers or
 ordering, because those are evaluated against decoded records. Pass `nil` only
-for a matcher-less, unordered dump; otherwise `Raw`/`RawEach` return
+for a matcher-less, unordered dump; otherwise `Iter`, `Raw` and `RawEach` return
 `db.ErrSampleRequired`.
+
+Stream records one at a time when the result set is large or the consumer may
+stop early:
+
+```go
+it, err := records.Select(q.Gte("Age", 21)).Iter(ctx, &User{})
+if err != nil {
+	return err
+}
+defer it.Close()
+
+for it.Next() {
+	var u User
+	if err := it.Decode(&u); err != nil {
+		return err
+	}
+	fmt.Println(u.Name)
+}
+if err := it.Err(); err != nil {
+	return err
+}
+```
+
+`Iter` keeps a read-only transaction (and the store's rotation guard) open
+until `Close`, so always close it, including on an early break. `Key` and
+`Value` expose the raw stored bytes of the current record. `Skip`, `Limit`,
+`Reverse` and `Bucket` apply; `OrderBy` does not, because ordering requires
+materializing the result set: an ordered query returns
+`db.ErrStreamOrdered`. Cancellation is checked before every `Next` and reported
+by `Err`. An iterator obtained from a `Store.Attach` transaction reads through
+that transaction and never closes it.
 
 `Query.Bucket(name)` targets a bucket explicitly, which is useful for
 runtime-generated types.
@@ -441,7 +493,8 @@ Classify with `errors.Is`, not string comparison:
 | `ErrPtrNeeded` | Expected a pointer. |
 | `ErrNoName` | No struct name and no explicit bucket. |
 | `ErrIncompatibleValue` | Value does not match the field type. |
-| `ErrSampleRequired` | `Raw`/`RawEach` needs a sample for matchers/ordering. |
+| `ErrSampleRequired` | `Iter`/`Raw`/`RawEach` needs a sample for matchers/ordering. |
+| `ErrStreamOrdered` | `Iter` cannot stream an `OrderBy` query. |
 | `ErrDifferentCodec` | Bucket was written with another codec. |
 | `ErrIncompatibleVersion` | Unsupported on-disk format version. |
 | `ErrTxFromDifferentDB` | Attached transaction belongs to another database. |

@@ -202,6 +202,11 @@ Important properties:
   `Open` created. It is safe to call twice, and the sub-store accessors return
   `nil` afterwards.
 
+`Options.Validate()` performs the checks `Open` applies when creating a store —
+password, complete and bounded Argon2id parameters, encryption-flag conflicts
+and audit flags — without touching the file. The sub-store configs expose the
+same `Validate()`/`Normalize()` pair, and their `Open` functions use it.
+
 Use `Options{Plaintext: true}` for an unencrypted store, or select individual
 encryption flags with `Options.Encrypt`. See [Encryption](#encryption) for the
 flags, rotation rules and threat model.
@@ -870,10 +875,84 @@ The two entry points differ in who owns the bbolt handle:
   ownership of the database. If several stores share one handle, close the
   handle after all wrappers are closed.
 
+When embedding `vec` on a shared handle, set `vec.Config.SharedDB` (or call
+`SetOwnsDB(false)`): `vec.Store.Close` then flushes buffered points without
+closing the handle. Use `Store.Vec().Flush()` to drain explicitly and
+`Store.Vec().Closed()` to check the state. Per collection, `Pending()` reports
+buffered points and `Close()` flushes and retires that handle. The root store
+does this automatically: `harbor.Store.Close` and `harbor.Store.Backup` flush
+the vector buffer before touching the database.
+
 A `nil` context is rejected by context-aware operations with `ErrNilContext`
 (or the store's equivalent sentinel); `Close` is a lifecycle exception and
 takes no context. `harbor.Open` is the one exception: it treats a nil context
 as `context.Background()`.
+
+### Backup
+
+`Backup` writes a consistent, point-in-time snapshot of the whole database to
+an `io.Writer`; `BackupTo` writes the same snapshot to a file atomically.
+
+```go
+var buf bytes.Buffer
+err := store.Backup(ctx, &buf)
+
+err = store.BackupTo(ctx, "/backups/harbor-2026-11-23.db")
+```
+
+- Buffered vector points are flushed first, so the snapshot includes every
+  upsert the store has accepted.
+- The snapshot comes from one bbolt read transaction: concurrent writers are
+  not blocked and do not appear in it. The store lock is held for the
+  duration, so `Close` waits for a running backup and a backup after `Close`
+  returns `ErrClosed`.
+- The bytes are the on-disk representation. An encrypted store produces an
+  encrypted backup that is opened with the same password; nothing is exported
+  in plaintext.
+- `Backup` is only complete when it returns `nil`. `BackupTo` writes to a
+  temporary sibling, syncs, and renames it into place, so a failed or canceled
+  backup never corrupts an existing file and leaves no partial output.
+
+To restore, open the snapshot file with `harbor.Open` and the same password.
+`View` remains available for lower-level raw bbolt snapshots.
+
+### Export, import and compaction
+
+`Backup` copies the database file; `Export` writes a versioned, checksummed
+*logical* snapshot that `Import` applies to another store. That is the migration
+path between encryption modes and formats:
+
+```go
+var buf bytes.Buffer
+summary, err := harbor.Export(ctx, store, &buf, harbor.ExportOptions{
+	RecordTypes: []any{(*User)(nil)}, // db record types to include
+	Progress:    func(p harbor.Progress) { log.Printf("%s: %d", p.Section, p.Records) },
+})
+
+restored, err := harbor.Open(ctx, "encrypted.db", 0o600, &harbor.Options{Password: "new"})
+err = harbor.Import(ctx, restored, bytes.NewReader(buf.Bytes()), harbor.ImportOptions{
+	RecordTypes: []any{(*User)(nil)},
+})
+```
+
+- The container is newline-delimited JSON: a header, one record per line, and a
+  footer with the record count and a SHA-256 checksum. `Import` rejects an
+  unknown format or version (`ErrExportFormat`/`ErrExportVersion`), a truncated
+  stream (`ErrExportTruncated`) and a checksum mismatch (`ErrExportChecksum`).
+- Exported: db records of the listed types, every named file system's tree,
+  every time series (points, labels, retention) and every vector collection
+  (metadata and points; buffered points are flushed first).
+- `ImportOptions.DryRun` validates the whole stream without writing, and accepts
+  a nil destination. Because the checksum is verified at the footer, run a dry
+  run first on untrusted input: earlier records can be applied before a later
+  mismatch is detected.
+- File ownership is not exported (the portable `FileInfo` has no owner), and db
+  records are encoded with `encoding/json`.
+
+`Store.CompactTo(ctx, path, mode)` rewrites the live pages into a new file and
+drops free space. The result is the same on-disk representation as `Backup`
+(encryption is preserved), an existing destination is refused, and buffered
+vector points are flushed first. Compaction cannot be interrupted part-way.
 
 ## Error handling
 
@@ -969,8 +1048,10 @@ code where they are most useful (for the `db` package, see
 
 Harbor is preparing its first public release (`v0.1.x`). The on-disk formats
 are versioned and refuse data from an incompatible build instead of misreading
-it. Pin a module version, and treat pre-1.0 API changes as potentially
-breaking.
+it. Every persisted format is version 1 (`db.Version`, `fs.FormatVersion`,
+`ts.FormatVersion`, `vec.CollectionFormatVersion`, `audit.FormatVersion`);
+there is no v2 or dual-version compatibility path. Pin a module version, and
+treat pre-1.0 API changes as potentially breaking.
 
 ## License
 
