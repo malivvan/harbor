@@ -92,6 +92,10 @@ var (
 	// that does not match what is stored on disk.
 	ErrWrongMode = crypto.ErrWrongMode
 
+	// ErrProjectionUnsupported reports Query.Project combined with matchers or
+	// ordering, which need fields the projection may remove.
+	ErrProjectionUnsupported = errors.New("db: projection is not supported with matchers or ordering")
+
 	// ErrDanglingReference reports a save whose reference field names a record
 	// that does not exist.
 	ErrDanglingReference = errors.New("db: referenced record does not exist")

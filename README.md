@@ -288,6 +288,20 @@ err = users.Prefix(ctx, "Name", "al", &prefixed)
 `All` if you want an empty slice contract. Pagination and ordering are
 `FindOption` values: `db.Limit`, `db.Skip` and `db.Reverse`.
 
+### Projection
+
+`Project` limits decoding to the fields you need:
+
+```go
+var docs []Doc
+err := store.DB().Select().Project("ID", "Metadata").Find(ctx, &docs)
+```
+
+The JSON codec decodes only the requested top-level fields; a custom codec
+without projected decoding falls back to a full decode and zeroes the rest.
+Matchers and ordering cannot be combined with a projection. See
+[db/README.md](db/README.md#projection).
+
 ### References
 
 A `ref` tag ties a record to another bucket's primary key:
@@ -575,6 +589,20 @@ Timestamps are Unix nanoseconds and ranges are inclusive on both ends. Points
 are stored in chronological key order, so `Range` and `RangeEach` stream in
 time order without an index. `Insert` replaces a point with the same timestamp;
 `InsertMany` accepts out-of-order timestamps and the last value wins.
+
+### Projection
+
+`Project` limits decoding to the fields you need:
+
+```go
+var docs []Doc
+err := store.DB().Select().Project("ID", "Metadata").Find(ctx, &docs)
+```
+
+The JSON codec decodes only the requested top-level fields; a custom codec
+without projected decoding falls back to a full decode and zeroes the rest.
+Matchers and ordering cannot be combined with a projection. See
+[db/README.md](db/README.md#projection).
 
 ### References
 

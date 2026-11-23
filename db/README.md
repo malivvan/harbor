@@ -311,6 +311,26 @@ type Chunk struct {
 - The relation registry (`__harbor_refs__`) is metadata: it stores bucket and
   field names, not record values.
 
+### Projection
+
+`Project` decodes only the named top-level fields of each record:
+
+```go
+var users []User
+err := records.Select().Project("ID", "Metadata").Find(ctx, &users)
+```
+
+- Field names are Go field names or JSON tag names. Nested paths are not
+  supported in v1.
+- Unprojected fields are zero, unknown names are an error, and the JSON codec
+  skips decoding the rest. A custom codec that does not implement
+  `db.ProjectedCodec` falls back to a full decode followed by zeroing, which
+  is correct but not an allocation win.
+- Matchers and ordering need fields that may be projected away, so combining
+  them with `Project` returns `db.ErrProjectionUnsupported`.
+- `Find`, `First`, `Each` and `Iter`/`Decode` honor the projection; `Count`
+  and `Raw` do not decode.
+
 ### Aggregation
 
 `Aggregate` computes grouped measures over a bucket without materializing the

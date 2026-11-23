@@ -85,6 +85,10 @@ type node struct {
 	// through this node. The root package uses it to stage audit events for a
 	// cross-store transaction instead of recording them inside the transaction.
 	audit audit.Sink
+
+	// project, when non-empty, limits decode to these top-level fields. It is
+	// set on a query's private node copy by Query.Project.
+	project []string
 }
 
 // cloneBucketPath returns a defensive copy of the given bucket path.

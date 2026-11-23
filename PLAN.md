@@ -667,7 +667,16 @@ only the final score, so HNSW recall is unchanged (documented). Tests: vectors
 match stored points, scorer ranks by the supplied function, no vectors by default
 (allocation check), filters and HNSW/exact paths.
 
-## 9. P2 — streaming projection in `db`
+## 9. P2 — streaming projection in `db` — DONE
+
+Done: `Query.Project(fields...)` and an optional `db.ProjectedCodec`
+capability. The JSON codec decodes only the requested top-level fields (Go or
+JSON tag names); other codecs fall back to a full decode plus zeroing, which
+preserves correctness but not the allocation win. Unprojected fields stay zero,
+unknown/unexported names are errors, and `Project` with matchers or ordering is
+refused with `ErrProjectionUnsupported`. `Find`, `First`, `Each` and
+`Iter`/`Decode` honor it. Tests cover Find/Each/Iter, JSON tag names, unknown
+fields, matcher/order rejection and the custom-codec fallback.
 
 ### Current state
 

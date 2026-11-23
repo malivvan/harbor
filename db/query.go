@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 
 	"github.com/malivvan/harbor/db/q"
@@ -41,6 +42,11 @@ type Query interface {
 	// Bucket specifies the bucket name.
 	// It returns a new query; the receiver is not modified.
 	Bucket(string) Query
+
+	// Project limits record decoding to the given top-level fields. It returns
+	// a new query; the receiver is not modified. Matchers and ordering are
+	// rejected because they need fields that may be projected away.
+	Project(fields ...string) Query
 
 	// Find a list of matching records
 	Find(ctx context.Context, to any) error
@@ -100,6 +106,7 @@ type query struct {
 	bucket      string
 	orderBy     []string
 	hasMatchers bool
+	project     []string
 }
 
 // clone returns a shallow copy that a builder method can safely modify. The
@@ -131,6 +138,19 @@ func (q *query) Limit(nb int) Query {
 func (q *query) OrderBy(field ...string) Query {
 	next := q.clone()
 	next.orderBy = append([]string(nil), field...)
+	return next
+}
+
+// Project returns a copy of the query that decodes only the named top-level
+// fields.
+func (q *query) Project(fields ...string) Query {
+	next := q.clone()
+	next.project = append([]string(nil), fields...)
+	if len(fields) > 0 {
+		bound := *q.node
+		bound.project = next.project
+		next.node = &bound
+	}
 	return next
 }
 
@@ -345,6 +365,10 @@ func (q *query) query(ctx context.Context, tx *bolt.Tx, sink sink) error {
 
 	if err := checkContext(ctx); err != nil {
 		return err
+	}
+
+	if len(q.project) > 0 && (q.hasMatchers || len(q.orderBy) > 0) {
+		return fmt.Errorf("%w: projection is not supported with matchers or ordering", ErrProjectionUnsupported)
 	}
 
 	if q.limit == 0 {
