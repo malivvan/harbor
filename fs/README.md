@@ -175,6 +175,22 @@ err := fs.FastWalkWithConfig(vfs, "/", &fs.FastWalkConfig{
 }, fn)
 ```
 
+## Application files and sessions
+
+Named file systems are a natural fit for application state that is already
+file-shaped: session JSON, documents, generated reports.
+
+```go
+vfs, err := store.FS().Open("app")
+err = vfs.MkdirAll("/sessions", 0o755)
+err = writeFile(vfs, "/sessions/alice.json", sessionJSON)
+```
+
+The files share the encrypted database, are covered by backups, exports and fs
+snapshots, and take part in cross-store transactions through `tx.FS()`. Keep
+session semantics (expiry, invalidation, which fields are secret) in the
+application: a session file is only as protected as the store password.
+
 ## Snapshots
 
 ```go

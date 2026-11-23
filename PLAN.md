@@ -776,7 +776,11 @@ lookups; encrypted keys work through the existing key encoding. Tests: order,
 missing, duplicates, empty input, wrong destination type, encrypted store, and a
 benchmark against the loop.
 
-## 12. P2 — append-only history helper (research)
+## 12. P2 — append-only history helper (research) — DESIGN NOTE RECORDED
+
+No code, as the plan requires. The design note is in
+[Appendix A](#appendix-a-append-only-history-design-note). The shape still needs
+a consumer to validate it before it becomes API.
 
 A generic bitemporal pattern (monotonic version keys, as-of reads, retraction)
 recurs in consumers. Before implementing, write a short design note covering:
@@ -793,7 +797,12 @@ snapshot, err := h.AsOf(ctx, id, at)
 No code until a consumer validates the shape. Keep application-specific
 intervals and meanings out of harbor.
 
-## 13. P2 — `fs` for application files and sessions
+## 13. P2 — `fs` for application files and sessions — DONE
+
+Done: the pattern is documented in the root README ("Application files and
+sessions") and `fs/README.md`, and `TestFSSessionSurvivesReopen` writes a JSON
+session file, closes the store, reopens it and reads the state back. fs
+operations already participate in `tx.FS()`, so no new primitive was needed.
 
 No new harbor primitive is needed: `fs` already provides named file systems with
 snapshots, symlinks, content encryption and external content. Harbor work:
@@ -805,7 +814,13 @@ snapshots, symlinks, content encryption and external content. Harbor work:
 - Add an example/test that writes a session file, reopens the store and reads it
   back; keep the application's session semantics outside harbor.
 
-## 14. P2 — reciprocal-rank fusion helper (optional)
+## 14. P2 — reciprocal-rank fusion helper (optional) — DONE
+
+Done: `pkg/fusion` with `RRF(k, lists...)`, deterministic score-then-id ordering,
+duplicate suppression within a list, `DefaultRRFK` (60), and no weighting or
+list-selection policy. It is a small standalone package because FTS and vector
+results now coexist; the caller still decides which lists to fuse. Tests cover
+merging, k handling, empty lists, ties and duplicates.
 
 Consider a small `search` package only if the FTS and vector APIs coexist:
 
@@ -816,7 +831,13 @@ func RRF(k int, lists ...[]Result) []Result
 Weights, list selection and ranking policy stay in the caller. Low value until
 FTS exists; do not add a package for it alone.
 
-## 15. P2 — ordered and prefix queries under encryption
+## 15. P2 — ordered and prefix queries under encryption — DOCUMENTED, OPTION 2 CHOSEN
+
+Done: README "Ordered queries under encryption" and the AGENTS encryption
+section document the three options (plaintext order index, open-time in-memory
+ordered map, OPE), the leak each incurs, and why Harbor keeps failing closed in
+this release. Option 2 is the planned path: no format change, per-index opt-in,
+bounded memory. No OPE without a security review; no code in this release.
 
 `db` returns `ErrEncryptedOrdering` for ordered/prefix lookups when keys are
 encrypted, because ciphertext order is meaningless. Harbor should document the
@@ -831,7 +852,17 @@ Deliverable: a README/AGENTS subsection and, if option 1 is chosen, an opt-in
 index flag with tests proving deterministic ordering and documenting leakage. Do
 not implement OPE without review.
 
-## 16. P3 — audit follow-ups
+## 16. P3 — audit follow-ups — DONE
+
+Done: `slip10.Node` gained `Destroy`, and `audit.DeriveKey` wipes the derived
+node (previously only the returned keys were wiped). `fs.Copy`/`CopyWithOptions`
+now record one `copy` event for the destination. `db.Set` records `set` and
+`db.SetBytes` `set_bytes` instead of both recording `set_bytes`. The audit README
+documents the higher-level write mapping (blob/snapshot via fs, store manager
+records nothing), the out-of-scope `VerifyData`, the runtime-only audit flags,
+the tail-truncation anchoring pattern, and the copy coverage. Canonical event
+encoding was completed in 0.5. Tests cover the copy event and the set/set_bytes
+distinction.
 
 The trail (audit package, PLAN.md) is implemented and tested: signed events,
 hash chain, genesis anchor, head reporting, per-store flags, verification, and
@@ -858,7 +889,7 @@ wrong-key/wrong-password behavior. Remaining polish:
 - **Persisted audit flags:** audit flags are runtime-only by design; if users
   want them persisted, that needs a metadata version bump and canary binding.
 
-## 17. Findings already resolved (no action)
+## 17. Findings already resolved (no action) — CONFIRMED
 
 - Ordered `Select(...).OrderBy(...).Find` into `[]*T` aliasing: fixed in
   `db/sink.go` with `TestOrderedQueryKeepsTheMatcher`
@@ -873,7 +904,15 @@ wrong-key/wrong-password behavior. Remaining polish:
   decode into `reflect.New(elem)` — a pointer to a pointer for `[]*T` sinks) are
   still undocumented; see item 18.
 
-## 18. P2 — codec contract documentation and test
+## 18. P2 — codec contract documentation and test — DONE
+
+Done: `db.Codec` now documents exactly what `Marshal` and `Unmarshal` receive
+for Save/Update, One, Find into `[]T` and `[]*T`, Each, Iterator/Decode, Set,
+and the internal `*map[string]any` decodes used by aggregation and references;
+the destination is zeroed first. `db/codec_contract_test.go` runs the full
+read/write matrix with a pointer-strict codec (nil and extra indirection
+rejected), so a codec that only breaks `[]*T` reads fails loudly. The matrix is
+also summarised in `db/README.md`.
 
 Document in `db.Codec` (and `db/README.md`) exactly what `Marshal` receives and
 what `Unmarshal` receives for `Save`, `One`, `Find` into `[]T` and `[]*T`, and
@@ -904,3 +943,43 @@ owns the primitive; the application owns the meaning.
 - [ ] On-disk version 1 and encryption markers unchanged, or bumped with a
       compatibility plan.
 - [ ] Tag from a commit whose CI is green.
+
+## Appendix A — append-only history design note
+
+This is a design note for the deferred history helper (PLAN.md item 12). It is
+not API and no code ships for it until a consumer validates the shape.
+
+**Key layout.** Prefer a sibling bucket per tracked record bucket:
+`<bucket>__history/<primary key>/<version>`, where `<version>` is a 16-byte
+big-endian counter (or a ULID suffix when ordering across writers matters).
+A separate bucket keeps current-record scans and index maintenance untouched and
+lets retention drop history independently. Storing history records inside the
+record bucket would make every normal scan filter them out and would break
+primary-key ordering.
+
+**Timestamp source.** A caller-supplied logical time (not the wall clock) should
+be the as-of key, because backfills and imports are not monotonic in wall time.
+Persist it alongside the version and use it for `AsOf`; document that two writes
+with the same logical time order by version. The store-managed version remains
+the tiebreaker.
+
+**Encryption and ordering.** History keys contain the primary key and a
+monotonic version, so the same ordering trade-off as item 15 applies: with
+`EncryptDBKeys`, exact lookup at a known version works but range/as-of scans by
+version do not. Options are (a) store the version outside the encrypted key,
+(b) keep the history bucket plaintext-keyed and encrypt only values, or (c) keep
+a plaintext ordered index for the version. Each leaks something; do not enable
+OPE without review.
+
+**Retention and compaction.** Per-key retention: keep the latest version, the
+latest version older than N days, and any version referenced by an external
+anchor. Compaction rewrites the history bucket in one transaction. Never delete
+the newest version while the current record exists, or `AsOf` cannot distinguish
+"unchanged" from "no record".
+
+**As-of lookup.** `AsOf(id, t)` finds the greatest version with logical time
+`<= t`, or reports that the record did not exist. Retractions are explicit
+tombstone versions; absence is different from a tombstone. `Append` returns the
+new version so a caller can pin it. The API candidate from the plan
+(`h.Append`, `h.AsOf`) is a reasonable starting point, but no shape should be
+frozen before a consumer validates interval semantics and retention.

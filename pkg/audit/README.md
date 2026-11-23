@@ -79,7 +79,9 @@ count, tip, err := store.Audit().Head()
 
 Later, compare the anchored tip against `VerifyAudit`'s `Result.Tip`. A tip that
 is no longer a prefix of the current chain means events were removed from the
-end.
+end. A scheduler that calls `Head` every few minutes and writes the pair to an
+append-only log outside the store is enough; there is no helper in Harbor
+because the destination is the operator's choice.
 
 ## Using the package directly
 
@@ -128,7 +130,7 @@ and therefore the derived audit keys, is correct.
 | Store | Operations |
 |-------|------------|
 | `db`  | `save`, `update`, `update_field`, `delete_struct`, `drop`, `set`, `set_bytes`, `delete` |
-| `fs`  | `mkdir`, `write`, `truncate`, `remove`, `remove_all`, `rename`, `chmod`, `chtimes`, `chown`, `symlink`, `delete_fs` |
+| `fs`  | `mkdir`, `write`, `truncate`, `remove`, `remove_all`, `rename`, `copy`, `chmod`, `chtimes`, `chown`, `symlink`, `delete_fs` |
 | `ts`  | `insert`, `insert_many`, `delete_range`, `set_labels`, `set_retention`, `delete_series` |
 | `vec` | `create_collection`, `upsert`, `delete`, `drop_collection` |
 
@@ -145,9 +147,23 @@ canonicalisation step and a future event field holding a map still has one
 signature per logical value. `TestEventEncodingIsCanonical` pins the stored
 bytes to the canonical form.
 
+`db.Set` records `set` and `db.SetBytes` records `set_bytes`: both write the same
+encoded value, but the operation name preserves the caller's intent. Higher-level
+packages are audited at the layer that performs the write: `blob` and
+`snapshot` write through `fs`, so their writes appear as `fs` events; the
+`store` manager only opens stores and records nothing itself.
+
 **Not recorded:** reads (`Get`, `Find`, `Range`, `Search`, `Stat`, `ReadFile`,
-…), and key/material lifecycle operations (`ReEncrypt`, `RotateAll`,
-`VerifyAll`, `EnforceRetention`, `Flush`).
+…), key/material lifecycle operations (`ReEncrypt`, `RotateAll`, `VerifyAll`,
+`EnforceRetention`, `Flush`) and higher-level copy paths beyond the single
+`copy` event. Re-hashing current records and comparing them to the recorded
+digests (`VerifyData`) is out of scope for v1; the digest is present for a
+future tool.
+
+Audit flags are a per-open runtime choice and are **not persisted**. If they
+must survive a restart, the application has to open the store with the same
+flags; changing that would require a metadata version bump and a canary
+binding.
 
 ## Threat model
 

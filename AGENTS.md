@@ -29,6 +29,7 @@ separate `docs/` tree.
 | `.../pkg/snapshot/blobstore` | Adapter from `snapshot.ObjectStore` to `blob`. |
 | `.../pkg/id` | ULID generation: 26-character Crockford base32, time-sortable. |
 | `.../pkg/sign/canonical` | Deterministic JSON encoding for signatures and content addressing: sorted keys, stable numbers, no whitespace. |
+| `.../pkg/fusion` | Reciprocal rank fusion for combining full-text and vector result lists. |
 | `.../internal/...` | Shared bbolt helpers, AEAD primitives, Argon2id/BLAKE2b, SLIP-0010/0021 and CPU detection. Not public API. |
 
 The stores are independent. The root package is a convenience composition,
@@ -564,7 +565,11 @@ too, which is why a password is required even when encryption is disabled.
 
 `EncryptDBKeys` makes exact lookups work over ciphertext but destroys meaningful
 ordering. Ordered and prefix lookups return `db.ErrEncryptedOrdering` instead of
-returning wrong results. `EncryptDBValues` seals record and key/value values;
+returning wrong results. The three options — a plaintext order index, an
+open-time in-memory ordered map, or order-preserving encryption — are weighed in
+[README.md](README.md#ordered-queries-under-encryption). This release keeps the
+fail-closed behaviour; option 2 is the planned path because it needs no format
+change. Do not add OPE without a security review. `EncryptDBValues` seals record and key/value values;
 `EncryptDBMetadata` seals auto-increment counters. Bucket names and the codec
 name stay readable.
 

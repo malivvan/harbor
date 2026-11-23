@@ -108,3 +108,28 @@ func TestAuditDigestMatchesPayload(t *testing.T) {
 	require.Equal(t, digestOf(raw), ev.Digest)
 	_ = pub
 }
+
+// Rule: Set and SetBytes are distinguishable in the audit trail even though
+// they share the write path.
+func TestAuditSetOperationNames(t *testing.T) {
+	st, bdb, _ := openAudited(t)
+	ctx := context.Background()
+
+	require.NoError(t, st.Set(ctx, "cfg", "typed", "v"))
+	require.NoError(t, st.SetBytes(ctx, "cfg", "raw", []byte("bytes")))
+
+	var ops []string
+	require.NoError(t, bdb.View(func(tx *bolt.Tx) error {
+		root := tx.Bucket([]byte("audit"))
+		events := root.Bucket([]byte("events"))
+		return events.ForEach(func(_, v []byte) error {
+			var event audit.Event
+			if err := json.Unmarshal(v[:len(v)-ed25519.SignatureSize], &event); err != nil {
+				return err
+			}
+			ops = append(ops, event.Op)
+			return nil
+		})
+	}))
+	require.Equal(t, []string{"set", "set_bytes"}, ops)
+}

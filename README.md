@@ -471,6 +471,29 @@ link, err := vfs.Readlink("/latest.txt")
 `FastWalk`, read-only snapshots, an inode cache, external content back ends, and
 chunked encrypted content.
 
+### Application files and sessions
+
+A named file system is a good home for application state that is naturally a
+file: JSON sessions, uploaded documents, generated reports. Keep the meaning of
+those files in the application; Harbor only stores them.
+
+```go
+app, err := store.FS().Open("app")
+err = app.MkdirAll("/sessions", 0o755)
+
+f, err := app.Create("/sessions/alice.json")
+_, err = f.Write(sessionJSON)
+err = f.Close()
+
+// Later, or after reopening the store:
+body, err := app.ReadFile("/sessions/alice.json")
+```
+
+The files live in the same encrypted database, participate in cross-store
+transactions, and are included in `Backup`/`Export` and fs snapshots. A session
+file is not a security boundary: anything holding the password can read it, so
+do not put a bearer token there that the application would not otherwise trust.
+
 ### Walk
 
 `fs.Walk` has the shape of `filepath.Walk`:
@@ -862,6 +885,9 @@ Small packages shared by applications and by Harbor itself:
   sorted at every depth, no insignificant whitespace, numbers passed through
   unchanged. It is the encoding to sign or hash when a struct may later carry a
   map.
+- **`pkg/fusion`** combines ranked lists with reciprocal rank fusion, the usual
+  way to merge full-text and vector results whose scores are not comparable.
+  Ranking policy and list selection stay in the caller.
 - **`vec/doc`** is a document-oriented facade over `vec`: id, content,
   embedding and string metadata, with the collection dimension taken from the
   first upsert instead of being known up front. See
@@ -989,6 +1015,25 @@ Partial rotation cannot run when deterministic names are encrypted: `ts` with
 one master key, so the remaining entities could neither be found nor decrypted
 after the new key is installed. The methods return `ErrInvalidConfig`; use
 `RotateAll`.
+
+### Ordered queries under encryption
+
+When `EncryptDBKeys` is enabled, primary keys and index values are AES-SIV
+ciphertext. Exact lookups still work, but ciphertext order is meaningless, so
+`OrderBy`, `Range` and `Prefix` return `db.ErrEncryptedOrdering` rather than
+wrong results. There are three honest options:
+
+1. **Plaintext index for non-secret ordering fields.** Fast, but deliberately
+   leaks the order of that field.
+2. **An in-memory ordered index built at open.** No on-disk format change and
+   the same order leak, bounded by the number of distinct indexed values;
+   writes must update it.
+3. **Order-preserving encryption.** Research only; it needs a security review
+   and is not promised here.
+
+Harbor keeps the current fail-closed behaviour for this release. Option 2 is
+the planned path when a consumer needs ordering, because it needs no format
+change and can be enabled per index.
 
 ### Threat model
 
@@ -1356,6 +1401,7 @@ Generated API documentation is published on pkg.go.dev:
 - [github.com/malivvan/harbor/pkg/blob](https://pkg.go.dev/github.com/malivvan/harbor/pkg/blob)
 - [github.com/malivvan/harbor/pkg/consensus](https://pkg.go.dev/github.com/malivvan/harbor/pkg/consensus)
 - [github.com/malivvan/harbor/pkg/id](https://pkg.go.dev/github.com/malivvan/harbor/pkg/id)
+- [github.com/malivvan/harbor/pkg/fusion](https://pkg.go.dev/github.com/malivvan/harbor/pkg/fusion)
 - [github.com/malivvan/harbor/pkg/metrics](https://pkg.go.dev/github.com/malivvan/harbor/pkg/metrics)
 - [github.com/malivvan/harbor/pkg/sign/canonical](https://pkg.go.dev/github.com/malivvan/harbor/pkg/sign/canonical)
 - [github.com/malivvan/harbor/pkg/snapshot](https://pkg.go.dev/github.com/malivvan/harbor/pkg/snapshot)

@@ -242,6 +242,7 @@ func DeriveKey(seed []byte, path string) (ed25519.PublicKey, ed25519.PrivateKey,
 	if err != nil {
 		return nil, nil, fmt.Errorf("audit: derive %s: %w", path, err)
 	}
+	defer slip10.Destroy(node)
 	pub, priv := node.KeyPair()
 	return pub, priv, nil
 }

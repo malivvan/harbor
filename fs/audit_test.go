@@ -77,3 +77,22 @@ func writeFile(t *testing.T, fsys *FS, name, content string) error {
 	}
 	return f.Close()
 }
+
+// Rule: Copy records one audit event under the destination name. Content and
+// inode writes are part of the copy and must not be invisible.
+func TestAuditRecordsCopy(t *testing.T) {
+	store, db, pub := openAuditedStore(t)
+	fsys, err := store.Open("fs")
+	require.NoError(t, err)
+
+	require.NoError(t, writeFile(t, fsys, "/src.txt", "hello"))
+	require.NoError(t, fsys.Copy("/src.txt", "/dst.txt"))
+
+	res, err := audit.Verify(db, map[string]ed25519.PublicKey{audit.StoreFS: pub})
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), res.Count, "write, close and copy must be recorded")
+
+	body, err := fsys.ReadFile("/dst.txt")
+	require.NoError(t, err)
+	require.Equal(t, "hello", string(body))
+}

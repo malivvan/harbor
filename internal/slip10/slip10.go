@@ -42,11 +42,16 @@ type Node interface {
 	PublicKeyWithPrefix() []byte
 	RawSeed() []byte
 	MarshalBinary() ([]byte, error)
+	// Destroy zeroes this node's key material. It is safe to call more than
+	// once; a destroyed node must not be used for derivation or signing.
+	Destroy()
 }
 
 type node struct {
 	code []byte
 	key  []byte
+
+	destroyed bool
 }
 
 // DeriveForPath derives the node at path starting from a root seed.
@@ -177,6 +182,32 @@ func (k *node) PublicKeyWithPrefix() []byte {
 // MarshalBinary serializes the node's extended private key as key||chainCode (64 bytes).
 // Use this to persist a checkpoint so you can restore the node later without the root seed.
 // Security: anyone with this blob can derive all descendants of this node.
+// Destroy zeroes n's key material. It is safe to call with a nil Node.
+func Destroy(n Node) {
+	if n != nil {
+		n.Destroy()
+	}
+}
+
+// Destroy zeroes the node's chain code and key. It is idempotent.
+func (k *node) Destroy() {
+	if k == nil || k.destroyed {
+		return
+	}
+	zeroBytes(k.key)
+	zeroBytes(k.code)
+	k.key = nil
+	k.code = nil
+	k.destroyed = true
+}
+
+// zeroBytes overwrites b.
+func zeroBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
 func (k *node) MarshalBinary() ([]byte, error) {
 	// [32]key || [32]chainCode
 	b := make([]byte, 64)

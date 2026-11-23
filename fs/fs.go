@@ -1248,6 +1248,9 @@ func (fs *FS) CopyContext(ctx context.Context, source, destination string, opts 
 	}
 
 	published = true
+	if err := fs.auditEntry("copy", path.Join(dstDir, dstFilename), nil); err != nil {
+		return err
+	}
 	return nil
 }
 
