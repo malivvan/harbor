@@ -5,10 +5,57 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sync"
 
 	"github.com/malivvan/harbor"
 	"github.com/malivvan/harbor/db"
 )
+
+// typeRegistry maps a record's reflect.Type name to its type, so the FSM can
+// reconstruct db records from a command payload. It is process-global: every
+// node in a cluster runs the same application binary, so a type registered on
+// one node is registered on all. The leader registers types lazily on first
+// write; callers of a multi-process deployment should still call Register on
+// every node before writes are replicated so followers can apply them.
+var typeRegistry sync.Map // string -> reflect.Type
+
+// Register records a record type for replication. It accepts a value or a
+// pointer to the record type. Call it on every node that must apply replicated
+// db writes of that type.
+func Register(v any) {
+	if v == nil {
+		return
+	}
+	t := reflect.TypeOf(v)
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() == reflect.Struct {
+		typeRegistry.Store(t.String(), t)
+	}
+}
+
+// registerType records t and returns its name.
+func registerType(t reflect.Type) string {
+	name := t.String()
+	typeRegistry.Store(name, t)
+	return name
+}
+
+// newValue reconstructs a pointer to the registered type and decodes raw into
+// it.
+func newValue(name string, raw json.RawMessage) (any, error) {
+	v, ok := typeRegistry.Load(name)
+	if !ok {
+		return nil, fmt.Errorf("consensus: unregistered record type %q", name)
+	}
+	t := v.(reflect.Type)
+	ptr := reflect.New(t).Interface()
+	if err := json.Unmarshal(raw, ptr); err != nil {
+		return nil, fmt.Errorf("consensus: decode record %s: %w", name, err)
+	}
+	return ptr, nil
+}
 
 // DB is the replicated write view of the db sub-store. Reads should use
 // Node.Store().DB() directly; writes go through the methods here so they are
@@ -89,7 +136,7 @@ func (d *DB) recordWrite(ctx context.Context, op, field string, value, data any)
 	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
 		return fmt.Errorf("consensus: db write requires a pointer to a struct")
 	}
-	name := d.n.registerType(ref.Elem().Type())
+	name := registerType(ref.Elem().Type())
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("consensus: encode record: %w", err)
@@ -121,7 +168,7 @@ func (f *fsm) applyDBUpsert(ctx context.Context, a dbChange, update bool) any {
 	if st == nil {
 		return ErrClosed
 	}
-	ptr, err := f.node.newValue(a.Type, a.Data)
+	ptr, err := newValue(a.Type, a.Data)
 	if err != nil {
 		return err
 	}
@@ -137,7 +184,7 @@ func (f *fsm) applyDBUpdateField(ctx context.Context, a dbFieldChange) any {
 	if st == nil {
 		return ErrClosed
 	}
-	ptr, err := f.node.newValue(a.Type, a.Data)
+	ptr, err := newValue(a.Type, a.Data)
 	if err != nil {
 		return err
 	}
@@ -160,7 +207,7 @@ func (f *fsm) applyDBDelete(ctx context.Context, a dbChange) any {
 	if st == nil {
 		return ErrClosed
 	}
-	ptr, err := f.node.newValue(a.Type, a.Data)
+	ptr, err := newValue(a.Type, a.Data)
 	if err != nil {
 		return err
 	}
@@ -172,7 +219,7 @@ func (f *fsm) applyDBDrop(ctx context.Context, a dbChange) any {
 	if st == nil {
 		return ErrClosed
 	}
-	ptr, err := f.node.newValue(a.Type, a.Data)
+	ptr, err := newValue(a.Type, a.Data)
 	if err != nil {
 		return err
 	}

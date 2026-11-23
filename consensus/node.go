@@ -3,14 +3,12 @@ package consensus
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sync"
 	"time"
 
@@ -36,10 +34,6 @@ type Node struct {
 	mu     sync.RWMutex
 	store  *harbor.Store
 	closed bool
-
-	// types maps a reflect.Type name to the type itself, so the FSM can
-	// reconstruct db records from the command payload.
-	types sync.Map // string -> reflect.Type
 }
 
 // Open starts a cluster node. It opens the harbor store at StorePath, wires up
@@ -370,27 +364,4 @@ func (n *Node) restoreStore(data []byte) error {
 	n.store = newStore
 	n.mu.Unlock()
 	return nil
-}
-
-// registerType records a reflect.Type under its name so the FSM can reconstruct
-// records of that type, and returns the name.
-func (n *Node) registerType(t reflect.Type) string {
-	name := t.String()
-	n.types.Store(name, t)
-	return name
-}
-
-// newValue reconstructs a pointer to the registered type and decodes raw into
-// it.
-func (n *Node) newValue(name string, raw json.RawMessage) (any, error) {
-	v, ok := n.types.Load(name)
-	if !ok {
-		return nil, fmt.Errorf("consensus: unregistered record type %q", name)
-	}
-	t := v.(reflect.Type)
-	ptr := reflect.New(t).Interface()
-	if err := json.Unmarshal(raw, ptr); err != nil {
-		return nil, fmt.Errorf("consensus: decode record %s: %w", name, err)
-	}
-	return ptr, nil
 }
