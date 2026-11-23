@@ -249,8 +249,16 @@ iff `Apply` is a **pure function of (current state, command)**. Audit results:
 - **ts** — deterministic. `Insert`/`InsertMany` use the caller's explicit
   `Point.Timestamp`; the pluggable `now` is only used by retention maintenance
   (`EnforceRetention`), which is not a replicated write (see §6.7).
-- **vec** — deterministic. `Version` is store-managed and derived from the
-  point sequence; `Upsert`/`Delete` carry the full point payload.
+- **vec** — replicated through the **durable** store path. `Store.UpsertPoints`
+  / `Store.DeletePoints` are deterministic (they encode the caller's points
+  verbatim and write them to bbolt; no wall clock is consulted), so the facade
+  uses those rather than `Collection.Upsert`, which stamps a `time.Now()`-based
+  `Version` and therefore cannot be replayed deterministically. Trade-off: the
+  in-memory search index (Flat/HNSW) is not updated by replicated writes — a
+  node's search index reflects the state at collection-load time and is
+  refreshed by reloading the collection. A deterministic-version
+  `Collection.Upsert` (e.g. carrying the version in the command, or a `SetNow`
+  clock) is the documented follow-up for index-aware replication.
 - **fs** — **the one non-deterministic store**: `inode.go` calls `time.Now()`
   for atime/mtime on create/write/chmod/chtimes. To keep apply pure, fs
   commands carry the leader's chosen times explicitly (the leader records them
@@ -368,27 +376,26 @@ Encryption is **per-node at-rest** and orthogonal to replication:
   **same password** (and the same `Encrypt` flags for a *new* store), so each
   node can open its own replica. This is the only cross-node secret; the raft
   transport itself is unauthenticated in v1 (documented in §13).
-- A node that joins late receives a snapshot of the **plaintext-free byte
-  stream? No** — see below.
+- A node that joins late receives a snapshot of the harbor database's
+  **at-rest bytes** (see below).
 
-**Snapshot format decision.** The FSM snapshot serializes the harbor database's
-**logical** state via `bbolt.Tx.WriteTo`, i.e. the *encrypted-at-rest bytes*.
-This has two consequences:
+**Snapshot format decision.** The FSM snapshot serializes the harbor database
+via `bbolt.Tx.WriteTo`, i.e. the *encrypted-at-rest bytes* (or plaintext bytes
+for a plaintext store). A raw byte snapshot **is** restorable across nodes
+because it is self-describing:
 
-1. A follower restoring a snapshot gets the leader's *encrypted* bytes, which it
-   can only read if it has the leader's salt. Since salts differ per node, a
-   raw `WriteTo` snapshot **cannot** be restored onto a node with a different
-   salt. Therefore the snapshot must be **logical** (export the four stores to
-   plaintext, re-import on restore) *or* all nodes must share the salt.
+1. The snapshot carries the leader's `harbor.Metadata` record — salt, KDF
+   parameters, flags and canary — so a follower that restores it adopts the
+   leader's salt. With the shared password it derives the leader's keys and
+   verifies the canary, then reads the leader's ciphertext correctly.
+2. After restore the node reopens its store, which rebuilds the in-memory
+   caches (fs inode cache, vec search indexes) from disk.
 
-**Chosen:** the snapshot is a **logical export** — a small, versioned container
-that serializes each store's logical contents (db buckets/records, fs tree,
-ts series, vec collections) in plaintext form, produced by a read-only export
-and re-imported by restore. This is the one place the plan departs from
-rqlite's raw-file snapshot, and it is forced by Harbor's per-node encryption.
-(The export/import code re-uses the store read/write paths; it is additive and
-does not change on-disk formats.) A plaintext store may still use raw
-`Tx.WriteTo` for speed; the container supports both. This is detailed in §9.4.
+**Chosen:** the snapshot is the **raw `Tx.WriteTo` byte stream + reopen**,
+exactly the rqlite "swap the database file and reopen" model. It needs no
+logical export/import, no per-store serialization, and is byte-accurate for
+both plaintext and encrypted stores. The one requirement is the shared
+password (§8 above). This is detailed in §9.4.
 
 ---
 
@@ -417,10 +424,11 @@ replication recursion risk** (§9.3).
 
 ### 9.2 `Snapshot` / `Persist`
 
-`Snapshot()` acquires the node's apply lock, exports the logical state (or
-`Tx.WriteTo` for plaintext), and returns an `fsmSnapshot`. `Persist` writes to
-the `raft.SnapshotSink` and `Close`s it; on error it `Cancel`s — the exact
-hraftd contract. `Release` is a no-op (the snapshot holds no locks).
+`Snapshot()` acquires the node's apply lock, serializes the harbor database
+with `bbolt.Tx.WriteTo` (via `*harbor.Store.View`), and returns an
+`fsmSnapshot`. `Persist` writes the bytes to the `raft.SnapshotSink` and
+`Close`s it; on error it `Cancel`s — the exact hraftd contract. `Release` is a
+no-op (the snapshot holds no locks).
 
 ### 9.3 Recursion guard
 
@@ -435,8 +443,8 @@ separate, opt-in layer.)
 
 ### 9.4 Restore and reopen
 
-`Restore(rc)` reads the snapshot container, writes it to a temp file, and calls
-the node's `reopen()`:
+`Restore(rc)` reads the snapshot bytes, writes them to a sibling temp file, and
+reopens the store over them:
 
 1. Flush and close the current `*harbor.Store` (which closes the bbolt handle).
 2. Replace the store file with the restored bytes.

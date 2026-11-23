@@ -31,6 +31,7 @@ and `Vec()`. Every store can also be used directly with its own `*bolt.DB`.
 - [Files with `fs`](#files-with-fs)
 - [Time series with `ts`](#time-series-with-ts)
 - [Vectors with `vec`](#vectors-with-vec)
+- [Clustering](#clustering)
 - [Encryption](#encryption)
 - [Database lifecycle](#database-lifecycle)
 - [Error handling](#error-handling)
@@ -642,6 +643,40 @@ quantization, is rejected. The quantizer implementation itself is not recorded;
 use the same one for every process that opens the collection.
 
 Full reference: [vec/README.md](vec/README.md).
+
+## Clustering
+
+Harbor ships a `consensus` package that replicates a whole store across a
+cluster of processes using the [Raft](https://github.com/hashicorp/raft)
+consensus algorithm. Each node keeps its own harbor database; writes are
+proposed through raft on the leader and applied, in log order, to the same
+logical state on every node. Reads are served from the local replica.
+
+```go
+node, err := consensus.Open(ctx, consensus.Config{
+    NodeID:     "node-1",
+    BindAddr:   "127.0.0.1:7001",
+    Dir:        "./data/node-1",
+    Bootstrap:  true, // first node forms the cluster
+    StorePath:  "./data/node-1/harbor.db",
+    StoreOpts:  &harbor.Options{Password: "shared-secret"},
+})
+
+// Writes go through the replicated facades (leader only).
+err = node.DB().Save(ctx, &User{ID: "u1", Name: "alice"})
+err = node.TS().Insert(ctx, "cpu", ts.Point{Timestamp: now, Value: 42})
+
+// Reads hit the local store directly.
+var u User
+_ = node.Store().DB().One(ctx, "ID", "u1", &u)
+```
+
+Every node in a cluster must use the same password. A second node opens with
+`Bootstrap: false` and joins the leader with `Join`; nodes leave with `Leave`.
+Off-leader writes return `consensus.ErrNotLeader`, and `Leader` reports the
+current leader's address for client-side redirect. See
+[consensus/README.md](consensus/README.md) for the full API, the consistency
+model and deployment notes.
 
 ## Encryption
 
