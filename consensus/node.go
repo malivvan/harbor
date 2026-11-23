@@ -1,0 +1,396 @@
+package consensus
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"reflect"
+	"sync"
+	"time"
+
+	"github.com/hashicorp/go-hclog"
+	"github.com/hashicorp/raft"
+	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
+	"github.com/malivvan/harbor"
+	bolt "go.etcd.io/bbolt"
+)
+
+// Node is one member of a Harbor cluster. It owns the local *harbor.Store
+// replica and the raft state machine that keeps it in sync with the cluster.
+type Node struct {
+	cfg Config
+
+	raft          *raft.Raft
+	transport     *raft.NetworkTransport
+	raftDB        *raftboltdb.BoltStore
+	logStore      raft.LogStore
+	stableStore   raft.StableStore
+	snapshotStore raft.SnapshotStore
+
+	mu     sync.RWMutex
+	store  *harbor.Store
+	closed bool
+
+	// types maps a reflect.Type name to the type itself, so the FSM can
+	// reconstruct db records from the command payload.
+	types sync.Map // string -> reflect.Type
+}
+
+// Open starts a cluster node. It opens the harbor store at StorePath, wires up
+// the raft transport, log/stable/snapshot stores, and — when Bootstrap is set
+// and no state exists yet — forms a single-node cluster.
+func Open(ctx context.Context, cfg Config) (*Node, error) {
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := os.MkdirAll(cfg.Dir, 0o755); err != nil {
+		return nil, fmt.Errorf("consensus: create data dir: %w", err)
+	}
+
+	st, err := harbor.Open(ctx, cfg.StorePath, cfg.storeMode(), cfg.StoreOpts)
+	if err != nil {
+		return nil, fmt.Errorf("consensus: open harbor store: %w", err)
+	}
+
+	n := &Node{cfg: cfg, store: st}
+	if err := n.startRaft(); err != nil {
+		_ = st.Close()
+		return nil, err
+	}
+	return n, nil
+}
+
+// startRaft builds the transport, stores and raft instance, then bootstraps
+// when requested and no state exists yet.
+func (n *Node) startRaft() error {
+	logWriter := n.cfg.LogOutput
+	if logWriter == nil {
+		logWriter = io.Discard
+	}
+
+	raftCfg := n.cfg.RaftConfig
+	if raftCfg == nil {
+		raftCfg = raft.DefaultConfig()
+	}
+	raftCfg.LocalID = n.cfg.NodeID
+	if raftCfg.Logger == nil {
+		raftCfg.Logger = newLogger(logWriter)
+	}
+
+	addr, err := net.ResolveTCPAddr("tcp", n.cfg.BindAddr)
+	if err != nil {
+		return fmt.Errorf("consensus: resolve bind address: %w", err)
+	}
+	transport, err := raft.NewTCPTransport(n.cfg.BindAddr, addr, transportMaxPool, transportTimeout, logWriter)
+	if err != nil {
+		return fmt.Errorf("consensus: create transport: %w", err)
+	}
+	n.transport = transport
+
+	snapshotStore, err := raft.NewFileSnapshotStore(filepath.Join(n.cfg.Dir, "snapshots"), retainSnapshotCount, logWriter)
+	if err != nil {
+		return fmt.Errorf("consensus: create snapshot store: %w", err)
+	}
+	n.snapshotStore = snapshotStore
+
+	raftDB, err := raftboltdb.New(raftboltdb.Options{Path: filepath.Join(n.cfg.Dir, "raft.db")})
+	if err != nil {
+		return fmt.Errorf("consensus: create raft log store: %w", err)
+	}
+	n.raftDB = raftDB
+	n.logStore = raftDB
+	n.stableStore = raftDB
+
+	ra, err := raft.NewRaft(raftCfg, &fsm{node: n}, n.logStore, n.stableStore, n.snapshotStore, n.transport)
+	if err != nil {
+		_ = raftDB.Close()
+		return fmt.Errorf("consensus: start raft: %w", err)
+	}
+	n.raft = ra
+
+	if n.cfg.Bootstrap {
+		existing, err := raft.HasExistingState(n.logStore, n.stableStore, n.snapshotStore)
+		if err != nil {
+			return fmt.Errorf("consensus: check existing raft state: %w", err)
+		}
+		if !existing {
+			configuration := raft.Configuration{Servers: []raft.Server{{
+				ID:      n.cfg.NodeID,
+				Address: transport.LocalAddr(),
+			}}}
+			if err := ra.BootstrapCluster(configuration).Error(); err != nil {
+				return fmt.Errorf("consensus: bootstrap cluster: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// newLogger builds the raft logger.
+func newLogger(w io.Writer) hclog.Logger {
+	return hclog.New(&hclog.LoggerOptions{
+		Name:   "consensus",
+		Output: w,
+		Level:  hclog.Info,
+	})
+}
+
+// Close shuts down raft and closes the local harbor store. It is safe to call
+// more than once.
+func (n *Node) Close() error {
+	if n == nil {
+		return nil
+	}
+	n.mu.Lock()
+	if n.closed {
+		n.mu.Unlock()
+		return nil
+	}
+	n.closed = true
+	n.mu.Unlock()
+
+	var errs []error
+	if n.raft != nil {
+		if err := n.raft.Shutdown().Error(); err != nil {
+			errs = append(errs, fmt.Errorf("shutdown raft: %w", err))
+		}
+	}
+	if n.transport != nil {
+		if err := n.transport.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close transport: %w", err))
+		}
+	}
+	if n.raftDB != nil {
+		if err := n.raftDB.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close raft log store: %w", err))
+		}
+	}
+	// Close the harbor store (flushing vec) last, after raft is stopped.
+	n.mu.Lock()
+	st := n.store
+	n.store = nil
+	n.mu.Unlock()
+	if st != nil {
+		if err := st.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close harbor store: %w", err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// Store returns the local harbor store for reads. It must not be written to
+// directly: writes made outside the facade methods are not replicated.
+func (n *Node) Store() *harbor.Store {
+	if n == nil {
+		return nil
+	}
+	return n.storeHandle()
+}
+
+// Leader returns the current leader's address and ID, or ("", "") when there
+// is no leader yet.
+func (n *Node) Leader() (raft.ServerAddress, raft.ServerID) {
+	if n == nil || n.raft == nil {
+		return "", ""
+	}
+	return n.raft.LeaderWithID()
+}
+
+// State reports this node's raft state.
+func (n *Node) State() raft.RaftState {
+	if n == nil || n.raft == nil {
+		return raft.Shutdown
+	}
+	return n.raft.State()
+}
+
+// Stats returns raft statistics for this node.
+func (n *Node) Stats() map[string]string {
+	if n == nil || n.raft == nil {
+		return nil
+	}
+	return n.raft.Stats()
+}
+
+// AppliedIndex returns the highest raft log index applied to this node's store.
+func (n *Node) AppliedIndex() uint64 {
+	if n == nil || n.raft == nil {
+		return 0
+	}
+	return n.raft.AppliedIndex()
+}
+
+// Barrier blocks until all prior log entries are applied, so a follower that
+// just wrote can serve its own read (read-your-writes).
+func (n *Node) Barrier(timeout time.Duration) error {
+	if n == nil || n.raft == nil {
+		return ErrClosed
+	}
+	if timeout <= 0 {
+		timeout = n.cfg.applyTimeout()
+	}
+	return n.raft.Barrier(timeout).Error()
+}
+
+// Snapshot forces an immediate raft snapshot of the current state.
+func (n *Node) Snapshot() error {
+	if n == nil || n.raft == nil {
+		return ErrClosed
+	}
+	return n.raft.Snapshot().Error()
+}
+
+// Join adds a node to the cluster. It must be called on the leader.
+func (n *Node) Join(id raft.ServerID, addr raft.ServerAddress) error {
+	if n == nil || n.raft == nil {
+		return ErrClosed
+	}
+	if n.raft.State() != raft.Leader {
+		return ErrNotLeader
+	}
+
+	configFuture := n.raft.GetConfiguration()
+	if err := configFuture.Error(); err != nil {
+		return err
+	}
+	for _, srv := range configFuture.Configuration().Servers {
+		// A node already exists with either the joining ID or address; it must
+		// be removed first, unless it is exactly this node.
+		if srv.ID == id || srv.Address == addr {
+			if srv.ID == id && srv.Address == addr {
+				return nil
+			}
+			if err := n.raft.RemoveServer(srv.ID, 0, 0).Error(); err != nil {
+				return fmt.Errorf("consensus: remove conflicting server %s: %w", srv.ID, err)
+			}
+		}
+	}
+	if err := n.raft.AddVoter(id, addr, 0, 0).Error(); err != nil {
+		return fmt.Errorf("consensus: add voter %s: %w", id, err)
+	}
+	return nil
+}
+
+// Leave removes a node from the cluster. It must be called on the leader.
+func (n *Node) Leave(id raft.ServerID) error {
+	if n == nil || n.raft == nil {
+		return ErrClosed
+	}
+	if n.raft.State() != raft.Leader {
+		return ErrNotLeader
+	}
+	return n.raft.RemoveServer(id, 0, 0).Error()
+}
+
+// apply proposes a command through raft and returns the FSM's response. It
+// returns ErrNotLeader when this node is not the leader.
+func (n *Node) apply(op string, arg any) (any, error) {
+	if n == nil || n.raft == nil {
+		return nil, ErrClosed
+	}
+	if n.raft.State() != raft.Leader {
+		return nil, ErrNotLeader
+	}
+	data, err := encodeCommand(op, arg)
+	if err != nil {
+		return nil, err
+	}
+	fut := n.raft.Apply(data, n.cfg.applyTimeout())
+	if err := fut.Error(); err != nil {
+		return nil, err
+	}
+	if resp, ok := fut.Response().(error); ok {
+		return nil, resp
+	}
+	return fut.Response(), nil
+}
+
+// storeHandle returns the current store, or nil when closed.
+func (n *Node) storeHandle() *harbor.Store {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.store
+}
+
+// serializeStore writes a consistent snapshot of the harbor database.
+func (n *Node) serializeStore() ([]byte, error) {
+	st := n.storeHandle()
+	if st == nil {
+		return nil, ErrClosed
+	}
+	var buf bytes.Buffer
+	if err := st.View(func(tx *bolt.Tx) error {
+		_, err := tx.WriteTo(&buf)
+		return err
+	}); err != nil {
+		return nil, fmt.Errorf("consensus: serialize store: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// restoreStore atomically replaces the harbor database with the snapshot
+// contents and reopens it, rebuilding the in-memory caches from disk.
+func (n *Node) restoreStore(data []byte) error {
+	n.mu.Lock()
+	st := n.store
+	n.store = nil
+	n.mu.Unlock()
+
+	if st != nil {
+		_ = st.Close()
+	}
+
+	tmp := n.cfg.StorePath + ".restore"
+	if err := os.WriteFile(tmp, data, n.cfg.storeMode()); err != nil {
+		return fmt.Errorf("consensus: write restored store: %w", err)
+	}
+	if err := os.Rename(tmp, n.cfg.StorePath); err != nil {
+		return fmt.Errorf("consensus: replace store: %w", err)
+	}
+
+	newStore, err := harbor.Open(context.Background(), n.cfg.StorePath, n.cfg.storeMode(), n.cfg.StoreOpts)
+	if err != nil {
+		return fmt.Errorf("consensus: reopen restored store: %w", err)
+	}
+
+	n.mu.Lock()
+	n.store = newStore
+	n.mu.Unlock()
+	return nil
+}
+
+// registerType records a reflect.Type under its name so the FSM can reconstruct
+// records of that type, and returns the name.
+func (n *Node) registerType(t reflect.Type) string {
+	name := t.String()
+	n.types.Store(name, t)
+	return name
+}
+
+// newValue reconstructs a pointer to the registered type and decodes raw into
+// it.
+func (n *Node) newValue(name string, raw json.RawMessage) (any, error) {
+	v, ok := n.types.Load(name)
+	if !ok {
+		return nil, fmt.Errorf("consensus: unregistered record type %q", name)
+	}
+	t := v.(reflect.Type)
+	ptr := reflect.New(t).Interface()
+	if err := json.Unmarshal(raw, ptr); err != nil {
+		return nil, fmt.Errorf("consensus: decode record %s: %w", name, err)
+	}
+	return ptr, nil
+}

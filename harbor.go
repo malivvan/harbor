@@ -466,6 +466,14 @@ func (s *Store) withDB(fn func(*bolt.DB) error) error {
 	return fn(s.bs)
 }
 
+// View runs fn against a consistent read-only snapshot of the underlying
+// database. It is used by the consensus layer to serialize the store for raft
+// snapshots and by callers that need a raw bbolt view (for example, a backup).
+// fn must not write to the database.
+func (s *Store) View(fn func(*bolt.Tx) error) error {
+	return s.withDB(func(b *bolt.DB) error { return b.View(fn) })
+}
+
 // Close closes the underlying database. It is safe to call more than once, and
 // the sub-store accessors return nil afterwards.
 //
