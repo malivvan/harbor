@@ -87,9 +87,9 @@ type Store struct {
 	// adoption of the new key state.
 	rotMu sync.RWMutex
 
-	// audit receives an entry for every committed write, or nil when the store
-	// was opened without audit. It is set once at Open and never mutated.
-	audit ledger.Sink
+	// trace receives an entry for every committed write, or nil when the store
+	// was opened without trace. It is set once at Open and never mutated.
+	trace ledger.Sink
 
 	// obs receives operation metrics and spans, or nil when the store was
 	// opened without instrumentation. It is set once at Open and never
@@ -97,14 +97,14 @@ type Store struct {
 	obs metrics.Observer
 }
 
-// auditEntry records one committed write in the store's audit trail. It is a
-// no-op when the store has no audit sink. Digest is the SHA-256 of the written
+// traceEntry records one committed write in the store's trace log. It is a
+// no-op when the store has no trace sink. Digest is the SHA-256 of the written
 // payload, or nil for deletes.
-func (s *Store) auditEntry(op, collection string, digest []byte) error {
-	if s == nil || s.audit == nil {
+func (s *Store) traceEntry(op, collection string, digest []byte) error {
+	if s == nil || s.trace == nil {
 		return nil
 	}
-	return s.audit.Record(ledger.Entry{
+	return s.trace.Record(ledger.Entry{
 		Store:  ledger.StoreVector,
 		Op:     op,
 		Entity: collection,
@@ -219,21 +219,21 @@ func (s *Store) WithRoot(parts ...string) *Store {
 		dropped:     make(map[string]struct{}),
 		quantizer:   owner.quantizer,
 		useQuant:    owner.useQuant,
-		audit:       owner.audit,
+		trace:       owner.trace,
 		obs:         owner.obs,
 	}
 	owner.views[key] = view
 	return view
 }
 
-// SetAuditSink replaces the sink that receives committed-write events and
+// SetTraceSink replaces the sink that receives committed-write events and
 // returns the receiver. It is intended for a transaction-bound view created by
 // WithTransaction: the view stages events and the transaction owner records
 // them after it commits. It must not be called concurrently with writes on the
 // same Store.
-func (s *Store) SetAuditSink(sink ledger.Sink) *Store {
+func (s *Store) SetTraceSink(sink ledger.Sink) *Store {
 	if s != nil {
-		s.audit = sink
+		s.trace = sink
 	}
 	return s
 }
@@ -259,7 +259,7 @@ func (s *Store) WithTransaction(tx *bbolt.Tx) *Store {
 		useQuant:    s.useQuant,
 		collections: make(map[string]*Collection),
 		dropped:     make(map[string]struct{}),
-		audit:       s.audit,
+		trace:       s.trace,
 		obs:         s.obs,
 	}
 	bound.ownsDB.Store(false)
@@ -531,7 +531,7 @@ func Open(ctx context.Context, bdb *bbolt.DB, cfg Config) (*Store, error) {
 		useQuant:    cfg.UseQuant,
 		root:        cfg.Root,
 		collections: make(map[string]*Collection),
-		audit:       cfg.Audit,
+		trace:       cfg.Trace,
 		obs:         cfg.Metrics,
 	}
 	store.enc.Store(enc)
@@ -878,7 +878,7 @@ func (s *Store) EnsureCollection(colName string) error {
 	}); err != nil {
 		return err
 	}
-	return s.auditEntry("create_collection", colName, nil)
+	return s.traceEntry("create_collection", colName, nil)
 }
 
 // UpsertPoints saves or updates a batch of points to disk. Points are encoded
@@ -962,7 +962,7 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 	}); err != nil {
 		return err
 	}
-	return s.auditEntry("upsert", colName, digestOf(encodePointsDigest(points)))
+	return s.traceEntry("upsert", colName, digestOf(encodePointsDigest(points)))
 }
 
 // Collection returns the live, in-memory collection for name, loading it from
@@ -1233,7 +1233,7 @@ func (s *Store) SaveCollectionMeta(name string, meta CollectionMeta) error {
 		return err
 	}
 	raw, _ := json.Marshal(meta)
-	return s.auditEntry("save_collection_meta", name, digestOf(raw))
+	return s.traceEntry("save_collection_meta", name, digestOf(raw))
 }
 
 // LoadCollectionMeta retrieves collection metadata from the special bucket.
@@ -1353,7 +1353,7 @@ func (s *Store) DeletePoints(colName string, ids []string) error {
 	}); err != nil {
 		return err
 	}
-	return s.auditEntry("delete", colName, nil)
+	return s.traceEntry("delete", colName, nil)
 }
 
 // DropCollection removes a collection and its metadata from the storage.
@@ -1400,5 +1400,5 @@ func (s *Store) DropCollection(name string) error {
 		}
 		s.dropped[name] = struct{}{}
 	}
-	return s.auditEntry("drop_collection", name, nil)
+	return s.traceEntry("drop_collection", name, nil)
 }

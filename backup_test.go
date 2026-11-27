@@ -219,18 +219,18 @@ func TestBackupUnderConcurrentWrites(t *testing.T) {
 	require.Equal(t, info.SHA256, verified.SHA256)
 }
 
-func TestObjectStoreAuditAndBackup(t *testing.T) {
+func TestObjectStoreTraceAndBackup(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "object.db")
 	opts := testOptions("object-password")
-	opts.Audit = AuditObject
+	opts.Trace = TraceObject
 	store, err := Open(ctx, path, 0o600, opts)
 	require.NoError(t, err)
 	defer mustClose(t, store)
 
 	_, err = store.Objects().Put(ctx, "bucket", "a.txt", strings.NewReader("alpha"), 5, "")
 	require.NoError(t, err)
-	res, err := store.VerifyAudit()
+	res, err := store.VerifyTrace()
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, res.Count, uint64(1))
 
@@ -248,11 +248,11 @@ func TestObjectStoreAuditAndBackup(t *testing.T) {
 	require.Equal(t, "alpha", string(body))
 }
 
-func TestGraphsStoreAuditAndBackup(t *testing.T) {
+func TestGraphsStoreTraceAndBackup(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "graphs.db")
 	opts := testOptions("graph-password")
-	opts.Audit = AuditGraphs
+	opts.Trace = TraceGraphs
 	store, err := Open(ctx, path, 0o600, opts)
 	require.NoError(t, err)
 	defer mustClose(t, store)
@@ -263,7 +263,7 @@ func TestGraphsStoreAuditAndBackup(t *testing.T) {
 	require.NoError(t, g.UpsertNode(ctx, &graphs.Node{ID: "b", Type: "person"}))
 	require.NoError(t, g.UpsertEdge(ctx, &graphs.Edge{ID: "e", From: "a", To: "b"}))
 
-	res, err := store.VerifyAudit()
+	res, err := store.VerifyTrace()
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, res.Count, uint64(3))
 

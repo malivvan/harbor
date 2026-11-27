@@ -53,9 +53,9 @@ type Store struct {
 	// rotation can swap the keys while readers are serving queries.
 	enc atomic.Pointer[encState]
 
-	// audit receives an entry for every committed write, or nil when the store
-	// was opened without audit. It is set once at Open and never mutated.
-	audit ledger.Sink
+	// trace receives an entry for every committed write, or nil when the store
+	// was opened without trace. It is set once at Open and never mutated.
+	trace ledger.Sink
 
 	// obs receives operation metrics and spans, or nil when the store was
 	// opened without instrumentation. It is set once at Open and never
@@ -86,14 +86,14 @@ func (s *Store) update(fn func(*bolt.Tx) error) error {
 	return s.b.Update(fn)
 }
 
-// SetAuditSink replaces the sink that receives committed-write events and
+// SetTraceSink replaces the sink that receives committed-write events and
 // returns the receiver. It is intended for a transaction-bound view created by
 // WithTransaction: the view stages events and the transaction owner records
 // them after it commits. It must not be called concurrently with writes on the
 // same Store.
-func (s *Store) SetAuditSink(sink ledger.Sink) *Store {
+func (s *Store) SetTraceSink(sink ledger.Sink) *Store {
 	if s != nil {
-		s.audit = sink
+		s.trace = sink
 	}
 	return s
 }
@@ -112,20 +112,20 @@ func (s *Store) WithTransaction(tx *bolt.Tx) *Store {
 		base:   s.rootStore(),
 		root:   cloneRoot(s.root),
 		series: make(map[string]*Series),
-		audit:  s.audit,
+		trace:  s.trace,
 		obs:    s.obs,
 	}
 	return bound
 }
 
-// auditEntry records one committed write in the store's audit trail. It is a
-// no-op when the store has no audit sink. Digest is the SHA-256 of the written
+// traceEntry records one committed write in the store's trace log. It is a
+// no-op when the store has no trace sink. Digest is the SHA-256 of the written
 // payload, or nil for deletes.
-func (s *Store) auditEntry(op, series string, digest []byte) error {
-	if s == nil || s.audit == nil {
+func (s *Store) traceEntry(op, series string, digest []byte) error {
+	if s == nil || s.trace == nil {
 		return nil
 	}
-	return s.audit.Record(ledger.Entry{
+	return s.trace.Record(ledger.Entry{
 		Store:  ledger.StoreSeries,
 		Op:     op,
 		Entity: series,
@@ -211,7 +211,7 @@ func (s *Store) WithRoot(parts ...string) *Store {
 		base:   s.rootStore(),
 		root:   root,
 		series: make(map[string]*Series),
-		audit:  s.audit,
+		trace:  s.trace,
 		obs:    s.obs,
 	}
 }
@@ -496,7 +496,7 @@ func (s *Store) DeleteSeries(ctx context.Context, name string) error {
 	}
 	s.mu.Unlock()
 
-	if err := s.auditEntry("delete_series", name, nil); err != nil {
+	if err := s.traceEntry("delete_series", name, nil); err != nil {
 		return err
 	}
 	return nil

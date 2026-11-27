@@ -13,13 +13,13 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-func auditSeed() []byte {
+func traceSeed() []byte {
 	return []byte("000102030405060708090a0b0c0d0e0f")
 }
 
-func openAuditedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
+func openTraceedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	t.Helper()
-	pub, priv, err := ledger.DeriveKey(auditSeed(), "m/1'")
+	pub, priv, err := ledger.DeriveKey(traceSeed(), "m/1'")
 	require.NoError(t, err)
 
 	db, err := bolt.Open(filepath.Join(t.TempDir(), "fs-ledger.db"), 0o600, &bolt.Options{Timeout: time.Second})
@@ -27,14 +27,14 @@ func openAuditedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	rec := ledger.NewRecorder(db, map[string]ed25519.PrivateKey{ledger.StoreFile: priv})
-	store, err := Open(context.Background(), db, Config{Root: [][]byte{[]byte(bucket.FSTREE)}, Audit: rec})
+	store, err := Open(context.Background(), db, Config{Root: [][]byte{[]byte(bucket.FSTREE)}, Trace: rec})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return store, db, pub
 }
 
-func TestAuditRecordsFSWrites(t *testing.T) {
-	store, db, pub := openAuditedStore(t)
+func TestTraceRecordsFSWrites(t *testing.T) {
+	store, db, pub := openTraceedStore(t)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 
@@ -54,7 +54,7 @@ func TestAuditRecordsFSWrites(t *testing.T) {
 	require.Equal(t, uint64(11), res.Count)
 }
 
-func TestAuditDisabledRecordsNothing(t *testing.T) {
+func TestTraceDisabledRecordsNothing(t *testing.T) {
 	store, db := openEncStore(t, []byte(bucket.FSTREE), Config{})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -65,7 +65,7 @@ func TestAuditDisabledRecordsNothing(t *testing.T) {
 }
 
 // writeFile creates a file and writes content through the absfs file API, which
-// is the path the audit trail instruments.
+// is the path the trace log instruments.
 func writeFile(t *testing.T, fsys *FS, name, content string) error {
 	t.Helper()
 	f, err := fsys.Create(name)
@@ -79,10 +79,10 @@ func writeFile(t *testing.T, fsys *FS, name, content string) error {
 	return f.Close()
 }
 
-// Rule: Copy records one audit event under the destination name. Content and
+// Rule: Copy records one trace event under the destination name. Content and
 // inode writes are part of the copy and must not be invisible.
-func TestAuditRecordsCopy(t *testing.T) {
-	store, db, pub := openAuditedStore(t)
+func TestTraceRecordsCopy(t *testing.T) {
+	store, db, pub := openTraceedStore(t)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 

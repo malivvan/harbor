@@ -105,8 +105,8 @@ type Config struct {
 	// recorded in the store's mode byte and a mismatch fails closed.
 	Dedup bool
 
-	// Audit, when non-nil, receives one entry per committed object write.
-	Audit ledger.Sink
+	// Trace, when non-nil, receives one entry per committed object write.
+	Trace ledger.Sink
 
 	// Metrics, when non-nil, receives operation counters.
 	Metrics metrics.Observer
@@ -132,7 +132,7 @@ type Store struct {
 	root [][]byte
 	enc  atomic.Pointer[encState]
 
-	audit ledger.Sink
+	trace ledger.Sink
 	obs   metrics.Observer
 
 	closed   atomic.Bool
@@ -196,7 +196,7 @@ func open(ctx context.Context, bdb *bolt.DB, cfg Config, readOnly bool) (*Store,
 	s := &Store{
 		db:       bdb,
 		root:     cloneRoot(cfg.Root),
-		audit:    cfg.Audit,
+		trace:    cfg.Trace,
 		obs:      cfg.Metrics,
 		readOnly: readOnly,
 		dedup:    cfg.Dedup,
@@ -290,7 +290,7 @@ func (s *Store) WithRoot(parts ...string) *Store {
 		tx:       s.tx,
 		base:     s.rootStore(),
 		root:     root,
-		audit:    s.audit,
+		trace:    s.trace,
 		obs:      s.obs,
 		readOnly: s.readOnly,
 		dedup:    s.dedup,
@@ -307,18 +307,18 @@ func (s *Store) WithTransaction(tx *bolt.Tx) *Store {
 		tx:       tx,
 		base:     s.rootStore(),
 		root:     cloneRoot(s.root),
-		audit:    s.audit,
+		trace:    s.trace,
 		obs:      s.obs,
 		readOnly: s.readOnly,
 		dedup:    s.dedup,
 	}
 }
 
-// SetAuditSink replaces the sink that receives committed-write entries and
+// SetTraceSink replaces the sink that receives committed-write entries and
 // returns the receiver. It is intended for a transaction-bound view.
-func (s *Store) SetAuditSink(sink ledger.Sink) *Store {
+func (s *Store) SetTraceSink(sink ledger.Sink) *Store {
 	if s != nil {
-		s.audit = sink
+		s.trace = sink
 	}
 	return s
 }
@@ -639,7 +639,7 @@ func (s *Store) Put(ctx context.Context, bucket, key string, r io.Reader, size i
 		if err := b.Put([]byte(okey), sealed); err != nil {
 			return err
 		}
-		if s.audit != nil {
+		if s.trace != nil {
 			entries = append(entries, ledger.Entry{Store: ledger.StoreObject, Op: "put", Entity: bucket + ":" + okey, Digest: sum[:]})
 		}
 		return nil
@@ -739,7 +739,7 @@ func (s *Store) Delete(ctx context.Context, bucket, key string) error {
 				return err
 			}
 		}
-		if s.audit != nil {
+		if s.trace != nil {
 			entries = append(entries, ledger.Entry{Store: ledger.StoreObject, Op: "delete", Entity: bucket + ":" + okey})
 		}
 		return nil
@@ -786,7 +786,7 @@ func (s *Store) Move(ctx context.Context, bucket, srcKey, dstKey string) error {
 		if err := b.Put([]byte(dst), raw); err != nil {
 			return err
 		}
-		if s.audit != nil {
+		if s.trace != nil {
 			entries = append(entries, ledger.Entry{Store: ledger.StoreObject, Op: "move", Entity: bucket + ":" + src + "->" + dst})
 		}
 		return nil
@@ -904,11 +904,11 @@ func (s *Store) recordFromRaw(raw []byte, dest *record) error {
 }
 
 func (s *Store) replay(entries []ledger.Entry) error {
-	if s.audit == nil {
+	if s.trace == nil {
 		return nil
 	}
 	for _, entry := range entries {
-		if err := s.audit.Record(entry); err != nil {
+		if err := s.trace.Record(entry); err != nil {
 			return err
 		}
 	}
@@ -1054,7 +1054,7 @@ func (s *Store) Buckets(ctx context.Context) ([]string, error) {
 }
 
 // DropBucket removes an entire object bucket and every key in it. A missing
-// bucket is a no-op. One "drop_bucket" entry is audited when auditing is
+// bucket is a no-op. One "drop_bucket" entry is traced when tracing is
 // enabled.
 func (s *Store) DropBucket(ctx context.Context, bucket string) error {
 	if err := ctxErr(ctx); err != nil {
@@ -1075,7 +1075,7 @@ func (s *Store) DropBucket(ctx context.Context, bucket string) error {
 		if err := root.DeleteBucket([]byte(bucket)); err != nil {
 			return err
 		}
-		if s.audit != nil {
+		if s.trace != nil {
 			entries = append(entries, ledger.Entry{Store: ledger.StoreObject, Op: "drop_bucket", Entity: bucket})
 		}
 		return nil

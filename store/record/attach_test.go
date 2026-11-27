@@ -72,9 +72,9 @@ func TestAttach_CommitIsAtomic(t *testing.T) {
 	require.NoError(t, err)
 
 	// Raw bolt write in the same caller-owned transaction.
-	audit, err := tx.CreateBucketIfNotExists([]byte(bucket.LEDGER))
+	trace, err := tx.CreateBucketIfNotExists([]byte(bucket.LEDGER))
 	require.NoError(t, err)
-	require.NoError(t, audit.Put([]byte("event"), []byte("created")))
+	require.NoError(t, trace.Put([]byte("event"), []byte("created")))
 
 	// Nothing is visible before the caller commits.
 	require.NoError(t, tx.Commit())
@@ -121,9 +121,9 @@ func TestAttach_RollbackDiscardsEverything(t *testing.T) {
 	// tempest record write plus a raw bolt write in the same transaction.
 	require.NoError(t, txn.Save(ctx, &attachUser{ID: 1, Name: "alice", Tag: "t1"}))
 
-	audit, err := tx.CreateBucketIfNotExists([]byte(bucket.LEDGER))
+	trace, err := tx.CreateBucketIfNotExists([]byte(bucket.LEDGER))
 	require.NoError(t, err)
-	require.NoError(t, audit.Put([]byte("event"), []byte("created")))
+	require.NoError(t, trace.Put([]byte("event"), []byte("created")))
 
 	// The caller aborts (failure path) before committing.
 	require.NoError(t, tx.Rollback())
@@ -264,9 +264,9 @@ func TestAttach_NeverCommitsOrRollsBackCallerTx(t *testing.T) {
 
 	// The transaction must still be open and writable: a raw bolt write
 	// succeeds only if tempest neither committed nor rolled it back.
-	audit, err := tx.CreateBucketIfNotExists([]byte(bucket.LEDGER))
+	trace, err := tx.CreateBucketIfNotExists([]byte(bucket.LEDGER))
 	require.NoError(t, err)
-	require.NoError(t, audit.Put([]byte("event"), []byte("created")))
+	require.NoError(t, trace.Put([]byte("event"), []byte("created")))
 
 	// Nothing was committed in between.
 	require.NoError(t, db.bolt.View(func(vtx *bolt.Tx) error {

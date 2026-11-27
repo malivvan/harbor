@@ -37,7 +37,7 @@ func decodeValue(b []byte) float64 {
 }
 
 // encodePoints returns a canonical 16-byte-per-point encoding of points, used
-// only to digest a written batch for the audit trail. Each point contributes
+// only to digest a written batch for the trace log. Each point contributes
 // its chronological key followed by its value bits, so the digest is stable
 // regardless of the caller's slice order.
 func encodePoints(points []Point) []byte {

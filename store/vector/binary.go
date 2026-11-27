@@ -230,7 +230,7 @@ func encodeStoredPoint(p StoredPoint) []byte {
 }
 
 // encodePointsDigest returns a canonical encoding of a point batch, used only
-// to digest a written batch for the audit trail. Points are sorted by ID and
+// to digest a written batch for the trace log. Points are sorted by ID and
 // encoded with the same positional format as storage, so the digest is stable
 // regardless of the caller's slice order.
 func encodePointsDigest(points []PointStruct) []byte {

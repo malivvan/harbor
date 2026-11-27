@@ -1,5 +1,5 @@
 // Package system owns tempest's store header: the unencrypted metadata record,
-// the Argon2id settings, the encryption and audit flag vocabulary, and the
+// the Argon2id settings, the encryption and trace flag vocabulary, and the
 // derivation of every per-store key from the password.
 //
 // The root tempest package uses it to open a store; the sub-stores only receive
@@ -73,29 +73,29 @@ const (
 	EncryptAll = EncryptRecord | EncryptFile | EncryptSeries | EncryptVector | EncryptGraph | EncryptObject
 )
 
-// Audit flags. Every bit enables the audit trail for one sub-store. Unlike
+// Trace flags. Every bit enables the trace log for one sub-store. Unlike
 // encryption flags they are a per-open runtime choice and are not persisted.
 const (
-	// AuditNone disables the audit trail.
-	AuditNone uint16 = 0
+	// TraceNone disables the trace log.
+	TraceNone uint16 = 0
 
-	// AuditRecord records db writes.
-	AuditRecord uint16 = 1 << iota
-	// AuditFile records fs writes.
-	AuditFile
-	// AuditSeries records ts writes.
-	AuditSeries
-	// AuditVector records vec writes.
-	AuditVector
-	// AuditGraphs records graph writes.
-	AuditGraphs
-	// AuditObject records object-store writes.
-	AuditObject
-	// AuditSearch records full-text writes.
-	AuditSearch
+	// TraceRecord records db writes.
+	TraceRecord uint16 = 1 << iota
+	// TraceFile records fs writes.
+	TraceFile
+	// TraceSeries records ts writes.
+	TraceSeries
+	// TraceVector records vec writes.
+	TraceVector
+	// TraceGraphs records graph writes.
+	TraceGraphs
+	// TraceObject records object-store writes.
+	TraceObject
+	// TraceSearch records full-text writes.
+	TraceSearch
 
-	// AuditAll records writes for every sub-store.
-	AuditAll = AuditRecord | AuditFile | AuditSeries | AuditVector | AuditGraphs | AuditObject | AuditSearch
+	// TraceAll records writes for every sub-store.
+	TraceAll = TraceRecord | TraceFile | TraceSeries | TraceVector | TraceGraphs | TraceObject | TraceSearch
 )
 
 // HasFlag reports whether all bits in other are set in flags.
@@ -331,7 +331,7 @@ type Config struct {
 	KDFThreads uint8
 	Encrypt    uint16
 	Plaintext  bool
-	Audit      uint16
+	Trace      uint16
 }
 
 // Validate checks the options that apply when a store is created.
@@ -342,8 +342,8 @@ func (c Config) Validate() error {
 	if _, _, _, _, err := c.creationParams(); err != nil {
 		return err
 	}
-	if unknown := c.Audit &^ AuditAll; unknown != 0 {
-		return fmt.Errorf("%w: unknown audit flags %#x", ErrInvalidOptions, unknown)
+	if unknown := c.Trace &^ TraceAll; unknown != 0 {
+		return fmt.Errorf("%w: unknown trace flags %#x", ErrInvalidOptions, unknown)
 	}
 	return nil
 }
@@ -434,15 +434,15 @@ const (
 	LabelObject = "tempest/object/v1"
 )
 
-// SLIP-10 hardened paths for the per-store audit signing keys.
+// SLIP-10 hardened paths for the per-store trace signing keys.
 const (
-	AuditPathRecord = "m/0'"
-	AuditPathFile   = "m/1'"
-	AuditPathSeries = "m/2'"
-	AuditPathVector = "m/3'"
-	AuditPathGraphs = "m/4'"
-	AuditPathObject = "m/5'"
-	AuditPathSearch = "m/6'"
+	TracePathRecord = "m/0'"
+	TracePathFile   = "m/1'"
+	TracePathSeries = "m/2'"
+	TracePathVector = "m/3'"
+	TracePathGraphs = "m/4'"
+	TracePathObject = "m/5'"
+	TracePathSearch = "m/6'"
 )
 
 // Keys holds the per-component keys derived for one open call. Wipe it when the
@@ -457,13 +457,13 @@ type Keys struct {
 	Graphs []byte
 	Object []byte
 
-	AuditRecord ed25519.PrivateKey
-	AuditFile   ed25519.PrivateKey
-	AuditSeries ed25519.PrivateKey
-	AuditVector ed25519.PrivateKey
-	AuditGraphs ed25519.PrivateKey
-	AuditObject ed25519.PrivateKey
-	AuditSearch ed25519.PrivateKey
+	TraceRecord ed25519.PrivateKey
+	TraceFile   ed25519.PrivateKey
+	TraceSeries ed25519.PrivateKey
+	TraceVector ed25519.PrivateKey
+	TraceGraphs ed25519.PrivateKey
+	TraceObject ed25519.PrivateKey
+	TraceSearch ed25519.PrivateKey
 }
 
 // Wipe overwrites the byte key material.
@@ -472,7 +472,7 @@ func (k *Keys) Wipe() {
 		return
 	}
 	for _, b := range [][]byte{k.Canary, k.Record, k.File, k.Series, k.Vector, k.Search, k.Graphs, k.Object,
-		k.AuditRecord, k.AuditFile, k.AuditSeries, k.AuditVector, k.AuditGraphs, k.AuditObject, k.AuditSearch} {
+		k.TraceRecord, k.TraceFile, k.TraceSeries, k.TraceVector, k.TraceGraphs, k.TraceObject, k.TraceSearch} {
 		wipe(b)
 	}
 }
@@ -533,19 +533,19 @@ func Derive(password string, salt []byte, time, memory uint32, threads uint8) (*
 		}
 	}
 
-	auditPaths := []struct {
+	tracePaths := []struct {
 		path string
 		dst  *ed25519.PrivateKey
 	}{
-		{AuditPathRecord, &keys.AuditRecord},
-		{AuditPathFile, &keys.AuditFile},
-		{AuditPathSeries, &keys.AuditSeries},
-		{AuditPathVector, &keys.AuditVector},
-		{AuditPathGraphs, &keys.AuditGraphs},
-		{AuditPathObject, &keys.AuditObject},
-		{AuditPathSearch, &keys.AuditSearch},
+		{TracePathRecord, &keys.TraceRecord},
+		{TracePathFile, &keys.TraceFile},
+		{TracePathSeries, &keys.TraceSeries},
+		{TracePathVector, &keys.TraceVector},
+		{TracePathGraphs, &keys.TraceGraphs},
+		{TracePathObject, &keys.TraceObject},
+		{TracePathSearch, &keys.TraceSearch},
 	}
-	for _, item := range auditPaths {
+	for _, item := range tracePaths {
 		_, priv, err := ledger.DeriveKey(seed, item.path)
 		if err != nil {
 			keys.Wipe()
@@ -564,8 +564,8 @@ func LoadOrCreate(bdb *bolt.DB, cfg Config) (Metadata, *Keys, error) {
 	if bdb == nil {
 		return Metadata{}, nil, fmt.Errorf("%w: database is required", ErrInvalidOptions)
 	}
-	if unknown := cfg.Audit &^ AuditAll; unknown != 0 {
-		return Metadata{}, nil, fmt.Errorf("%w: unknown audit flags %#x", ErrInvalidOptions, unknown)
+	if unknown := cfg.Trace &^ TraceAll; unknown != 0 {
+		return Metadata{}, nil, fmt.Errorf("%w: unknown trace flags %#x", ErrInvalidOptions, unknown)
 	}
 	if cfg.Password == "" {
 		return Metadata{}, nil, fmt.Errorf("%w: password is required", ErrInvalidPassword)

@@ -37,7 +37,7 @@ the same bbolt transaction as the other stores.
 - Values are sealed when `EncryptValues` is enabled. The root store enables it
   with `EncryptObjectValues` (or the db value flag on stores created before that
   flag existed).
-- `Config.Audit` receives one event per committed object write under the
+- `Config.Trace` receives one event per committed object write under the
   `object` store identifier.
 - `VerifyBackup` validates the object store's version and mode;
   `BackupFile` records the format version in its manifest.
@@ -45,7 +45,7 @@ the same bbolt transaction as the other stores.
   Unknown versions and wrong modes fail closed.
 - `Buckets` lists the object bucket names (sorted) and `DropBucket` removes one
   bucket and all its keys; a missing bucket is a no-op and the removal is
-  audited.
+  traced.
 - `RotateAll` re-seals every object record and the canary under a new key, and
   `VerifyAll` re-reads them, reporting `crypto.ErrAuthFailed` on a value that
   does not authenticate. `ReEncryptBucket` rotates one bucket and keeps the

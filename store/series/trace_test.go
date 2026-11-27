@@ -13,13 +13,13 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-func auditSeed() []byte {
+func traceSeed() []byte {
 	return []byte("000102030405060708090a0b0c0d0e0f")
 }
 
-func openAuditedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
+func openTraceedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	t.Helper()
-	pub, priv, err := ledger.DeriveKey(auditSeed(), "m/2'")
+	pub, priv, err := ledger.DeriveKey(traceSeed(), "m/2'")
 	require.NoError(t, err)
 
 	db, err := bolt.Open(filepath.Join(t.TempDir(), "ts-ledger.db"), 0o600, &bolt.Options{Timeout: time.Second})
@@ -27,13 +27,13 @@ func openAuditedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	rec := ledger.NewRecorder(db, map[string]ed25519.PrivateKey{ledger.StoreSeries: priv})
-	store, err := openStore(context.Background(), db, []byte(bucket.SERIES), Config{Audit: rec})
+	store, err := openStore(context.Background(), db, []byte(bucket.SERIES), Config{Trace: rec})
 	require.NoError(t, err)
 	return store, db, pub
 }
 
-func TestAuditRecordsSeriesWrites(t *testing.T) {
-	store, db, pub := openAuditedStore(t)
+func TestTraceRecordsSeriesWrites(t *testing.T) {
+	store, db, pub := openTraceedStore(t)
 	ctx := context.Background()
 	se := store.Series("cpu")
 
@@ -50,7 +50,7 @@ func TestAuditRecordsSeriesWrites(t *testing.T) {
 	require.Equal(t, uint64(6), res.Count)
 }
 
-func TestAuditDisabledRecordsNothing(t *testing.T) {
+func TestTraceDisabledRecordsNothing(t *testing.T) {
 	store, db := openTestStore(t, []byte(bucket.SERIES))
 	require.NoError(t, store.Series("cpu").Insert(context.Background(), Point{Timestamp: 1, Value: 1}))
 
@@ -58,7 +58,7 @@ func TestAuditDisabledRecordsNothing(t *testing.T) {
 	require.ErrorIs(t, err, ledger.ErrNoLog)
 }
 
-func TestAuditDigestStableAcrossOrder(t *testing.T) {
+func TestTraceDigestStableAcrossOrder(t *testing.T) {
 	// The batch digest is order-independent: the same points in a different
 	// order produce the same digest.
 	a := digestOf(encodePoints([]Point{{Timestamp: 1, Value: 1}, {Timestamp: 2, Value: 2}}))

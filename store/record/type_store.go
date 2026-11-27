@@ -237,7 +237,7 @@ func (n *node) Save(ctx context.Context, data any) error {
 		return wrapError("save", err)
 	}
 	n.emitUpsert(cfg, data)
-	return n.auditRecordStruct("save", cfg, data)
+	return n.traceRecordStruct("save", cfg, data)
 }
 
 func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data interface{}, update bool) error {
@@ -586,7 +586,7 @@ func (n *node) update(ctx context.Context, data interface{}, op string, fn func(
 		return err
 	}
 	n.emitUpsert(cfg, current.Interface())
-	return n.auditRecordStruct(op, cfg, current.Interface())
+	return n.traceRecordStruct(op, cfg, current.Interface())
 }
 
 // Drop a bucket
@@ -618,7 +618,7 @@ func (n *node) Drop(ctx context.Context, data any) error {
 	})); err != nil {
 		return err
 	}
-	return n.auditEntry("drop", bucketName, nil)
+	return n.traceEntry("drop", bucketName, nil)
 }
 
 func (n *node) drop(ctx context.Context, tx *bolt.Tx, bucketName string) error {
@@ -680,7 +680,7 @@ func (n *node) DeleteStruct(ctx context.Context, data any) error {
 		return wrapError("delete struct", err)
 	}
 	n.emitDelete(cfg)
-	return n.auditRecordStruct("delete_struct", cfg, nil)
+	return n.traceRecordStruct("delete_struct", cfg, nil)
 }
 
 func (n *node) deleteStruct(ctx context.Context, tx *bolt.Tx, cfg *structConfig, id []byte) error {

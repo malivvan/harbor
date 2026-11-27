@@ -45,9 +45,9 @@ type Store struct {
 	// can swap it without racing Open/VerifyAll.
 	enc atomic.Pointer[encState]
 
-	// audit receives an entry for every committed write, or nil when the store
-	// was opened without audit. It is copied into each FS at Open.
-	audit ledger.Sink
+	// trace receives an entry for every committed write, or nil when the store
+	// was opened without trace. It is copied into each FS at Open.
+	trace ledger.Sink
 
 	// obs receives operation metrics and spans, or nil when the store was
 	// opened without instrumentation. It is copied into each FS at Open.
@@ -95,7 +95,7 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 	store := &Store{
 		db:    bdb,
 		root:  cloneRoot(cfg.Root),
-		audit: cfg.Audit,
+		trace: cfg.Trace,
 		obs:   cfg.Metrics,
 	}
 	store.enc.Store(enc)
@@ -127,14 +127,14 @@ func (s *Store) update(fn func(*bolt.Tx) error) error {
 	return s.db.Update(fn)
 }
 
-// SetAuditSink replaces the sink that receives committed-write events and
+// SetTraceSink replaces the sink that receives committed-write events and
 // returns the receiver. It is intended for a transaction-bound view created by
 // WithTransaction: the view stages events and the transaction owner records
 // them after it commits. It must not be called concurrently with writes on the
 // same Store.
-func (s *Store) SetAuditSink(sink ledger.Sink) *Store {
+func (s *Store) SetTraceSink(sink ledger.Sink) *Store {
 	if s != nil {
-		s.audit = sink
+		s.trace = sink
 	}
 	return s
 }
@@ -144,7 +144,7 @@ func (s *Store) SetAuditSink(sink ledger.Sink) *Store {
 // back or closes tx, and is not tracked by the parent Store. It is used by the
 // root package to bind a sub-store to a cross-store transaction.
 //
-// A bound Store shares the parent's encryption state, audit sink and observer;
+// A bound Store shares the parent's encryption state, trace sink and observer;
 // filesystems opened through it are bound to the same transaction. Rotation is
 // rejected on a bound Store.
 func (s *Store) WithTransaction(tx *bolt.Tx) *Store {
@@ -156,7 +156,7 @@ func (s *Store) WithTransaction(tx *bolt.Tx) *Store {
 		tx:    tx,
 		base:  s.rootStore(),
 		root:  cloneRoot(s.root),
-		audit: s.audit,
+		trace: s.trace,
 		obs:   s.obs,
 	}
 }
@@ -217,7 +217,7 @@ func (s *Store) WithRoot(parts ...string) *Store {
 		tx:    s.tx,
 		base:  s.rootStore(),
 		root:  root,
-		audit: s.audit,
+		trace: s.trace,
 		obs:   s.obs,
 	}
 }
@@ -256,7 +256,7 @@ func (s *Store) Open(name string) (*FS, error) {
 	if err != nil {
 		return nil, err
 	}
-	filesystem.audit = s.audit
+	filesystem.trace = s.trace
 	if s.tx == nil {
 		s.track(filesystem)
 	}
@@ -278,7 +278,7 @@ func (s *Store) OpenReadOnly(name string) (*FS, error) {
 	if err != nil {
 		return nil, err
 	}
-	filesystem.audit = nil
+	filesystem.trace = nil
 	return filesystem, nil
 }
 
@@ -302,7 +302,7 @@ func (s *Store) OpenWithContentFS(name string, contentFS ContentFS) (*FS, error)
 		return nil, err
 	}
 	filesystem.contentFS = contentFS
-	filesystem.audit = s.audit
+	filesystem.trace = s.trace
 	if s.tx == nil {
 		s.track(filesystem)
 	}
@@ -386,8 +386,8 @@ func (s *Store) DeleteFS(name string) error {
 	if err != nil {
 		return err
 	}
-	if s.audit != nil {
-		return s.audit.Record(ledger.Entry{
+	if s.trace != nil {
+		return s.trace.Record(ledger.Entry{
 			Store:  ledger.StoreFile,
 			Op:     "delete_fs",
 			Entity: name,

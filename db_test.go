@@ -977,19 +977,19 @@ func TestOpenNilReceiverHelpers(t *testing.T) {
 	}
 }
 
-func TestAuditTrailEndToEnd(t *testing.T) {
+func TestTraceTrailEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "tempest-ledger.db")
 	const password = "correct horse battery staple"
 
 	opts := testOptions(password)
-	opts.Audit = AuditAll
+	opts.Trace = TraceAll
 	s, err := Open(ctx, path, 0600, opts)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 
-	require.Equal(t, AuditAll, s.AuditFlags())
-	require.NotNil(t, s.Audit())
+	require.Equal(t, TraceAll, s.TraceFlags())
+	require.NotNil(t, s.Trace())
 
 	// One write per store.
 	require.NoError(t, s.Record().Save(ctx, &tempestRecord{Name: "alice"}))
@@ -1000,7 +1000,7 @@ func TestAuditTrailEndToEnd(t *testing.T) {
 	require.NoError(t, col.Upsert([]vector.PointStruct{{ID: "a", Vector: []float32{1, 2, 3}}}))
 	require.NoError(t, col.Flush())
 
-	vfs, err := s.File().Open("audit_fs")
+	vfs, err := s.File().Open("trace_fs")
 	require.NoError(t, err)
 	f, err := vfs.Create("blob.txt")
 	require.NoError(t, err)
@@ -1008,46 +1008,46 @@ func TestAuditTrailEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	res, err := s.VerifyAudit()
+	res, err := s.VerifyTrace()
 	require.NoError(t, err)
 	require.Greater(t, res.Count, uint64(0))
 	require.Len(t, res.Tip, 32)
 
 	// The tip matches the recorder's head.
-	count, tip, err := s.Audit().Head()
+	count, tip, err := s.Trace().Head()
 	require.NoError(t, err)
 	require.Equal(t, res.Count, count)
 	require.Equal(t, res.Tip, tip)
 }
 
-func TestAuditDisabledHasNoTrail(t *testing.T) {
+func TestTraceDisabledHasNoTrail(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "tempest-noaudit.db")
+	path := filepath.Join(t.TempDir(), "tempest-notrace.db")
 
 	s := mustOpen(t, path, "pw")
 	t.Cleanup(func() { _ = s.Close() })
 
-	require.Equal(t, AuditNone, s.AuditFlags())
-	require.Nil(t, s.Audit())
+	require.Equal(t, TraceNone, s.TraceFlags())
+	require.Nil(t, s.Trace())
 
 	require.NoError(t, s.Record().Save(ctx, &tempestRecord{Name: "alice"}))
 
-	_, err := s.VerifyAudit()
+	_, err := s.VerifyTrace()
 	require.ErrorIs(t, err, ledger.ErrNoLog)
 }
 
-func TestAuditWrongPasswordIsRejectedOnOpen(t *testing.T) {
+func TestTraceWrongPasswordIsRejectedOnOpen(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "tempest-audit-pw.db")
+	path := filepath.Join(t.TempDir(), "tempest-trace-pw.db")
 
 	opts := testOptions("right")
-	opts.Audit = AuditRecord
+	opts.Trace = TraceRecord
 	s, err := Open(ctx, path, 0600, opts)
 	require.NoError(t, err)
 	require.NoError(t, s.Record().Save(ctx, &tempestRecord{Name: "alice"}))
 	require.NoError(t, s.Close())
 
-	// The audit signing keys derive from the same seed as the encryption keys,
+	// The trace signing keys derive from the same seed as the encryption keys,
 	// so a wrong password is caught by the canary at Open. Verification is
 	// therefore never reachable with a key that could not have signed the
 	// trail: a wrong password cannot even open the store.
@@ -1194,9 +1194,9 @@ func TestOptionsValidate(t *testing.T) {
 	unknownEnc.Encrypt = 1 << 15
 	require.ErrorIs(t, unknownEnc.Validate(), ErrInvalidOptions)
 
-	unknownAudit := testOptions("pw")
-	unknownAudit.Audit = 1 << 15
-	require.ErrorIs(t, unknownAudit.Validate(), ErrInvalidOptions)
+	unknownTrace := testOptions("pw")
+	unknownTrace.Trace = 1 << 15
+	require.ErrorIs(t, unknownTrace.Validate(), ErrInvalidOptions)
 
 	beyondLimits := testOptions("pw")
 	beyondLimits.KDFTime = system.MaxKDFTime + 1
@@ -1207,9 +1207,9 @@ func TestOptionsValidate(t *testing.T) {
 	require.NoError(t, plaintext.Validate())
 }
 
-func TestOpenRejectsUnknownAuditFlags(t *testing.T) {
+func TestOpenRejectsUnknownTraceFlags(t *testing.T) {
 	opts := testOptions("pw")
-	opts.Audit = 1 << 15
+	opts.Trace = 1 << 15
 	_, err := Open(context.Background(), filepath.Join(t.TempDir(), "tempest.db"), 0o600, opts)
 	require.ErrorIs(t, err, ErrInvalidOptions)
 }
@@ -1276,8 +1276,8 @@ func TestFSSessionSurvivesReopen(t *testing.T) {
 	_ = ctx
 }
 
-// auditEventStores returns the store name of every event in the audit chain.
-func auditEventStores(t *testing.T, s *Store) []string {
+// traceEventStores returns the store name of every event in the trace chain.
+func traceEventStores(t *testing.T, s *Store) []string {
 	t.Helper()
 	var stores []string
 	err := s.bs.View(func(tx *bolt.Tx) error {
@@ -1291,7 +1291,7 @@ func auditEventStores(t *testing.T, s *Store) []string {
 		}
 		return events.ForEach(func(_, v []byte) error {
 			if len(v) < ed25519.SignatureSize {
-				return errors.New("truncated audit event")
+				return errors.New("truncated trace event")
 			}
 			var ev ledger.Event
 			if err := json.Unmarshal(v[:len(v)-ed25519.SignatureSize], &ev); err != nil {
@@ -1305,13 +1305,13 @@ func auditEventStores(t *testing.T, s *Store) []string {
 	return stores
 }
 
-// TestAuditAllIncludesSearch proves AuditAll derives and verifies the search
-// signing key and that search writes reach the audit chain.
-func TestAuditAllIncludesSearch(t *testing.T) {
+// TestTraceAllIncludesSearch proves TraceAll derives and verifies the search
+// signing key and that search writes reach the trace chain.
+func TestTraceAllIncludesSearch(t *testing.T) {
 	ctx := context.Background()
 	opts := testOptions("pw")
-	opts.Audit = AuditAll
-	s, err := Open(ctx, filepath.Join(t.TempDir(), "audit-search.db"), 0o600, opts)
+	opts.Trace = TraceAll
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "trace-search.db"), 0o600, opts)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 
@@ -1319,22 +1319,22 @@ func TestAuditAllIncludesSearch(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, idx.Upsert(ctx, "d1", "alpha beta"))
 
-	res, err := s.VerifyAudit()
+	res, err := s.VerifyTrace()
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, res.Count, uint64(2))
 
-	stores := auditEventStores(t, s)
+	stores := traceEventStores(t, s)
 	require.Contains(t, stores, ledger.StoreSearch)
 }
 
-// TestAuditAllCoversEveryStore performs one representative write in each
-// sub-store and proves AuditAll produced a verifiable event for every one of
+// TestTraceAllCoversEveryStore performs one representative write in each
+// sub-store and proves TraceAll produced a verifiable event for every one of
 // them, including the search store.
-func TestAuditAllCoversEveryStore(t *testing.T) {
+func TestTraceAllCoversEveryStore(t *testing.T) {
 	ctx := context.Background()
 	opts := testOptions("pw")
-	opts.Audit = AuditAll
-	s, err := Open(ctx, filepath.Join(t.TempDir(), "audit-every-store.db"), 0o600, opts)
+	opts.Trace = TraceAll
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "trace-every-store.db"), 0o600, opts)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 
@@ -1366,16 +1366,16 @@ func TestAuditAllCoversEveryStore(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, idx.Upsert(ctx, "d1", "alpha"))
 
-	res, err := s.VerifyAudit()
+	res, err := s.VerifyTrace()
 	require.NoError(t, err)
 	require.Greater(t, res.Count, uint64(0))
 
-	stores := auditEventStores(t, s)
+	stores := traceEventStores(t, s)
 	require.Equal(t, int(res.Count), len(stores))
 	for _, want := range []string{
 		ledger.StoreRecord, ledger.StoreFile, ledger.StoreSeries, ledger.StoreVector,
 		ledger.StoreGraphs, ledger.StoreObject, ledger.StoreSearch,
 	} {
-		require.Contains(t, stores, want, "no audit event for store %q", want)
+		require.Contains(t, stores, want, "no trace event for store %q", want)
 	}
 }

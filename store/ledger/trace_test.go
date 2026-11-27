@@ -25,7 +25,7 @@ func testKey(t *testing.T, path string) (ed25519.PublicKey, ed25519.PrivateKey) 
 
 func testDB(t *testing.T) *bolt.DB {
 	t.Helper()
-	b, err := bolt.Open(filepath.Join(t.TempDir(), "audit.db"), 0o600, nil)
+	b, err := bolt.Open(filepath.Join(t.TempDir(), "trace.db"), 0o600, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = b.Close() })
 	return b
@@ -57,7 +57,7 @@ func TestVerifyRejectsForgery(t *testing.T) {
 
 	// Tamper with the stored event payload without re-signing.
 	require.NoError(t, b.Update(func(tx *bolt.Tx) error {
-		root := tx.Bucket([]byte(auditBucket))
+		root := tx.Bucket([]byte(traceBucket))
 		events := root.Bucket([]byte(eventsBucket))
 		v := events.Get(seqKey(0))
 		copy(v, []byte("x")) // corrupt the encoded JSON
@@ -78,7 +78,7 @@ func TestVerifyRejectsMissingEvent(t *testing.T) {
 
 	// Delete the middle event; the chain link must break.
 	require.NoError(t, b.Update(func(tx *bolt.Tx) error {
-		root := tx.Bucket([]byte(auditBucket))
+		root := tx.Bucket([]byte(traceBucket))
 		events := root.Bucket([]byte(eventsBucket))
 		return events.Delete(seqKey(1))
 	}))
@@ -98,7 +98,7 @@ func TestVerifyTruncatedTailStillVerifiesPrefix(t *testing.T) {
 	// Delete the last event: the remaining prefix is internally consistent, so
 	// Verify succeeds but reports a shorter chain. Tail anchoring is external.
 	require.NoError(t, b.Update(func(tx *bolt.Tx) error {
-		root := tx.Bucket([]byte(auditBucket))
+		root := tx.Bucket([]byte(traceBucket))
 		events := root.Bucket([]byte(eventsBucket))
 		return events.Delete(seqKey(2))
 	}))
@@ -143,7 +143,7 @@ func TestRecordFillsTime(t *testing.T) {
 
 	var ev Event
 	require.NoError(t, b.View(func(tx *bolt.Tx) error {
-		events := tx.Bucket([]byte(auditBucket)).Bucket([]byte(eventsBucket))
+		events := tx.Bucket([]byte(traceBucket)).Bucket([]byte(eventsBucket))
 		v := events.Get(seqKey(0))
 		encoded := v[:len(v)-ed25519.SignatureSize]
 		return json.Unmarshal(encoded, &ev)
@@ -184,7 +184,7 @@ func TestRecordConcurrentSequence(t *testing.T) {
 	require.Equal(t, res.Tip, tip)
 }
 
-// TestVerifyRejectsWrongKeys covers the wrong-password case at the audit layer:
+// TestVerifyRejectsWrongKeys covers the wrong-password case at the trace layer:
 // a verifier holding keys derived from another seed cannot validate the
 // signatures, even if it has the trail.
 func TestVerifyRejectsWrongKeys(t *testing.T) {
@@ -209,7 +209,7 @@ func TestEventEncodingIsCanonical(t *testing.T) {
 
 	var stored []byte
 	require.NoError(t, b.View(func(tx *bolt.Tx) error {
-		events := tx.Bucket([]byte(auditBucket)).Bucket([]byte(eventsBucket))
+		events := tx.Bucket([]byte(traceBucket)).Bucket([]byte(eventsBucket))
 		v := events.Get(seqKey(0))
 		stored = append([]byte(nil), v[:len(v)-ed25519.SignatureSize]...)
 		return nil

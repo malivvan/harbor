@@ -62,7 +62,7 @@ var ErrCorruptStore = system.ErrCorruptStore
 // Metadata is the unencrypted store configuration owned by store/system.
 type Metadata = system.Metadata
 
-// Encryption, audit and KDF identifiers are re-exported from store/system.
+// Encryption, trace and KDF identifiers are re-exported from store/system.
 const (
 	EncryptNone                  = system.EncryptNone
 	EncryptRecordKeys            = system.EncryptRecordKeys
@@ -84,15 +84,15 @@ const (
 	EncryptGraph                 = system.EncryptGraph
 	EncryptObject                = system.EncryptObject
 	EncryptAll                   = system.EncryptAll
-	AuditNone                    = system.AuditNone
-	AuditRecord                  = system.AuditRecord
-	AuditFile                    = system.AuditFile
-	AuditSeries                  = system.AuditSeries
-	AuditVector                  = system.AuditVector
-	AuditGraphs                  = system.AuditGraphs
-	AuditObject                  = system.AuditObject
-	AuditSearch                  = system.AuditSearch
-	AuditAll                     = system.AuditAll
+	TraceNone                    = system.TraceNone
+	TraceRecord                  = system.TraceRecord
+	TraceFile                    = system.TraceFile
+	TraceSeries                  = system.TraceSeries
+	TraceVector                  = system.TraceVector
+	TraceGraphs                  = system.TraceGraphs
+	TraceObject                  = system.TraceObject
+	TraceSearch                  = system.TraceSearch
+	TraceAll                     = system.TraceAll
 	SaltSize                     = system.SaltSize
 	KeySize                      = system.KeySize
 	MiB                          = system.MiB
@@ -122,13 +122,13 @@ type Store struct {
 	graphs *graphs.Store
 	object *object.Store
 
-	// audit records events for the enabled stores, or nil when disabled.
-	audit *ledger.Recorder
-	// auditFlags remembers which stores are enabled, for verification.
-	auditFlags uint16
-	// auditPubs holds the public keys matching the recorder's private keys, so
-	// VerifyAudit can check the chain without re-deriving from the password.
-	auditPubs auditPublicKeys
+	// trace records events for the enabled stores, or nil when disabled.
+	trace *ledger.Recorder
+	// traceFlags remembers which stores are enabled, for verification.
+	traceFlags uint16
+	// tracePubs holds the public keys matching the recorder's private keys, so
+	// VerifyTrace can check the chain without re-deriving from the password.
+	tracePubs tracePublicKeys
 }
 
 // Compression selects Zstd compression across the sub-stores. It is a write-time
@@ -192,10 +192,10 @@ type Options struct {
 	// non-zero Encrypt. It is ignored when opening an existing store.
 	Plaintext bool
 
-	// Audit selects which sub-stores record a tamper-evident audit trail. The
-	// zero value (AuditNone) disables it. It is a per-open runtime choice, not
-	// persisted; see the Audit* flag constants in the package docs.
-	Audit uint16
+	// Trace selects which sub-stores record a tamper-evident trace log. The
+	// zero value (TraceNone) disables it. It is a per-open runtime choice, not
+	// persisted; see the Trace* flag constants in the package docs.
+	Trace uint16
 
 	// UseQuant enables vector quantization in the vector sub-store.
 	UseQuant bool
@@ -401,7 +401,7 @@ func (o *Options) boltOptions() bolt.Options {
 }
 
 // Validate checks the options that apply when a store is created: the password,
-// the Argon2id parameter set, the encryption selection and the audit flags.
+// the Argon2id parameter set, the encryption selection and the trace flags.
 // Open ignores the KDF costs and the encryption selection for an existing
 // store; this method validates them as they would apply to a new store, so
 // callers can check their configuration before creating one.
@@ -416,7 +416,7 @@ func (o *Options) Validate() error {
 	if err := o.systemConfig().Validate(); err != nil {
 		return err
 	}
-	return o.validateAuditFlags()
+	return o.validateTraceFlags()
 }
 
 // systemConfig maps the root options onto the header package's configuration.
@@ -431,30 +431,30 @@ func (o *Options) systemConfig() system.Config {
 		KDFThreads: o.KDFThreads,
 		Encrypt:    o.Encrypt,
 		Plaintext:  o.Plaintext,
-		Audit:      o.Audit,
+		Trace:      o.Trace,
 	}
 }
 
-// validateAuditFlags rejects audit bits that do not name a sub-store. Open
-// applies the same check, because audit flags are a per-open runtime choice
+// validateTraceFlags rejects trace bits that do not name a sub-store. Open
+// applies the same check, because trace flags are a per-open runtime choice
 // even for an existing store.
-func (o *Options) validateAuditFlags() error {
-	if unknown := o.Audit &^ AuditAll; unknown != 0 {
-		return fmt.Errorf("%w: unknown audit flags %#x", ErrInvalidOptions, unknown)
+func (o *Options) validateTraceFlags() error {
+	if unknown := o.Trace &^ TraceAll; unknown != 0 {
+		return fmt.Errorf("%w: unknown trace flags %#x", ErrInvalidOptions, unknown)
 	}
 	return nil
 }
 
-// auditPublicKeys holds the per-store Ed25519 public keys used to verify the
-// audit trail.
-type auditPublicKeys struct {
-	auditRecord ed25519.PublicKey
-	auditFSTree ed25519.PublicKey
-	auditSeries ed25519.PublicKey
-	auditVector ed25519.PublicKey
-	auditGraphs ed25519.PublicKey
-	auditObject ed25519.PublicKey
-	auditSearch ed25519.PublicKey
+// tracePublicKeys holds the per-store Ed25519 public keys used to verify the
+// trace log.
+type tracePublicKeys struct {
+	traceRecord ed25519.PublicKey
+	traceFSTree ed25519.PublicKey
+	traceSeries ed25519.PublicKey
+	traceVector ed25519.PublicKey
+	traceGraphs ed25519.PublicKey
+	traceObject ed25519.PublicKey
+	traceSearch ed25519.PublicKey
 }
 
 // Open opens (or creates) a Store at path.
@@ -482,7 +482,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	if options.Password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidPassword)
 	}
-	if err := options.validateAuditFlags(); err != nil {
+	if err := options.validateTraceFlags(); err != nil {
 		return nil, err
 	}
 	if ctx == nil {
@@ -520,48 +520,48 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 
 	s := &Store{bs: bdb}
 
-	// Build the audit recorder for the enabled stores, copying the derived
+	// Build the trace recorder for the enabled stores, copying the derived
 	// private keys so they survive storeKeys.wipe below.
-	if options.Audit != 0 {
+	if options.Trace != 0 {
 		recKeys := make(map[string]ed25519.PrivateKey, 4)
-		if system.HasFlag(options.Audit, AuditRecord) {
-			recKeys[ledger.StoreRecord] = append(ed25519.PrivateKey(nil), keys.AuditRecord...)
+		if system.HasFlag(options.Trace, TraceRecord) {
+			recKeys[ledger.StoreRecord] = append(ed25519.PrivateKey(nil), keys.TraceRecord...)
 		}
-		if system.HasFlag(options.Audit, AuditFile) {
-			recKeys[ledger.StoreFile] = append(ed25519.PrivateKey(nil), keys.AuditFile...)
+		if system.HasFlag(options.Trace, TraceFile) {
+			recKeys[ledger.StoreFile] = append(ed25519.PrivateKey(nil), keys.TraceFile...)
 		}
-		if system.HasFlag(options.Audit, AuditSeries) {
-			recKeys[ledger.StoreSeries] = append(ed25519.PrivateKey(nil), keys.AuditSeries...)
+		if system.HasFlag(options.Trace, TraceSeries) {
+			recKeys[ledger.StoreSeries] = append(ed25519.PrivateKey(nil), keys.TraceSeries...)
 		}
-		if system.HasFlag(options.Audit, AuditVector) {
-			recKeys[ledger.StoreVector] = append(ed25519.PrivateKey(nil), keys.AuditVector...)
+		if system.HasFlag(options.Trace, TraceVector) {
+			recKeys[ledger.StoreVector] = append(ed25519.PrivateKey(nil), keys.TraceVector...)
 		}
-		if system.HasFlag(options.Audit, AuditGraphs) {
-			recKeys[ledger.StoreGraphs] = append(ed25519.PrivateKey(nil), keys.AuditGraphs...)
+		if system.HasFlag(options.Trace, TraceGraphs) {
+			recKeys[ledger.StoreGraphs] = append(ed25519.PrivateKey(nil), keys.TraceGraphs...)
 		}
-		if system.HasFlag(options.Audit, AuditObject) {
-			recKeys[ledger.StoreObject] = append(ed25519.PrivateKey(nil), keys.AuditObject...)
+		if system.HasFlag(options.Trace, TraceObject) {
+			recKeys[ledger.StoreObject] = append(ed25519.PrivateKey(nil), keys.TraceObject...)
 		}
-		if system.HasFlag(options.Audit, AuditSearch) {
-			recKeys[ledger.StoreSearch] = append(ed25519.PrivateKey(nil), keys.AuditSearch...)
+		if system.HasFlag(options.Trace, TraceSearch) {
+			recKeys[ledger.StoreSearch] = append(ed25519.PrivateKey(nil), keys.TraceSearch...)
 		}
-		s.audit = ledger.NewRecorder(bdb, recKeys)
-		s.auditFlags = options.Audit
-		s.auditPubs = auditPublicKeys{
-			auditRecord: publicOf(keys.AuditRecord),
-			auditFSTree: publicOf(keys.AuditFile),
-			auditSeries: publicOf(keys.AuditSeries),
-			auditVector: publicOf(keys.AuditVector),
-			auditGraphs: publicOf(keys.AuditGraphs),
-			auditObject: publicOf(keys.AuditObject),
-			auditSearch: publicOf(keys.AuditSearch),
+		s.trace = ledger.NewRecorder(bdb, recKeys)
+		s.traceFlags = options.Trace
+		s.tracePubs = tracePublicKeys{
+			traceRecord: publicOf(keys.TraceRecord),
+			traceFSTree: publicOf(keys.TraceFile),
+			traceSeries: publicOf(keys.TraceSeries),
+			traceVector: publicOf(keys.TraceVector),
+			traceGraphs: publicOf(keys.TraceGraphs),
+			traceObject: publicOf(keys.TraceObject),
+			traceSearch: publicOf(keys.TraceSearch),
 		}
 	}
-	auditSink := func(flag uint16) ledger.Sink {
-		if s.audit == nil || !system.HasFlag(options.Audit, flag) {
+	traceSink := func(flag uint16) ledger.Sink {
+		if s.trace == nil || !system.HasFlag(options.Trace, flag) {
 			return nil
 		}
-		return s.audit
+		return s.trace
 	}
 
 	// Bind each sub-store to its own derived key and explicit bucket root.
@@ -577,7 +577,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Compress:        options.Compression.Enable,
 		CompressLevel:   options.Compression.Level,
 		MinCompress:     options.Compression.MinSize,
-		Audit:           auditSink(AuditRecord),
+		Trace:           traceSink(TraceRecord),
 		Metrics:         options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("tempest: open record store: %w", err)
@@ -591,7 +591,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Compress:        options.Compression.Enable,
 		CompressLevel:   options.Compression.Level,
 		MinCompress:     options.Compression.MinSize,
-		Audit:           auditSink(AuditFile),
+		Trace:           traceSink(TraceFile),
 		Metrics:         options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("tempest: open file store: %w", err)
@@ -604,7 +604,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Compress:           options.Compression.Enable,
 		CompressLevel:      options.Compression.Level,
 		MinCompress:        options.Compression.MinSize,
-		Audit:              auditSink(AuditSeries),
+		Trace:              traceSink(TraceSeries),
 		Metrics:            options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("tempest: open series store: %w", err)
@@ -616,7 +616,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Compress:      options.Compression.Enable,
 		CompressLevel: options.Compression.Level,
 		MinCompress:   options.Compression.MinSize,
-		Audit:         auditSink(AuditSearch),
+		Trace:         traceSink(TraceSearch),
 		Metrics:       options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("tempest: open search store: %w", err)
@@ -630,7 +630,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Compress:      options.Compression.Enable,
 		CompressLevel: options.Compression.Level,
 		MinCompress:   options.Compression.MinSize,
-		Audit:         auditSink(AuditGraphs),
+		Trace:         traceSink(TraceGraphs),
 		Metrics:       options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("tempest: open graphs store: %w", err)
@@ -643,7 +643,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Compress:      options.Compression.Enable,
 		CompressLevel: options.Compression.Level,
 		MinCompress:   options.Compression.MinSize,
-		Audit:         auditSink(AuditObject),
+		Trace:         traceSink(TraceObject),
 		Metrics:       options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("tempest: open object store: %w", err)
@@ -659,7 +659,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Compress:               options.Compression.Enable,
 		CompressLevel:          options.Compression.Level,
 		MinCompress:            options.Compression.MinSize,
-		Audit:                  auditSink(AuditVector),
+		Trace:                  traceSink(TraceVector),
 		Metrics:                options.Metrics,
 		// The vector store shares this handle with db, fs and ts; Close must only
 		// flush its buffers and never close the handle.
@@ -828,38 +828,38 @@ func (s *Store) Flags() uint16 {
 	return flags
 }
 
-// AuditFlags returns the audit flags the store was opened with. They are a
+// TraceFlags returns the trace flags the store was opened with. They are a
 // per-open runtime choice and are not persisted, so a closed store returns
-// AuditNone.
-func (s *Store) AuditFlags() uint16 {
+// TraceNone.
+func (s *Store) TraceFlags() uint16 {
 	if s == nil {
-		return AuditNone
+		return TraceNone
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.bs == nil {
-		return AuditNone
+		return TraceNone
 	}
-	return s.auditFlags
+	return s.traceFlags
 }
 
-// Audit returns the recorder backing the audit trail, or nil when the store
-// was opened with AuditNone. Callers use it to record out-of-band events and
+// Trace returns the recorder backing the trace log, or nil when the store
+// was opened with TraceNone. Callers use it to record out-of-band events and
 // to anchor the chain tip with Head.
-func (s *Store) Audit() *ledger.Recorder {
+func (s *Store) Trace() *ledger.Recorder {
 	if s == nil {
 		return nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.audit
+	return s.trace
 }
 
-// VerifyAudit replays the audit trail and checks every signature and chain
+// VerifyTrace replays the trace log and checks every signature and chain
 // link. It returns the event count and chain tip. Keys are derived from the
 // store password, so a store opened with a different password fails
-// verification. It returns audit.ErrNoLog when no trail exists.
-func (s *Store) VerifyAudit() (ledger.Result, error) {
+// verification. It returns trace.ErrNoLog when no trail exists.
+func (s *Store) VerifyTrace() (ledger.Result, error) {
 	if s == nil {
 		return ledger.Result{}, ErrClosed
 	}
@@ -869,26 +869,26 @@ func (s *Store) VerifyAudit() (ledger.Result, error) {
 		return ledger.Result{}, ErrClosed
 	}
 	keys := make(map[string]ed25519.PublicKey, 4)
-	if system.HasFlag(s.auditFlags, AuditRecord) {
-		keys[ledger.StoreRecord] = s.auditPubs.auditRecord
+	if system.HasFlag(s.traceFlags, TraceRecord) {
+		keys[ledger.StoreRecord] = s.tracePubs.traceRecord
 	}
-	if system.HasFlag(s.auditFlags, AuditFile) {
-		keys[ledger.StoreFile] = s.auditPubs.auditFSTree
+	if system.HasFlag(s.traceFlags, TraceFile) {
+		keys[ledger.StoreFile] = s.tracePubs.traceFSTree
 	}
-	if system.HasFlag(s.auditFlags, AuditSeries) {
-		keys[ledger.StoreSeries] = s.auditPubs.auditSeries
+	if system.HasFlag(s.traceFlags, TraceSeries) {
+		keys[ledger.StoreSeries] = s.tracePubs.traceSeries
 	}
-	if system.HasFlag(s.auditFlags, AuditVector) {
-		keys[ledger.StoreVector] = s.auditPubs.auditVector
+	if system.HasFlag(s.traceFlags, TraceVector) {
+		keys[ledger.StoreVector] = s.tracePubs.traceVector
 	}
-	if system.HasFlag(s.auditFlags, AuditGraphs) {
-		keys[ledger.StoreGraphs] = s.auditPubs.auditGraphs
+	if system.HasFlag(s.traceFlags, TraceGraphs) {
+		keys[ledger.StoreGraphs] = s.tracePubs.traceGraphs
 	}
-	if system.HasFlag(s.auditFlags, AuditObject) {
-		keys[ledger.StoreObject] = s.auditPubs.auditObject
+	if system.HasFlag(s.traceFlags, TraceObject) {
+		keys[ledger.StoreObject] = s.tracePubs.traceObject
 	}
-	if system.HasFlag(s.auditFlags, AuditSearch) {
-		keys[ledger.StoreSearch] = s.auditPubs.auditSearch
+	if system.HasFlag(s.traceFlags, TraceSearch) {
+		keys[ledger.StoreSearch] = s.tracePubs.traceSearch
 	}
 	return ledger.Verify(s.bs, keys)
 }

@@ -17,14 +17,14 @@ separate `docs/` tree.
 | `.../store/vector` | Vector collections with Flat/HNSW indexes, payload filters and quantization. |
 | `.../store/search` | Full-text indexes: BM25 ranking, word and CJK tokenizers, posting lists and corpus statistics. |
 | `.../store/graphs` | Bitemporal property-graph store and the reusable graph core: `Store` keeps node/edge records and closed versions in its own root bucket, while `Graph` (also runnable over `record` for the legacy layout) provides adjacency, traversal, counts, history/as-of/diff/purge and JSON interchange. |
-| `.../store/system` | Store header manager: metadata record, KDF settings, encryption/audit flags, canary and every per-store key derivation. |
+| `.../store/system` | Store header manager: metadata record, KDF settings, encryption/trace flags, canary and every per-store key derivation. |
 | `.../store` | Process-wide database manager: resolves a directory, reads or creates the password file (published atomically by link, `O_EXCL` fallback, mode 0600, never logged), and opens one handle. It sits next to the sub-store packages it opens. |
 | `.../store/fstree/s3fs` | An `absfs.Filer` backed by S3-compatible object storage. |
 | `.../store/vector/hnsw` | The vendored HNSW graph implementation used by `vector`. |
 | `.../store/vector/hnsw/heap` | The heap used on the HNSW search hot path. |
 | `.../store/vector/doc` | Document-oriented facade over `vector`: id, content, embedding and string metadata; the collection dimension is taken from the first upsert. |
 | `.../metrics` | Dependency-free observer interface and nil-safe metric helpers used by every store; a nil observer means no instrumentation. |
-| `.../store/ledger` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write (record, file, series, vector, graphs, object, search), encoded with the package's deterministic JSON encoder. |
+| `.../store/ledger` | Tamper-evident, append-only trace log: signed, hash-linked events for every store write (record, file, series, vector, graphs, object, search), encoded with the package's deterministic JSON encoder. |
 | `.../cluster` | Raft-backed cluster replication of a whole store: replicated command facades, snapshots, and the bolt-backed raft log/stable store it persists with (no raft-boltdb dependency). |
 | `.../store/object` | Independent flat object store with buckets, path containment and atomic `Put`; works without the file store and migrates file-backed blobs explicitly. |
 | `.../backup` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore, and snapshot ids are time-sortable ULIDs generated in the package. |
@@ -53,7 +53,7 @@ vector/                    vector store root bucket
 search/                    full-text store root bucket
 graphs/                    property-graph store root bucket
 object/                    flat object store root bucket
-ledger/                    audit trail (created only when auditing is enabled)
+ledger/                    trace log (created only when tracing is enabled)
 ```
 
 The names come from the `internal/bucket` registry (`bucket.RECORD`,
@@ -300,9 +300,9 @@ bbolt provides one writer and many readers, and tempest follows that model:
   optional `tx` field: when set, their `view`/`update` helpers execute against it instead of
   opening a managed transaction, and `WithTransaction` builds the bound view
   without tracking it in the parent. Rotation is rejected on a bound store
-  (`ErrInTransaction`). Audit events cannot be recorded inside the transaction
+  (`ErrInTransaction`). Trace events cannot be recorded inside the transaction
   (the recorder opens its own write transaction), so bound views receive a
-  collecting sink and the root replays it after commit; `record.AttachWithAudit`
+  collecting sink and the root replays it after commit; `record.AttachWithTrace`
   provides the same for the record store. `vector` stages writes in its bound
   view and calls `AdoptTransaction` after commit to install the updated
   in-memory indexes, so no point is re-read. Write transactions are serialized
@@ -382,8 +382,8 @@ Three caveats sit above the bbolt layer and are not fixed by these options:
 - `vector.Collection.Upsert` acknowledges points that are still buffered in
   memory. They are durable after `Flush`, the flush threshold, or `Close`, not
   before. Callers that must not lose an acknowledged point flush explicitly.
-- Audit events are written in their own transaction after the data commit, so a
-  crash can leave a committed write without its audit event.
+- Trace events are written in their own transaction after the data commit, so a
+  crash can leave a committed write without its trace event.
 - bbolt does not fsync the parent directory when it creates a new database file.
   A crash immediately after the very first `Open` can lose the directory entry
   (and with it a store that was only just created).
@@ -592,7 +592,7 @@ Platform summary:
   its logical root.
 - Permissions are advisory: enforcement depends on the backend. Do not rely on
   `Chmod` for isolation.
-- The abstraction layer does not encrypt data and does not audit operations.
+- The abstraction layer does not encrypt data and does not trace operations.
   Encryption belongs to the tempest stores (`record`, `file`, `series`, `vector`); the
   `internal/absfs` layer must remain a transparent pass-through.
 - Apply resource limits where untrusted paths or sizes are accepted; do not log

@@ -107,8 +107,8 @@ type Config struct {
 	// MinCompress skips compressing values smaller than this many bytes.
 	MinCompress int
 
-	// Audit, when non-nil, receives one entry per committed graph record write.
-	Audit ledger.Sink
+	// Trace, when non-nil, receives one entry per committed graph record write.
+	Trace ledger.Sink
 
 	// Metrics, when non-nil, receives operation counters.
 	Metrics metrics.Observer
@@ -134,7 +134,7 @@ type Store struct {
 	root [][]byte
 	enc  atomic.Pointer[encState]
 
-	audit ledger.Sink
+	trace ledger.Sink
 	obs   metrics.Observer
 
 	closed   atomic.Bool
@@ -177,7 +177,7 @@ func open(ctx context.Context, bdb *bolt.DB, cfg Config, readOnly bool) (*Store,
 	s := &Store{
 		db:       bdb,
 		root:     cloneRoot(cfg.Root),
-		audit:    cfg.Audit,
+		trace:    cfg.Trace,
 		obs:      cfg.Metrics,
 		readOnly: readOnly,
 	}
@@ -266,7 +266,7 @@ func (s *Store) Root() [][]byte {
 }
 
 // WithRoot returns a view rooted at the given bucket path. It shares the
-// handle, encryption state and audit sink with the receiver.
+// handle, encryption state and trace sink with the receiver.
 func (s *Store) WithRoot(parts ...string) *Store {
 	if s == nil {
 		return nil
@@ -287,7 +287,7 @@ func (s *Store) WithRoot(parts ...string) *Store {
 		tx:       s.tx,
 		base:     s.rootStore(),
 		root:     root,
-		audit:    s.audit,
+		trace:    s.trace,
 		obs:      s.obs,
 		readOnly: s.readOnly,
 	}
@@ -303,17 +303,17 @@ func (s *Store) WithTransaction(tx *bolt.Tx) *Store {
 		tx:       tx,
 		base:     s.rootStore(),
 		root:     cloneRoot(s.root),
-		audit:    s.audit,
+		trace:    s.trace,
 		obs:      s.obs,
 		readOnly: s.readOnly,
 	}
 }
 
-// SetAuditSink replaces the sink that receives committed-write entries and
+// SetTraceSink replaces the sink that receives committed-write entries and
 // returns the receiver. It is intended for a transaction-bound view.
-func (s *Store) SetAuditSink(sink ledger.Sink) *Store {
+func (s *Store) SetTraceSink(sink ledger.Sink) *Store {
 	if s != nil {
-		s.audit = sink
+		s.trace = sink
 	}
 	return s
 }
@@ -602,7 +602,7 @@ func (s *Store) Names(ctx context.Context) ([]string, error) {
 }
 
 // Drop removes a named graph and every node, edge and version record in it. A
-// missing graph is a no-op. One "drop" entry is audited when auditing is
+// missing graph is a no-op. One "drop" entry is traced when tracing is
 // enabled.
 func (s *Store) Drop(ctx context.Context, name string) error {
 	if ctx == nil {
@@ -626,7 +626,7 @@ func (s *Store) Drop(ctx context.Context, name string) error {
 		if err := root.DeleteBucket([]byte(name)); err != nil {
 			return err
 		}
-		if s.audit != nil {
+		if s.trace != nil {
 			entries = append(entries, ledger.Entry{Store: ledger.StoreGraphs, Op: "drop", Entity: name})
 		}
 		return nil
@@ -634,9 +634,9 @@ func (s *Store) Drop(ctx context.Context, name string) error {
 	if err != nil {
 		return fmt.Errorf("graphs: drop %q: %w", name, err)
 	}
-	if s.audit != nil {
+	if s.trace != nil {
 		for _, entry := range entries {
-			if err := s.audit.Record(entry); err != nil {
+			if err := s.trace.Record(entry); err != nil {
 				return err
 			}
 		}

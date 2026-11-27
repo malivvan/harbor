@@ -7,7 +7,7 @@ import (
 	"sort"
 )
 
-// canonicalBytes serialises v to the deterministic JSON that audit events are
+// canonicalBytes serialises v to the deterministic JSON that trace events are
 // signed and hash-chained over.
 //
 // The output is byte-stable across runs and processes: object keys are sorted
@@ -32,7 +32,7 @@ import (
 func canonicalBytes(v any) ([]byte, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
-		return nil, fmt.Errorf("audit: marshal: %w", err)
+		return nil, fmt.Errorf("trace: marshal: %w", err)
 	}
 	return fromRaw(json.RawMessage(raw))
 }
@@ -43,7 +43,7 @@ func fromRaw(raw json.RawMessage) ([]byte, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber() // keep the literal numeric text instead of float64
 	if err := dec.Decode(&v); err != nil {
-		return nil, fmt.Errorf("audit: decode: %w", err)
+		return nil, fmt.Errorf("trace: decode: %w", err)
 	}
 	return encode(v)
 }
@@ -83,13 +83,13 @@ func encodeObject(m map[string]any) ([]byte, error) {
 		}
 		keyBytes, err := json.Marshal(k)
 		if err != nil {
-			return nil, fmt.Errorf("audit: marshal key %q: %w", k, err)
+			return nil, fmt.Errorf("trace: marshal key %q: %w", k, err)
 		}
 		buf.Write(keyBytes)
 		buf.WriteByte(':')
 		valBytes, err := encode(m[k])
 		if err != nil {
-			return nil, fmt.Errorf("audit: marshal value for key %q: %w", k, err)
+			return nil, fmt.Errorf("trace: marshal value for key %q: %w", k, err)
 		}
 		buf.Write(valBytes)
 	}
@@ -106,7 +106,7 @@ func encodeArray(a []any) ([]byte, error) {
 		}
 		b, err := encode(elem)
 		if err != nil {
-			return nil, fmt.Errorf("audit: marshal array element %d: %w", i, err)
+			return nil, fmt.Errorf("trace: marshal array element %d: %w", i, err)
 		}
 		buf.Write(b)
 	}

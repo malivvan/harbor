@@ -195,7 +195,7 @@ func (se *Series) SetLabels(ctx context.Context, labels map[string]string) error
 		return err
 	}
 	raw, _ := json.Marshal(labels)
-	return se.store.auditEntry("set_labels", se.name, digestOf(raw))
+	return se.store.traceEntry("set_labels", se.name, digestOf(raw))
 }
 
 // Insert stores one point, replacing any point with the same timestamp.
@@ -256,7 +256,7 @@ func (se *Series) InsertAt(ctx context.Context, p Point, now int64) error {
 	}); err != nil {
 		return err
 	}
-	return se.store.auditEntry("insert", se.name, digestOf(encodePoints([]Point{p})))
+	return se.store.traceEntry("insert", se.name, digestOf(encodePoints([]Point{p})))
 }
 
 // InsertMany stores multiple points in a single transaction. Out-of-order
@@ -326,7 +326,7 @@ func (se *Series) InsertManyAt(ctx context.Context, points []Point, now int64) e
 	}); err != nil {
 		return err
 	}
-	return se.store.auditEntry("insert_many", se.name, digestOf(encodePoints(points)))
+	return se.store.traceEntry("insert_many", se.name, digestOf(encodePoints(points)))
 }
 
 // updateMetaAfterInsert adjusts the persisted count and applies retention.
@@ -828,7 +828,7 @@ func (se *Series) DeleteRange(ctx context.Context, start, end int64) (int, error
 	if err != nil {
 		return 0, err
 	}
-	if err := se.store.auditEntry("delete_range", se.name, nil); err != nil {
+	if err := se.store.traceEntry("delete_range", se.name, nil); err != nil {
 		return 0, err
 	}
 	return deleted, nil

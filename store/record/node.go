@@ -82,10 +82,10 @@ type node struct {
 	// Codec of this node
 	codec Codec
 
-	// audit, when non-nil, replaces the store's sink for writes performed
-	// through this node. The root package uses it to stage audit events for a
+	// trace, when non-nil, replaces the store's sink for writes performed
+	// through this node. The root package uses it to stage trace events for a
 	// cross-store transaction instead of recording them inside the transaction.
-	audit ledger.Sink
+	trace ledger.Sink
 
 	// project, when non-empty, limits decode to these top-level fields. It is
 	// set on a query's private node copy by Query.Project.

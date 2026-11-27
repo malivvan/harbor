@@ -14,21 +14,21 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-type auditUser struct {
+type traceUser struct {
 	ID   string `db:"id"`
 	Name string `db:"index"`
 }
 
-func (auditUser) TempestBucketName() string { return "audit_users" }
+func (traceUser) TempestBucketName() string { return "trace_users" }
 
-// auditSeed is a fixed 32-byte seed so the derived key is deterministic.
-func auditSeed() []byte {
+// traceSeed is a fixed 32-byte seed so the derived key is deterministic.
+func traceSeed() []byte {
 	return []byte("000102030405060708090a0b0c0d0e0f")
 }
 
-func openAudited(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
+func openTraceed(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	t.Helper()
-	pub, priv, err := ledger.DeriveKey(auditSeed(), "m/0'")
+	pub, priv, err := ledger.DeriveKey(traceSeed(), "m/0'")
 	require.NoError(t, err)
 
 	bdb, err := bolt.Open(filepath.Join(t.TempDir(), "ledger.db"), 0o600, &bolt.Options{Timeout: time.Second})
@@ -36,16 +36,16 @@ func openAudited(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	t.Cleanup(func() { _ = bdb.Close() })
 
 	rec := ledger.NewRecorder(bdb, map[string]ed25519.PrivateKey{ledger.StoreRecord: priv})
-	st, err := Open(context.Background(), bdb, Config{Audit: rec})
+	st, err := Open(context.Background(), bdb, Config{Trace: rec})
 	require.NoError(t, err)
 	return st, bdb, pub
 }
 
-func TestAuditRecordsStructWrites(t *testing.T) {
-	st, bdb, pub := openAudited(t)
+func TestTraceRecordsStructWrites(t *testing.T) {
+	st, bdb, pub := openTraceed(t)
 	ctx := context.Background()
 
-	u := auditUser{ID: "u1", Name: "alice"}
+	u := traceUser{ID: "u1", Name: "alice"}
 	require.NoError(t, st.Save(ctx, &u))
 	u.Name = "bob"
 	require.NoError(t, st.Update(ctx, &u))
@@ -57,8 +57,8 @@ func TestAuditRecordsStructWrites(t *testing.T) {
 	require.Equal(t, uint64(4), res.Count)
 }
 
-func TestAuditRecordsKeyValueWrites(t *testing.T) {
-	st, bdb, pub := openAudited(t)
+func TestTraceRecordsKeyValueWrites(t *testing.T) {
+	st, bdb, pub := openTraceed(t)
 	ctx := context.Background()
 
 	require.NoError(t, st.Set(ctx, "cfg", "k", "v"))
@@ -70,26 +70,26 @@ func TestAuditRecordsKeyValueWrites(t *testing.T) {
 	require.Equal(t, uint64(3), res.Count)
 }
 
-func TestAuditDisabledRecordsNothing(t *testing.T) {
-	bdb, err := bolt.Open(filepath.Join(t.TempDir(), "noaudit.db"), 0o600, &bolt.Options{Timeout: time.Second})
+func TestTraceDisabledRecordsNothing(t *testing.T) {
+	bdb, err := bolt.Open(filepath.Join(t.TempDir(), "notrace.db"), 0o600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bdb.Close() })
 
 	st, err := Open(context.Background(), bdb, Config{})
 	require.NoError(t, err)
 
-	u := auditUser{ID: "u1", Name: "alice"}
+	u := traceUser{ID: "u1", Name: "alice"}
 	require.NoError(t, st.Save(context.Background(), &u))
 
 	_, err = ledger.Verify(bdb, map[string]ed25519.PublicKey{ledger.StoreRecord: nil})
 	require.ErrorIs(t, err, ledger.ErrNoLog)
 }
 
-func TestAuditDigestMatchesPayload(t *testing.T) {
-	st, bdb, pub := openAudited(t)
+func TestTraceDigestMatchesPayload(t *testing.T) {
+	st, bdb, pub := openTraceed(t)
 	ctx := context.Background()
 
-	u := auditUser{ID: "u1", Name: "alice"}
+	u := traceUser{ID: "u1", Name: "alice"}
 	require.NoError(t, st.Save(ctx, &u))
 
 	var ev ledger.Event
@@ -100,7 +100,7 @@ func TestAuditDigestMatchesPayload(t *testing.T) {
 		return json.Unmarshal(encoded, &ev)
 	}))
 	require.Equal(t, "save", ev.Op)
-	require.Equal(t, "audit_users:u1", ev.Entity)
+	require.Equal(t, "trace_users:u1", ev.Entity)
 	require.Len(t, ev.Digest, 32)
 
 	// The recorded digest is the SHA-256 of the codec-encoded record.
@@ -110,10 +110,10 @@ func TestAuditDigestMatchesPayload(t *testing.T) {
 	_ = pub
 }
 
-// Rule: Set and SetBytes are distinguishable in the audit trail even though
+// Rule: Set and SetBytes are distinguishable in the trace log even though
 // they share the write path.
-func TestAuditSetOperationNames(t *testing.T) {
-	st, bdb, _ := openAudited(t)
+func TestTraceSetOperationNames(t *testing.T) {
+	st, bdb, _ := openTraceed(t)
 	ctx := context.Background()
 
 	require.NoError(t, st.Set(ctx, "cfg", "typed", "v"))

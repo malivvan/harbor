@@ -186,7 +186,7 @@ func TestSearchDrop(t *testing.T) {
 	}
 }
 
-// recordingSink collects the audit entries a store reports.
+// recordingSink collects the trace entries a store reports.
 type recordingSink struct {
 	entries []ledger.Entry
 }
@@ -196,10 +196,10 @@ func (r *recordingSink) Record(e ledger.Entry) error {
 	return nil
 }
 
-func TestSearchAudit(t *testing.T) {
+func TestSearchTrace(t *testing.T) {
 	ctx := context.Background()
 	sink := &recordingSink{}
-	s, _ := testStore(t, Config{Audit: sink})
+	s, _ := testStore(t, Config{Trace: sink})
 	idx := openIndex(t, s)
 
 	if err := idx.Upsert(ctx, "d1", "alpha beta"); err != nil {
@@ -214,7 +214,7 @@ func TestSearchAudit(t *testing.T) {
 
 	wantOps := []string{"create_index", "upsert", "delete", "drop_index"}
 	if len(sink.entries) != len(wantOps) {
-		t.Fatalf("audit entries = %d, want %d: %+v", len(sink.entries), len(wantOps), sink.entries)
+		t.Fatalf("trace entries = %d, want %d: %+v", len(sink.entries), len(wantOps), sink.entries)
 	}
 	for i, entry := range sink.entries {
 		if entry.Store != ledger.StoreSearch {

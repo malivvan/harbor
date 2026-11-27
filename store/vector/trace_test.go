@@ -13,13 +13,13 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-func auditSeed() []byte {
+func traceSeed() []byte {
 	return []byte("000102030405060708090a0b0c0d0e0f")
 }
 
-func openAuditedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
+func openTraceedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	t.Helper()
-	pub, priv, err := ledger.DeriveKey(auditSeed(), "m/3'")
+	pub, priv, err := ledger.DeriveKey(traceSeed(), "m/3'")
 	require.NoError(t, err)
 
 	bdb, err := bolt.Open(filepath.Join(t.TempDir(), "vec-ledger.db"), 0o600, &bolt.Options{Timeout: time.Second})
@@ -27,13 +27,13 @@ func openAuditedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	t.Cleanup(func() { _ = bdb.Close() })
 
 	rec := ledger.NewRecorder(bdb, map[string]ed25519.PrivateKey{ledger.StoreVector: priv})
-	store, err := openStore(context.Background(), bdb, []byte(bucket.VECTOR), Config{Audit: rec})
+	store, err := openStore(context.Background(), bdb, []byte(bucket.VECTOR), Config{Trace: rec})
 	require.NoError(t, err)
 	return store, bdb, pub
 }
 
-func TestAuditRecordsCollectionWrites(t *testing.T) {
-	store, bdb, pub := openAuditedStore(t)
+func TestTraceRecordsCollectionWrites(t *testing.T) {
+	store, bdb, pub := openTraceedStore(t)
 
 	col, err := store.NewCollection("docs", 3, Cosine, false)
 	require.NoError(t, err)
@@ -50,8 +50,8 @@ func TestAuditRecordsCollectionWrites(t *testing.T) {
 	require.Equal(t, uint64(5), res.Count)
 }
 
-func TestAuditDisabledRecordsNothing(t *testing.T) {
-	store := openTestStorage(t, filepath.Join(t.TempDir(), "vec-noaudit.db"))
+func TestTraceDisabledRecordsNothing(t *testing.T) {
+	store := openTestStorage(t, filepath.Join(t.TempDir(), "vec-notrace.db"))
 	col, err := store.NewCollection("docs", 3, Cosine, false)
 	require.NoError(t, err)
 	require.NoError(t, col.Upsert([]PointStruct{{ID: "a", Vector: []float32{1, 2, 3}}}))
@@ -61,7 +61,7 @@ func TestAuditDisabledRecordsNothing(t *testing.T) {
 	require.ErrorIs(t, err, ledger.ErrNoLog)
 }
 
-func TestAuditDigestStableAcrossOrder(t *testing.T) {
+func TestTraceDigestStableAcrossOrder(t *testing.T) {
 	// The batch digest sorts by point ID, so the same points in a different
 	// order produce the same digest.
 	a := digestOf(encodePointsDigest([]PointStruct{{ID: "a", Vector: []float32{1}}, {ID: "b", Vector: []float32{2}}}))

@@ -118,20 +118,20 @@ func (s *Store) TouchChange(ctx context.Context, c Change) {
 	s.emitChange(c)
 }
 
-// auditEntry records one committed write in the store's audit trail. It is a
-// no-op when the store has no audit sink. Digest is the SHA-256 of the written
+// traceEntry records one committed write in the store's trace log. It is a
+// no-op when the store has no trace sink. Digest is the SHA-256 of the written
 // payload, or nil for deletes. A sink error is returned so the caller can
 // surface it; the data write has already committed at that point.
 //
 // Internal bookkeeping (the version record in __database and per-bucket
 // metadata) is not an application write and is never recorded.
-func (n *node) auditEntry(op, entity string, digest []byte) error {
+func (n *node) traceEntry(op, entity string, digest []byte) error {
 	if n == nil || n.s == nil {
 		return nil
 	}
-	sink := n.audit
+	sink := n.trace
 	if sink == nil {
-		sink = n.s.audit
+		sink = n.s.trace
 	}
 	if sink == nil {
 		return nil
@@ -139,27 +139,27 @@ func (n *node) auditEntry(op, entity string, digest []byte) error {
 	return sink.Record(ledger.Entry{
 		Store:  ledger.StoreRecord,
 		Op:     op,
-		Entity: n.auditEntity(entity),
+		Entity: n.traceEntity(entity),
 		Digest: digest,
 	})
 }
 
-// auditEntryBucket is like auditEntry but skips the reserved internal buckets,
+// traceEntryBucket is like traceEntry but skips the reserved internal buckets,
 // so opening a store (which writes the version record) leaves no event.
-func (n *node) auditEntryBucket(op, bucketName, entity string, digest []byte) error {
+func (n *node) traceEntryBucket(op, bucketName, entity string, digest []byte) error {
 	if isInternalBucket(bucketName) {
 		return nil
 	}
-	return n.auditEntry(op, entity, digest)
+	return n.traceEntry(op, entity, digest)
 }
 
 func isInternalBucket(name string) bool {
 	return name == databaseInfo || name == metadataBucket
 }
 
-// auditEntity prefixes the bucket path so an event identifies the node the
+// traceEntity prefixes the bucket path so an event identifies the node the
 // write landed on, matching the Change.Path convention.
-func (n *node) auditEntity(entity string) string {
+func (n *node) traceEntity(entity string) string {
 	path := n.Bucket()
 	if len(path) == 0 {
 		return entity
@@ -181,10 +181,10 @@ func digestOf(data []byte) []byte {
 	return sum[:]
 }
 
-// auditRecordStruct records a committed struct write. The digest is the
+// traceRecordStruct records a committed struct write. The digest is the
 // SHA-256 of the codec-encoded record, matching what is stored.
-func (n *node) auditRecordStruct(op string, cfg *structConfig, data any) error {
-	if n == nil || n.s == nil || n.s.audit == nil {
+func (n *node) traceRecordStruct(op string, cfg *structConfig, data any) error {
+	if n == nil || n.s == nil || n.s.trace == nil {
 		return nil
 	}
 	raw, err := json.Marshal(data)
@@ -195,5 +195,5 @@ func (n *node) auditRecordStruct(op string, cfg *structConfig, data any) error {
 	if cfg.ID != nil {
 		id = fmt.Sprint(cfg.ID.Value.Interface())
 	}
-	return n.auditEntry(op, cfg.Name+":"+id, digestOf(raw))
+	return n.traceEntry(op, cfg.Name+":"+id, digestOf(raw))
 }

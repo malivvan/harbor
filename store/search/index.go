@@ -154,7 +154,7 @@ func (s *Store) Open(name string, cfg Config) (*Index, error) {
 		return nil, err
 	}
 	if created {
-		if err := s.auditEntry("create_index", name, nil); err != nil {
+		if err := s.traceEntry("create_index", name, nil); err != nil {
 			return nil, err
 		}
 	}
@@ -469,7 +469,7 @@ func (idx *Index) Upsert(ctx context.Context, id, text string) error {
 	}); err != nil {
 		return err
 	}
-	return idx.store.auditEntry("upsert", idx.name+":"+id, digestEvent(id, text))
+	return idx.store.traceEntry("upsert", idx.name+":"+id, digestEvent(id, text))
 }
 
 // Delete removes documents from the index. Unknown ids are ignored.
@@ -529,7 +529,7 @@ func (idx *Index) Delete(ctx context.Context, ids ...string) error {
 	}); err != nil {
 		return err
 	}
-	return idx.store.auditEntry("delete", idx.name, nil)
+	return idx.store.traceEntry("delete", idx.name, nil)
 }
 
 // Hit is one search result.
@@ -1010,7 +1010,7 @@ func (s *Store) Drop(ctx context.Context, name string) error {
 	if !dropped {
 		return nil
 	}
-	return s.auditEntry("drop_index", name, nil)
+	return s.traceEntry("drop_index", name, nil)
 }
 
 // digestEvent is the SHA-256 of the document as it was written. The separator

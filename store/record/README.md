@@ -466,11 +466,11 @@ if err := txn.Save(ctx, &account); err != nil {
 	return err
 }
 
-audit, err := tx.CreateBucketIfNotExists([]byte("audit"))
+trace, err := tx.CreateBucketIfNotExists([]byte("trace"))
 if err != nil {
 	return err
 }
-if err := audit.Put([]byte("event"), []byte("created")); err != nil {
+if err := trace.Put([]byte("event"), []byte("created")); err != nil {
 	return err
 }
 

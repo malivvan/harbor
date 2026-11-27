@@ -74,7 +74,7 @@ func (se *Series) SetRetention(ctx context.Context, r Retention) error {
 		return err
 	}
 	raw, _ := json.Marshal(r)
-	return se.store.auditEntry("set_retention", se.name, digestOf(raw))
+	return se.store.traceEntry("set_retention", se.name, digestOf(raw))
 }
 
 // Retention returns the persisted policy; the zero value when unset.

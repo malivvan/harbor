@@ -1,6 +1,6 @@
 # ledger
 
-Tamper-evident, append-only audit trail for tempest. Every mutating operation in
+Tamper-evident, append-only trace log for tempest. Every mutating operation in
 the `record`, `file`, `series` and `vector` stores can be recorded as a signed, hash-linked
 event, so the trail proves *what* changed and *in which order* — and cannot be
 forged, altered, reordered or spliced without the store's key material.
@@ -31,13 +31,13 @@ automatically.
 
 ## Quick start
 
-Auditing is enabled per open with `tempest.Options.Audit`, mirroring the
+Tracing is enabled per open with `tempest.Options.Trace`, mirroring the
 encryption flags:
 
 ```go
 store, err := tempest.Open(ctx, "app.db", 0o600, &tempest.Options{
 	Password: "correct horse battery staple",
-	Audit:    tempest.AuditAll, // or AuditRecord | AuditSeries, …
+	Trace:    tempest.TraceAll, // or TraceRecord | TraceSeries, …
 })
 if err != nil {
 	log.Fatal(err)
@@ -45,26 +45,26 @@ if err != nil {
 
 // … perform writes through the sub-stores …
 
-res, err := store.VerifyAudit()
+res, err := store.VerifyTrace()
 if err != nil {
 	log.Fatal(err) // forged signature, broken link, or no trail
 }
-log.Printf("audit: %d events, tip %x", res.Count, res.Tip)
+log.Printf("trace: %d events, tip %x", res.Count, res.Tip)
 ```
 
 | Flag | Records |
 |------|---------|
-| `AuditNone` | nothing (default) |
-| `AuditRecord` | `record` writes |
-| `AuditFile` | `file` writes |
-| `AuditSeries` | `series` writes |
-| `AuditVector` | `vector` writes |
-| `AuditGraphs` | `graphs` writes |
-| `AuditObject` | `object` writes |
-| `AuditSearch` | `search` writes |
-| `AuditAll` | every store |
+| `TraceNone` | nothing (default) |
+| `TraceRecord` | `record` writes |
+| `TraceFile` | `file` writes |
+| `TraceSeries` | `series` writes |
+| `TraceVector` | `vector` writes |
+| `TraceGraphs` | `graphs` writes |
+| `TraceObject` | `object` writes |
+| `TraceSearch` | `search` writes |
+| `TraceAll` | every store |
 
-Unlike encryption flags, audit flags are **not persisted**: they are a per-open
+Unlike encryption flags, trace flags are **not persisted**: they are a per-open
 runtime choice. Opening with a flag set records events; opening without it
 simply stops recording. There is no "open in the wrong mode" hazard, so the
 flags stay out of the on-disk metadata and the format is unchanged.
@@ -77,11 +77,11 @@ detect that, record the chain tip somewhere the store's writer cannot reach —
 a log, a separate database, a ledger:
 
 ```go
-count, tip, err := store.Audit().Head()
+count, tip, err := store.Trace().Head()
 // persist (count, tip) out of band on a schedule
 ```
 
-Later, compare the anchored tip against `VerifyAudit`'s `Result.Tip`. A tip that
+Later, compare the anchored tip against `VerifyTrace`'s `Result.Tip`. A tip that
 is no longer a prefix of the current chain means events were removed from the
 end. A scheduler that calls `Head` every few minutes and writes the pair to an
 append-only log outside the store is enough; there is no helper in tempest
@@ -126,8 +126,8 @@ keys, using SLIP-0010 hardened paths:
 
 SLIP-0010 and SLIP-0021 are domain-separated (different HMAC keys), so deriving
 signing keys and encryption keys from one seed does not couple them. No separate
-audit canary is needed: the existing encryption canary already proves the seed,
-and therefore the derived audit keys, is correct.
+trace canary is needed: the existing encryption canary already proves the seed,
+and therefore the derived trace keys, is correct.
 
 ## What is recorded
 
@@ -156,7 +156,7 @@ bytes to the canonical form.
 
 `record.Set` records `set` and `record.SetBytes` records `set_bytes`: both write the same
 encoded value, but the operation name preserves the caller's intent. Higher-level
-packages are audited at the layer that performs the write: `backup` writes
+packages are traced at the layer that performs the write: `backup` writes
 through the object store, so its writes appear as `object` events; the `store`
 manager only opens stores and records nothing itself.
 
@@ -167,7 +167,7 @@ manager only opens stores and records nothing itself.
 digests (`VerifyData`) is out of scope for v1; the digest is present for a
 future tool.
 
-Audit flags are a per-open runtime choice and are **not persisted**. If they
+Trace flags are a per-open runtime choice and are **not persisted**. If they
 must survive a restart, the application has to open the store with the same
 flags; changing that would require a metadata version bump and a canary
 binding.
@@ -190,7 +190,7 @@ Not guaranteed (by design, not by omission):
   the encryption itself.
 - **Per-user identity.** Events record what happened, not which human did it.
 - **Crash-atomic coupling.** An event is appended in its own transaction after
-  the data write commits. A crash in between loses the *trailing* audit event
+  the data write commits. A crash in between loses the *trailing* trace event
   (the data is present, the event is not) — the same model as `record.ChangeHook`.
 
 ## Verification
@@ -198,4 +198,4 @@ Not guaranteed (by design, not by omission):
 `ledger.Verify` replays every event in sequence and returns the count and tip
 hash. It fails on the first forged signature, broken link, or non-monotonic
 sequence, and returns `ledger.ErrNoLog` when no trail exists. At the root,
-`Store.VerifyAudit()` does the same using the public keys derived at open.
+`Store.VerifyTrace()` does the same using the public keys derived at open.

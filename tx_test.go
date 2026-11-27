@@ -272,19 +272,19 @@ func TestWriteTransactionSerializesConcurrentWriters(t *testing.T) {
 	require.Len(t, all, writers)
 }
 
-// TestWriteTransactionAuditsAfterCommit proves audit events are collected
+// TestWriteTransactionTracesAfterCommit proves trace events are collected
 // inside the transaction and appended once it commits, with no deadlock
 // against the write transaction.
-func TestWriteTransactionAuditsAfterCommit(t *testing.T) {
+func TestWriteTransactionTracesAfterCommit(t *testing.T) {
 	ctx := context.Background()
 	opts := testOptions("tx-password")
-	opts.Audit = AuditAll
+	opts.Trace = TraceAll
 	s, err := Open(ctx, filepath.Join(t.TempDir(), "tx.db"), 0o600, opts)
 	require.NoError(t, err)
 	defer mustClose(t, s)
 
 	require.NoError(t, s.WriteTransaction(ctx, func(tx *Tx) error {
-		if err := tx.Record().Save(ctx, &txRecord{ID: "audited"}); err != nil {
+		if err := tx.Record().Save(ctx, &txRecord{ID: "traced"}); err != nil {
 			return err
 		}
 		fsys, err := tx.File().Open("txfs")
@@ -301,12 +301,12 @@ func TestWriteTransactionAuditsAfterCommit(t *testing.T) {
 		return f.Close()
 	}))
 
-	res, err := s.VerifyAudit()
+	res, err := s.VerifyTrace()
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, res.Count, uint64(2), "db and fs writes must be audited")
+	require.GreaterOrEqual(t, res.Count, uint64(2), "db and fs writes must be traced")
 
 	// The trail is append-only and valid after the commit.
-	count, tip, err := s.Audit().Head()
+	count, tip, err := s.Trace().Head()
 	require.NoError(t, err)
 	require.Equal(t, res.Count, count)
 	require.NotEmpty(t, tip)

@@ -151,18 +151,18 @@ err := store.Graphs().MigrateFromRecord(ctx, "social", recordStore, "old")
 `MigrateFromRecord` copies live records and every closed version in one write
 transaction and is idempotent. The legacy data is left untouched.
 
-## Encryption, audit and backups
+## Encryption, trace and backups
 
 - Value encryption follows `Config.EncryptValues`; the root store enables it
   with `EncryptGraphValues` (or the db value flag for stores created before
   that flag existed).
-- `Config.Audit` receives one event per committed graph record write under the
+- `Config.Trace` receives one event per committed graph record write under the
   `graphs` store identifier.
 - `VerifyBackup` validates the graph store's version and mode, and lists every
   graph in the copy. `BackupFile` records the graph format version in its
   manifest.
 - `Store.Drop` removes a named graph and every node, edge and closed version in
-  it; a missing graph is a no-op and the removal is audited.
+  it; a missing graph is a no-op and the removal is traced.
 - `Store.RotateAll` re-seals every live and closed record plus the canary under a
   new key, and `Store.VerifyAll` re-reads them, reporting
   `crypto.ErrAuthFailed` on a value that does not authenticate.

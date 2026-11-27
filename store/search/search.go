@@ -93,8 +93,8 @@ type Config struct {
 	// default.
 	EncryptTokens bool
 
-	// Audit, when non-nil, receives one entry per committed index write.
-	Audit ledger.Sink
+	// Trace, when non-nil, receives one entry per committed index write.
+	Trace ledger.Sink
 
 	// Compress Zstd-compresses documents, posting lists and index metadata on
 	// the plaintext side of encryption. Term keys are never compressed. It is a
@@ -124,7 +124,7 @@ type Store struct {
 	base  *Store
 	root  [][]byte
 	enc   atomic.Pointer[encState]
-	audit ledger.Sink
+	trace ledger.Sink
 	obs   metrics.Observer
 
 	// rotMu serializes rotation against normal operations. Reads and writes take
@@ -173,7 +173,7 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 	store := &Store{
 		db:    bdb,
 		root:  cloneRoot(cfg.Root),
-		audit: cfg.Audit,
+		trace: cfg.Trace,
 		obs:   cfg.Metrics,
 	}
 	store.enc.Store(enc)
@@ -296,7 +296,7 @@ func (s *Store) WithTransaction(tx *bolt.Tx) *Store {
 		tx:       tx,
 		base:     s.rootStore(),
 		root:     cloneRoot(s.root),
-		audit:    s.audit,
+		trace:    s.trace,
 		obs:      s.obs,
 		readOnly: s.readOnly,
 	}
@@ -338,7 +338,7 @@ func (s *Store) WithRoot(parts ...string) *Store {
 		tx:       s.tx,
 		base:     s.rootStore(),
 		root:     root,
-		audit:    s.audit,
+		trace:    s.trace,
 		obs:      s.obs,
 		readOnly: s.readOnly,
 	}
@@ -441,22 +441,22 @@ func (s *Store) openValue(raw []byte) ([]byte, error) {
 	return compress.Decode(nil, plain)
 }
 
-// SetAuditSink replaces the sink that receives committed-write entries and
+// SetTraceSink replaces the sink that receives committed-write entries and
 // returns the receiver. It is intended for a transaction-bound view.
-func (s *Store) SetAuditSink(sink ledger.Sink) *Store {
+func (s *Store) SetTraceSink(sink ledger.Sink) *Store {
 	if s != nil {
-		s.audit = sink
+		s.trace = sink
 	}
 	return s
 }
 
-// auditEntry records one committed index write in the store's audit trail. It
-// is a no-op when the store has no audit sink.
-func (s *Store) auditEntry(op, entity string, digest []byte) error {
-	if s == nil || s.audit == nil {
+// traceEntry records one committed index write in the store's trace log. It
+// is a no-op when the store has no trace sink.
+func (s *Store) traceEntry(op, entity string, digest []byte) error {
+	if s == nil || s.trace == nil {
 		return nil
 	}
-	return s.audit.Record(ledger.Entry{
+	return s.trace.Record(ledger.Entry{
 		Store:  ledger.StoreSearch,
 		Op:     op,
 		Entity: entity,

@@ -41,7 +41,7 @@ bucket-path segments that select a rooted view of the already-open store. Every 
 - [Utilities](#utilities)
 - [Clustering](#clustering)
 - [Encryption](#encryption)
-- [Audit trail](#audit-trail)
+- [Trace log](#trace-trail)
 - [Cross-store transactions](#cross-store-transactions)
 - [Database lifecycle](#database-lifecycle)
 - [Error handling](#error-handling)
@@ -59,7 +59,7 @@ bucket-path segments that select a rooted view of the already-open store. Every 
 - **Encryption is built in, not bolted on.** AES-256-GCM seals records, files,
   points and documents; deterministic AES-SIV keeps exact lookups working when
   keys themselves must be hidden.
-- **Tamper-evident audit trail.** Optionally record every write as an Ed25519
+- **Tamper-evident trace log.** Optionally record every write as an Ed25519
   signed, hash-linked event, so the history cannot be forged, altered or
   reordered without the store key.
 - **Context-aware.** Database operations accept `context.Context` and honor
@@ -265,7 +265,7 @@ Important properties:
 
 `Options.Validate()` performs the checks `Open` applies when creating a store —
 password, complete and bounded Argon2id parameters, encryption-flag conflicts
-and audit flags — without touching the file. The sub-store configs expose the
+and trace flags — without touching the file. The sub-store configs expose the
 same `Validate()`/`Normalize()` pair, and their `Open` functions use it.
 
 Use `Options{Plaintext: true}` for an unencrypted store, or select individual
@@ -457,7 +457,7 @@ if err != nil {
 if err := txn.Save(ctx, &record); err != nil {
 	return err
 }
-if _, err := tx.CreateBucketIfNotExists([]byte("audit")); err != nil {
+if _, err := tx.CreateBucketIfNotExists([]byte("trace")); err != nil {
 	return err
 }
 return tx.Commit()
@@ -1178,21 +1178,21 @@ store, err := tempest.Open(ctx, "app.db", 0o600, &tempest.Options{
   are small and heterogeneous, and reference counting would cost more than it
   saves.
 
-## Audit trail
+## Trace log
 
 tempest can record every mutating operation as a **tamper-evident, append-only
-audit trail**. Each event is signed with an Ed25519 key derived from the store
+trace log**. Each event is signed with an Ed25519 key derived from the store
 password (SLIP-0010, one key per sub-store) and linked to its predecessor by a
 hash chain, so the history cannot be forged, altered, reordered or spliced
 without the key material.
 
-Auditing is enabled per open with `Options.Audit`, mirroring the encryption
+Tracing is enabled per open with `Options.Trace`, mirroring the encryption
 flags:
 
 ```go
 store, err := tempest.Open(ctx, "app.db", 0o600, &tempest.Options{
 	Password: "correct horse battery staple",
-	Audit:    tempest.AuditAll, // or AuditRecord | AuditSeries, …
+	Trace:    tempest.TraceAll, // or TraceRecord | TraceSeries, …
 })
 if err != nil {
 	log.Fatal(err)
@@ -1200,33 +1200,33 @@ if err != nil {
 
 // … writes through the sub-stores are recorded automatically …
 
-res, err := store.VerifyAudit()
+res, err := store.VerifyTrace()
 if err != nil {
 	log.Fatal(err) // forged signature, broken link, or no trail
 }
-log.Printf("audit: %d events, tip %x", res.Count, res.Tip)
+log.Printf("trace: %d events, tip %x", res.Count, res.Tip)
 ```
 
 | Flag | Records |
 |------|---------|
-| `AuditNone` | nothing (default) |
-| `AuditRecord` | `record` writes |
-| `AuditFile` | `file` writes |
-| `AuditSeries` | `series` writes |
-| `AuditVector` | `vector` writes |
-| `AuditGraphs` | `graphs` writes |
-| `AuditObject` | `object` writes |
-| `AuditSearch` | `search` writes (index create/drop, upsert, delete) |
-| `AuditAll` | every store |
+| `TraceNone` | nothing (default) |
+| `TraceRecord` | `record` writes |
+| `TraceFile` | `file` writes |
+| `TraceSeries` | `series` writes |
+| `TraceVector` | `vector` writes |
+| `TraceGraphs` | `graphs` writes |
+| `TraceObject` | `object` writes |
+| `TraceSearch` | `search` writes (index create/drop, upsert, delete) |
+| `TraceAll` | every store |
 
-Unlike encryption flags, audit flags are **not persisted**: they are a per-open
-runtime choice, so enabling or disabling auditing never changes the on-disk
+Unlike encryption flags, trace flags are **not persisted**: they are a per-open
+runtime choice, so enabling or disabling tracing never changes the on-disk
 format. The trail lives in a `ledger/` bucket in the same file, so it travels
 with snapshots and backups.
 
 The trail detects interior tampering but **cannot by itself detect tail
 truncation** — deleting the last N events leaves a self-consistent prefix.
-Anchor `store.Audit().Head()` out of band on a schedule to detect that. The
+Anchor `store.Trace().Head()` out of band on a schedule to detect that. The
 signing keys derive from the password, so anyone holding it can produce valid
 events; the trail proves integrity against an attacker *without* the key, the
 same trust boundary as the encryption itself.
@@ -1298,7 +1298,7 @@ Behaviour worth knowing:
   the transaction commits, so searches outside the transaction do not see them
   early. Points still buffered from earlier calls are flushed before the
   transaction starts.
-- **Audit after commit.** Audit events for transaction writes are collected and
+- **Trace after commit.** Trace events for transaction writes are collected and
   appended to the trail once the transaction commits, never from inside it.
 - **Single writer.** Write transactions are serialized. Do not start a
   transaction from inside another transaction's callback; pass `tx` down
@@ -1527,7 +1527,7 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
 - [store/system/README.md](store/system/README.md) — the store header, KDF settings,
   flags and key derivation.
 - [store/fstree/s3fs/README.md](store/fstree/s3fs/README.md) — the S3-backed `absfs.Filer`.
-- [store/ledger/README.md](store/ledger/README.md) — the tamper-evident audit trail:
+- [store/ledger/README.md](store/ledger/README.md) — the tamper-evident trace log:
   event model, recorded operations, threat model, and direct package use.
 - [store/README.md](store/README.md) — the process-wide database
   manager, directory layout, and password file.

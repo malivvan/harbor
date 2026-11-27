@@ -1,7 +1,7 @@
 # system
 
 `system` owns tempest's store header: the unencrypted metadata record, the
-Argon2id settings, the encryption and audit flag vocabulary, the canary, and the
+Argon2id settings, the encryption and trace flag vocabulary, the canary, and the
 derivation of every per-store key from the password.
 
 The root `tempest` package uses it when opening a store; the sub-store packages
@@ -44,17 +44,17 @@ password
    └── tempest/graphs/v1, object/v1
 ```
 
-The audit signing keys hang off the same seed at SLIP-10 hardened paths
+The trace signing keys hang off the same seed at SLIP-10 hardened paths
 `m/0'`…`m/5'`. Labels and paths are exported constants; existing values must not
 change because they determine persisted key material.
 
 ## Flags
 
-`Encrypt*` bits select what a new store protects; `Audit*` bits select which
-stores append to the audit trail at runtime. New flags are always appended, so
+`Encrypt*` bits select what a new store protects; `Trace*` bits select which
+stores append to the trace log at runtime. New flags are always appended, so
 existing bit assignments stay stable. `EncryptAll` includes graph and object
-values; `AuditAll` includes every store, including the appended
-`AuditSearch` bit (derived at `m/6'`).
+values; `TraceAll` includes every store, including the appended
+`TraceSearch` bit (derived at `m/6'`).
 
 ## Canary
 

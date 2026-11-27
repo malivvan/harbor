@@ -61,8 +61,8 @@ type Config struct {
 	// minute is a good default for streaming metrics.
 	BlockDuration int64
 
-	// Audit, when non-nil, receives an entry for every committed write.
-	Audit ledger.Sink
+	// Trace, when non-nil, receives an entry for every committed write.
+	Trace ledger.Sink
 
 	// Metrics, when non-nil, receives operation counters, decode/aggregate
 	// timings and tracing spans. A nil Observer disables instrumentation.
@@ -458,7 +458,7 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		b:      bdb,
 		root:   root,
 		series: make(map[string]*Series),
-		audit:  cfg.Audit,
+		trace:  cfg.Trace,
 	}
 	s.now.Store(&nowProvider{fn: defaultNow})
 

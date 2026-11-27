@@ -64,7 +64,7 @@ same one.
   the previous key as a fallback, but it is rejected when `EncryptTokens` is
   enabled: the deterministic term keys are derived from one master key, so the
   indexes that were not rewritten could no longer be found.
-- `Config.Audit` receives one event per committed index write (`create_index`,
+- `Config.Trace` receives one event per committed index write (`create_index`,
   `upsert`, `delete`, `drop_index`) under the `search` store identifier.
 - Opening an index without supplying a tokenizer adopts the persisted built-in
   tokenizer, so export and verification do not need to know how the index was

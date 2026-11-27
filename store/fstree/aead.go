@@ -55,8 +55,8 @@ type Config struct {
 	// recorded in the filesystem marker and a mismatch fails closed.
 	Dedup bool
 
-	// Audit, when non-nil, receives an entry for every committed write.
-	Audit ledger.Sink
+	// Trace, when non-nil, receives an entry for every committed write.
+	Trace ledger.Sink
 
 	// Metrics, when non-nil, receives chunk/cache counters, byte counts and
 	// tracing spans. A nil Observer disables instrumentation.

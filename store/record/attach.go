@@ -49,14 +49,14 @@ func (s *Store) Attach(tx *bolt.Tx) (Tx, error) {
 	return s.attach(tx, nil)
 }
 
-// AttachWithAudit is Attach with an explicit audit sink for writes performed
+// AttachWithTrace is Attach with an explicit trace sink for writes performed
 // through the returned Tx. It lets a caller that owns a bbolt transaction stage
-// audit events and record them after committing, instead of calling the
+// trace events and record them after committing, instead of calling the
 // store's recorder from inside the transaction (which would deadlock).
 //
-// A nil sink attaches with no audit recording at all, even when the store has
-// an audit trail configured.
-func (s *Store) AttachWithAudit(tx *bolt.Tx, sink ledger.Sink) (Tx, error) {
+// A nil sink attaches with no trace recording at all, even when the store has
+// an trace log configured.
+func (s *Store) AttachWithTrace(tx *bolt.Tx, sink ledger.Sink) (Tx, error) {
 	return s.attach(tx, sink)
 }
 
@@ -75,6 +75,6 @@ func (s *Store) attach(tx *bolt.Tx, sink ledger.Sink) (Tx, error) {
 	}
 
 	bound := root.withTransaction(tx)
-	bound.audit = sink
+	bound.trace = sink
 	return bound, nil
 }

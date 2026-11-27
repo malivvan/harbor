@@ -114,7 +114,7 @@ func (n *node) SetBytes(ctx context.Context, bucketName string, key any, value [
 	return wrapError("kv set bytes", n.setValues(ctx, bucketName, key, value, "set_bytes"))
 }
 
-// setValues seals and writes one key/value entry, recording op in the audit
+// setValues seals and writes one key/value entry, recording op in the trace
 // trail. Set and SetBytes differ only in the recorded operation name.
 func (n *node) setValues(ctx context.Context, bucketName string, key any, value []byte, op string) error {
 	if key == nil {
@@ -135,7 +135,7 @@ func (n *node) setValues(ctx context.Context, bucketName string, key any, value 
 	}); err != nil {
 		return err
 	}
-	return n.auditEntryBucket(op, bucketName, bucketName+":"+fmt.Sprint(key), digestOf(value))
+	return n.traceEntryBucket(op, bucketName, bucketName+":"+fmt.Sprint(key), digestOf(value))
 }
 
 func (n *node) setBytes(ctx context.Context, tx *bolt.Tx, bucketName string, id, data []byte) error {
@@ -259,7 +259,7 @@ func (n *node) Delete(ctx context.Context, bucketName string, key any) error {
 	})); err != nil {
 		return err
 	}
-	return n.auditEntryBucket("delete", bucketName, bucketName+":"+fmt.Sprint(key), nil)
+	return n.traceEntryBucket("delete", bucketName, bucketName+":"+fmt.Sprint(key), nil)
 }
 
 func (n *node) delete(ctx context.Context, tx *bolt.Tx, bucketName string, id []byte) error {

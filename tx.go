@@ -44,10 +44,10 @@ type Tx struct {
 	object *object.Store
 }
 
-// newTx binds the sub-stores to btx. sink, when non-nil, collects audit events
+// newTx binds the sub-stores to btx. sink, when non-nil, collects trace events
 // so they can be recorded after the transaction commits.
 func newTx(s *Store, btx *bolt.Tx, writable bool, sink ledger.Sink) (*Tx, error) {
-	attached, err := s.record.AttachWithAudit(btx, sink)
+	attached, err := s.record.AttachWithTrace(btx, sink)
 	if err != nil {
 		return nil, err
 	}
@@ -64,21 +64,21 @@ func newTx(s *Store, btx *bolt.Tx, writable bool, sink ledger.Sink) (*Tx, error)
 		object:   s.object.WithTransaction(btx),
 	}
 	if sink != nil {
-		tx.file.SetAuditSink(sink)
-		tx.series.SetAuditSink(sink)
-		tx.search.SetAuditSink(sink)
-		tx.vector.SetAuditSink(sink)
-		tx.graphs.SetAuditSink(sink)
-		tx.object.SetAuditSink(sink)
+		tx.file.SetTraceSink(sink)
+		tx.series.SetTraceSink(sink)
+		tx.search.SetTraceSink(sink)
+		tx.vector.SetTraceSink(sink)
+		tx.graphs.SetTraceSink(sink)
+		tx.object.SetTraceSink(sink)
 	} else {
 		// Never let a bound view call the recorder: its Record opens its own
 		// write transaction, which would deadlock against the one we hold.
-		tx.file.SetAuditSink(nil)
-		tx.series.SetAuditSink(nil)
-		tx.search.SetAuditSink(nil)
-		tx.vector.SetAuditSink(nil)
-		tx.graphs.SetAuditSink(nil)
-		tx.object.SetAuditSink(nil)
+		tx.file.SetTraceSink(nil)
+		tx.series.SetTraceSink(nil)
+		tx.search.SetTraceSink(nil)
+		tx.vector.SetTraceSink(nil)
+		tx.graphs.SetTraceSink(nil)
+		tx.object.SetTraceSink(nil)
 	}
 	return tx, nil
 }
@@ -154,22 +154,22 @@ func (tx *Tx) Writable() bool {
 	return tx != nil && tx.writable
 }
 
-// txAuditSink collects the audit events recorded by a transaction-bound store.
-// Recording them inside the transaction is impossible: audit.Record opens its
+// txTraceSink collects the trace events recorded by a transaction-bound store.
+// Recording them inside the transaction is impossible: trace.Record opens its
 // own bbolt write transaction, which would deadlock against ours. The root
 // package replays the collected entries after a successful commit.
-type txAuditSink struct {
+type txTraceSink struct {
 	entries []ledger.Entry
 }
 
-// Record implements audit.Sink.
-func (t *txAuditSink) Record(e ledger.Entry) error {
+// Record implements trace.Sink.
+func (t *txTraceSink) Record(e ledger.Entry) error {
 	t.entries = append(t.entries, e)
 	return nil
 }
 
-// replay records the collected entries in the live audit trail.
-func (t *txAuditSink) replay(rec *ledger.Recorder) error {
+// replay records the collected entries in the live trace log.
+func (t *txTraceSink) replay(rec *ledger.Recorder) error {
 	if rec == nil {
 		return nil
 	}
@@ -191,8 +191,8 @@ func (t *txAuditSink) replay(rec *ledger.Recorder) error {
 // live collection indexes adopt them after the commit, so searches outside the
 // transaction observe them only once it commits.
 //
-// Audit events for writes inside the transaction are collected and appended to
-// the audit trail after the commit, never inside it.
+// Trace events for writes inside the transaction are collected and appended to
+// the trace log after the commit, never inside it.
 //
 // Write transactions are serialized: a second WriteTransaction waits for the
 // first to finish. Starting one from inside another transaction on the same
@@ -229,10 +229,10 @@ func (s *Store) WriteTransaction(ctx context.Context, fn func(tx *Tx) error) err
 	s.txMu.Lock()
 	defer s.txMu.Unlock()
 
-	var sink *txAuditSink
+	var sink *txTraceSink
 	var collector ledger.Sink
-	if s.audit != nil {
-		sink = &txAuditSink{}
+	if s.trace != nil {
+		sink = &txTraceSink{}
 		collector = sink
 	}
 
@@ -260,11 +260,11 @@ func (s *Store) WriteTransaction(ctx context.Context, fn func(tx *Tx) error) err
 	}
 
 	// The transaction committed. Install the index state built inside it and
-	// replay the staged audit events against the real recorder.
+	// replay the staged trace events against the real recorder.
 	s.vector.AdoptTransaction(bound.vector)
 	if sink != nil {
-		if err := sink.replay(s.audit); err != nil {
-			return fmt.Errorf("tempest: transaction committed, audit append failed: %w", err)
+		if err := sink.replay(s.trace); err != nil {
+			return fmt.Errorf("tempest: transaction committed, trace append failed: %w", err)
 		}
 	}
 	return nil

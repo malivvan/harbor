@@ -371,9 +371,9 @@ func TestBoltStorageContextCancelled(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
-// TestBoltStorageAuditSink locks in that committed writes reach the audit sink
+// TestBoltStorageTraceSink locks in that committed writes reach the trace sink
 // and that a failing sink fails the write.
-func TestBoltStorageAuditSink(t *testing.T) {
+func TestBoltStorageTraceSink(t *testing.T) {
 	ctx := context.Background()
 
 	var mu sync.Mutex
@@ -384,8 +384,8 @@ func TestBoltStorageAuditSink(t *testing.T) {
 		got = append(got, e)
 		return nil
 	})
-	s, _ := openBoltStore(t, Config{Audit: sink})
-	g, err := s.Open("audited")
+	s, _ := openBoltStore(t, Config{Trace: sink})
+	g, err := s.Open("traced")
 	require.NoError(t, err)
 	require.NoError(t, g.UpsertNode(ctx, node("a", "person")))
 	mu.Lock()
@@ -394,9 +394,9 @@ func TestBoltStorageAuditSink(t *testing.T) {
 	require.Greater(t, n, 0)
 
 	// A failing sink fails the write.
-	bad := ledger.SinkFunc(func(ledger.Entry) error { return errors.New("audit down") })
-	s2, _ := openBoltStore(t, Config{Audit: bad})
-	g2, err := s2.Open("audited")
+	bad := ledger.SinkFunc(func(ledger.Entry) error { return errors.New("trace down") })
+	s2, _ := openBoltStore(t, Config{Trace: bad})
+	g2, err := s2.Open("traced")
 	require.NoError(t, err)
 	require.Error(t, g2.UpsertNode(ctx, node("a", "person")))
 }

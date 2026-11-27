@@ -9,7 +9,7 @@ package bucket
 
 const (
 	SYSTEM string = "system" // SYSTEM identifies the store header and key derivation.
-	LEDGER string = "ledger" // LEDGER identifies the tamper-evident audit trail.
+	LEDGER string = "ledger" // LEDGER identifies the tamper-evident trace log.
 	SEARCH string = "search" // SEARCH identifies the full-text store.
 	RECORD string = "record" // RECORD identifies the record store.
 	SERIES string = "series" // SERIES identifies the time-series store.

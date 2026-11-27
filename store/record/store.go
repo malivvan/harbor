@@ -73,7 +73,7 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		return nil, wrapError("open", err)
 	}
 
-	s := &Store{bolt: bdb, audit: cfg.Audit, obs: cfg.Metrics}
+	s := &Store{bolt: bdb, trace: cfg.Trace, obs: cfg.Metrics}
 	s.enc.Store(enc)
 
 	root := cloneBucketPath(cfg.Root)
@@ -125,9 +125,9 @@ type Store struct {
 	changeHooks map[uint64]ChangeHook
 	nextHookID  uint64
 
-	// audit receives an entry for every committed write, or nil when the store
-	// was opened without audit. It is set once at Open and never mutated.
-	audit ledger.Sink
+	// trace receives an entry for every committed write, or nil when the store
+	// was opened without trace. It is set once at Open and never mutated.
+	trace ledger.Sink
 
 	// obs receives operation metrics and spans, or nil when the store was
 	// opened without instrumentation. It is set once at Open and never
@@ -190,7 +190,7 @@ func (s *Store) WithRoot(parts ...string) *Store {
 	view := &Store{
 		bolt:  s.bolt,
 		base:  s.rootStore(),
-		audit: s.audit,
+		trace: s.trace,
 		obs:   s.obs,
 	}
 	view.Node = &node{s: view, codec: s.Codec(), root: root}

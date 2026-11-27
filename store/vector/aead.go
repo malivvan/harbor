@@ -59,8 +59,8 @@ type Config struct {
 	// MinCompress skips compressing values smaller than this many bytes.
 	MinCompress int
 
-	// Audit, when non-nil, receives an entry for every committed write.
-	Audit ledger.Sink
+	// Trace, when non-nil, receives an entry for every committed write.
+	Trace ledger.Sink
 
 	// SharedDB reports that the caller owns the bbolt handle. Store.Close then
 	// flushes buffered points and releases the wrapper without closing the

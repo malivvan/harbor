@@ -49,9 +49,9 @@ func (g *graphStorage) Write(ctx context.Context, fn func(Writer) error) error {
 	if err != nil {
 		return err
 	}
-	if g.store.audit != nil {
+	if g.store.trace != nil {
 		for _, entry := range entries {
-			if err := g.store.audit.Record(entry); err != nil {
+			if err := g.store.trace.Record(entry); err != nil {
 				return err
 			}
 		}

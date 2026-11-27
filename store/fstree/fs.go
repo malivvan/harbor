@@ -68,10 +68,10 @@ type FS struct {
 	// a multi-transaction read cannot observe a concurrent mutation.
 	mu sync.RWMutex
 
-	// audit receives an entry for every committed write, or nil when the file
-	// system was opened without audit. It is set once at construction and never
+	// trace receives an entry for every committed write, or nil when the file
+	// system was opened without trace. It is set once at construction and never
 	// mutated.
-	audit ledger.Sink
+	trace ledger.Sink
 }
 
 // view runs fn against the bound transaction, or a fresh read transaction.
@@ -102,16 +102,16 @@ func (fs *FS) encState() *encState {
 	return fs.enc.Load()
 }
 
-// auditEntry records one committed write in the store's audit trail. It is a
-// no-op when the file system has no audit sink. Digest is the SHA-256 of the
+// traceEntry records one committed write in the store's trace log. It is a
+// no-op when the file system has no trace sink. Digest is the SHA-256 of the
 // written payload, or nil for deletes and metadata-only changes. A sink error
 // is returned so the caller can surface it; the data write has already
 // committed at that point.
-func (fs *FS) auditEntry(op, entity string, digest []byte) error {
-	if fs == nil || fs.audit == nil {
+func (fs *FS) traceEntry(op, entity string, digest []byte) error {
+	if fs == nil || fs.trace == nil {
 		return nil
 	}
-	return fs.audit.Record(ledger.Entry{
+	return fs.trace.Record(ledger.Entry{
 		Store:  ledger.StoreFile,
 		Op:     op,
 		Entity: entity,
@@ -1049,7 +1049,7 @@ func (fs *FS) Rename(oldpath, newpath string) error {
 		}
 	}
 
-	return fs.auditEntry("rename", path.Join(dstDir, dstFilename), digestOf([]byte(path.Join(srcDir, srcFilename))))
+	return fs.traceEntry("rename", path.Join(dstDir, dstFilename), digestOf([]byte(path.Join(srcDir, srcFilename))))
 }
 
 // CopyOptions controls CopyWithOptions and CopyContext. Its zero value keeps
@@ -1248,7 +1248,7 @@ func (fs *FS) CopyContext(ctx context.Context, source, destination string, opts 
 	}
 
 	published = true
-	if err := fs.auditEntry("copy", path.Join(dstDir, dstFilename), nil); err != nil {
+	if err := fs.traceEntry("copy", path.Join(dstDir, dstFilename), nil); err != nil {
 		return err
 	}
 	return nil
@@ -1546,7 +1546,7 @@ func (fs *FS) openFile(name string, flag int, perm os.FileMode, depth int) (absf
 			pathErr.Err = err
 			return file, pathErr
 		}
-		if err := fs.auditEntry("create", path.Join(dir, filename), nil); err != nil {
+		if err := fs.traceEntry("create", path.Join(dir, filename), nil); err != nil {
 			pathErr.Err = err
 			return file, pathErr
 		}
@@ -1583,7 +1583,7 @@ func (fs *FS) openFile(name string, flag int, perm os.FileMode, depth int) (absf
 				pathErr.Err = err
 				return file, pathErr
 			}
-			if err := fs.auditEntry("truncate", path.Join(dir, filename), nil); err != nil {
+			if err := fs.traceEntry("truncate", path.Join(dir, filename), nil); err != nil {
 				pathErr.Err = err
 				return file, pathErr
 			}
@@ -1835,7 +1835,7 @@ func (fs *FS) mkdir(name string, perm os.FileMode) error {
 		pathErr.Err = err
 		return pathErr
 	}
-	return fs.auditEntry("mkdir", path.Join(dir, filename), nil)
+	return fs.traceEntry("mkdir", path.Join(dir, filename), nil)
 }
 
 // MkdirAll creates a directory named path, along with any necessary parents,
@@ -1925,12 +1925,12 @@ func (fs *FS) Remove(name string) error {
 		if err != nil {
 			return err
 		}
-		return fs.auditEntry("remove", path.Join(dir, filename), nil)
+		return fs.traceEntry("remove", path.Join(dir, filename), nil)
 	}
 	if _, err = fs.saveInode(child); err != nil {
 		return err
 	}
-	return fs.auditEntry("remove", path.Join(dir, filename), nil)
+	return fs.traceEntry("remove", path.Join(dir, filename), nil)
 }
 
 // RemoveAll removes path and any children it contains. It removes everything
@@ -2101,7 +2101,7 @@ func (fs *FS) RemoveAll(name string) error {
 		return err
 	}
 
-	return fs.auditEntry("remove_all", path.Join(dir, filename), nil)
+	return fs.traceEntry("remove_all", path.Join(dir, filename), nil)
 }
 
 // Chtimes changes the access and modification times of the named file
@@ -2121,7 +2121,7 @@ func (fs *FS) Chtimes(name string, atime time.Time, mtime time.Time) error {
 	if _, err = fs.saveInode(node); err != nil {
 		return err
 	}
-	return fs.auditEntry("chtimes", path.Join(dir, filename), nil)
+	return fs.traceEntry("chtimes", path.Join(dir, filename), nil)
 }
 
 // Chown changes the owner and group ids of the named file
@@ -2154,7 +2154,7 @@ func (fs *FS) chown(name string, uid, gid int, depth int) error {
 			pathErr.Err = err
 			return pathErr
 		}
-		return fs.auditEntry("chown", path.Join(dir, filename), digestOf([]byte(fmt.Sprintf("%d:%d", uid, gid))))
+		return fs.traceEntry("chown", path.Join(dir, filename), digestOf([]byte(fmt.Sprintf("%d:%d", uid, gid))))
 	}
 	link, err := fs.readLink(node.Ino)
 	if err != nil {
@@ -2189,7 +2189,7 @@ func (fs *FS) Chmod(name string, mode os.FileMode) error {
 	if _, err = fs.saveInode(node); err != nil {
 		return err
 	}
-	return fs.auditEntry("chmod", path.Join(dir, filename), modeDigest(mode))
+	return fs.traceEntry("chmod", path.Join(dir, filename), modeDigest(mode))
 }
 
 // modeDigest encodes a mode as the digest payload of a metadata-only event, so
@@ -2325,5 +2325,5 @@ func (fs *FS) Symlink(source, destination string) error {
 		return pathErr
 	}
 
-	return fs.auditEntry("symlink", path.Join(dstDir, dstFilename), digestOf([]byte(source)))
+	return fs.traceEntry("symlink", path.Join(dstDir, dstFilename), digestOf([]byte(source)))
 }

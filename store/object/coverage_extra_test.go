@@ -105,14 +105,14 @@ func TestNilReceiversAndClose(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestAuditReplay(t *testing.T) {
+func TestTraceReplay(t *testing.T) {
 	ctx := context.Background()
 	var recorded []ledger.Entry
 	sink := ledger.SinkFunc(func(e ledger.Entry) error {
 		recorded = append(recorded, e)
 		return nil
 	})
-	s, _ := openDirect(t, object.Config{Audit: sink})
+	s, _ := openDirect(t, object.Config{Trace: sink})
 	_, err := s.Put(ctx, "b", "k", strings.NewReader("data"), 4, "")
 	require.NoError(t, err)
 	require.NoError(t, s.Move(ctx, "b", "k", "k2"))
@@ -123,8 +123,8 @@ func TestAuditReplay(t *testing.T) {
 	require.Equal(t, "delete", recorded[2].Op)
 
 	// A failing sink surfaces through the write call.
-	fail := ledger.SinkFunc(func(ledger.Entry) error { return errors.New("audit down") })
-	s2, _ := openDirect(t, object.Config{Audit: fail})
+	fail := ledger.SinkFunc(func(ledger.Entry) error { return errors.New("trace down") })
+	s2, _ := openDirect(t, object.Config{Trace: fail})
 	_, err = s2.Put(ctx, "b", "k", strings.NewReader("x"), 1, "")
 	require.Error(t, err)
 }

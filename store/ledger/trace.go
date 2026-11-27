@@ -1,4 +1,4 @@
-// Package ledger provides a tamper-evident, append-only audit trail for tempest.
+// Package ledger provides a tamper-evident, append-only trace log for tempest.
 //
 // A Recorder appends signed, hash-linked events to a bbolt database: each event
 // carries the store, operation, entity and a SHA-256 digest of the written
@@ -28,14 +28,14 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// Reserved bucket and record names under the database root. The audit trail
+// Reserved bucket and record names under the database root. The trace log
 // lives in its own top-level bucket, named by the internal/bucket registry.
 const (
-	auditBucket  = bucket.LEDGER
+	traceBucket  = bucket.LEDGER
 	eventsBucket = "events"
 	headKey      = "head"
 
-	// FormatVersion is the on-disk audit format. Unknown versions fail closed.
+	// FormatVersion is the on-disk trace format. Unknown versions fail closed.
 	FormatVersion = 1
 
 	// genesisDomain anchors the start of every chain.
@@ -56,8 +56,8 @@ const (
 )
 
 var (
-	// ErrNoLog is returned when verification finds no audit log.
-	ErrNoLog = errors.New("audit: no audit log")
+	// ErrNoLog is returned when verification finds no trace log.
+	ErrNoLog = errors.New("trace: no trace log")
 )
 
 // Entry is what a store reports after a committed write. It is the unsigned
@@ -118,7 +118,7 @@ func NewRecorder(b *bolt.DB, keys map[string]ed25519.PrivateKey) *Recorder {
 func (r *Recorder) Record(entry Entry) error {
 	key, ok := r.keys[entry.Store]
 	if !ok {
-		return fmt.Errorf("audit: no key for store %q", entry.Store)
+		return fmt.Errorf("trace: no key for store %q", entry.Store)
 	}
 	return r.b.Update(func(tx *bolt.Tx) error {
 		return r.recordTx(tx, key, entry)
@@ -129,7 +129,7 @@ func (r *Recorder) Record(entry Entry) error {
 // the log is empty. Operators use it to anchor the tip externally.
 func (r *Recorder) Head() (count uint64, tip []byte, err error) {
 	err = r.b.View(func(tx *bolt.Tx) error {
-		root := tx.Bucket([]byte(auditBucket))
+		root := tx.Bucket([]byte(traceBucket))
 		if root == nil {
 			count, tip = 0, genesisHash()
 			return nil
@@ -141,7 +141,7 @@ func (r *Recorder) Head() (count uint64, tip []byte, err error) {
 }
 
 func (r *Recorder) recordTx(tx *bolt.Tx, key ed25519.PrivateKey, entry Entry) error {
-	root, err := tx.CreateBucketIfNotExists([]byte(auditBucket))
+	root, err := tx.CreateBucketIfNotExists([]byte(traceBucket))
 	if err != nil {
 		return err
 	}
@@ -166,7 +166,7 @@ func (r *Recorder) recordTx(tx *bolt.Tx, key ed25519.PrivateKey, entry Entry) er
 		PrevHash: tip,
 	}
 	if len(ev.Digest) != 0 && len(ev.Digest) != sha256.Size {
-		return fmt.Errorf("audit: digest must be %d bytes, got %d", sha256.Size, len(ev.Digest))
+		return fmt.Errorf("trace: digest must be %d bytes, got %d", sha256.Size, len(ev.Digest))
 	}
 
 	// Sign the canonical encoding, not encoding/json's struct order: an event
@@ -174,7 +174,7 @@ func (r *Recorder) recordTx(tx *bolt.Tx, key ed25519.PrivateKey, entry Entry) er
 	// logical value. The bytes stored are the bytes signed.
 	encoded, err := canonicalBytes(ev)
 	if err != nil {
-		return fmt.Errorf("audit: encode event: %w", err)
+		return fmt.Errorf("trace: encode event: %w", err)
 	}
 	sig := ed25519.Sign(key, encoded)
 
@@ -190,12 +190,12 @@ func (r *Recorder) recordTx(tx *bolt.Tx, key ed25519.PrivateKey, entry Entry) er
 	return writeHead(root, ev.Seq+1, sum)
 }
 
-// Verify replays the audit log in b and checks that every event has a valid
+// Verify replays the trace log in b and checks that every event has a valid
 // signature and links to its predecessor. It returns the event count and tip.
 func Verify(b *bolt.DB, keys map[string]ed25519.PublicKey) (Result, error) {
 	var res Result
 	err := b.View(func(tx *bolt.Tx) error {
-		root := tx.Bucket([]byte(auditBucket))
+		root := tx.Bucket([]byte(traceBucket))
 		if root == nil {
 			return ErrNoLog
 		}
@@ -209,27 +209,27 @@ func Verify(b *bolt.DB, keys map[string]ed25519.PublicKey) (Result, error) {
 		var count uint64
 		err := events.ForEach(func(_, v []byte) error {
 			if len(v) < ed25519.SignatureSize {
-				return fmt.Errorf("audit: event %d: truncated record", count)
+				return fmt.Errorf("trace: event %d: truncated record", count)
 			}
 			encoded := v[:len(v)-ed25519.SignatureSize]
 			sig := v[len(v)-ed25519.SignatureSize:]
 
 			var ev Event
 			if err := json.Unmarshal(encoded, &ev); err != nil {
-				return fmt.Errorf("audit: decode event %d: %w", count, err)
+				return fmt.Errorf("trace: decode event %d: %w", count, err)
 			}
 			if ev.Seq != count {
-				return fmt.Errorf("audit: non-monotonic sequence: got %d want %d", ev.Seq, count)
+				return fmt.Errorf("trace: non-monotonic sequence: got %d want %d", ev.Seq, count)
 			}
 			pub, ok := keys[ev.Store]
 			if !ok {
-				return fmt.Errorf("audit: no public key for store %q", ev.Store)
+				return fmt.Errorf("trace: no public key for store %q", ev.Store)
 			}
 			if !ed25519.Verify(pub, encoded, sig) {
-				return fmt.Errorf("audit: bad signature on event %d", ev.Seq)
+				return fmt.Errorf("trace: bad signature on event %d", ev.Seq)
 			}
 			if !bytes.Equal(ev.PrevHash, prev) {
-				return fmt.Errorf("audit: broken chain at event %d", ev.Seq)
+				return fmt.Errorf("trace: broken chain at event %d", ev.Seq)
 			}
 			sum := sha256.Sum256(encoded)
 			prev = sum[:]
@@ -252,7 +252,7 @@ func Verify(b *bolt.DB, keys map[string]ed25519.PublicKey) (Result, error) {
 func DeriveKey(seed []byte, path string) (ed25519.PublicKey, ed25519.PrivateKey, error) {
 	node, err := slip10.DeriveForPath(path, seed)
 	if err != nil {
-		return nil, nil, fmt.Errorf("audit: derive %s: %w", path, err)
+		return nil, nil, fmt.Errorf("trace: derive %s: %w", path, err)
 	}
 	defer slip10.Destroy(node)
 	pub, priv := node.KeyPair()
@@ -278,10 +278,10 @@ func readHead(root *bolt.Bucket) (count uint64, tip []byte, err error) {
 		return 0, genesisHash(), nil
 	}
 	if len(raw) != 1+8+sha256.Size {
-		return 0, nil, fmt.Errorf("audit: corrupt head record")
+		return 0, nil, fmt.Errorf("trace: corrupt head record")
 	}
 	if raw[0] != FormatVersion {
-		return 0, nil, fmt.Errorf("audit: unsupported audit format %d", raw[0])
+		return 0, nil, fmt.Errorf("trace: unsupported trace format %d", raw[0])
 	}
 	count = binary.BigEndian.Uint64(raw[1 : 1+8])
 	tip = append([]byte(nil), raw[1+8:]...)
