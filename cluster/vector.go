@@ -163,7 +163,15 @@ func (f *fsm) applyVectorUpsert(ctx context.Context, a vectorUpsertArg) any {
 	if st == nil {
 		return ErrClosed
 	}
-	return st.Vector().UpsertPoints(a.Collection, a.Points)
+	// Write through the live collection, not the raw store, so the in-memory
+	// index every replica searches is updated by the replicated write. The
+	// points are buffered exactly like a direct Collection.Upsert; a caller
+	// that needs them durable calls Vector().Flush.
+	col, err := st.Vector().Collection(a.Collection)
+	if err != nil {
+		return err
+	}
+	return col.Upsert(a.Points)
 }
 
 func (f *fsm) applyVectorDelete(ctx context.Context, a vectorDeleteArg) any {
@@ -171,7 +179,12 @@ func (f *fsm) applyVectorDelete(ctx context.Context, a vectorDeleteArg) any {
 	if st == nil {
 		return ErrClosed
 	}
-	return st.Vector().DeletePoints(a.Collection, a.IDs)
+	col, err := st.Vector().Collection(a.Collection)
+	if err != nil {
+		return err
+	}
+	_, err = col.Delete(a.IDs, nil)
+	return err
 }
 
 func (f *fsm) applyVectorDrop(ctx context.Context, a vectorDropArg) any {

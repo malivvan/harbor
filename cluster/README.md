@@ -12,7 +12,7 @@ directly from the local replica.
 write ──▶ leader encodes command ──▶ raft.Apply ──▶ committed to quorum
                                                        │
                  every node's FSM applies the command  ▼
-                 to its own *tempest.Store (record/fstree/series/vector)
+                 to its own *tempest.Store (every sub-store)
 
 read  ──▶ local *tempest.Store  (no raft round-trip)
 ```
@@ -102,6 +102,26 @@ err = node.Vector().Upsert("colors", points)
 err = node.Vector().Delete("colors", []string{"red"})
 err = node.Vector().Flush(ctx) // drain every replica's write buffer
 
+// fts (full-text indexes)
+err = node.Search().Create("docs", search.Config{}) // built-in tokenizers only
+err = node.Search().Upsert("docs", "d1", "alpha beta")
+err = node.Search().Delete("docs", "d1")
+err = node.Search().Drop("docs")
+
+// graphs (property graphs)
+err = node.Graphs().Create("social")
+err = node.Graphs().UpsertNode("social", &graphs.Node{ID: "a", Type: "person"})
+err = node.Graphs().UpsertEdge("social", &graphs.Edge{ID: "e1", From: "a", To: "b", Type: "knows"})
+err = node.Graphs().DeleteEdge("social", "e1")
+err = node.Graphs().DeleteNode("social", "a")
+err = node.Graphs().Drop("social")
+
+// object (flat objects)
+err = node.Objects().Put("tenant-a", "docs/q3.pdf", data)
+err = node.Objects().Move("tenant-a", "docs/q3.pdf", "reports/q3.pdf")
+err = node.Objects().Delete("tenant-a", "reports/q3.pdf")
+err = node.Objects().DropBucket("tenant-a")
+
 // fs (files)
 fsys := node.File().Open("data")
 err = fsys.Mkdir(ctx, "/docs", 0o755)
@@ -139,6 +159,18 @@ verbatim, so all nodes must run the same codec. Keys use the same
 type-sensitive encoding as direct access, so an int key and a string key never
 collide. Directory times are pinned into `Mkdir`/`MkdirAll` commands, and
 snapshots drain the vector buffer first, so buffered points survive a restore.
+
+A replicated vector write goes through the live `Collection`, exactly like a
+direct store write: the in-memory Flat/HNSW index on every replica reflects the
+change immediately, and the points are buffered until `Vector().Flush`, the
+flush threshold or close. `Vector().Upsert` therefore returns once the point is
+searchable, not once it is durable; callers that need durability call
+`Vector().Flush`.
+
+A full-text index created through `Search().Create` must use a built-in
+tokenizer. A custom tokenizer is code, not data, so a command cannot carry it;
+`Create` rejects it with `cluster.ErrInvalidConfig` instead of silently
+substituting the default on the replicas.
 
 ## Reading
 
@@ -193,8 +225,6 @@ err := leader.Leave(id)            // remove a voter (leader only)
 - fs directory mtimes set by `Remove`/`Rename` use each node's wall clock; file
   content, names and explicit `Chtimes` converge. Full determinism needs a
   `SetNow` clock in fs (tracked in TODO.md).
-- vec replicated writes update the durable point store but not the in-memory
-  search index; reload the collection to refresh search results.
 - Large file writes are single raft entries; a chunked command is a follow-up.
 - Streaming `OpenFile`+`Write` and `db` raw key/value (`Set`/`SetBytes`) writes
   are not yet covered by the facades; use the path-level and record-level

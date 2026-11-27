@@ -45,6 +45,26 @@ const (
 	opVectorDropCollection          = "vector.drop_collection"
 	opVectorFlush                   = "vector.flush"
 
+	// search store
+	opSearchCreate = "search.create"
+	opSearchUpsert = "search.upsert"
+	opSearchDelete = "search.delete"
+	opSearchDrop   = "search.drop"
+
+	// graphs store
+	opGraphCreate     = "graph.create"
+	opGraphDrop       = "graph.drop"
+	opGraphUpsertNode = "graph.upsert_node"
+	opGraphDeleteNode = "graph.delete_node"
+	opGraphUpsertEdge = "graph.upsert_edge"
+	opGraphDeleteEdge = "graph.delete_edge"
+
+	// object store
+	opObjectPut    = "object.put"
+	opObjectDelete = "object.delete"
+	opObjectMove   = "object.move"
+	opObjectDrop   = "object.drop"
+
 	// fstree store
 	opFileMkdir            = "file.mkdir"
 	opFileMkdirAll         = "file.mkdir_all"

@@ -200,6 +200,9 @@ func TestReplicateVec(t *testing.T) {
 		{ID: "red", Vector: []float32{1, 0}},
 		{ID: "blue", Vector: []float32{0, 1}},
 	}))
+	// Replicated vector writes are buffered in the live collection (matching the
+	// direct store), so flush before asserting the durable points on every node.
+	require.NoError(t, leader.Vector().Flush(context.Background()))
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {

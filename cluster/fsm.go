@@ -236,6 +236,96 @@ func (f *fsm) applyCommand(index uint64, c Command) any {
 		}
 		return f.applyVectorDrop(ctx, a)
 
+	// search
+	case opSearchCreate:
+		var a searchCreateArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applySearchCreate(ctx, a)
+	case opSearchUpsert:
+		var a searchUpsertArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applySearchUpsert(ctx, a)
+	case opSearchDelete:
+		var a searchDeleteArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applySearchDelete(ctx, a)
+	case opSearchDrop:
+		var a searchDropArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applySearchDrop(ctx, a)
+
+	// graphs
+	case opGraphCreate:
+		var a graphNameArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyGraphCreate(ctx, a)
+	case opGraphDrop:
+		var a graphNameArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyGraphDrop(ctx, a)
+	case opGraphUpsertNode:
+		var a graphNodeArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyGraphUpsertNode(ctx, a)
+	case opGraphDeleteNode:
+		var a graphNodeIDArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyGraphDeleteNode(ctx, a)
+	case opGraphUpsertEdge:
+		var a graphEdgeArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyGraphUpsertEdge(ctx, a)
+	case opGraphDeleteEdge:
+		var a graphEdgeIDArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyGraphDeleteEdge(ctx, a)
+
+	// objects
+	case opObjectPut:
+		var a objectPutArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyObjectPut(ctx, a)
+	case opObjectDelete:
+		var a objectKeyArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyObjectDelete(ctx, a)
+	case opObjectMove:
+		var a objectMoveArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyObjectMove(ctx, a)
+	case opObjectDrop:
+		var a objectBucketArg
+		if err := decodeArg(index, c, &a); err != nil {
+			return err
+		}
+		return f.applyObjectDrop(ctx, a)
+
 	// fs
 	case opFileMkdir:
 		var a filePathArg
