@@ -131,6 +131,30 @@ type Store struct {
 	auditPubs auditPublicKeys
 }
 
+// Compression selects Zstd compression across the sub-stores. It is a write-time
+// preference: reads always auto-detect the envelope, so a store written
+// compressed stays readable with compression disabled, and existing stores are
+// unaffected. Compression is applied on the plaintext side of encryption.
+type Compression struct {
+	// Enable compresses new values in every sub-store.
+	Enable bool
+	// Level is the Zstandard level; 0 selects the default.
+	Level int
+	// MinSize skips values smaller than this many bytes. Zero tries every value.
+	MinSize int
+}
+
+// Dedup selects content-addressed deduplication for the stores that support it.
+type Dedup struct {
+	// Files deduplicates file-store chunks by content hash. It implies chunked
+	// content and therefore content encryption, so it requires a store whose
+	// file content is encrypted.
+	Files bool
+	// Objects deduplicates object-store content by hash, across keys and
+	// buckets.
+	Objects bool
+}
+
 // Options configures Open.
 //
 // Password is required and is never stored: it is stretched with Argon2id and
@@ -188,6 +212,15 @@ type Options struct {
 	// metrics.Observer to forward to Prometheus, OpenTelemetry or anything
 	// else. See the metrics package for the metric names and labels.
 	Metrics metrics.Observer
+
+	// Compression selects Zstd compression for the sub-stores' values. Zero
+	// disables it.
+	Compression Compression
+
+	// Dedup selects content-addressed deduplication for the file and object
+	// stores. Zero disables it. A dedup store records its layout and must be
+	// reopened with the same settings.
+	Dedup Dedup
 
 	// Timeout bounds how long Open waits for bbolt's exclusive file lock before
 	// failing. A zero Timeout selects DefaultBoltOptions.Timeout (two seconds),
@@ -477,6 +510,14 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	}
 	defer keys.Wipe()
 
+	// File dedup stores chunks content-addressed under the file store's marker,
+	// which implies content encryption. A store whose persisted flags do not
+	// encrypt file content cannot host it; fail closed instead of creating an
+	// encrypted filesystem inside a plaintext store.
+	if options.Dedup.Files && !system.HasFlag(md.Flags, EncryptFileContent) {
+		return nil, fmt.Errorf("%w: file dedup requires encrypted file content", ErrInvalidOptions)
+	}
+
 	s := &Store{bs: bdb}
 
 	// Build the audit recorder for the enabled stores, copying the derived
@@ -533,6 +574,9 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptKeys:     system.HasFlag(md.Flags, EncryptRecordKeys),
 		EncryptValues:   system.HasFlag(md.Flags, EncryptRecordValues),
 		EncryptMetadata: system.HasFlag(md.Flags, EncryptRecordMetadata),
+		Compress:        options.Compression.Enable,
+		CompressLevel:   options.Compression.Level,
+		MinCompress:     options.Compression.MinSize,
 		Audit:           auditSink(AuditRecord),
 		Metrics:         options.Metrics,
 	}); err != nil {
@@ -543,6 +587,10 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Secret:          keys.File,
 		EncryptMetadata: system.HasFlag(md.Flags, EncryptFileMetadata),
 		EncryptContent:  system.HasFlag(md.Flags, EncryptFileContent),
+		Dedup:           options.Dedup.Files,
+		Compress:        options.Compression.Enable,
+		CompressLevel:   options.Compression.Level,
+		MinCompress:     options.Compression.MinSize,
 		Audit:           auditSink(AuditFile),
 		Metrics:         options.Metrics,
 	}); err != nil {
@@ -553,6 +601,9 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Secret:             keys.Series,
 		EncryptValues:      system.HasFlag(md.Flags, EncryptSeriesValues),
 		EncryptSeriesNames: system.HasFlag(md.Flags, EncryptSeriesNames),
+		Compress:           options.Compression.Enable,
+		CompressLevel:      options.Compression.Level,
+		MinCompress:        options.Compression.MinSize,
 		Audit:              auditSink(AuditSeries),
 		Metrics:            options.Metrics,
 	}); err != nil {
@@ -562,6 +613,9 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Root:          namedRoot(bucket.SEARCH),
 		Secret:        keys.Search,
 		EncryptValues: system.HasFlag(md.Flags, EncryptRecordValues),
+		Compress:      options.Compression.Enable,
+		CompressLevel: options.Compression.Level,
+		MinCompress:   options.Compression.MinSize,
 		Audit:         auditSink(AuditSearch),
 		Metrics:       options.Metrics,
 	}); err != nil {
@@ -573,6 +627,9 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		// Graph values follow the graph flag for new stores and the db value
 		// flag for stores created before the graph flag existed.
 		EncryptValues: system.HasFlag(md.Flags, EncryptGraphValues) || system.HasFlag(md.Flags, EncryptRecordValues),
+		Compress:      options.Compression.Enable,
+		CompressLevel: options.Compression.Level,
+		MinCompress:   options.Compression.MinSize,
 		Audit:         auditSink(AuditGraphs),
 		Metrics:       options.Metrics,
 	}); err != nil {
@@ -582,6 +639,10 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Root:          namedRoot(bucket.OBJECT),
 		Secret:        keys.Object,
 		EncryptValues: system.HasFlag(md.Flags, EncryptObjectValues) || system.HasFlag(md.Flags, EncryptRecordValues),
+		Dedup:         options.Dedup.Objects,
+		Compress:      options.Compression.Enable,
+		CompressLevel: options.Compression.Level,
+		MinCompress:   options.Compression.MinSize,
 		Audit:         auditSink(AuditObject),
 		Metrics:       options.Metrics,
 	}); err != nil {
@@ -595,6 +656,9 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptPoints:          system.HasFlag(md.Flags, EncryptVectorPoints),
 		EncryptPointIDs:        system.HasFlag(md.Flags, EncryptVectorPointIDs),
 		EncryptCollectionNames: system.HasFlag(md.Flags, EncryptVectorCollectionNames),
+		Compress:               options.Compression.Enable,
+		CompressLevel:          options.Compression.Level,
+		MinCompress:            options.Compression.MinSize,
 		Audit:                  auditSink(AuditVector),
 		Metrics:                options.Metrics,
 		// The vector store shares this handle with db, fs and ts; Close must only
