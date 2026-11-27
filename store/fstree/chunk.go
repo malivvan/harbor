@@ -57,15 +57,28 @@ func (fsys *FS) openFsBucketForWrite(tx *bolt.Tx) (*fsBucket, error) {
 			return nil, err
 		}
 	}
+	enc := fsys.enc.Load()
+	if enc != nil && enc.dedup {
+		if err := ensureDedupBuckets(bb); err != nil {
+			return nil, err
+		}
+	}
 	b := newFsBucketWithCacheOpts(bb, fsys.cache, fsys.chunked())
 	if b == nil {
 		return nil, os.ErrNotExist
 	}
-	b.enc = fsys.enc.Load()
+	b.enc = enc
+	if enc != nil && enc.dedup {
+		b.chunkmap = bb.Bucket([]byte(chunkMapBucketName))
+		b.chunkrefs = bb.Bucket([]byte(chunkRefsBucketName))
+	}
 	return b, nil
 }
 
 func (b *fsBucket) readChunk(ino uint64, idx int64) ([]byte, error) {
+	if b.dedupEnabled() {
+		return b.dedupReadChunk(ino, idx)
+	}
 	if b == nil || b.chunks == nil {
 		return nil, nil
 	}
@@ -80,6 +93,9 @@ func (b *fsBucket) readChunk(ino uint64, idx int64) ([]byte, error) {
 }
 
 func (b *fsBucket) writeChunk(ino uint64, idx int64, data []byte) error {
+	if b.dedupEnabled() {
+		return b.dedupWriteChunk(ino, idx, data)
+	}
 	if b == nil || b.chunks == nil {
 		return os.ErrInvalid
 	}
@@ -124,6 +140,9 @@ func resultLabel(err error) string {
 // the inode's chunks with a single cursor, so a sequential read does one seek
 // and then advances forward instead of looking up each chunk separately.
 func (b *fsBucket) readDataRange(ino uint64, off, n, chunkSize int64) ([]byte, error) {
+	if b.dedupEnabled() {
+		return b.dedupReadDataRange(ino, off, n, chunkSize)
+	}
 	if n <= 0 {
 		return nil, nil
 	}
@@ -195,6 +214,9 @@ func (b *fsBucket) readDataRange(ino uint64, off, n, chunkSize int64) ([]byte, e
 
 // writeDataRange writes data at off, touching only the affected chunks.
 func (b *fsBucket) writeDataRange(ino uint64, off int64, data []byte, chunkSize int64) error {
+	if b.dedupEnabled() {
+		return b.dedupWriteDataRange(ino, off, data, chunkSize)
+	}
 	if len(data) == 0 {
 		return nil
 	}
@@ -254,6 +276,9 @@ func (b *fsBucket) writeDataRange(ino uint64, off int64, data []byte, chunkSize 
 
 // truncateData drops chunks beyond size and trims the last partial chunk.
 func (b *fsBucket) truncateData(ino uint64, size, chunkSize int64) error {
+	if b.dedupEnabled() {
+		return b.dedupTruncateData(ino, size, chunkSize)
+	}
 	if b == nil || b.chunks == nil {
 		return nil
 	}
@@ -314,6 +339,9 @@ func (b *fsBucket) deleteChunks(prefix []byte, match func(key []byte) (bool, err
 
 // deleteAllChunks removes every chunk belonging to an inode.
 func (b *fsBucket) deleteAllChunks(ino uint64) error {
+	if b.dedupEnabled() {
+		return b.dedupDeleteAllChunks(ino)
+	}
 	var prefixBuf [8]byte
 	prefix := chunkPrefix(&prefixBuf, ino)
 	return b.deleteChunks(prefix, func([]byte) (bool, error) { return true, nil })
@@ -321,6 +349,9 @@ func (b *fsBucket) deleteAllChunks(ino uint64) error {
 
 // readAllChunks concatenates every chunk of an inode.
 func (b *fsBucket) readAllChunks(ino uint64) ([]byte, error) {
+	if b.dedupEnabled() {
+		return b.dedupReadAllChunks(ino)
+	}
 	if b == nil || b.chunks == nil {
 		return nil, nil
 	}
@@ -340,6 +371,9 @@ func (b *fsBucket) readAllChunks(ino uint64) ([]byte, error) {
 
 // writeAllChunks replaces every chunk of an inode with data.
 func (b *fsBucket) writeAllChunks(ino uint64, data []byte, chunkSize int64) error {
+	if b.dedupEnabled() {
+		return b.dedupWriteAllChunks(ino, data, chunkSize)
+	}
 	if b == nil || b.chunks == nil {
 		return os.ErrInvalid
 	}

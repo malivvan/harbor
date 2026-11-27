@@ -51,6 +51,7 @@ func (s *Store) newKeyState(newKey []byte, keepFallbacks bool) (*encState, error
 		encMetadata: cur.encMetadata,
 		chunkSize:   cur.chunkSize,
 		comp:        cur.comp,
+		dedup:       cur.dedup,
 	}, nil
 }
 
@@ -143,6 +144,29 @@ func (s *Store) reEncryptFSTx(ctx context.Context, tx *bolt.Tx, name string, old
 				return err
 			}
 			if err := newB.chunks.Put(key, sealed); err != nil {
+				return err
+			}
+		}
+	}
+
+	if oldB.chunkmap != nil {
+		mapKeys, err := crypto.KeysOf(oldB.chunkmap)
+		if err != nil {
+			return err
+		}
+		for _, key := range mapKeys {
+			plain, err := old.openMetadata(oldB.chunkmap.Get(key))
+			if err != nil {
+				return err
+			}
+			sealed, err := next.sealMetadata(plain)
+			if err != nil {
+				return err
+			}
+			if newB.chunkmap == nil {
+				return fmt.Errorf("%w: missing chunk map", ErrWrongMode)
+			}
+			if err := newB.chunkmap.Put(key, sealed); err != nil {
 				return err
 			}
 		}
@@ -332,6 +356,18 @@ func (s *Store) verifyFS(name string) error {
 			node := new(iNode)
 			if err := b.decodeNode(b2i(key), node); err != nil {
 				return err
+			}
+		}
+
+		if b.chunkmap != nil {
+			mapKeys, err := crypto.KeysOf(b.chunkmap)
+			if err != nil {
+				return err
+			}
+			for _, key := range mapKeys {
+				if _, err := enc.openMetadata(b.chunkmap.Get(key)); err != nil {
+					return err
+				}
 			}
 		}
 

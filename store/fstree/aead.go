@@ -48,6 +48,13 @@ type Config struct {
 	// MinCompress skips compressing content smaller than this many bytes.
 	MinCompress int
 
+	// Dedup stores chunk content by its plaintext SHA-256, so identical chunks
+	// (within a file, across files and across file systems of one store) are
+	// written once and reference-counted. It implies ChunkSize (default
+	// DefaultChunkSize) and therefore content encryption. The layout is
+	// recorded in the filesystem marker and a mismatch fails closed.
+	Dedup bool
+
 	// Audit, when non-nil, receives an entry for every committed write.
 	Audit ledger.Sink
 
@@ -57,7 +64,7 @@ type Config struct {
 }
 
 func (c Config) encryptionEnabled() bool {
-	return c.EncryptContent || c.EncryptMetadata || c.ChunkSize != 0
+	return c.EncryptContent || c.EncryptMetadata || c.ChunkSize != 0 || c.Dedup
 }
 
 // Validate reports whether the configuration can be opened: the chunk size must
@@ -93,6 +100,8 @@ type encState struct {
 	encMetadata bool
 	chunkSize   int
 	comp        *compress.Codec
+	// dedup stores chunks content-addressed and reference-counted.
+	dedup bool
 }
 
 // encrypted reports whether a real cipher is configured. A state can exist for
@@ -167,6 +176,7 @@ const (
 	markerFlagContent  = 1 << 0
 	markerFlagMetadata = 1 << 1
 	markerFlagChunked  = 1 << 2
+	markerFlagDedup    = 1 << 4
 )
 
 // markerSpec describes the on-disk marker framing shared by every store.
@@ -177,6 +187,7 @@ type marker struct {
 	encContent  bool
 	encMetadata bool
 	chunkSize   int
+	dedup       bool
 }
 
 // flagsByte returns the marker bits for the configured state.
@@ -191,13 +202,17 @@ func (m marker) flagsByte() byte {
 	if m.chunkSize > 0 {
 		f |= markerFlagChunked
 	}
+	if m.dedup {
+		f |= markerFlagDedup
+	}
 	return f
 }
 
 func (m marker) matches(e *encState) bool {
 	return m.encContent == e.encContent &&
 		m.encMetadata == e.encMetadata &&
-		m.chunkSize == e.chunkSize
+		m.chunkSize == e.chunkSize &&
+		m.dedup == e.dedup
 }
 
 // encodeMarker serializes the marker with a sealed canary used to verify the
@@ -212,6 +227,9 @@ func (e *encState) encodeMarker() ([]byte, error) {
 	}
 	if e.chunkSize > 0 {
 		flags |= markerFlagChunked
+	}
+	if e.dedup {
+		flags |= markerFlagDedup
 	}
 
 	canary, err := e.seal([]byte(crypto.CanaryPlaintext(canaryPlaintext, flags, uint64(e.chunkSize))))
@@ -237,6 +255,7 @@ func decodeMarker(raw []byte) (marker, []byte, error) {
 		encContent:  decoded.Flags&markerFlagContent != 0,
 		encMetadata: decoded.Flags&markerFlagMetadata != 0,
 		chunkSize:   int(decoded.Extra),
+		dedup:       decoded.Flags&markerFlagDedup != 0,
 	}, decoded.Canary, nil
 }
 
@@ -269,6 +288,9 @@ func resolveConfig(cfg Config) (*encState, error) {
 		return state, nil
 	}
 	chunkSize := cfg.ChunkSize
+	if cfg.Dedup && chunkSize == 0 {
+		chunkSize = DefaultChunkSize
+	}
 
 	key, err := crypto.ResolveKey(cfg.Secret)
 	if err != nil {
@@ -284,5 +306,6 @@ func resolveConfig(cfg Config) (*encState, error) {
 	state.encContent = cfg.EncryptContent || chunkSize > 0
 	state.encMetadata = cfg.EncryptMetadata
 	state.chunkSize = chunkSize
+	state.dedup = cfg.Dedup
 	return state, nil
 }

@@ -17,16 +17,18 @@ var nilIno uint64
 // fsBucket provides a unified interface to a potentally nested bucket in which
 // the fs buckets can be found.
 type fsBucket struct {
-	state    *bolt.Bucket
-	inodes   *bolt.Bucket
-	data     *bolt.Bucket
-	symlinks *bolt.Bucket
-	chunks   *bolt.Bucket     // Optional chunked-content bucket
-	dirents  *bolt.Bucket     // Optional per-entry directory keys
-	cache    *inodeCache      // Optional cache for read operations
-	enc      *encState        // nil when encryption is disabled
-	obs      metrics.Observer // Optional metrics sink for chunk activity
-	parent   bucketer         // parent of the fs buckets, for lazy bucket creation
+	state     *bolt.Bucket
+	inodes    *bolt.Bucket
+	data      *bolt.Bucket
+	symlinks  *bolt.Bucket
+	chunks    *bolt.Bucket     // Optional chunked-content bucket
+	chunkmap  *bolt.Bucket     // Optional content-addressed chunk lists (dedup)
+	chunkrefs *bolt.Bucket     // Optional chunk reference counts (dedup)
+	dirents   *bolt.Bucket     // Optional per-entry directory keys
+	cache     *inodeCache      // Optional cache for read operations
+	enc       *encState        // nil when encryption is disabled
+	obs       metrics.Observer // Optional metrics sink for chunk activity
+	parent    bucketer         // parent of the fs buckets, for lazy bucket creation
 }
 
 type bucketer interface {
@@ -77,15 +79,17 @@ func newFsBucketWithCacheOpts(b bucketer, cache *inodeCache, withChunks bool) *f
 	}
 
 	return &fsBucket{
-		state:    state,
-		inodes:   inodes,
-		data:     data,
-		symlinks: symlinks,
-		chunks:   chunks,
-		dirents:  b.Bucket([]byte(direntsBucketName)),
-		cache:    cache,
-		obs:      obs,
-		parent:   b,
+		state:     state,
+		inodes:    inodes,
+		data:      data,
+		symlinks:  symlinks,
+		chunks:    chunks,
+		chunkmap:  b.Bucket([]byte(chunkMapBucketName)),
+		chunkrefs: b.Bucket([]byte(chunkRefsBucketName)),
+		dirents:   b.Bucket([]byte(direntsBucketName)),
+		cache:     cache,
+		obs:       obs,
+		parent:    b,
 	}
 }
 
