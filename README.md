@@ -37,7 +37,7 @@ bucket-path segments that select a rooted view of the already-open store. Every 
 - [Time series with `series`](#time-series-with-series)
 - [Vectors with `vector`](#vectors-with-vector)
 - [Full-text search with `search`](#full-text-search-with-search)
-- [Object storage: `object` and `snapshot`](#object-storage-object-and-snapshot)
+- [Object storage: `object` and `backup`](#object-storage-object-and-backup)
 - [Utilities](#utilities)
 - [Clustering](#clustering)
 - [Encryption](#encryption)
@@ -890,31 +890,31 @@ Values are sealed when value encryption is enabled, following the
 set; encrypting them hides the vocabulary but still leaks equality and result
 sizes. See [store/search/README.md](store/search/README.md) for the layout, errors and limits.
 
-## Object storage: `object` and `snapshot`
+## Object storage: `object` and `backup`
 
-tempest has an independent flat object store and a snapshot package built on it:
+tempest has an independent flat object store and a `backup` package built on it:
 
 - **`store/object`** owns a dedicated root bucket, so it works without the file
   store. A bucket is a namespace and a key is a slash-separated name inside it.
   Keys containing a `..` segment are rejected, so a key can never address a
   sibling bucket. `Put` consumes the whole reader before writing, so a failed
   reader leaves the previous content unchanged.
-- **`pkg/snapshot`** takes content-addressed, incremental point-in-time
+- **`backup`** takes content-addressed, incremental point-in-time
   snapshots of the objects under a prefix and restores them. Uploads dedupe by
   content hash, each snapshot carries a complete gzipped manifest, and restore
   verifies the manifest hash before writing anything.
 
 ```go
 import (
-	"github.com/malivvan/tempest/pkg/snapshot"
-	"github.com/malivvan/tempest/pkg/snapshot/blobstore"
+	"github.com/malivvan/tempest/backup"
+	"github.com/malivvan/tempest/backup/blobstore"
 )
 
 objects := store.Objects()
 _, err := objects.Put(ctx, "tenant-a", "reports/q3.pdf", reader, 0, "application/pdf")
 
-snap := snapshot.New(blobstore.New(objects, "os"), snapshot.Config{DataPrefix: "os/"})
-idx, err := snap.Create(ctx, snapshot.KindManual, "") // capture
+snap := backup.New(blobstore.New(objects, "os"), backup.Config{DataPrefix: "os/"})
+idx, err := snap.Create(ctx, backup.KindManual, "") // capture
 err = snap.Restore(ctx, idx.ID)                      // roll back
 ```
 
@@ -922,24 +922,24 @@ Data written by the previous file-backed blob implementation is not abandoned:
 it remains in the file store, and `object.Store.MigrateFromFile` copies a bucket
 into the independent store explicitly. See
 [store/object/README.md](store/object/README.md) and
-[pkg/snapshot/README.md](pkg/snapshot/README.md).
+[backup/README.md](backup/README.md).
 
 ## Utilities
 
 Small packages shared by applications and by tempest itself:
 
-- **`pkg/id`** generates ULIDs: 26-character Crockford-base32 strings with a
+- **`ulid`** generates ULIDs: 26-character Crockford-base32 strings with a
   48-bit millisecond timestamp followed by 80 random bits, so they sort
-  lexicographically by creation time. `id.New` uses the clock; `id.NewAt` pins
+  lexicographically by creation time. `ulid.New` uses the clock; `ulid.NewAt` pins
   the time. Use them where a time-ordered, collision-resistant record key helps.
-- **`pkg/metrics`** defines the dependency-free `Observer` interface the stores
+- **`metrics`** defines the dependency-free `Observer` interface the stores
   report counters, histograms, gauges and spans to. A nil observer disables
   instrumentation, and `tempest.Options{Observer: ...}` installs one.
-- **`pkg/sign/canonical`** serialises a Go value to byte-stable JSON: keys
+- **`canonical`** serialises a Go value to byte-stable JSON: keys
   sorted at every depth, no insignificant whitespace, numbers passed through
   unchanged. It is the encoding to sign or hash when a struct may later carry a
   map.
-- **`pkg/fusion`** combines ranked lists with reciprocal rank fusion, the usual
+- **`ranking`** combines ranked lists with reciprocal rank fusion, the usual
   way to merge full-text and vector results whose scores are not comparable.
   Ranking policy and list selection stay in the caller.
 - **`vec/doc`** is a document-oriented facade over `vector`: id, content,
@@ -949,14 +949,14 @@ Small packages shared by applications and by tempest itself:
 
 ## Clustering
 
-tempest ships a `consensus` package that replicates a whole store across a
+tempest ships a `cluster` package that replicates a whole store across a
 cluster of processes using the [Raft](https://github.com/hashicorp/raft)
 consensus algorithm. Each node keeps its own tempest store; writes are
 proposed through raft on the leader and applied, in log order, to the same
 logical state on every node. Reads are served from the local replica.
 
 ```go
-node, err := consensus.Open(ctx, consensus.Config{
+node, err := cluster.Open(ctx, cluster.Config{
     NodeID:     "node-1",
     BindAddr:   "127.0.0.1:7001",
     Dir:        "./data/node-1",
@@ -976,9 +976,9 @@ _ = node.Store().Record().One(ctx, "ID", "u1", &u)
 
 Every node in a cluster must use the same password. A second node opens with
 `Bootstrap: false` and joins the leader with `Join`; nodes leave with `Leave`.
-Off-leader writes return `consensus.ErrNotLeader`, and `Leader` reports the
+Off-leader writes return `cluster.ErrNotLeader`, and `Leader` reports the
 current leader's address for client-side redirect. See
-[pkg/consensus/README.md](pkg/consensus/README.md) for the full API, the consistency
+[cluster/README.md](cluster/README.md) for the full API, the consistency
 model and deployment notes.
 
 ## Encryption
@@ -1455,7 +1455,7 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
   manager, directory layout, and password file.
 - [store/object/README.md](store/object/README.md) — the flat object store, containment,
   and grants.
-- [pkg/snapshot/README.md](pkg/snapshot/README.md) — content-addressed
+- [backup/README.md](backup/README.md) — content-addressed
   incremental snapshots, restore, retention, and scheduling.
 - [store/vector/doc/README.md](store/vector/doc/README.md) — the document-oriented vector
   facade.
@@ -1475,13 +1475,13 @@ Generated API documentation is published on pkg.go.dev:
 - [github.com/malivvan/tempest/store/object](https://pkg.go.dev/github.com/malivvan/tempest/store/object)
 - [github.com/malivvan/tempest/store/graphs](https://pkg.go.dev/github.com/malivvan/tempest/store/graphs)
 - [github.com/malivvan/tempest/store/system](https://pkg.go.dev/github.com/malivvan/tempest/store/system)
-- [github.com/malivvan/tempest/pkg/consensus](https://pkg.go.dev/github.com/malivvan/tempest/pkg/consensus)
-- [github.com/malivvan/tempest/pkg/id](https://pkg.go.dev/github.com/malivvan/tempest/pkg/id)
-- [github.com/malivvan/tempest/pkg/fusion](https://pkg.go.dev/github.com/malivvan/tempest/pkg/fusion)
-- [github.com/malivvan/tempest/pkg/metrics](https://pkg.go.dev/github.com/malivvan/tempest/pkg/metrics)
-- [github.com/malivvan/tempest/pkg/sign/canonical](https://pkg.go.dev/github.com/malivvan/tempest/pkg/sign/canonical)
-- [github.com/malivvan/tempest/pkg/snapshot](https://pkg.go.dev/github.com/malivvan/tempest/pkg/snapshot)
-- [github.com/malivvan/tempest/pkg/snapshot/blobstore](https://pkg.go.dev/github.com/malivvan/tempest/pkg/snapshot/blobstore)
+- [github.com/malivvan/tempest/cluster](https://pkg.go.dev/github.com/malivvan/tempest/cluster)
+- [github.com/malivvan/tempest/ulid](https://pkg.go.dev/github.com/malivvan/tempest/ulid)
+- [github.com/malivvan/tempest/ranking](https://pkg.go.dev/github.com/malivvan/tempest/ranking)
+- [github.com/malivvan/tempest/metrics](https://pkg.go.dev/github.com/malivvan/tempest/metrics)
+- [github.com/malivvan/tempest/canonical](https://pkg.go.dev/github.com/malivvan/tempest/canonical)
+- [github.com/malivvan/tempest/backup](https://pkg.go.dev/github.com/malivvan/tempest/backup)
+- [github.com/malivvan/tempest/backup/blobstore](https://pkg.go.dev/github.com/malivvan/tempest/backup/blobstore)
 - [github.com/malivvan/tempest/pkg/store](https://pkg.go.dev/github.com/malivvan/tempest/pkg/store)
 - [github.com/malivvan/tempest/store/vector/doc](https://pkg.go.dev/github.com/malivvan/tempest/store/vector/doc)
 
@@ -1499,7 +1499,7 @@ Where to start:
 - **Process-wide database, blobs or object snapshots:**
   [pkg/store/README.md](pkg/store/README.md),
   [store/object/README.md](store/object/README.md) and
-  [pkg/snapshot/README.md](pkg/snapshot/README.md).
+  [backup/README.md](backup/README.md).
 - **IDs, metrics or a document vector facade:**
   [Utilities](#utilities) and [store/vector/doc/README.md](store/vector/doc/README.md).
 - **Security review or operations:** [Encryption](#encryption) and

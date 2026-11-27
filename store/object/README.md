@@ -60,6 +60,6 @@ err = store.Objects().MigrateFromFile(ctx, fsys, "tenant-a")
 
 The copy is idempotent. Nothing is deleted from the file store, and no old data
 is silently interpreted as the new layout. The snapshot adapter
-(`pkg/snapshot/blobstore`) accepts the independent `*object.Store`; a snapshot
+(`backup/blobstore`) accepts the independent `*object.Store`; a snapshot
 taken over a file-backed bucket can be migrated the same way before it is used
 with the new store.

@@ -23,16 +23,16 @@ separate `docs/` tree.
 | `.../store/vector/hnsw` | The vendored HNSW graph implementation used by `vector`. |
 | `.../store/vector/hnsw/heap` | The heap used on the HNSW search hot path. |
 | `.../store/vector/doc` | Document-oriented facade over `vector`: id, content, embedding and string metadata; the collection dimension is taken from the first upsert. |
-| `.../pkg/metrics` | Dependency-free observer interface and nil-safe metric helpers used by every store; a nil observer means no instrumentation. |
+| `.../metrics` | Dependency-free observer interface and nil-safe metric helpers used by every store; a nil observer means no instrumentation. |
 | `.../store/ledger` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write. |
-| `.../pkg/consensus` | Raft-backed cluster replication of a whole store: replicated command facades, snapshots, and the bolt-backed raft log/stable store it persists with (no raft-boltdb dependency). |
+| `.../cluster` | Raft-backed cluster replication of a whole store: replicated command facades, snapshots, and the bolt-backed raft log/stable store it persists with (no raft-boltdb dependency). |
 | `.../pkg/store` | Process-wide database manager: resolves a directory, reads or creates the password file (published atomically by link, `O_EXCL` fallback, mode 0600, never logged), and opens one handle. |
 | `.../store/object` | Independent flat object store with buckets, path containment and atomic `Put`; works without the file store and migrates file-backed blobs explicitly. |
-| `.../pkg/snapshot` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore. |
-| `.../pkg/snapshot/blobstore` | Adapter from `snapshot.ObjectStore` to one bucket of the object store. |
-| `.../pkg/id` | ULID generation: 26-character Crockford base32, time-sortable. |
-| `.../pkg/sign/canonical` | Deterministic JSON encoding for signatures and content addressing: sorted keys, stable numbers, no whitespace. |
-| `.../pkg/fusion` | Reciprocal rank fusion for combining full-text and vector result lists. |
+| `.../backup` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore. |
+| `.../backup/blobstore` | Adapter from `backup.ObjectStore` to one bucket of the object store. |
+| `.../ulid` | ULID generation: 26-character Crockford base32, time-sortable. |
+| `.../canonical` | Deterministic JSON encoding for signatures and content addressing: sorted keys, stable numbers, no whitespace. |
+| `.../ranking` | Reciprocal rank fusion for combining full-text and vector result lists. |
 | `.../internal/...` | Shared bbolt helpers, AEAD primitives, Argon2id/BLAKE2b, SLIP-0010/0021 and CPU detection. Not public API. |
 
 The stores are independent. The root package is a convenience composition,
@@ -841,9 +841,9 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
   layouts, encryption internals, invariants, development workflow.
 - Per-package guides live in `store/record/README.md`, `store/fstree/README.md`, `store/series/README.md`,
   `store/vector/README.md`, `store/fstree/s3fs/README.md`, `store/ledger/README.md`,
-  `pkg/consensus/README.md`, `pkg/store/README.md`, `store/object/README.md`,
+  `cluster/README.md`, `pkg/store/README.md`, `store/object/README.md`,
   `store/graphs/README.md`, `store/system/README.md` and
-  `pkg/snapshot/README.md`. Package doc comments are the source of truth for
+  `backup/README.md`. Package doc comments are the source of truth for
   behavior; package guides are the source of truth for usage.
 - Every public package has a package-level doc comment, and every exported
   identifier is documented. Keep comments in English.
@@ -891,9 +891,9 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 - [store/vector/doc/README.md](store/vector/doc/README.md)
 - [store/ledger/README.md](store/ledger/README.md)
 - [store/object/README.md](store/object/README.md)
-- [pkg/consensus/README.md](pkg/consensus/README.md)
+- [cluster/README.md](cluster/README.md)
 - [pkg/store/README.md](pkg/store/README.md)
-- [pkg/snapshot/README.md](pkg/snapshot/README.md)
+- [backup/README.md](backup/README.md)
 - [store/system/README.md](store/system/README.md)
 
 Generated API documentation:
@@ -908,12 +908,12 @@ Generated API documentation:
 - [github.com/malivvan/tempest/store/object](https://pkg.go.dev/github.com/malivvan/tempest/store/object)
 - [github.com/malivvan/tempest/store/graphs](https://pkg.go.dev/github.com/malivvan/tempest/store/graphs)
 - [github.com/malivvan/tempest/store/system](https://pkg.go.dev/github.com/malivvan/tempest/store/system)
-- [github.com/malivvan/tempest/pkg/consensus](https://pkg.go.dev/github.com/malivvan/tempest/pkg/consensus)
-- [github.com/malivvan/tempest/pkg/id](https://pkg.go.dev/github.com/malivvan/tempest/pkg/id)
-- [github.com/malivvan/tempest/pkg/metrics](https://pkg.go.dev/github.com/malivvan/tempest/pkg/metrics)
-- [github.com/malivvan/tempest/pkg/sign/canonical](https://pkg.go.dev/github.com/malivvan/tempest/pkg/sign/canonical)
-- [github.com/malivvan/tempest/pkg/snapshot](https://pkg.go.dev/github.com/malivvan/tempest/pkg/snapshot)
-- [github.com/malivvan/tempest/pkg/snapshot/blobstore](https://pkg.go.dev/github.com/malivvan/tempest/pkg/snapshot/blobstore)
+- [github.com/malivvan/tempest/cluster](https://pkg.go.dev/github.com/malivvan/tempest/cluster)
+- [github.com/malivvan/tempest/ulid](https://pkg.go.dev/github.com/malivvan/tempest/ulid)
+- [github.com/malivvan/tempest/metrics](https://pkg.go.dev/github.com/malivvan/tempest/metrics)
+- [github.com/malivvan/tempest/canonical](https://pkg.go.dev/github.com/malivvan/tempest/canonical)
+- [github.com/malivvan/tempest/backup](https://pkg.go.dev/github.com/malivvan/tempest/backup)
+- [github.com/malivvan/tempest/backup/blobstore](https://pkg.go.dev/github.com/malivvan/tempest/backup/blobstore)
 - [github.com/malivvan/tempest/pkg/store](https://pkg.go.dev/github.com/malivvan/tempest/pkg/store)
 
 ## Pre-release checklist

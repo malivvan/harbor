@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/malivvan/tempest/internal/crypto"
-	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/metrics"
 	"github.com/malivvan/tempest/store"
 	"github.com/malivvan/tempest/store/record/index"
 	bolt "go.etcd.io/bbolt"

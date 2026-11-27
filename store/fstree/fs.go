@@ -19,7 +19,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/malivvan/tempest/internal/absfs"
-	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/metrics"
 	"github.com/malivvan/tempest/store/ledger"
 )
 

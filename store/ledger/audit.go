@@ -17,8 +17,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/malivvan/tempest/canonical"
 	"github.com/malivvan/tempest/internal/slip10"
-	"github.com/malivvan/tempest/pkg/sign/canonical"
 	"github.com/malivvan/tempest/store"
 	bolt "go.etcd.io/bbolt"
 )

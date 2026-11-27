@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 

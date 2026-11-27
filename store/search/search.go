@@ -19,7 +19,7 @@ import (
 	"sync/atomic"
 
 	"github.com/malivvan/tempest/internal/crypto"
-	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 

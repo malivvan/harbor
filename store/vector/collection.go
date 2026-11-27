@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/metrics"
 	"github.com/malivvan/tempest/store"
 )
 

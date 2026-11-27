@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/metrics"
 	"github.com/malivvan/tempest/store"
 	"github.com/malivvan/tempest/store/fstree"
 	"github.com/malivvan/tempest/store/graphs"

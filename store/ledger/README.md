@@ -140,7 +140,7 @@ so re-hashing current data against the recorded digest detects content changes.
 
 ## Event encoding
 
-An event is encoded with `pkg/sign/canonical` — deterministic JSON with keys
+An event is encoded with `canonical` — deterministic JSON with keys
 sorted at every depth and no insignificant whitespace — and **those exact bytes
 are what is signed and stored** (with the Ed25519 signature appended). The hash
 chain is SHA-256 over the same bytes, so verifiers do not need a
@@ -150,7 +150,7 @@ bytes to the canonical form.
 
 `record.Set` records `set` and `record.SetBytes` records `set_bytes`: both write the same
 encoded value, but the operation name preserves the caller's intent. Higher-level
-packages are audited at the layer that performs the write: `snapshot` writes
+packages are audited at the layer that performs the write: `backup` writes
 through the object store, so its writes appear as `object` events; the `store`
 manager only opens stores and records nothing itself.
 

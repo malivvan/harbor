@@ -6,7 +6,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/metrics"
 	"github.com/malivvan/tempest/store"
 	"github.com/malivvan/tempest/store/vector/hnsw"
 )

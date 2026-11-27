@@ -31,7 +31,7 @@ import (
 	"time"
 
 	"github.com/malivvan/tempest/internal/crypto"
-	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/metrics"
 	"github.com/malivvan/tempest/store/fstree"
 	"github.com/malivvan/tempest/store/ledger"
 	bolt "go.etcd.io/bbolt"
