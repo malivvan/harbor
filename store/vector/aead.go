@@ -3,6 +3,7 @@ package vector
 import (
 	"fmt"
 
+	"github.com/malivvan/tempest/internal/compress"
 	"github.com/malivvan/tempest/internal/crypto"
 	"github.com/malivvan/tempest/metrics"
 	"github.com/malivvan/tempest/store/ledger"
@@ -45,6 +46,18 @@ type Config struct {
 	// EncryptCollectionNames deterministically encrypts collection bucket and
 	// metadata names with AES-SIV. Listing still returns the original names.
 	EncryptCollectionNames bool
+
+	// Compress Zstd-compresses point blobs and collection metadata on the
+	// plaintext side of encryption. It is a write-time preference: reads
+	// auto-detect the envelope, so a store written compressed stays readable
+	// with Compress disabled. It does not require encryption.
+	Compress bool
+
+	// CompressLevel selects the Zstandard level (0 selects the default).
+	CompressLevel int
+
+	// MinCompress skips compressing values smaller than this many bytes.
+	MinCompress int
 
 	// Audit, when non-nil, receives an entry for every committed write.
 	Audit ledger.Sink
@@ -125,11 +138,19 @@ type encState struct {
 	// sivs holds the per-domain deterministic name ciphers derived from the
 	// primary key. Read-only after construction.
 	sivs map[string]*crypto.SIVNameCipher
+
+	// comp compresses point blobs and metadata before sealing; nil when
+	// compression is off. Immutable and shared across rotation states.
+	comp *compress.Codec
 }
+
+// encrypted reports whether a real cipher is configured. A state can exist for
+// compression alone, with no keychain.
+func (e *encState) encrypted() bool { return e != nil && e.kc != nil }
 
 // seal encrypts plain with the primary engine, prefixing a fresh random nonce.
 func (e *encState) seal(plain []byte) ([]byte, error) {
-	if e == nil {
+	if !e.encrypted() {
 		return plain, nil
 	}
 	return e.kc.Seal(plain)
@@ -137,27 +158,37 @@ func (e *encState) seal(plain []byte) ([]byte, error) {
 
 // open decrypts raw with the primary engine and any rotation fallbacks.
 func (e *encState) open(raw []byte) ([]byte, error) {
-	if e == nil {
+	if !e.encrypted() {
 		return raw, nil
 	}
 	return e.kc.Open(raw)
 }
 
-// sealPoints seals a point blob or collection metadata when EncryptPoints is
-// enabled.
+// sealPoints compresses a point blob or collection metadata when compression
+// is enabled, then seals it when EncryptPoints is enabled.
 func (e *encState) sealPoints(plain []byte) ([]byte, error) {
-	if e == nil || !e.encPoints {
+	if e != nil && e.comp != nil {
+		var err error
+		if plain, err = e.comp.Encode(nil, plain); err != nil {
+			return nil, err
+		}
+	}
+	if e == nil || !e.encPoints || !e.encrypted() {
 		return plain, nil
 	}
 	return e.seal(plain)
 }
 
-// openPoints reverses sealPoints.
+// openPoints reverses sealPoints and always decodes a compressed envelope.
 func (e *encState) openPoints(raw []byte) ([]byte, error) {
-	if e == nil || !e.encPoints {
-		return raw, nil
+	if e == nil || !e.encPoints || !e.encrypted() {
+		return compress.Decode(nil, raw)
 	}
-	return e.open(raw)
+	plain, err := e.open(raw)
+	if err != nil {
+		return nil, err
+	}
+	return compress.Decode(nil, plain)
 }
 
 // sealName deterministically encrypts a point ID or collection name for the
@@ -400,8 +431,20 @@ func (s *Store) metaBucketForRead() ([]string, error) {
 // resolveConfig turns a Config into an encryption state. It returns nil for a
 // zero Config and for a Config that enables no encryption feature.
 func resolveConfig(cfg Config) (*encState, error) {
-	if !cfg.encryptionEnabled() {
+	if !cfg.encryptionEnabled() && !cfg.Compress {
 		return nil, nil
+	}
+
+	state := &encState{}
+	if cfg.Compress {
+		codec, err := compress.NewCodec(compress.Config{Level: cfg.CompressLevel, MinSize: cfg.MinCompress})
+		if err != nil {
+			return nil, err
+		}
+		state.comp = codec
+	}
+	if !cfg.encryptionEnabled() {
+		return state, nil
 	}
 
 	key, err := crypto.ResolveKey(cfg.Secret)
@@ -414,14 +457,10 @@ func resolveConfig(cfg Config) (*encState, error) {
 		return nil, err
 	}
 
-	state := &encState{
-		kc: kc,
-		// The ID is stored inside the point value, so encrypting only the key
-		// would leave it readable.
-		encPoints: cfg.EncryptPoints || cfg.EncryptPointIDs,
-		encIDs:    cfg.EncryptPointIDs,
-		encNames:  cfg.EncryptCollectionNames,
-	}
+	state.kc = kc
+	state.encPoints = cfg.EncryptPoints || cfg.EncryptPointIDs
+	state.encIDs = cfg.EncryptPointIDs
+	state.encNames = cfg.EncryptCollectionNames
 
 	if state.encIDs || state.encNames {
 		state.sivs = make(map[string]*crypto.SIVNameCipher, 2)

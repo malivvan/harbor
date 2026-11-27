@@ -15,7 +15,7 @@ import (
 // rewritten keep working until RotateAll.
 func (s *Store) withRotationKey(newKey []byte) (*encState, error) {
 	cur := s.encState()
-	if cur == nil {
+	if !cur.encrypted() {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 
@@ -26,6 +26,10 @@ func (s *Store) withRotationKey(newKey []byte) (*encState, error) {
 	return &encState{
 		kc:        kc,
 		encPoints: cur.encPoints,
+		encIDs:    cur.encIDs,
+		encNames:  cur.encNames,
+		sivs:      cur.sivs,
+		comp:      cur.comp,
 	}, nil
 }
 
@@ -33,19 +37,24 @@ func (s *Store) withRotationKey(newKey []byte) (*encState, error) {
 // current cipher and flags, dropping every current key.
 func (s *Store) withKey(newKey []byte) (*encState, error) {
 	cur := s.encState()
-	if cur == nil {
+	if !cur.encrypted() {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 	if len(newKey) != KeySize {
 		return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, KeySize, len(newKey))
 	}
 
-	return resolveConfig(Config{
+	next, err := resolveConfig(Config{
 		Secret:                 append([]byte(nil), newKey...),
 		EncryptPoints:          cur.encPoints,
 		EncryptPointIDs:        cur.encIDs,
 		EncryptCollectionNames: cur.encNames,
 	})
+	if err != nil {
+		return nil, err
+	}
+	next.comp = cur.comp
+	return next, nil
 }
 
 // adoptEnc installs next as the encryption state of the store.
@@ -193,7 +202,7 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 	}
 	return s.view(func(tx *bbolt.Tx) error {
 		enc := s.encState()
-		if enc == nil {
+		if !enc.encrypted() {
 			return fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 		}
 		if err := checkContext(ctx); err != nil {

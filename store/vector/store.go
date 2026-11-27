@@ -581,7 +581,7 @@ func (s *Store) checkMode(ctx context.Context) error {
 	}
 
 	enc := s.encState()
-	if enc == nil {
+	if !enc.encrypted() {
 		if found {
 			return fmt.Errorf("%w: store is encrypted", ErrWrongMode)
 		}

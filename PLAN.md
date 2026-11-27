@@ -41,7 +41,7 @@ dependency. It will be deleted in the next step.
 - [x] Phase 1 — record store compression
 - [x] Phase 2 — fstree compression
 - [x] Phase 3 — series compression
-- [ ] Phase 4 — vector compression
+- [x] Phase 4 — vector compression
 - [ ] Phase 5 — search compression
 - [ ] Phase 6 — graphs compression
 - [ ] Phase 7 — object compression
