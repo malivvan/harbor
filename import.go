@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/malivvan/tempest/store/fstree"
+	"github.com/malivvan/tempest/store/graphs"
+	"github.com/malivvan/tempest/store/search"
 	"github.com/malivvan/tempest/store/series"
 	"github.com/malivvan/tempest/store/vector"
 )
@@ -36,6 +38,13 @@ type ImportOptions struct {
 
 	// Progress, when non-nil, is called after each record is validated/applied.
 	Progress func(Progress)
+
+	// SearchTokenizer supplies the tokenizer for an exported index whose
+	// persisted tokenizer is "custom": a custom tokenizer cannot be
+	// reconstructed from its name. It is ignored for built-in tokenizers, and
+	// an import of a custom index without it fails (fail closed) instead of
+	// approximating the tokenizer.
+	SearchTokenizer search.Tokenizer
 }
 
 // ImportSummary describes a completed import.
@@ -82,6 +91,9 @@ func Import(ctx context.Context, dest *Store, r io.Reader, opts ImportOptions) (
 		types:       make(map[string]reflect.Type, len(opts.RecordTypes)),
 		fsystems:    make(map[string]*fstree.FS),
 		collections: make(map[string]*vector.Collection),
+		indexMeta:   make(map[string]search.IndexMeta),
+		indexDocs:   make(map[string][]search.DocEntry),
+		indexTerms:  make(map[string][]search.TermEntry),
 	}
 	for _, sample := range opts.RecordTypes {
 		t, err := recordType(sample)
@@ -207,6 +219,11 @@ type importer struct {
 	types       map[string]reflect.Type
 	fsystems    map[string]*fstree.FS
 	collections map[string]*vector.Collection
+	// Search records arrive as index, then docs, then terms, so they are
+	// collected and materialized in finish. Maps are keyed by index name.
+	indexMeta  map[string]search.IndexMeta
+	indexDocs  map[string][]search.DocEntry
+	indexTerms map[string][]search.TermEntry
 }
 
 func (im *importer) apply(rec exportRecord) error {
@@ -229,6 +246,16 @@ func (im *importer) apply(rec exportRecord) error {
 		return im.applyVecCollection(rec)
 	case exportKindVecPoints:
 		return im.applyVecPoints(rec)
+	case exportKindSearchIndex:
+		return im.applySearchIndex(rec)
+	case exportKindSearchDocs:
+		return im.applySearchDocs(rec)
+	case exportKindSearchTerms:
+		return im.applySearchTerms(rec)
+	case exportKindGraphDocument:
+		return im.applyGraphDocument(rec)
+	case exportKindObject:
+		return im.applyObject(rec)
 	default:
 		return fmt.Errorf("%w: unknown record kind %q", ErrExportFormat, rec.Kind)
 	}
@@ -426,7 +453,7 @@ func (im *importer) applyVecPoints(rec exportRecord) error {
 }
 
 // finish flushes imported vector collections so the records are durable even if
-// the store stays open.
+// the store stays open, then materializes the collected search indexes.
 func (im *importer) finish() error {
 	if im.dryRun {
 		return nil
@@ -435,6 +462,93 @@ func (im *importer) finish() error {
 		if err := collection.Flush(); err != nil {
 			return fmt.Errorf("tempest: import collection %q: %w", name, err)
 		}
+	}
+	for name, meta := range im.indexMeta {
+		if err := im.dest.Search().RestoreIndex(im.ctx, name, search.Config{
+			Tokenizer: im.opts.SearchTokenizer,
+		}, meta, im.indexDocs[name], im.indexTerms[name]); err != nil {
+			return fmt.Errorf("tempest: import search %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func (im *importer) applySearchIndex(rec exportRecord) error {
+	if rec.Name == "" {
+		return fmt.Errorf("%w: fts.index without name", ErrExportFormat)
+	}
+	if rec.K1 < 0 || rec.B < 0 || rec.B > 1 {
+		return fmt.Errorf("%w: fts.index %q has invalid BM25 parameters", ErrExportFormat, rec.Name)
+	}
+	if im.dryRun {
+		return nil
+	}
+	im.indexMeta[rec.Name] = search.IndexMeta{
+		K1:        rec.K1,
+		B:         rec.B,
+		Tokenizer: rec.Tokenizer,
+		DocCount:  rec.DocCount,
+		TotalLen:  rec.TotalLen,
+	}
+	return nil
+}
+
+func (im *importer) applySearchDocs(rec exportRecord) error {
+	if rec.Name == "" || len(rec.Docs) == 0 {
+		return fmt.Errorf("%w: fts.docs without index or documents", ErrExportFormat)
+	}
+	if im.dryRun {
+		return nil
+	}
+	im.indexDocs[rec.Name] = append(im.indexDocs[rec.Name], rec.Docs...)
+	return nil
+}
+
+func (im *importer) applySearchTerms(rec exportRecord) error {
+	if rec.Name == "" || len(rec.Terms) == 0 {
+		return fmt.Errorf("%w: fts.terms without index or terms", ErrExportFormat)
+	}
+	if im.dryRun {
+		return nil
+	}
+	im.indexTerms[rec.Name] = append(im.indexTerms[rec.Name], rec.Terms...)
+	return nil
+}
+
+func (im *importer) applyGraphDocument(rec exportRecord) error {
+	if rec.Name == "" {
+		return fmt.Errorf("%w: graph.document without name", ErrExportFormat)
+	}
+	if rec.Nodes == nil && rec.Edges == nil {
+		return fmt.Errorf("%w: graph.document %q carries no nodes or edges", ErrExportFormat, rec.Name)
+	}
+	if im.dryRun {
+		return nil
+	}
+	g, err := im.dest.Graphs().Open(rec.Name)
+	if err != nil {
+		return fmt.Errorf("tempest: import graph %q: %w", rec.Name, err)
+	}
+	result, err := g.ImportDocument(im.ctx, &graphs.Document{Nodes: rec.Nodes, Edges: rec.Edges})
+	if err != nil {
+		return fmt.Errorf("tempest: import graph %q: %w", rec.Name, err)
+	}
+	if result.FailedCount > 0 {
+		return fmt.Errorf("tempest: import graph %q: %d of %d records failed",
+			rec.Name, result.FailedCount, result.SuccessCount+result.FailedCount)
+	}
+	return nil
+}
+
+func (im *importer) applyObject(rec exportRecord) error {
+	if rec.Bucket == "" || rec.Key == "" {
+		return fmt.Errorf("%w: object.put without bucket or key", ErrExportFormat)
+	}
+	if im.dryRun {
+		return nil
+	}
+	if _, err := im.dest.Objects().Put(im.ctx, rec.Bucket, rec.Key, bytes.NewReader(rec.Data), int64(len(rec.Data)), ""); err != nil {
+		return fmt.Errorf("tempest: import object %q/%q: %w", rec.Bucket, rec.Key, err)
 	}
 	return nil
 }

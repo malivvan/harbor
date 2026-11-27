@@ -282,3 +282,114 @@ func TestGraphsStoreAuditAndBackup(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "person", got.Type)
 }
+
+func TestRestoreBackupRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	src := filepath.Join(t.TempDir(), "tempest.db")
+	s := mustOpen(t, src, "restore-password")
+	seedBackup(t, s)
+	backupPath := filepath.Join(t.TempDir(), "backup.db")
+	_, err := s.BackupFile(ctx, backupPath, BackupOptions{Manifest: true})
+	require.NoError(t, err)
+	mustClose(t, s)
+
+	dst := filepath.Join(t.TempDir(), "restored.db")
+	info, err := RestoreBackup(ctx, backupPath, dst, "restore-password", nil, RestoreOptions{})
+	require.NoError(t, err)
+	require.Equal(t, dst, info.Path)
+	require.Positive(t, info.Size)
+	require.Len(t, info.SHA256, 64)
+
+	restored := mustOpen(t, dst, "restore-password")
+	defer mustClose(t, restored)
+
+	var rec txRecord
+	require.NoError(t, restored.Record().One(ctx, "ID", "b1", &rec))
+	require.Equal(t, "backup", rec.Name)
+
+	hits, err := restored.Search().Open("docs", search.Config{})
+	require.NoError(t, err)
+	got, err := hits.Search(ctx, "backup", 0)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, "d1", got[0].ID)
+}
+
+func TestRestoreBackupWrongPassword(t *testing.T) {
+	ctx := context.Background()
+	src := filepath.Join(t.TempDir(), "tempest.db")
+	s := mustOpen(t, src, "right-password")
+	seedBackup(t, s)
+	backupPath := filepath.Join(t.TempDir(), "backup.db")
+	_, err := s.BackupFile(ctx, backupPath, BackupOptions{})
+	require.NoError(t, err)
+	mustClose(t, s)
+
+	_, err = RestoreBackup(ctx, backupPath, filepath.Join(t.TempDir(), "dst.db"), "wrong-password", nil, RestoreOptions{})
+	require.ErrorIs(t, err, ErrInvalidPassword)
+}
+
+func TestRestoreBackupCorruptSource(t *testing.T) {
+	ctx := context.Background()
+	src := filepath.Join(t.TempDir(), "tempest.db")
+	s := mustOpen(t, src, "corrupt-password")
+	seedBackup(t, s)
+	backupPath := filepath.Join(t.TempDir(), "backup.db")
+	_, err := s.BackupFile(ctx, backupPath, BackupOptions{Manifest: true})
+	require.NoError(t, err)
+	mustClose(t, s)
+
+	raw, err := os.ReadFile(backupPath)
+	require.NoError(t, err)
+	raw[len(raw)/2] ^= 0xff
+	require.NoError(t, os.WriteFile(backupPath, raw, 0o600))
+
+	dst := filepath.Join(t.TempDir(), "dst.db")
+	_, err = RestoreBackup(ctx, backupPath, dst, "corrupt-password", nil, RestoreOptions{})
+	require.ErrorIs(t, err, ErrBackupManifest)
+	_, statErr := os.Stat(dst)
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestRestoreBackupOverwrite(t *testing.T) {
+	ctx := context.Background()
+	src := filepath.Join(t.TempDir(), "tempest.db")
+	s := mustOpen(t, src, "overwrite-password")
+	seedBackup(t, s)
+	backupPath := filepath.Join(t.TempDir(), "backup.db")
+	_, err := s.BackupFile(ctx, backupPath, BackupOptions{})
+	require.NoError(t, err)
+	mustClose(t, s)
+
+	dst := filepath.Join(t.TempDir(), "dst.db")
+	require.NoError(t, os.WriteFile(dst, []byte("existing"), 0o600))
+
+	_, err = RestoreBackup(ctx, backupPath, dst, "overwrite-password", nil, RestoreOptions{})
+	require.ErrorIs(t, err, os.ErrExist)
+
+	info, err := RestoreBackup(ctx, backupPath, dst, "overwrite-password", nil, RestoreOptions{Overwrite: true})
+	require.NoError(t, err)
+	require.Equal(t, dst, info.Path)
+
+	restored := mustOpen(t, dst, "overwrite-password")
+	mustClose(t, restored)
+}
+
+func TestRestoreBackupCanceledContext(t *testing.T) {
+	ctx := context.Background()
+	src := filepath.Join(t.TempDir(), "tempest.db")
+	s := mustOpen(t, src, "cancel-password")
+	seedBackup(t, s)
+	backupPath := filepath.Join(t.TempDir(), "backup.db")
+	_, err := s.BackupFile(ctx, backupPath, BackupOptions{})
+	require.NoError(t, err)
+	mustClose(t, s)
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	dst := filepath.Join(t.TempDir(), "dst.db")
+	_, err = RestoreBackup(canceled, backupPath, dst, "cancel-password", nil, RestoreOptions{})
+	require.ErrorIs(t, err, context.Canceled)
+	_, statErr := os.Stat(dst)
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}

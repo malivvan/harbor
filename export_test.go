@@ -5,11 +5,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/malivvan/tempest/store/graphs"
 	"github.com/malivvan/tempest/store/record/q"
+	"github.com/malivvan/tempest/store/search"
 	"github.com/malivvan/tempest/store/series"
 	"github.com/malivvan/tempest/store/vector"
 )
@@ -313,4 +316,233 @@ func TestCompactTo(t *testing.T) {
 
 	require.NoError(t, src.Close())
 	require.ErrorIs(t, src.CompactTo(ctx, filepath.Join(dir, "closed.db"), 0o600), ErrClosed)
+}
+
+// testCustomTokenizer is a caller-supplied tokenizer: it cannot be
+// reconstructed from its persisted name, so import needs it explicitly.
+type testCustomTokenizer struct{}
+
+func (testCustomTokenizer) Tokenize(text string) []string { return strings.Fields(text) }
+
+func seedLogicalStores(t *testing.T, store *Store) {
+	t.Helper()
+	ctx := context.Background()
+
+	words, err := store.Search().Open("words", search.Config{})
+	require.NoError(t, err)
+	require.NoError(t, words.Upsert(ctx, "d1", "alpha beta"))
+	require.NoError(t, words.Upsert(ctx, "d2", "beta gamma"))
+
+	cjk, err := store.Search().Open("cjk", search.Config{Tokenizer: search.WordsWithCJK()})
+	require.NoError(t, err)
+	require.NoError(t, cjk.Upsert(ctx, "c1", "世界 和平"))
+
+	g, err := store.Graphs().Open("social")
+	require.NoError(t, err)
+	require.NoError(t, g.UpsertNode(ctx, &graphs.Node{ID: "a", Type: "person", Content: "alice"}))
+	require.NoError(t, g.UpsertNode(ctx, &graphs.Node{ID: "b", Type: "person", Content: "bob"}))
+	require.NoError(t, g.UpsertEdge(ctx, &graphs.Edge{ID: "e1", From: "a", To: "b", Type: "knows"}))
+
+	_, err = store.Objects().Put(ctx, "tenant-a", "reports/q3.pdf",
+		strings.NewReader("quarter three"), 13, "application/pdf")
+	require.NoError(t, err)
+	_, err = store.Objects().Put(ctx, "tenant-b", "notes.txt",
+		strings.NewReader("hello"), 5, "text/plain")
+	require.NoError(t, err)
+}
+
+func verifyLogicalStores(t *testing.T, store *Store) {
+	t.Helper()
+	ctx := context.Background()
+
+	words, err := store.Search().Open("words", search.Config{})
+	require.NoError(t, err)
+	count, err := words.Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, count)
+	hits, err := words.Search(ctx, "beta", 0)
+	require.NoError(t, err)
+	require.Len(t, hits, 2)
+
+	cjk, err := store.Search().Open("cjk", search.Config{Tokenizer: search.WordsWithCJK()})
+	require.NoError(t, err)
+	hits, err = cjk.Search(ctx, "世界", 0)
+	require.NoError(t, err)
+	require.Len(t, hits, 1)
+	require.Equal(t, "c1", hits[0].ID)
+
+	g, err := store.Graphs().Open("social")
+	require.NoError(t, err)
+	nodes, err := g.GetAllNodes(ctx, nil)
+	require.NoError(t, err)
+	require.Len(t, nodes, 2)
+	edges, err := g.GetAllEdges(ctx)
+	require.NoError(t, err)
+	require.Len(t, edges, 1)
+	require.Equal(t, "knows", edges[0].Type)
+
+	data, err := store.Objects().ReadAll(ctx, "tenant-a", "reports/q3.pdf")
+	require.NoError(t, err)
+	require.Equal(t, "quarter three", string(data))
+	data, err = store.Objects().ReadAll(ctx, "tenant-b", "notes.txt")
+	require.NoError(t, err)
+	require.Equal(t, "hello", string(data))
+
+	buckets, err := store.Objects().Buckets(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []string{"tenant-a", "tenant-b"}, buckets)
+}
+
+func TestExportImportSearch(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	srcOpts := testOptions("pw")
+	srcOpts.Plaintext = true
+	src, err := Open(ctx, filepath.Join(dir, "source.db"), 0o600, srcOpts)
+	require.NoError(t, err)
+	seedLogicalStores(t, src)
+
+	var buf bytes.Buffer
+	_, err = Export(ctx, src, &buf, ExportOptions{RecordTypes: []any{&exportTestRecord{}}})
+	require.NoError(t, err)
+	require.NoError(t, src.Close())
+
+	dst := mustOpen(t, filepath.Join(dir, "target.db"), "pw")
+	defer func() { require.NoError(t, dst.Close()) }()
+	_, err = Import(ctx, dst, bytes.NewReader(buf.Bytes()), ImportOptions{RecordTypes: []any{&exportTestRecord{}}})
+	require.NoError(t, err)
+
+	verifyLogicalStores(t, dst)
+}
+
+func TestExportImportGraphsLiveOnly(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	src := mustOpen(t, filepath.Join(dir, "source.db"), "pw")
+
+	g, err := src.Graphs().Open("social")
+	require.NoError(t, err)
+	// Two upserts close a version of node "a"; only the live record is exported.
+	require.NoError(t, g.UpsertNode(ctx, &graphs.Node{ID: "a", Type: "person", Content: "alice"}))
+	require.NoError(t, g.UpsertNode(ctx, &graphs.Node{ID: "a", Type: "person", Content: "alice v2"}))
+	require.NoError(t, g.UpsertEdge(ctx, &graphs.Edge{ID: "e1", From: "a", To: "a", Type: "self"}))
+
+	var buf bytes.Buffer
+	_, err = Export(ctx, src, &buf, ExportOptions{})
+	require.NoError(t, err)
+	require.NoError(t, src.Close())
+
+	dst := mustOpen(t, filepath.Join(dir, "target.db"), "pw")
+	defer func() { require.NoError(t, dst.Close()) }()
+	_, err = Import(ctx, dst, bytes.NewReader(buf.Bytes()), ImportOptions{})
+	require.NoError(t, err)
+
+	imported, err := dst.Graphs().Open("social")
+	require.NoError(t, err)
+	node, err := imported.GetNode(ctx, "a")
+	require.NoError(t, err)
+	require.Equal(t, "alice v2", node.Content)
+	edges, err := imported.GetAllEdges(ctx)
+	require.NoError(t, err)
+	require.Len(t, edges, 1)
+}
+
+func TestExportImportObjects(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	src := mustOpen(t, filepath.Join(dir, "source.db"), "pw")
+
+	_, err := src.Objects().Put(ctx, "tenant", "a/b.bin", strings.NewReader("payload"), 7, "")
+	require.NoError(t, err)
+	info, ok, err := src.Objects().Stat(ctx, "tenant", "a/b.bin")
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	var buf bytes.Buffer
+	_, err = Export(ctx, src, &buf, ExportOptions{})
+	require.NoError(t, err)
+	require.NoError(t, src.Close())
+
+	dst := mustOpen(t, filepath.Join(dir, "target.db"), "pw")
+	defer func() { require.NoError(t, dst.Close()) }()
+	_, err = Import(ctx, dst, bytes.NewReader(buf.Bytes()), ImportOptions{})
+	require.NoError(t, err)
+
+	got, ok, err := dst.Objects().Stat(ctx, "tenant", "a/b.bin")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, info.ETag, got.ETag)
+	data, err := dst.Objects().ReadAll(ctx, "tenant", "a/b.bin")
+	require.NoError(t, err)
+	require.Equal(t, "payload", string(data))
+}
+
+func TestExportImportAllStores(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	// plaintext -> encrypted
+	srcOpts := testOptions("pw")
+	srcOpts.Plaintext = true
+	src, err := Open(ctx, filepath.Join(dir, "source.db"), 0o600, srcOpts)
+	require.NoError(t, err)
+	seedExportStore(t, src)
+	seedLogicalStores(t, src)
+
+	var buf bytes.Buffer
+	_, err = Export(ctx, src, &buf, ExportOptions{RecordTypes: []any{&exportTestRecord{}}})
+	require.NoError(t, err)
+	require.NoError(t, src.Close())
+
+	encrypted := mustOpen(t, filepath.Join(dir, "encrypted.db"), "pw")
+	_, err = Import(ctx, encrypted, bytes.NewReader(buf.Bytes()), ImportOptions{RecordTypes: []any{&exportTestRecord{}}})
+	require.NoError(t, err)
+	verifyExportStore(t, encrypted)
+	verifyLogicalStores(t, encrypted)
+
+	// encrypted -> plaintext
+	var back bytes.Buffer
+	_, err = Export(ctx, encrypted, &back, ExportOptions{RecordTypes: []any{&exportTestRecord{}}})
+	require.NoError(t, err)
+	require.NoError(t, encrypted.Close())
+
+	plainOpts := testOptions("pw")
+	plainOpts.Plaintext = true
+	plain, err := Open(ctx, filepath.Join(dir, "plain.db"), 0o600, plainOpts)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, plain.Close()) }()
+	_, err = Import(ctx, plain, bytes.NewReader(back.Bytes()), ImportOptions{RecordTypes: []any{&exportTestRecord{}}})
+	require.NoError(t, err)
+	verifyExportStore(t, plain)
+	verifyLogicalStores(t, plain)
+}
+
+func TestImportSearchCustomTokenizerFails(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	src := mustOpen(t, filepath.Join(dir, "source.db"), "pw")
+
+	idx, err := src.Search().Open("custom", search.Config{Tokenizer: testCustomTokenizer{}})
+	require.NoError(t, err)
+	require.NoError(t, idx.Upsert(ctx, "d1", "one two"))
+
+	var buf bytes.Buffer
+	_, err = Export(ctx, src, &buf, ExportOptions{})
+	require.NoError(t, err)
+	require.NoError(t, src.Close())
+
+	dst := mustOpen(t, filepath.Join(dir, "target.db"), "pw")
+	defer func() { require.NoError(t, dst.Close()) }()
+
+	_, err = Import(ctx, dst, bytes.NewReader(buf.Bytes()), ImportOptions{})
+	require.ErrorIs(t, err, search.ErrInvalidConfig)
+
+	_, err = Import(ctx, dst, bytes.NewReader(buf.Bytes()), ImportOptions{SearchTokenizer: testCustomTokenizer{}})
+	require.NoError(t, err)
+	imported, err := dst.Search().Open("custom", search.Config{Tokenizer: testCustomTokenizer{}})
+	require.NoError(t, err)
+	count, err := imported.Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
 }

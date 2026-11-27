@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/malivvan/tempest/store/fstree"
+	"github.com/malivvan/tempest/store/graphs"
 	"github.com/malivvan/tempest/store/record"
+	"github.com/malivvan/tempest/store/search"
 	"github.com/malivvan/tempest/store/series"
 	"github.com/malivvan/tempest/store/vector"
 )
@@ -47,6 +49,12 @@ const (
 	exportKindTSRetention   = "ts.retention"
 	exportKindVecCollection = "vec.collection"
 	exportKindVecPoints     = "vec.points"
+
+	exportKindSearchIndex   = "fts.index"
+	exportKindSearchDocs    = "fts.docs"
+	exportKindSearchTerms   = "fts.terms"
+	exportKindGraphDocument = "graph.document"
+	exportKindObject        = "object.put"
 )
 
 // Errors returned by Export and Import.
@@ -125,6 +133,25 @@ type exportRecord struct {
 	UseHNSW   bool               `json:"use_hnsw,omitempty"`
 	HNSW      *vector.HNSWParams `json:"hnsw,omitempty"`
 	Vectors   json.RawMessage    `json:"vectors,omitempty"`
+
+	// Search (fts.*) records.
+	Name      string             `json:"name,omitempty"`
+	K1        float64            `json:"k1,omitempty"`
+	B         float64            `json:"b,omitempty"`
+	Tokenizer string             `json:"tokenizer,omitempty"`
+	DocCount  int64              `json:"doc_count,omitempty"`
+	TotalLen  int64              `json:"total_len,omitempty"`
+	Docs      []search.DocEntry  `json:"docs,omitempty"`
+	Terms     []search.TermEntry `json:"terms,omitempty"`
+
+	// Graph (graph.document) records.
+	Nodes []*graphs.Node `json:"nodes,omitempty"`
+	Edges []*graphs.Edge `json:"edges,omitempty"`
+
+	// Object (object.put) records.
+	Bucket string `json:"bucket,omitempty"`
+	Key    string `json:"key,omitempty"`
+	ETag   string `json:"etag,omitempty"`
 }
 
 // countingWriter counts the bytes that reach the destination.
@@ -197,7 +224,10 @@ func Export(ctx context.Context, src *Store, w io.Writer, opts ExportOptions) (E
 	if err := e.writeHeader(flags); err != nil {
 		return ExportSummary{}, err
 	}
-	for _, export := range []func() error{e.exportDB, e.exportFS, e.exportTS, e.exportVec} {
+	for _, export := range []func() error{
+		e.exportDB, e.exportFS, e.exportTS, e.exportVec,
+		e.exportSearch, e.exportGraphs, e.exportObjects,
+	} {
 		if err := export(); err != nil {
 			return ExportSummary{}, err
 		}
@@ -504,6 +534,140 @@ func (e *exporter) exportVec() error {
 		}
 		if err := flush(); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// exportSearch writes one fts.index record per index, followed by its documents
+// and posting lists in bounded batches. The index record comes first so an
+// import can materialize the index before applying its contents.
+//
+// The original document text is not part of the index and is therefore not
+// exported: search is exported at the postings level.
+func (e *exporter) exportSearch() error {
+	names, err := e.src.Search().Indexes(e.ctx)
+	if err != nil {
+		return fmt.Errorf("tempest: export search: %w", err)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := e.ctx.Err(); err != nil {
+			return err
+		}
+		idx, err := e.src.Search().Open(name, search.Config{})
+		if err != nil {
+			return fmt.Errorf("tempest: export search %q: %w", name, err)
+		}
+		meta, err := idx.Meta(e.ctx)
+		if err != nil {
+			return fmt.Errorf("tempest: export search %q: %w", name, err)
+		}
+		if err := e.writeRecord(exportRecord{
+			Kind:      exportKindSearchIndex,
+			Name:      name,
+			K1:        meta.K1,
+			B:         meta.B,
+			Tokenizer: meta.Tokenizer,
+			DocCount:  meta.DocCount,
+			TotalLen:  meta.TotalLen,
+		}); err != nil {
+			return err
+		}
+
+		docs, err := idx.Docs(e.ctx)
+		if err != nil {
+			return fmt.Errorf("tempest: export search %q: %w", name, err)
+		}
+		for start := 0; start < len(docs); start += exportBatch {
+			end := start + exportBatch
+			if end > len(docs) {
+				end = len(docs)
+			}
+			if err := e.writeRecord(exportRecord{Kind: exportKindSearchDocs, Name: name, Docs: docs[start:end]}); err != nil {
+				return err
+			}
+		}
+
+		terms, err := idx.Terms(e.ctx)
+		if err != nil {
+			return fmt.Errorf("tempest: export search %q: %w", name, err)
+		}
+		for start := 0; start < len(terms); start += exportBatch {
+			end := start + exportBatch
+			if end > len(terms) {
+				end = len(terms)
+			}
+			if err := e.writeRecord(exportRecord{Kind: exportKindSearchTerms, Name: name, Terms: terms[start:end]}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// exportGraphs writes one graph.document record per graph. Only the live graph
+// is exported; the closed bitemporal version history stays behind in the
+// per-store buckets.
+func (e *exporter) exportGraphs() error {
+	names, err := e.src.Graphs().Names(e.ctx)
+	if err != nil {
+		return fmt.Errorf("tempest: export graphs: %w", err)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := e.ctx.Err(); err != nil {
+			return err
+		}
+		g, err := e.src.Graphs().Open(name)
+		if err != nil {
+			return fmt.Errorf("tempest: export graph %q: %w", name, err)
+		}
+		doc, err := g.ExportDocument(e.ctx)
+		if err != nil {
+			return fmt.Errorf("tempest: export graph %q: %w", name, err)
+		}
+		if err := e.writeRecord(exportRecord{
+			Kind:  exportKindGraphDocument,
+			Name:  name,
+			Nodes: doc.Nodes,
+			Edges: doc.Edges,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// exportObjects writes one object.put record per object, bucket by bucket.
+func (e *exporter) exportObjects() error {
+	buckets, err := e.src.Objects().Buckets(e.ctx)
+	if err != nil {
+		return fmt.Errorf("tempest: export objects: %w", err)
+	}
+	sort.Strings(buckets)
+	for _, bucket := range buckets {
+		infos, err := e.src.Objects().List(e.ctx, bucket, "")
+		if err != nil {
+			return fmt.Errorf("tempest: export object bucket %q: %w", bucket, err)
+		}
+		for _, info := range infos {
+			if err := e.ctx.Err(); err != nil {
+				return err
+			}
+			data, err := e.src.Objects().ReadAll(e.ctx, bucket, info.Key)
+			if err != nil {
+				return fmt.Errorf("tempest: export object %q/%q: %w", bucket, info.Key, err)
+			}
+			if err := e.writeRecord(exportRecord{
+				Kind:   exportKindObject,
+				Bucket: bucket,
+				Key:    info.Key,
+				Data:   data,
+				ETag:   info.ETag,
+			}); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

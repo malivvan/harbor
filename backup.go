@@ -439,3 +439,116 @@ func bucketExists(bdb *bolt.DB, name string) bool {
 	})
 	return found
 }
+
+// RestoreOptions tunes RestoreBackup.
+type RestoreOptions struct {
+	// Overwrite replaces an existing file at the destination. When false, an
+	// existing destination fails with os.ErrExist.
+	Overwrite bool
+}
+
+// RestoreBackup verifies src (a backup written by BackupFile or BackupTo) with
+// VerifyBackup and atomically restores it to dst: the bytes go to a temporary
+// file in dst's directory, are synced and closed, and only then replace dst by
+// rename. A failed or canceled restore therefore never truncates an existing
+// destination.
+//
+// dst must not be the path of a store that is currently open: bbolt holds the
+// file lock, and a backup is only restorable while nothing else owns dst.
+// Restoring between encryption modes is not possible through a backup — that is
+// Export/Import's job, because the backup is the encrypted on-disk image.
+func RestoreBackup(ctx context.Context, src, dst, password string, opts *Options, rest RestoreOptions) (BackupInfo, error) {
+	var info BackupInfo
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return info, err
+	}
+	if src == "" {
+		return info, fmt.Errorf("tempest: restore backup: %w: src is required", ErrInvalidOptions)
+	}
+	if dst == "" {
+		return info, fmt.Errorf("tempest: restore backup: %w: dst is required", ErrInvalidOptions)
+	}
+	if password == "" {
+		return info, fmt.Errorf("tempest: restore backup: %w: password is required", ErrInvalidPassword)
+	}
+
+	// Prove the password, flags, every sub-store marker and the manifest
+	// checksum before dst is touched.
+	verified, err := VerifyBackup(ctx, src, password, opts)
+	if err != nil {
+		return info, fmt.Errorf("tempest: restore backup: %w", err)
+	}
+
+	if !rest.Overwrite {
+		if _, err := os.Stat(dst); err == nil {
+			return info, fmt.Errorf("tempest: restore backup: %w: %s already exists", os.ErrExist, dst)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return info, fmt.Errorf("tempest: restore backup: %w", err)
+		}
+	}
+
+	in, err := os.Open(src)
+	if err != nil {
+		return info, fmt.Errorf("tempest: restore backup: %w", err)
+	}
+	defer func() { _ = in.Close() }()
+
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".tempest-restore-*")
+	if err != nil {
+		return info, fmt.Errorf("tempest: restore to %q: %w", dst, err)
+	}
+	tmpPath := tmp.Name()
+	discard := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}
+
+	hasher := sha256.New()
+	counter := &countingWriter{w: io.MultiWriter(tmp, hasher)}
+	if _, err := io.Copy(counter, ctxReader{ctx: ctx, r: in}); err != nil {
+		discard()
+		return info, fmt.Errorf("tempest: restore to %q: %w", dst, err)
+	}
+	sum := hex.EncodeToString(hasher.Sum(nil))
+	if counter.n != verified.Size || sum != verified.SHA256 {
+		discard()
+		return info, fmt.Errorf("tempest: restore to %q: %w: source changed during the restore", dst, ErrInvalidBackup)
+	}
+	if err := tmp.Sync(); err != nil {
+		discard()
+		return info, fmt.Errorf("tempest: restore to %q: sync: %w", dst, err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return info, fmt.Errorf("tempest: restore to %q: close: %w", dst, err)
+	}
+	if err := os.Rename(tmpPath, dst); err != nil {
+		_ = os.Remove(tmpPath)
+		return info, fmt.Errorf("tempest: restore to %q: %w", dst, err)
+	}
+
+	return BackupInfo{
+		Path:      dst,
+		Size:      counter.n,
+		SHA256:    sum,
+		CreatedAt: time.Now().UTC(),
+		Flags:     verified.Flags,
+		Version:   record.Version,
+	}, nil
+}
+
+// ctxReader aborts a copy when the context is cancelled.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (cr ctxReader) Read(p []byte) (int, error) {
+	if err := cr.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return cr.r.Read(p)
+}
