@@ -31,6 +31,21 @@ is additive and old readers already fail closed on the new record kinds.
 
 ---
 
+## Progress
+
+- [x] Phase 0 — shared prerequisites
+- [x] Phase 1 — database-backup restore API
+- [x] Phase 2 — complete logical export/import
+- [x] Phase 3 — cluster coverage for search/graphs/objects
+- [x] Phase 4 — vector cluster writes refresh in-memory indexes
+- [x] Phase 5 — search audit flag and implementation
+- [x] Phase 6 — search key rotation and VerifyAll
+- [x] Phase 7 — encryption/rotation consolidation (graphs, object)
+- [x] Phase 8 — audit/ledger consolidation
+- [x] Documentation updates
+
+---
+
 ## Gap summary and priority order
 
 | # | Gap | Urgency | Phase |

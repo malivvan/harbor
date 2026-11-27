@@ -9,7 +9,7 @@ record store used by the root `tempest` package.
 It can be used in two ways:
 
 ```go
-// 1. Through the root package (one file, one password, all four stores).
+// 1. Through the root package (one file, one password, every store).
 store, err := tempest.Open(ctx, "app.db", 0o600, &tempest.Options{Password: password})
 records := store.Record()
 

@@ -960,6 +960,9 @@ node, err := cluster.Open(ctx, cluster.Config{
 // Writes go through the replicated facades (leader only).
 err = node.Record().Save(ctx, &User{ID: "u1", Name: "alice"})
 err = node.Series().Insert(ctx, "cpu", series.Point{Timestamp: now, Value: 42})
+err = node.Search().Upsert("docs", "d1", "alpha beta")
+err = node.Objects().Put("tenant", "a/b.txt", data)
+err = node.Graphs().UpsertNode("social", &graphs.Node{ID: "a", Type: "person"})
 
 // Reads hit the local store directly.
 var u User
@@ -1043,6 +1046,9 @@ Full rotation uses the whole-store methods:
 | `file` | `RotateAll` |
 | `series` | `RotateAll` |
 | `vector` | `RotateAll` |
+| `search` | `RotateAll` |
+| `graphs` | `RotateAll` |
+| `object` | `RotateAll` |
 
 A full rotation is atomic within its store and adopts the new key when it
 completes. Run it with **exclusive access** to the store; do not write from
@@ -1050,19 +1056,23 @@ other goroutines while it runs. `VerifyAll` re-reads every value and confirms
 it decrypts with the configured keys.
 
 The per-entity methods (`file.ReEncryptFS`, `series.ReEncryptSeries`,
-`vector.ReEncryptCollection`) are **partial** migrations. The marker stays under
-the current key and the previous key remains available in the running process,
-so entities that have not been rewritten keep working. Rewrite every entity,
-call `RotateAll`, and only then close the store or reopen it from a fresh
-process. Closing a store between a partial rotation and `RotateAll` is
-unsupported.
+`vector.ReEncryptCollection`, `search.ReEncryptIndex`,
+`graphs.ReEncryptGraph`, `object.ReEncryptBucket`) are **partial** migrations.
+The marker stays under the current key and the previous key remains available in
+the running process, so entities that have not been rewritten keep working.
+Rewrite every entity, call `RotateAll`, and only then close the store or reopen
+it from a fresh process. Closing a store between a partial rotation and
+`RotateAll` is unsupported.
 
 Partial rotation cannot run when deterministic names are encrypted: `series` with
-`EncryptSeriesNames`, or `vector` with `EncryptPointIDs` or
-`EncryptVectorCollectionNames`. In those modes the physical names are derived from
-one master key, so the remaining entities could neither be found nor decrypted
-after the new key is installed. The methods return `ErrInvalidConfig`; use
-`RotateAll`.
+`EncryptSeriesNames`, `vector` with `EncryptPointIDs` or
+`EncryptVectorCollectionNames`, or `search` with `EncryptTokens`. In those modes
+the physical names are derived from one master key, so the remaining entities
+could neither be found nor decrypted after the new key is installed. The methods
+return `ErrInvalidConfig`; use `RotateAll`.
+
+`VerifyAll` is available on every store, including `search`, `graphs` and
+`object`, and reports any value that fails authentication.
 
 ### Ordered queries under encryption
 
@@ -1155,6 +1165,7 @@ log.Printf("audit: %d events, tip %x", res.Count, res.Tip)
 | `AuditVector` | `vector` writes |
 | `AuditGraphs` | `graphs` writes |
 | `AuditObject` | `object` writes |
+| `AuditSearch` | `search` writes (index create/drop, upsert, delete) |
 | `AuditAll` | every store |
 
 Unlike encryption flags, audit flags are **not persisted**: they are a per-open
@@ -1300,6 +1311,18 @@ fmt.Println(info.Size, info.SHA256, info.Flags)
   backup never corrupts an existing file and leaves no partial output.
 
 To restore, open the snapshot file with `tempest.Open` and the same password.
+`RestoreBackup` verifies the source and then atomically copies it to a
+destination: the bytes go to a temporary file, are synced and closed, and only
+then replace the destination by rename. The destination must not be a store that
+is currently open, because bbolt holds the file lock. A backup is the encrypted
+on-disk image, so restoring with the same password is byte-identical; use
+Export/Import to change encryption modes.
+
+```go
+info, err := tempest.RestoreBackup(ctx, backupPath, "/var/lib/app/tempest.db",
+	password, nil, tempest.RestoreOptions{Overwrite: true})
+```
+
 `View` remains available for lower-level raw bbolt snapshots.
 
 `VerifyBackup` validates a copy before restoring it. It opens the file
@@ -1362,8 +1385,17 @@ err = tempest.Import(ctx, restored, bytes.NewReader(buf.Bytes()), tempest.Import
   unknown format or version (`ErrExportFormat`/`ErrExportVersion`), a truncated
   stream (`ErrExportTruncated`) and a checksum mismatch (`ErrExportChecksum`).
 - Exported: db records of the listed types, every named file system's tree,
-  every time series (points, labels, retention) and every vector collection
-  (metadata and points; buffered points are flushed first).
+  every time series (points, labels, retention), every vector collection
+  (metadata and points; buffered points are flushed first), every full-text
+  index, every graph and every object bucket.
+- Full-text export is **postings-level**: documents (id, length, term
+  frequencies), posting lists and corpus statistics. The original text was never
+  stored, so it cannot be recovered. A custom tokenizer cannot be reconstructed
+  from its name; import such an index with
+  `ImportOptions.SearchTokenizer`, or it fails with `ErrInvalidConfig`.
+- Graph export is **live-only**: nodes and edges are carried, not the closed
+  bitemporal version history. In-process history migration between layouts stays
+  available through `graphs.Copy` and `Store.MigrateFromRecord`.
 - `ImportOptions.DryRun` validates the whole stream without writing, and accepts
   a nil destination. Because the checksum is verified at the footer, run a dry
   run first on untrusted input: earlier records can be applied before a later

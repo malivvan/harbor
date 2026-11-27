@@ -24,7 +24,7 @@ separate `docs/` tree.
 | `.../store/vector/hnsw/heap` | The heap used on the HNSW search hot path. |
 | `.../store/vector/doc` | Document-oriented facade over `vector`: id, content, embedding and string metadata; the collection dimension is taken from the first upsert. |
 | `.../metrics` | Dependency-free observer interface and nil-safe metric helpers used by every store; a nil observer means no instrumentation. |
-| `.../store/ledger` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write, encoded with the package's deterministic JSON encoder. |
+| `.../store/ledger` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write (record, file, series, vector, graphs, object, search), encoded with the package's deterministic JSON encoder. |
 | `.../cluster` | Raft-backed cluster replication of a whole store: replicated command facades, snapshots, and the bolt-backed raft log/stable store it persists with (no raft-boltdb dependency). |
 | `.../store/object` | Independent flat object store with buckets, path containment and atomic `Put`; works without the file store and migrates file-backed blobs explicitly. |
 | `.../backup` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore, and snapshot ids are time-sortable ULIDs generated in the package. |
@@ -248,8 +248,8 @@ bbolt provides one writer and many readers, and tempest follows that model:
 - `record.TransactionManager`, `fstree.Walk`, `series.Store`, and `vector.Collection` all use
   the same bbolt handle and therefore share the single-writer constraint.
 - `Store.WriteTransaction`/`ReadTransaction` bind every sub-store to one
-  caller-owned bbolt transaction. `file`, `series` and `vector` carry an optional `tx`
-  field: when set, their `view`/`update` helpers execute against it instead of
+  caller-owned bbolt transaction. `file`, `series`, `vector` and `search` carry an
+  optional `tx` field: when set, their `view`/`update` helpers execute against it instead of
   opening a managed transaction, and `WithTransaction` builds the bound view
   without tracking it in the parent. Rotation is rejected on a bound store
   (`ErrInTransaction`). Audit events cannot be recorded inside the transaction
@@ -727,16 +727,20 @@ keys as fallbacks and deliberately leaves the marker under the current key;
 the store is only self-consistent for a fresh process after `RotateAll`.
 
 Full rotation (`record.ReEncrypt`/`RotateAll`, `fstree.RotateAll`, `series.RotateAll`,
-`vector.RotateAll`) rewrites data atomically within the store, adopts the new key,
-and drops the old one. It requires exclusive access. `VerifyAll` re-reads every
+`vector.RotateAll`, `search.RotateAll`, `graphs.RotateAll`, `object.RotateAll`)
+rewrites data atomically within the store, adopts the new key, and drops the old
+one. It requires exclusive access. `VerifyAll` re-reads every
 value and fails with the authentication sentinel if any value does not decrypt.
 
 Partial rotation (`fstree.ReEncryptFS`, `series.ReEncryptSeries`,
-`vector.ReEncryptCollection`) must be followed by `RotateAll` before close. It
-cannot run when deterministic names are encrypted (`series.EncryptSeriesNames`,
-`vector.EncryptPointIDs`, `vector.EncryptCollectionNames`), because the physical names
-are derived from one master key; those paths return `ErrInvalidConfig` rather
-than leaving the database unrecoverable.
+`vector.ReEncryptCollection`, `search.ReEncryptIndex`, `graphs.ReEncryptGraph`,
+`object.ReEncryptBucket`) must be followed by `RotateAll` before close. It cannot
+run when deterministic names are encrypted (`series.EncryptSeriesNames`,
+`vector.EncryptPointIDs`, `vector.EncryptCollectionNames`, `search.EncryptTokens`),
+because the physical names are derived from one master key; those paths return
+`ErrInvalidConfig` rather than leaving the database unrecoverable. `VerifyAll`
+exists on every store and reports `crypto.ErrAuthFailed` for a value that does
+not decrypt.
 
 There is no plaintext ↔ encrypted in-place migration. Export and re-import.
 
@@ -778,6 +782,15 @@ sub-store's marker and version through the normal `record.Open`/`fstree.Open`/`s
 `search.OpenReadOnly` exist for read-only traversal, and fs filesystems are opened
 with `OpenReadOnly` per name. The manifest is a sidecar, so the backup bytes are
 unchanged. Verification never mutates the copy.
+
+`RestoreBackup(ctx, src, dst, password, opts, RestoreOptions)` verifies `src`
+with `VerifyBackup` and then restores it atomically: the bytes are copied to a
+temporary file in `dst`'s directory through a context-aware writer, hashed,
+synced, closed and renamed into place. The destination must not be a store that
+is currently open (bbolt holds the lock), and a backup is the encrypted on-disk
+image, so restoring it keeps the same password and flags; cross-mode migration
+belongs to Export/Import. `RestoreOptions.Overwrite` controls whether an existing
+`dst` is replaced.
 
 ## Development workflow
 

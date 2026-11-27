@@ -59,7 +59,10 @@ log.Printf("audit: %d events, tip %x", res.Count, res.Tip)
 | `AuditFile` | `file` writes |
 | `AuditSeries` | `series` writes |
 | `AuditVector` | `vector` writes |
-| `AuditAll` | all four |
+| `AuditGraphs` | `graphs` writes |
+| `AuditObject` | `object` writes |
+| `AuditSearch` | `search` writes |
+| `AuditAll` | every store |
 
 Unlike encryption flags, audit flags are **not persisted**: they are a per-open
 runtime choice. Opening with a flag set records events; opening without it
