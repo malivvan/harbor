@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/malivvan/tempest/internal/compress"
 	"github.com/malivvan/tempest/internal/crypto"
 	"github.com/malivvan/tempest/metrics"
 	"github.com/malivvan/tempest/store/fstree"
@@ -81,6 +82,18 @@ type Config struct {
 	// EncryptValues seals object records.
 	EncryptValues bool
 
+	// Compress Zstd-compresses object records (content and metadata) on the
+	// plaintext side of encryption. It is a write-time preference: reads
+	// auto-detect the envelope, so a store written compressed stays readable
+	// with Compress disabled. It does not require encryption.
+	Compress bool
+
+	// CompressLevel selects the Zstandard level (0 selects the default).
+	CompressLevel int
+
+	// MinCompress skips compressing records smaller than this many bytes.
+	MinCompress int
+
 	// Audit, when non-nil, receives one entry per committed object write.
 	Audit ledger.Sink
 
@@ -90,8 +103,13 @@ type Config struct {
 
 // encState holds the resolved encryption settings.
 type encState struct {
-	kc *crypto.Keychain
+	kc   *crypto.Keychain
+	comp *compress.Codec
 }
+
+// encrypted reports whether a real cipher is configured. A state can exist for
+// compression alone, with no keychain.
+func (e *encState) encrypted() bool { return e != nil && e.kc != nil }
 
 // Store is a flat object namespace backed by one bbolt database.
 type Store struct {
@@ -175,8 +193,19 @@ func open(ctx context.Context, bdb *bolt.DB, cfg Config, readOnly bool) (*Store,
 }
 
 func resolveEnc(cfg Config) (*encState, error) {
-	if !cfg.EncryptValues {
+	if !cfg.EncryptValues && !cfg.Compress {
 		return nil, nil
+	}
+	state := &encState{}
+	if cfg.Compress {
+		codec, err := compress.NewCodec(compress.Config{Level: cfg.CompressLevel, MinSize: cfg.MinCompress})
+		if err != nil {
+			return nil, err
+		}
+		state.comp = codec
+	}
+	if !cfg.EncryptValues {
+		return state, nil
 	}
 	key, err := crypto.ResolveKey(cfg.Secret)
 	if err != nil {
@@ -186,7 +215,8 @@ func resolveEnc(cfg Config) (*encState, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &encState{kc: kc}, nil
+	state.kc = kc
+	return state, nil
 }
 
 func cloneRoot(root [][]byte) [][]byte {
@@ -413,7 +443,7 @@ func (s *Store) checkMeta(root *bolt.Bucket, readOnly bool) error {
 
 	want := byte(0)
 	enc := s.encState()
-	if enc != nil {
+	if enc.encrypted() {
 		want = 1
 	}
 	mode := root.Get([]byte(modeKey))
@@ -430,7 +460,7 @@ func (s *Store) checkMeta(root *bolt.Bucket, readOnly bool) error {
 		return fmt.Errorf("%w: stored mode %#x, configured %#x", ErrWrongMode, mode[0], want)
 	}
 
-	if enc == nil {
+	if !enc.encrypted() {
 		return nil
 	}
 	canary := root.Get([]byte(canaryKey))
@@ -454,20 +484,35 @@ func (s *Store) checkMeta(root *bolt.Bucket, readOnly bool) error {
 	return nil
 }
 
+// seal compresses plain when compression is enabled, then seals it when value
+// encryption is enabled. The canary is sealed directly with the keychain and is
+// never compressed.
 func (s *Store) seal(plain []byte) ([]byte, error) {
 	enc := s.encState()
-	if enc == nil {
+	if enc != nil && enc.comp != nil {
+		var err error
+		if plain, err = enc.comp.Encode(nil, plain); err != nil {
+			return nil, err
+		}
+	}
+	if !enc.encrypted() {
 		return plain, nil
 	}
 	return enc.kc.Seal(plain)
 }
 
+// openValue opens raw when value encryption is enabled and always decodes a
+// compressed envelope.
 func (s *Store) openValue(raw []byte) ([]byte, error) {
 	enc := s.encState()
-	if enc == nil {
-		return raw, nil
+	if !enc.encrypted() {
+		return compress.Decode(nil, raw)
 	}
-	return enc.kc.Open(raw)
+	plain, err := enc.kc.Open(raw)
+	if err != nil {
+		return nil, err
+	}
+	return compress.Decode(nil, plain)
 }
 
 func validateBucket(bucket string) error {

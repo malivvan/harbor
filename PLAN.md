@@ -44,7 +44,7 @@ dependency. It will be deleted in the next step.
 - [x] Phase 4 — vector compression
 - [x] Phase 5 — search compression
 - [x] Phase 6 — graphs compression
-- [ ] Phase 7 — object compression
+- [x] Phase 7 — object compression
 - [ ] Phase 8 — fstree content-addressed chunk deduplication
 - [ ] Phase 9 — object blob deduplication
 - [ ] Phase 10 — root package wiring
