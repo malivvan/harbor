@@ -127,15 +127,15 @@ jobs:
         include:
           - goarch: arm
             goarm: "7"
-            emulator: /usr/bin/qemu-arm-static
+            qemu: arm
           - goarch: arm64
-            emulator: /usr/bin/qemu-aarch64-static
+            qemu: aarch64
           - goarch: ppc64le
-            emulator: /usr/bin/qemu-ppc64le-static
+            qemu: ppc64le
           - goarch: riscv64
-            emulator: /usr/bin/qemu-riscv64-static
+            qemu: riscv64
           - goarch: s390x
-            emulator: /usr/bin/qemu-s390x-static
+            qemu: s390x
     env:
       GOOS: linux
       GOARCH: ${{ matrix.goarch }}
@@ -151,12 +151,36 @@ jobs:
       - name: install qemu-user
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-user-static
+          # Ubuntu 26.04 (resolute) turned qemu-user-static into a virtual
+          # package: the static emulators are no longer shipped and qemu-user
+          # provides /usr/bin/qemu-<arch> instead. Install whichever exists and
+          # resolve the binary by name below, instead of pinning a path.
+          sudo apt-get install -y --no-install-recommends qemu-user ||
+            sudo apt-get install -y --no-install-recommends qemu-user-static
+
+      - name: resolve emulator
+        id: emulator
+        run: |
+          # Prefer a static binary when the distribution still ships one;
+          # qemu-user's dynamically linked emulator works the same way for a
+          # static Go test binary.
+          for candidate in \
+            "/usr/bin/qemu-${{ matrix.qemu }}-static" \
+            "/usr/bin/qemu-${{ matrix.qemu }}"; do
+            if [ -x "$candidate" ]; then
+              echo "using $candidate"
+              echo "path=$candidate" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "no qemu user emulator found for ${{ matrix.qemu }}" >&2
+          ls -l /usr/bin/qemu-* >&2 || true
+          exit 1
 
       - name: test
         # qemu is roughly an order of magnitude slower than the host, so the
         # per-binary timeout is raised; it still catches a hang.
-        run: go test -exec "${{ matrix.emulator }}" -count=1 -timeout 900s ./...
+        run: go test -exec "${{ steps.emulator.outputs.path }}" -count=1 -timeout 900s ./...
 
   bench:
     runs-on: ubuntu-latest
