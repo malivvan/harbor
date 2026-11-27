@@ -33,6 +33,7 @@ separate `docs/` tree.
 | `.../store/rag` | Deterministic text chunking with byte offsets and digests, provenance payload keys, and a neighbour-window filter. |
 | `.../internal/compress` | The Zstandard value codec: pooled encoder/decoder and the self-describing `ZCMP` envelope. Not public API. |
 | `.../internal/bucket` | The root bucket name registry for the sub-stores (`RECORD`, `SERIES`, `VECTOR`, `FSTREE`, `SEARCH`, `GRAPHS`, `OBJECT`, `SYSTEM`, `LEDGER`). Append a name for a new store; never rename an existing one. Not public API. |
+| `.../internal/evals` | Retrieval metrics (recall@k, nDCG, MRR) and a seed-stable synthetic corpus for the HNSW recall floor. Not public API. |
 | `.../internal/...` | Shared bbolt helpers, AEAD primitives, Argon2id/BLAKE2b, SLIP-0010/0021 and CPU detection. Not public API. |
 
 The stores are independent. The root package is a convenience composition,
@@ -876,6 +877,9 @@ go tool cover -func=coverage.out
 # Benchmarks (distance kernels, encrypted overhead, filtered search, FS I/O,
 # FastWalk, TS aggregates/retention, db queries and S3 multipart)
 go test -run '^$' -bench . -benchmem -benchtime=100ms ./store/vector ./store/series ./store/fstree ./store/record ./store/fstree/s3fs
+
+# Retrieval quality gate (deterministic corpus, HNSW recall@10 floor)
+go test -run TestHNSWRecallFloor ./store/vector
 ```
 
 CI runs formatting, vet, build, tests, race tests, coverage, staticcheck,
