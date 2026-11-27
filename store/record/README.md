@@ -462,6 +462,27 @@ expired, err := records.SweepExpired(ctx, &Session{}, time.Now(), 100)
 expire. An expired record is still readable under `WithExpired` and can be
 updated or resurrected by clearing its expiry.
 
+### Soft delete
+
+`Config.Tombstone` (root `Options.Tombstone`) enables soft delete.
+`DeleteStructWith(ctx, data, DeleteOptions{Soft: true})` writes a tombstone
+without removing the record or its indexes. Normal reads hide it;
+`record.WithDeleted(ctx)` includes it for audit. `Restore` clears the tombstone,
+`Deleted` lists tombstones, and `PurgeDeleted` hard-deletes them. A normal
+`Save` or `Update` resurrects the record. The first soft delete writes the
+`CapTombstone` capability bit, so reopening without the option still hides the
+record.
+
+```go
+err = records.DeleteStructWith(ctx, &Todo{ID: "1"}, record.DeleteOptions{Soft: true})
+err = records.Restore(ctx, &Todo{ID: "1"})
+refs, err := records.Deleted(ctx, &Todo{}, 0)
+purged, err := records.PurgeDeleted(ctx, &Todo{}, time.Now().Add(-30*24*time.Hour))
+```
+
+`DeleteOptions.Cascade` is reserved for the cross-store link registry and has
+no effect on a soft delete.
+
 ## Transactions
 
 tempest exposes callback-managed transactions only; there is no

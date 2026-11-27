@@ -174,7 +174,7 @@ func (it *Iterator) Next() bool {
 			// Nested buckets are not records.
 			continue
 		}
-		if it.node != nil && it.node.s != nil && it.node.s.expiry && !expiredAllowed(it.ctx) && it.node.expiredKey(it.bucket, k) {
+		if it.node != nil && it.node.hiddenKey(it.ctx, it.bucket, k) {
 			continue
 		}
 

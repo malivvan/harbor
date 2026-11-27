@@ -228,6 +228,11 @@ type Options struct {
 	// records.
 	Expiry bool
 
+	// Tombstone enables soft delete for the record store. It is a write-time
+	// preference stored with the capability bits, so reopening without it still
+	// hides soft-deleted records.
+	Tombstone bool
+
 	// Timeout bounds how long Open waits for bbolt's exclusive file lock before
 	// failing. A zero Timeout selects DefaultBoltOptions.Timeout (two seconds),
 	// not bbolt's wait-forever. A negative value is ignored for the same
@@ -584,6 +589,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		CompressLevel:   options.Compression.Level,
 		MinCompress:     options.Compression.MinSize,
 		Expiry:          options.Expiry,
+		Tombstone:       options.Tombstone,
 		Trace:           traceSink(TraceRecord),
 		Metrics:         options.Metrics,
 	}); err != nil {

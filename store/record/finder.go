@@ -172,7 +172,7 @@ func (n *node) one(ctx context.Context, tx *bolt.Tx, bucketName, fieldName strin
 		return ErrNotFound
 	}
 
-	if !expiredAllowed(ctx) && n.expiredKey(bucket, id) {
+	if n.hiddenKey(ctx, bucket, id) {
 		return ErrNotFound
 	}
 
@@ -428,7 +428,7 @@ func (n *node) allByIndex(ctx context.Context, tx *bolt.Tx, fieldName string, cf
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
-		if !expiredAllowed(ctx) && n.expiredKey(bucket, id) {
+		if n.hiddenKey(ctx, bucket, id) {
 			continue
 		}
 		live = append(live, id)

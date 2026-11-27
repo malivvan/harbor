@@ -29,7 +29,7 @@ is `done` only when its acceptance tests pass and the tree is green.
 | GAP-03 | pending | |
 | GAP-04 | in progress | record store done (`SetExpiry`/`Expiry`/`SweepExpired`, capability bit, read filtering); vector/search expiry pending |
 | GAP-05 | pending | |
-| GAP-06 | pending | |
+| GAP-06 | done | soft delete/tombstones, `Restore`, `Deleted`, `PurgeDeleted`, capability bit |
 | GAP-07 | done | record revisions, `UpdateIf`/`DeleteIf`/`Revision`, `ErrConflict` |
 | GAP-08 | pending | |
 | GAP-09 | pending | |

@@ -442,6 +442,11 @@ err = users.SetExpiry(ctx, &u, time.Now().Add(7*24*time.Hour))
 expired, err := users.SweepExpired(ctx, &User{}, time.Now(), 100)
 ```
 
+With `Options.Tombstone`, `DeleteStructWith(..., record.DeleteOptions{Soft: true})`
+hides a record without removing its bytes; `Restore` brings it back,
+`record.WithDeleted(ctx)` includes it for audit, and `PurgeDeleted` hard-deletes
+old tombstones. A normal `Save` or `Update` resurrects a soft-deleted record.
+
 ### Transactions
 
 tempest exposes callback-managed transactions only:

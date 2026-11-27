@@ -94,6 +94,10 @@ type node struct {
 	// skipRevision suppresses the per-record revision bump for maintenance
 	// rewrites (ReIndex) that do not represent a caller-visible write.
 	skipRevision bool
+
+	// skipTombstone suppresses the implicit un-delete performed by a save.
+	// ReIndex must not resurrect a record the caller soft-deleted.
+	skipTombstone bool
 }
 
 // cloneBucketPath returns a defensive copy of the given bucket path.

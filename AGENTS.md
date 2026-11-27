@@ -86,6 +86,7 @@ User/                          one bucket per mapped struct
     <field>                    auto-increment counters
     revision:<key>             8-byte per-record revision
     expiry:<key>               8-byte per-record expiry (UnixNano, sealed)
+    deleted:<key>              8-byte soft-delete tombstone (UnixNano, sealed)
   __tempest_index_<Field>/       list or unique index bucket
 __tempest_expiry_/             expiry index: expiry + type + key
 __database/

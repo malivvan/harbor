@@ -98,6 +98,7 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		return nil, wrapError("open", err)
 	}
 	s.expiry = cfg.Expiry || s.caps&CapExpiry != 0
+	s.tombstone = cfg.Tombstone || s.caps&CapTombstone != 0
 
 	return s, nil
 }
@@ -140,10 +141,12 @@ type Store struct {
 	// mutated.
 	obs metrics.Observer
 
-	// caps is the validated persisted capability bitmask, and expiry reports
-	// whether reads must exclude expired records. Both are set at Open.
-	caps   uint64
-	expiry bool
+	// caps is the validated persisted capability bitmask; expiry and
+	// tombstone report which read-time filters are active. All are set at
+	// Open.
+	caps      uint64
+	expiry    bool
+	tombstone bool
 
 	// nowMu guards nowFn, the optional clock override used by expiry checks
 	// and sweeps. A nil nowFn selects time.Now.

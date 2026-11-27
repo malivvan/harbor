@@ -64,7 +64,7 @@ func (n *node) GetMany(ctx context.Context, ids []any, to any) (missing []any, e
 				missing = append(missing, id)
 				continue
 			}
-			if !expiredAllowed(ctx) && n.expiredKey(bucket, key) {
+			if n.hiddenKey(ctx, bucket, key) {
 				missing = append(missing, id)
 				continue
 			}

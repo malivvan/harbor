@@ -54,6 +54,18 @@ type TypeStore interface {
 
 	// SweepExpired deletes up to limit expired records of the type of data.
 	SweepExpired(ctx context.Context, data any, now time.Time, limit int) (int, error)
+
+	// DeleteStructWith deletes a record, either hard (the default) or soft.
+	DeleteStructWith(ctx context.Context, data any, opts DeleteOptions) error
+
+	// Restore clears a soft-delete tombstone.
+	Restore(ctx context.Context, data any) error
+
+	// Deleted lists soft-deleted records of the type of data.
+	Deleted(ctx context.Context, data any, limit int) ([]DeletedRef, error)
+
+	// PurgeDeleted hard-deletes tombstones older than before (zero = all).
+	PurgeDeleted(ctx context.Context, data any, before time.Time) (int, error)
 }
 
 // Init creates the indexes and buckets for a given structure
@@ -157,8 +169,10 @@ func (n *node) reIndex(ctx context.Context, tx *bolt.Tx, data interface{}, cfg *
 
 	root := n.withTransaction(tx)
 	// ReIndex rewrites every record to rebuild its indexes. That is not a
-	// caller-visible write, so it must not invalidate a CAS precondition.
+	// caller-visible write, so it must not invalidate a CAS precondition or
+	// resurrect a soft-deleted record.
 	root.skipRevision = true
+	root.skipTombstone = true
 	nodes, err := root.From(cfg.Name).PrefixScan(ctx, indexPrefix)
 	if err != nil {
 		return err
@@ -435,6 +449,11 @@ func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data in
 			return err
 		}
 	}
+	if !n.skipTombstone {
+		if err := meta.deleteTombstone(id); err != nil {
+			return err
+		}
+	}
 	return checkContext(ctx)
 }
 
@@ -566,6 +585,7 @@ func (n *node) update(ctx context.Context, data interface{}, op string, fn func(
 	// Update must be able to read and resurrect an expired record; the expiry
 	// gate belongs on ordinary reads, not on the maintenance path.
 	ctx = WithExpired(ctx)
+	ctx = WithDeleted(ctx)
 
 	ref := reflect.ValueOf(data)
 	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
@@ -783,6 +803,9 @@ func (n *node) deleteStruct(ctx context.Context, tx *bolt.Tx, cfg *structConfig,
 		}
 	}
 	if err := m.deleteExpiry(id); err != nil {
+		return err
+	}
+	if err := m.deleteTombstone(id); err != nil {
 		return err
 	}
 	if err := m.deleteRevision(id); err != nil {

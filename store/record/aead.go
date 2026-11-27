@@ -64,6 +64,12 @@ type Config struct {
 	// value leaves the store byte-identical to a build without expiry.
 	Expiry bool
 
+	// Tombstone enables soft delete: DeleteStructWith(Soft) hides a record
+	// without removing its bytes, and normal reads exclude it until Restore or
+	// PurgeDeleted. Opening a store that already carries the tombstone
+	// capability enables it even when this field is false.
+	Tombstone bool
+
 	// Trace, when non-nil, receives an entry for every committed write.
 	Trace ledger.Sink
 
