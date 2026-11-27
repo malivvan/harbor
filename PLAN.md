@@ -40,7 +40,7 @@ dependency. It will be deleted in the next step.
 - [x] Phase 0 — internal/compress (Zstd codec + envelope)
 - [x] Phase 1 — record store compression
 - [x] Phase 2 — fstree compression
-- [ ] Phase 3 — series compression
+- [x] Phase 3 — series compression
 - [ ] Phase 4 — vector compression
 - [ ] Phase 5 — search compression
 - [ ] Phase 6 — graphs compression

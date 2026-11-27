@@ -216,13 +216,18 @@ func (s *Store) WithRoot(parts ...string) *Store {
 	}
 }
 
-// encryptsValues reports whether values and series metadata are sealed.
+// encryptsValues reports whether values and series metadata go through the
+// seal/open path: they are sealed when value encryption is enabled, and
+// compressed when compression is enabled.
 func (s *Store) encryptsValues() bool {
 	if s == nil {
 		return false
 	}
 	enc := s.encState()
-	return enc != nil && enc.encValues
+	if enc == nil {
+		return false
+	}
+	return (enc.encValues && enc.encrypted()) || enc.comp != nil
 }
 
 // blockDuration returns the configured encryption time-block width, or zero

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/malivvan/tempest/internal/compress"
 	"github.com/malivvan/tempest/internal/crypto"
 	"github.com/malivvan/tempest/metrics"
 	"github.com/malivvan/tempest/store/ledger"
@@ -38,6 +39,18 @@ type Config struct {
 	// EncryptSeriesNames encrypts series bucket and metadata names with
 	// deterministic AES-SIV.
 	EncryptSeriesNames bool
+
+	// Compress Zstd-compresses point values, block payloads and series metadata
+	// on the plaintext side of encryption. It is a write-time preference: reads
+	// auto-detect the envelope, so a store written compressed stays readable
+	// with Compress disabled. It does not require encryption.
+	Compress bool
+
+	// CompressLevel selects the Zstandard level (0 selects the default).
+	CompressLevel int
+
+	// MinCompress skips compressing values smaller than this many bytes.
+	MinCompress int
 
 	// BlockDuration groups points into encrypted time blocks of this width in
 	// nanoseconds. It must be non-negative; zero disables block mode.
@@ -110,30 +123,58 @@ type encState struct {
 	encNames  bool
 	blockDur  int64
 	siv       *crypto.SIVNameCipher
+	comp      *compress.Codec
 }
 
-// seal encrypts plain with the primary key, prepending a fresh nonce.
+// encrypted reports whether a real cipher is configured. A state can exist for
+// compression alone, with no keychain.
+func (e *encState) encrypted() bool { return e != nil && e.kc != nil }
+
+// seal compresses plain when compression is enabled, then encrypts it when a
+// cipher is configured.
 func (e *encState) seal(plain []byte) ([]byte, error) {
-	if e == nil {
+	if e != nil && e.comp != nil {
+		var err error
+		if plain, err = e.comp.Encode(nil, plain); err != nil {
+			return nil, err
+		}
+	}
+	if !e.encrypted() {
 		return plain, nil
 	}
 	return e.kc.Seal(plain)
 }
 
-// open decrypts raw, trying the primary key and then any rotation fallbacks.
+// open decrypts raw, trying the primary key and then any rotation fallbacks,
+// and decodes a compressed envelope when present.
 func (e *encState) open(raw []byte) ([]byte, error) {
-	if e == nil {
-		return raw, nil
+	if !e.encrypted() {
+		return compress.Decode(nil, raw)
 	}
-	return e.kc.Open(raw)
+	plain, err := e.kc.Open(raw)
+	if err != nil {
+		return nil, err
+	}
+	return compress.Decode(nil, plain)
 }
 
 func resolveConfig(cfg Config) (*encState, error) {
-	if !cfg.encryptionEnabled() {
+	if !cfg.encryptionEnabled() && !cfg.Compress {
 		return nil, nil
 	}
 	if cfg.BlockDuration < 0 {
 		return nil, fmt.Errorf("%w: block duration cannot be negative", ErrInvalidConfig)
+	}
+	state := &encState{}
+	if cfg.Compress {
+		codec, err := compress.NewCodec(compress.Config{Level: cfg.CompressLevel, MinSize: cfg.MinCompress})
+		if err != nil {
+			return nil, err
+		}
+		state.comp = codec
+	}
+	if !cfg.encryptionEnabled() {
+		return state, nil
 	}
 
 	key, err := crypto.ResolveKey(cfg.Secret)
@@ -146,12 +187,10 @@ func resolveConfig(cfg Config) (*encState, error) {
 		return nil, err
 	}
 
-	state := &encState{
-		kc:        kc,
-		encValues: cfg.EncryptValues,
-		encNames:  cfg.EncryptSeriesNames,
-		blockDur:  cfg.BlockDuration,
-	}
+	state.kc = kc
+	state.encValues = cfg.EncryptValues
+	state.encNames = cfg.EncryptSeriesNames
+	state.blockDur = cfg.BlockDuration
 	if state.encNames {
 		state.siv, err = crypto.NewSIVNameCipher(key, sivInfo)
 		if err != nil {
@@ -277,7 +316,7 @@ func (e *encState) verifyCanary(canary []byte, m marker) error {
 // It is called inside write transactions for encrypted stores.
 func (s *Store) ensureMarker(tx *bolt.Tx) error {
 	enc := s.encState()
-	if enc == nil {
+	if !enc.encrypted() {
 		return nil
 	}
 	bucket, err := s.metaBucket(tx, true)

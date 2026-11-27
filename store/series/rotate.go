@@ -14,7 +14,7 @@ import (
 // rewritten keep working until RotateAll.
 func (s *Store) withRotationKey(newKey []byte) (*Store, error) {
 	cur := s.encState()
-	if cur == nil {
+	if !cur.encrypted() {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 
@@ -30,6 +30,7 @@ func (s *Store) withRotationKey(newKey []byte) (*Store, error) {
 		kc:        kc,
 		encValues: cur.encValues,
 		blockDur:  cur.blockDur,
+		comp:      cur.comp,
 	})
 	next.now.Store(s.now.Load())
 	return next, nil
@@ -40,7 +41,7 @@ func (s *Store) withRotationKey(newKey []byte) (*Store, error) {
 // data.
 func (s *Store) withKey(newKey []byte) (*Store, error) {
 	cur := s.encState()
-	if cur == nil {
+	if !cur.encrypted() {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 	if len(newKey) != KeySize {
@@ -61,6 +62,7 @@ func (s *Store) withKey(newKey []byte) (*Store, error) {
 		encValues: cur.encValues,
 		encNames:  cur.encNames,
 		blockDur:  cur.blockDur,
+		comp:      cur.comp,
 	}
 	if cur.encNames {
 		nextEnc.siv, err = crypto.NewSIVNameCipher(newKey, sivInfo)
@@ -275,7 +277,7 @@ func (s *Store) ReEncryptSeries(ctx context.Context, name string, newKey []byte)
 	if name == "" {
 		return ErrNilParam
 	}
-	if enc := s.encState(); enc != nil && enc.encNames {
+	if enc := s.encState(); enc.encrypted() && enc.encNames {
 		return fmt.Errorf("%w: a single series cannot be rotated when series names are encrypted; use RotateAll", ErrInvalidConfig)
 	}
 
@@ -361,7 +363,7 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 
 	var names []string
 	if err := s.view(func(tx *bolt.Tx) error {
-		if enc := s.encState(); enc != nil {
+		if enc := s.encState(); enc.encrypted() {
 			meta, err := s.metaBucket(tx, false)
 			if err != nil {
 				return err
