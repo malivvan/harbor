@@ -937,6 +937,11 @@ Each hit reports its lexical and dense contributions and a `Why` list, so the
 caller can explain or rerank without running the arms again. Ranking policy
 (decay, importance, prompt budgeting) stays in the caller.
 
+`store/rag` supplies the ingest half: `Split` cuts text at sentence, paragraph
+or rune boundaries with byte offsets and SHA-256 digests; `WithProvenance`
+stamps the chunk's document id, index and offsets into a vector payload, and
+`WindowFilter` fetches a chunk's neighbours.
+
 ## Object storage: `object` and `backup`
 
 tempest has an independent flat object store and a `backup` package built on it:

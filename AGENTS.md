@@ -30,6 +30,7 @@ separate `docs/` tree.
 | `.../backup` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore, and snapshot ids are time-sortable ULIDs generated in the package. |
 | `.../backup/blobstore` | Adapter from `backup.ObjectStore` to one bucket of the object store. |
 | `.../ranking` | Reciprocal rank fusion and weighted fusion for combining full-text and vector result lists; the root `HybridSearch` uses it. |
+| `.../store/rag` | Deterministic text chunking with byte offsets and digests, provenance payload keys, and a neighbour-window filter. |
 | `.../internal/compress` | The Zstandard value codec: pooled encoder/decoder and the self-describing `ZCMP` envelope. Not public API. |
 | `.../internal/bucket` | The root bucket name registry for the sub-stores (`RECORD`, `SERIES`, `VECTOR`, `FSTREE`, `SEARCH`, `GRAPHS`, `OBJECT`, `SYSTEM`, `LEDGER`). Append a name for a new store; never rename an existing one. Not public API. |
 | `.../internal/...` | Shared bbolt helpers, AEAD primitives, Argon2id/BLAKE2b, SLIP-0010/0021 and CPU detection. Not public API. |
