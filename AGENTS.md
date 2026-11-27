@@ -281,8 +281,8 @@ Every bbolt commit is an fsync. tempest batches where it can:
 
 ### Durability and crash consistency
 
-`tempest.Open` fills the `bolt.Options` fields that a caller leaves unset from
-`tempest.DefaultBoltOptions()`. This is what makes a default store safe to lose
+`tempest.Open` builds the handle's `bolt.Options` from
+`tempest.DefaultBoltOptions`. This is what makes a default store safe to lose
 power in; it is not a per-store setting and is not persisted.
 
 | Field | Default | Reason |
@@ -309,15 +309,25 @@ quietly:
 | `Logger` | `nil` | Selects bbolt's discard logger: tempest must not emit paths, keys or contents by default. |
 | `NoStatistics` | `false` | Keeps `Stats` available; the cost is small next to sealing and fsync, and it is what makes write-latency regressions diagnosable. |
 
-`applyBoltDefaults` therefore only fills the three fields whose default is not
-the zero value: `Timeout`, `FreelistType` and `PreLoadFreelist` (bbolt forces
-the latter on for writable databases anyway, so an explicit `false` is moot).
-Callers may override any field, including the ones above;
-`NoSync`/`NoGrowSync`/`NoFreelistSync` set to `true` deliberately weaken the
-guarantees. `Open` applies the defaults to a copy of `Options`, so a shared or
-reused value is never mutated, and a nil `Options` selects them all (the
-password still has to come from somewhere, so nil fails with
-`ErrInvalidPassword`).
+`DefaultBoltOptions` is a package-level `var`, not a function, so a caller that
+opens a bbolt handle itself — to hand the same database to `record.Open`,
+`fstree.Open`, `series.Open` or `vector.Open` — can reuse the same settings. It
+is shared by every store in the process: treat it as read-only and copy it
+before changing a field.
+
+`tempest.Options` does not embed `bolt.Options`. It passes through only
+`Timeout`, `InitialMmapSize`, `MaxSize`, `Mlock`, `NoSync` and `Logger`; the zero
+value of each selects the `DefaultBoltOptions` value, and `Options.boltOptions`
+copies the defaults before applying them, so a shared or reused `Options` is
+never mutated and a nil `Options` selects them all (the password still has to
+come from somewhere, so nil fails with `ErrInvalidPassword`). A non-positive
+`Timeout` falls back to the default, so bbolt's wait-forever is unreachable
+through `tempest.Options`. Every other field — `NoGrowSync`, `NoFreelistSync`,
+`FreelistType`, `PreLoadFreelist`, `MmapFlags`, `PageSize`, `OpenFile`,
+`ReadOnly`, `NoStatistics` — always comes from `DefaultBoltOptions`; a caller
+that needs to change one opens the handle itself. Setting `NoSync` (or, on a
+hand-built handle, `NoGrowSync`/`NoFreelistSync`) to `true` deliberately weakens
+the guarantees documented above.
 
 Three caveats sit above the bbolt layer and are not fixed by these options:
 

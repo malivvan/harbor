@@ -213,8 +213,8 @@ defer func() {
 }()
 ```
 
-The embedded `bolt.Options` is filled from `tempest.DefaultBoltOptions` for
-every field you leave unset, so a default store is already crash-safe:
+`tempest.Open` builds the underlying bbolt handle from
+`tempest.DefaultBoltOptions`, so a default store is already crash-safe:
 
 - `NoSync`, `NoGrowSync` and `NoFreelistSync` stay `false`. Each commit
   fdatasyncs its data pages and then its meta page, file growth is truncated and
@@ -232,11 +232,19 @@ Every other bbolt field is set explicitly too — `MmapFlags`, `InitialMmapSize`
 cannot change the store's behaviour quietly. Each field carries a comment in
 `tempest.DefaultBoltOptions` explaining the choice.
 
-Override a field to change that behaviour; `NoSync: true` trades durability for
-write speed, and `Mlock` or `InitialMmapSize` tune memory rather than
-consistency. A nil `options` value is accepted and selects every default, but
-the password has no default, so pass at least
-`&tempest.Options{Password: "..."}`; a nil value fails with `ErrInvalidPassword`.
+`tempest.Options` passes through the settings a caller may reasonably need —
+`Timeout`, `InitialMmapSize`, `MaxSize`, `Mlock`, `NoSync` and `Logger` — and
+every other bbolt setting stays at the default. Their zero values select the
+default, so `&tempest.Options{Password: "..."}` is complete. `NoSync: true`
+trades durability for write speed, while `Mlock` and `InitialMmapSize` tune
+memory rather than consistency. `DefaultBoltOptions` is a variable: copy it
+before changing a field when you open a bbolt handle yourself (for example to
+pass the same database to `record.Open`), and do not mutate it in place, because
+it is the default for every store in the process.
+
+A nil `options` value is accepted and selects every default, but the password
+has no default, so pass at least `&tempest.Options{Password: "..."}`; a nil value
+fails with `ErrInvalidPassword`.
 
 Important properties:
 
@@ -1107,7 +1115,7 @@ responsibility.
 ### Operational checklist
 
 - Create the database with restrictive permissions; the lock timeout is part of
-  `DefaultBoltOptions` but can be overridden in `bolt.Options`.
+  `DefaultBoltOptions` and can be overridden with `Options.Timeout`.
 - Keep the password out of logs, crash reports, and command-line arguments.
 - Back up the database file and the password/key separately.
 - Test restores and run `VerifyAll` after moving data between environments.

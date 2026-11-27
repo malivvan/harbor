@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/malivvan/tempest"
-	bolt "go.etcd.io/bbolt"
 )
 
 func TestOpenCreatesOneStoreAndKey(t *testing.T) {
@@ -174,7 +173,7 @@ func TestConcurrentFirstOpenAgreesOnOneKey(t *testing.T) {
 			// This test opens the same directory eight times: every winner
 			// holds the file lock through Argon2id, so it must not use the
 			// short production lock timeout.
-			opts := &tempest.Options{Options: bolt.Options{Timeout: time.Minute}}
+			opts := &tempest.Options{Timeout: time.Minute}
 			m := NewManager(Config{Dir: dir, Options: opts})
 			if _, oerr := m.Open(context.Background()); oerr != nil {
 				mu.Lock()

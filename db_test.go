@@ -33,7 +33,7 @@ type tempestRecord struct {
 // cost of the production default.
 func testOptions(password string) *Options {
 	return &Options{
-		Options:    bolt.Options{Timeout: time.Second},
+		Timeout:    time.Second,
 		Password:   password,
 		KDFTime:    1,
 		KDFMemory:  8 * MiB,
@@ -281,49 +281,86 @@ func TestDefaultBoltOptions(t *testing.T) {
 		Mlock:           false,
 		Logger:          nil,
 		NoStatistics:    false,
-	}, DefaultBoltOptions())
+	}, DefaultBoltOptions)
 }
 
-// TestApplyBoltDefaults checks that applying the defaults to an empty value
-// reproduces DefaultBoltOptions and that explicit choices are preserved.
-func TestApplyBoltDefaults(t *testing.T) {
-	var unset bolt.Options
-	applyBoltDefaults(&unset)
-	require.Equal(t, DefaultBoltOptions(), unset)
+// TestBoltOptions checks the mapping from Options onto bbolt.Options: the zero
+// value reproduces DefaultBoltOptions, the passthrough fields override it, and
+// the caller's Options is left untouched.
+func TestBoltOptions(t *testing.T) {
+	var empty Options
+	require.Equal(t, DefaultBoltOptions, empty.boltOptions())
 
-	explicit := bolt.Options{
+	// A nil receiver selects the defaults too.
+	var nilOptions *Options
+	require.Equal(t, DefaultBoltOptions, nilOptions.boltOptions())
+
+	logger := &testBoltLogger{}
+	explicit := Options{
 		Timeout:         50 * time.Millisecond,
-		FreelistType:    bolt.FreelistArrayType,
-		NoSync:          true,
-		PreLoadFreelist: false,
 		InitialMmapSize: 1 << 20,
+		MaxSize:         1 << 30,
+		Mlock:           true,
+		NoSync:          true,
+		Logger:          logger,
 	}
-	applyBoltDefaults(&explicit)
-	require.Equal(t, 50*time.Millisecond, explicit.Timeout)
-	require.Equal(t, bolt.FreelistArrayType, explicit.FreelistType)
-	require.True(t, explicit.NoSync)
-	require.Equal(t, 1<<20, explicit.InitialMmapSize)
-	// bbolt forces the freelist load on for a writable database anyway, so the
-	// default wins over an explicit false.
-	require.True(t, explicit.PreLoadFreelist)
+	got := explicit.boltOptions()
+	require.Equal(t, 50*time.Millisecond, got.Timeout)
+	require.Equal(t, 1<<20, got.InitialMmapSize)
+	require.Equal(t, 1<<30, got.MaxSize)
+	require.True(t, got.Mlock)
+	require.True(t, got.NoSync)
+	require.Same(t, logger, got.Logger)
+
+	// Fields without a passthrough always come from DefaultBoltOptions.
+	require.Equal(t, DefaultBoltOptions.FreelistType, got.FreelistType)
+	require.Equal(t, DefaultBoltOptions.PreLoadFreelist, got.PreLoadFreelist)
+	require.Equal(t, DefaultBoltOptions.NoGrowSync, got.NoGrowSync)
+	require.Equal(t, DefaultBoltOptions.NoFreelistSync, got.NoFreelistSync)
+
+	// A non-positive Timeout cannot select bbolt's wait-forever.
+	negative := Options{Timeout: -time.Second}
+	require.Equal(t, DefaultBoltOptions.Timeout, negative.boltOptions().Timeout)
+
+	// The override must not leak into the shared default.
+	require.Equal(t, defaultBoltLockTimeout, DefaultBoltOptions.Timeout)
+	require.Equal(t, 0, DefaultBoltOptions.InitialMmapSize)
+	require.False(t, DefaultBoltOptions.NoSync)
 }
 
-// TestOpenDoesNotMutateOptions makes sure applying the defaults works on a copy:
-// a caller may reuse the same Options for several Open calls.
+// testBoltLogger is a bolt.Logger that only has to be distinguishable.
+type testBoltLogger struct{}
+
+func (*testBoltLogger) Debug(...interface{})            {}
+func (*testBoltLogger) Debugf(string, ...interface{})   {}
+func (*testBoltLogger) Error(...interface{})            {}
+func (*testBoltLogger) Errorf(string, ...interface{})   {}
+func (*testBoltLogger) Info(...interface{})             {}
+func (*testBoltLogger) Infof(string, ...interface{})    {}
+func (*testBoltLogger) Warning(...interface{})          {}
+func (*testBoltLogger) Warningf(string, ...interface{}) {}
+func (*testBoltLogger) Fatal(...interface{})            {}
+func (*testBoltLogger) Fatalf(string, ...interface{})   {}
+func (*testBoltLogger) Panic(...interface{})            {}
+func (*testBoltLogger) Panicf(string, ...interface{})   {}
+
+// TestOpenDoesNotMutateOptions makes sure configuring the handle works on a
+// copy: a caller may reuse the same Options for several Open calls.
 func TestOpenDoesNotMutateOptions(t *testing.T) {
 	opts := testOptions("pw")
-	opts.Options = bolt.Options{}
+	before := *opts
 
 	path := filepath.Join(t.TempDir(), "copy.db")
 	st, err := Open(context.Background(), path, 0o600, opts)
 	require.NoError(t, err)
 	require.NoError(t, st.Close())
-	require.Equal(t, bolt.Options{}, opts.Options, "Open mutated the caller's Options")
+	require.Equal(t, before, *opts, "Open mutated the caller's Options")
 
 	// The same Options value opens the store again unchanged.
 	st, err = Open(context.Background(), path, 0o600, opts)
 	require.NoError(t, err)
 	require.NoError(t, st.Close())
+	require.Equal(t, before, *opts, "Open mutated the caller's Options")
 }
 
 // TestOpenAppliesDefaultLockTimeout proves the default reaches bbolt: a second

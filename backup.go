@@ -249,14 +249,13 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		info.Flags = manifest.Flags
 	}
 
-	bopts := bolt.Options{ReadOnly: true, Timeout: time.Second}
+	bopts := opts.boltOptions()
+	bopts.ReadOnly = true
+	if bopts.Timeout <= 0 {
+		bopts.Timeout = time.Second
+	}
 	var codec record.Codec
 	if opts != nil {
-		bopts = opts.Options
-		bopts.ReadOnly = true
-		if bopts.Timeout == 0 {
-			bopts.Timeout = time.Second
-		}
 		codec = opts.Codec
 	}
 	bdb, err := bolt.Open(path, 0o600, &bopts)

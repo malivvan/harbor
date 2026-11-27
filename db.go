@@ -133,12 +133,11 @@ type Store struct {
 // Options configures Open.
 //
 // Password is required and is never stored: it is stretched with Argon2id and
-// the result is used to derive one key per sub-store. The embedded
-// bolt.Options configure the underlying database handle; the fields a caller
-// leaves unset are filled from DefaultBoltOptions.
+// the result is used to derive one key per sub-store. The bbolt handle is
+// configured from DefaultBoltOptions; the fields at the end of the struct
+// override the settings a caller may reasonably need, and every other bbolt
+// setting is taken from that variable unchanged.
 type Options struct {
-	bolt.Options
-
 	// Codec encodes entities for the record sub-store. A nil Codec selects the
 	// default JSON codec.
 	Codec record.Codec
@@ -188,6 +187,36 @@ type Options struct {
 	// metrics.Observer to forward to Prometheus, OpenTelemetry or anything
 	// else. See the metrics package for the metric names and labels.
 	Metrics metrics.Observer
+
+	// Timeout bounds how long Open waits for bbolt's exclusive file lock before
+	// failing. A zero Timeout selects DefaultBoltOptions.Timeout (two seconds),
+	// not bbolt's wait-forever. A negative value is ignored for the same
+	// reason: waiting forever is never a supported mode.
+	Timeout time.Duration
+
+	// InitialMmapSize pre-sizes the database mapping in bytes. Zero selects
+	// DefaultBoltOptions.InitialMmapSize (grow on demand). Raising it avoids
+	// remapping while long read transactions are open, but on Windows bbolt
+	// resizes the file to that size immediately.
+	InitialMmapSize int
+
+	// MaxSize caps the database file size in bytes. Zero selects
+	// DefaultBoltOptions.MaxSize (no cap).
+	MaxSize int
+
+	// Mlock pins the database mapping in memory. The default is false, which
+	// keeps the mapping reclaimable; locking a growing store can exhaust RAM.
+	Mlock bool
+
+	// NoSync disables the fdatasync of each committed transaction. The default
+	// is false. Setting it true trades crash durability for write throughput;
+	// use it only for data that can be rebuilt after a power loss.
+	NoSync bool
+
+	// Logger receives bbolt's internal diagnostics. A nil Logger selects
+	// bbolt's discard logger, so tempest emits no database paths, keys or
+	// contents by default.
+	Logger bolt.Logger
 }
 
 // defaultBoltLockTimeout bounds how long Open waits for the exclusive file
@@ -195,8 +224,8 @@ type Options struct {
 // hang the opening process instead of reporting a second instance.
 const defaultBoltLockTimeout = 2 * time.Second
 
-// DefaultBoltOptions returns the complete bbolt.Options tempest applies to the
-// fields a caller leaves unset in Options.Options.
+// DefaultBoltOptions is the complete bbolt.Options tempest applies when it
+// opens the database handle.
 //
 // Every field is set explicitly, including the ones that keep bbolt's zero
 // value, so the defaults do not drift when bbolt changes its own defaults and
@@ -206,116 +235,135 @@ const defaultBoltLockTimeout = 2 * time.Second
 // consideration, mostly through the freelist type and by not adding tuning that
 // costs memory, file size or portability.
 //
-// A caller may override any field by setting it explicitly; the field comments
-// note which changes weaken a guarantee.
-func DefaultBoltOptions() bolt.Options {
-	return bolt.Options{
-		// Timeout: bbolt's zero value waits forever for the exclusive file
-		// lock. Two seconds lets another process finish a clean shutdown and
-		// still fails a stale or hung lock instead of blocking the agent that
-		// owns the memories.
-		Timeout: defaultBoltLockTimeout,
+// It is a variable so a caller that opens a bbolt handle itself — for example
+// to pass the same database to record.Open or fstree.Open — can reuse the
+// settings. Treat it as read-only: take a copy before changing a field.
+//
+//	opts := tempest.DefaultBoltOptions
+//	opts.Timeout = time.Minute
+//	bdb, err := bolt.Open(path, 0o600, &opts)
+//
+// Open builds its handle from a copy of this value and applies the corresponding
+// tempest.Options fields on top. Fields without such a passthrough (NoGrowSync,
+// NoFreelistSync, FreelistType, PreLoadFreelist, MmapFlags, PageSize, OpenFile,
+// ReadOnly, NoStatistics) always come from here.
+var DefaultBoltOptions = bolt.Options{
+	// Timeout: bbolt's zero value waits forever for the exclusive file
+	// lock. Two seconds lets another process finish a clean shutdown and
+	// still fails a stale or hung lock instead of blocking the agent that
+	// owns the memories.
+	Timeout: defaultBoltLockTimeout,
 
-		// NoGrowSync: false truncates and fsyncs the file extension before any
-		// page is written into it, so a crash cannot leave a mapping over a
-		// tail that was never persisted (zero-filled pages, SIGBUS on the next
-		// access). It costs one extra sync per growth, not per commit.
-		NoGrowSync: false,
+	// NoGrowSync: false truncates and fsyncs the file extension before any
+	// page is written into it, so a crash cannot leave a mapping over a
+	// tail that was never persisted (zero-filled pages, SIGBUS on the next
+	// access). It costs one extra sync per growth, not per commit.
+	NoGrowSync: false,
 
-		// NoFreelistSync: false writes the free-page list in the same
-		// transaction that frees the pages. Reopen then reads one page instead
-		// of scanning the whole file to rebuild the list, and a freed page is
-		// never reused without a durable record of the free.
-		NoFreelistSync: false,
+	// NoFreelistSync: false writes the free-page list in the same
+	// transaction that frees the pages. Reopen then reads one page instead
+	// of scanning the whole file to rebuild the list, and a freed page is
+	// never reused without a durable record of the free.
+	NoFreelistSync: false,
 
-		// PreLoadFreelist: bbolt loads the freelist at open for a writable
-		// database regardless. Setting it keeps the struct complete and makes
-		// the one-time read at open explicit instead of implied.
-		PreLoadFreelist: true,
+	// PreLoadFreelist: bbolt loads the freelist at open for a writable
+	// database regardless. Setting it keeps the struct complete and makes
+	// the one-time read at open explicit instead of implied.
+	PreLoadFreelist: true,
 
-		// FreelistType: the array freelist scans free spans linearly once a
-		// long-lived, frequently updated store fragments, which is the normal
-		// shape of an agent's memory store. The hashmap freelist keeps
-		// allocation fast, persists the same on-disk format and therefore
-		// changes nothing about crash safety.
-		FreelistType: bolt.FreelistMapType,
+	// FreelistType: the array freelist scans free spans linearly once a
+	// long-lived, frequently updated store fragments, which is the normal
+	// shape of an agent's memory store. The hashmap freelist keeps
+	// allocation fast, persists the same on-disk format and therefore
+	// changes nothing about crash safety.
+	FreelistType: bolt.FreelistMapType,
 
-		// ReadOnly: tempest has to create and migrate its system header, so the
-		// handle is always writable. A read-only handle fails once
-		// LoadOrCreate needs to write and is not a supported Open mode.
-		ReadOnly: false,
+	// ReadOnly: tempest has to create and migrate its system header, so the
+	// handle is always writable. A read-only handle fails once
+	// LoadOrCreate needs to write and is not a supported Open mode.
+	ReadOnly: false,
 
-		// MmapFlags: zero keeps the OS default mapping. MAP_POPULATE is
-		// Linux-only and only moves page faults to open time; a wrong or
-		// non-portable flag makes the mapping fail or behave differently per
-		// platform.
-		MmapFlags: 0,
+	// MmapFlags: zero keeps the OS default mapping. MAP_POPULATE is
+	// Linux-only and only moves page faults to open time; a wrong or
+	// non-portable flag makes the mapping fail or behave differently per
+	// platform.
+	MmapFlags: 0,
 
-		// InitialMmapSize: zero grows the mapping on demand. Pre-sizing makes
-		// read transactions less likely to block writers, but on Windows it
-		// resizes the file to that size immediately, so a default would impose
-		// an arbitrary file size on every store. Callers holding long read
-		// transactions open can raise it themselves.
-		InitialMmapSize: 0,
+	// InitialMmapSize: zero grows the mapping on demand. Pre-sizing makes
+	// read transactions less likely to block writers, but on Windows it
+	// resizes the file to that size immediately, so a default would impose
+	// an arbitrary file size on every store. Callers holding long read
+	// transactions open can raise it themselves.
+	InitialMmapSize: 0,
 
-		// PageSize: zero uses the OS page size, which bbolt also records in the
-		// file header. Overriding it changes the on-disk layout and makes the
-		// store unreadable on a host with a different page size.
-		PageSize: 0,
+	// PageSize: zero uses the OS page size, which bbolt also records in the
+	// file header. Overriding it changes the on-disk layout and makes the
+	// store unreadable on a host with a different page size.
+	PageSize: 0,
 
-		// MaxSize: zero means no cap. A cap turns "the disk is full" into an
-		// opaque write error and can leave a store that cannot grow; disk
-		// quotas and monitoring belong outside the database.
-		MaxSize: 0,
+	// MaxSize: zero means no cap. A cap turns "the disk is full" into an
+	// opaque write error and can leave a store that cannot grow; disk
+	// quotas and monitoring belong outside the database.
+	MaxSize: 0,
 
-		// NoSync: false fdatasyncs the data pages, writes the meta page, then
-		// fdatasyncs again. That order is what makes a crash leave either the
-		// old or the new transaction; NoSync true acknowledges writes that a
-		// power loss can still discard.
-		NoSync: false,
+	// NoSync: false fdatasyncs the data pages, writes the meta page, then
+	// fdatasyncs again. That order is what makes a crash leave either the
+	// old or the new transaction; NoSync true acknowledges writes that a
+	// power loss can still discard.
+	NoSync: false,
 
-		// OpenFile: nil selects os.OpenFile, so the mode passed to Open applies
-		// and callers can still inject a custom file (test hooks, in-memory or
-		// filesystem-level encryption) themselves.
-		OpenFile: nil,
+	// OpenFile: nil selects os.OpenFile, so the mode passed to Open applies
+	// and callers can still inject a custom file (test hooks, in-memory or
+	// filesystem-level encryption) themselves.
+	OpenFile: nil,
 
-		// Mlock: false keeps the mapping reclaimable. Locking a growing
-		// multi-gigabyte memory store can exhaust RAM and get the process
-		// killed; callers that can afford the RSS opt in.
-		Mlock: false,
+	// Mlock: false keeps the mapping reclaimable. Locking a growing
+	// multi-gigabyte memory store can exhaust RAM and get the process
+	// killed; callers that can afford the RSS opt in.
+	Mlock: false,
 
-		// Logger: nil selects bbolt's discard logger. tempest must not emit
-		// database paths, keys or contents by default; a caller that wants
-		// bbolt's internal diagnostics injects a logger explicitly.
-		Logger: nil,
+	// Logger: nil selects bbolt's discard logger. tempest must not emit
+	// database paths, keys or contents by default; a caller that wants
+	// bbolt's internal diagnostics injects a logger explicitly.
+	Logger: nil,
 
-		// NoStatistics: false keeps bbolt's per-transaction and freelist
-		// statistics available through Stats. The cost is small next to sealing
-		// and fsync, and without them a write-latency regression is hard to
-		// explain.
-		NoStatistics: false,
-	}
+	// NoStatistics: false keeps bbolt's per-transaction and freelist
+	// statistics available through Stats. The cost is small next to sealing
+	// and fsync, and without them a write-latency regression is hard to
+	// explain.
+	NoStatistics: false,
 }
 
-// applyBoltDefaults fills the fields whose tempest default differs from bbolt's
-// zero value: the lock Timeout, the freelist type and PreLoadFreelist. Every
-// other field in DefaultBoltOptions is the zero value, so an unset field
-// already carries the default and an explicit caller value is preserved.
-func applyBoltDefaults(o *bolt.Options) {
+// boltOptions builds the bbolt.Options for Open from a copy of
+// DefaultBoltOptions with the passthrough fields of Options applied.
+//
+// Overrides are applied only when they ask for something other than the
+// default, so the zero value of Options selects DefaultBoltOptions unchanged
+// and an explicit choice always wins. The caller's Options is never mutated.
+func (o *Options) boltOptions() bolt.Options {
+	opts := DefaultBoltOptions
 	if o == nil {
-		return
+		return opts
 	}
-	defaults := DefaultBoltOptions()
-	if o.Timeout <= 0 {
-		o.Timeout = defaults.Timeout
+	if o.Timeout > 0 {
+		opts.Timeout = o.Timeout
 	}
-	if o.FreelistType == "" {
-		o.FreelistType = defaults.FreelistType
+	if o.InitialMmapSize > 0 {
+		opts.InitialMmapSize = o.InitialMmapSize
 	}
-	// PreLoadFreelist is the one field an explicit false cannot override: bbolt
-	// forces it on for every writable database, so the choice would be ignored
-	// at open anyway. Setting it keeps the handle equal to DefaultBoltOptions.
-	o.PreLoadFreelist = defaults.PreLoadFreelist
+	if o.MaxSize > 0 {
+		opts.MaxSize = o.MaxSize
+	}
+	if o.Mlock {
+		opts.Mlock = true
+	}
+	if o.NoSync {
+		opts.NoSync = true
+	}
+	if o.Logger != nil {
+		opts.Logger = o.Logger
+	}
+	return opts
 }
 
 // Validate checks the options that apply when a store is created: the password,
@@ -383,18 +431,17 @@ type auditPublicKeys struct {
 // ErrInvalidPassword and leaves the database closed.
 //
 // A nil options value is accepted and selects the defaults: the crash-safe
-// bolt.Options from DefaultBoltOptions, the DefaultKDF* costs and EncryptAll.
+// bbolt.Options from DefaultBoltOptions, the DefaultKDF* costs and EncryptAll.
 // The password has no default, so a nil options value still fails with
-// ErrInvalidPassword. The caller's Options is never mutated; the defaults are
-// applied to a copy.
+// ErrInvalidPassword. The caller's Options is never mutated; the bbolt handle
+// is configured from a copy.
 func Open(ctx context.Context, path string, mode os.FileMode, options *Options) (*Store, error) {
-	// Apply the defaults to a copy so a shared or reused Options keeps its
-	// configured values across calls.
+	// Copy so a shared or reused Options keeps its configured values across
+	// calls.
 	effective := Options{}
 	if options != nil {
 		effective = *options
 	}
-	applyBoltDefaults(&effective.Options)
 	options = &effective
 
 	if options.Password == "" {
@@ -410,7 +457,8 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		return nil, err
 	}
 
-	bdb, err := bolt.Open(path, mode, &options.Options)
+	bboltOpts := options.boltOptions()
+	bdb, err := bolt.Open(path, mode, &bboltOpts)
 	if err != nil {
 		return nil, err
 	}
