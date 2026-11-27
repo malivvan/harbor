@@ -261,6 +261,24 @@ A non-empty `points` slice takes precedence; otherwise `filter` is used. If
 both are empty, `Delete` returns an error. Storage is updated first, then the
 in-memory index, keeping both consistent.
 
+## Expiry
+
+`Collection.SetExpiry` writes a TTL into the reserved payload key
+`__expires_at__`; `Expiry` reads it and `SweepExpired` deletes expired points.
+`Search`, `SearchWith`, `RangeSearch`, `Get`, `GetPointsByFilter` and
+`ListPoints` exclude expired points; `ForEachPoint` is the maintenance view and
+still sees them. `Count`, facets and the index statistics include expired
+points until a sweep.
+
+The first expiry write upgrades the collection to format 2, which an older
+build refuses to open. The expiry travels in the payload, so it survives
+backup, export and reopen.
+
+```go
+err := col.SetExpiry("point-1", time.Now().Add(24*time.Hour))
+removed, err := col.SweepExpired(time.Now(), 100)
+```
+
 ## The live collection
 
 `Store.Collection(name)` returns the live, in-memory collection for a name,

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unicode/utf8"
 
 	"github.com/malivvan/tempest/internal/bucket"
@@ -81,6 +82,11 @@ type Store struct {
 	// enc is the optional encryption state. It is an atomic pointer so a
 	// rotation can swap the keys without racing readers.
 	enc atomic.Pointer[encState]
+
+	// nowMu guards nowFn, the optional clock used by expiry checks. A nil
+	// nowFn selects time.Now.
+	nowMu sync.RWMutex
+	nowFn func() time.Time
 
 	// rotMu serializes rotation against normal operations. Normal view/update
 	// transactions take RLock; rotation takes Lock across the rewrite and the
@@ -1270,8 +1276,8 @@ func (s *Store) LoadCollectionMeta(name string) (*CollectionMeta, error) {
 		if err := json.Unmarshal(plain, &meta); err != nil {
 			return err
 		}
-		if meta.FormatVersion > CollectionFormatVersion {
-			return fmt.Errorf("%w: collection %q has format version %d, this build supports %d", ErrInvalidConfig, name, meta.FormatVersion, CollectionFormatVersion)
+		if meta.FormatVersion > CollectionFormatVersionExpiry {
+			return fmt.Errorf("%w: collection %q has format version %d, this build supports %d", ErrInvalidConfig, name, meta.FormatVersion, CollectionFormatVersionExpiry)
 		}
 		return nil
 	})

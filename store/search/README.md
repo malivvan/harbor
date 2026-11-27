@@ -70,6 +70,25 @@ same one.
   tokenizer, so export and verification do not need to know how the index was
   created.
 
+## Expiry
+
+`Index.UpsertWithExpiry` and `Index.SetExpiry` attach a TTL to a document.
+`Search` excludes expired documents, `Expiry` reads the stored time, and
+`SweepExpired` deletes them. Documents and their expiry are exported and
+restored through `Docs`/`RestoreIndex`, because `DocEntry` carries
+`ExpiresAt`.
+
+The first expiry write upgrades the index to format 2 and creates the
+`__expiry__` indexes. Version 1 indexes still open; an older build refuses
+version 2, so it cannot serve expired documents with no filter. `Count` and
+`Meta` keep counting expired documents until a sweep, because only the sweep
+decodes every document.
+
+```go
+err := idx.UpsertWithExpiry(ctx, "doc", text, time.Now().Add(24*time.Hour))
+removed, err := idx.SweepExpired(ctx, time.Now())
+```
+
 ## Compression
 
 `Config.Compress` Zstd-compresses documents, posting lists and index metadata

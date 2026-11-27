@@ -36,8 +36,9 @@ type indexMeta struct {
 
 // docRecord is one indexed document.
 type docRecord struct {
-	Length int            `json:"len"`
-	TF     map[string]int `json:"tf"`
+	Length    int            `json:"len"`
+	TF        map[string]int `json:"tf"`
+	ExpiresAt int64          `json:"expires_at,omitempty"`
 }
 
 // termRecord is one posting list.
@@ -210,10 +211,19 @@ func (s *Store) checkVersion(b *bolt.Bucket, readOnly bool) error {
 	for i := len(raw) - 1; i >= 0; i-- {
 		v = v<<8 | uint64(raw[i])
 	}
-	if v != FormatVersion {
-		return fmt.Errorf("%w: index format %d, this build supports %d", ErrIncompatibleVersion, v, FormatVersion)
+	if v != FormatVersion && v != FormatVersionExpiry {
+		return fmt.Errorf("%w: index format %d, this build supports %d", ErrIncompatibleVersion, v, FormatVersionExpiry)
 	}
 	return nil
+}
+
+// setVersion writes the on-disk format revision.
+func (s *Store) setVersion(b *bolt.Bucket, version uint64) error {
+	var buf [8]byte
+	for i := range buf {
+		buf[i] = byte(version >> (8 * i))
+	}
+	return b.Put([]byte(versionKey), buf[:])
 }
 
 // checkMode validates the plaintext encryption-mode record.
@@ -460,6 +470,9 @@ func (idx *Index) Upsert(ctx context.Context, id, text string) error {
 				return err
 			}
 		}
+		if err := idx.clearExpiry(tx, b, id); err != nil {
+			return err
+		}
 		if err := idx.saveDoc(docs, id, docRecord{Length: len(tokens), TF: tf}); err != nil {
 			return err
 		}
@@ -518,6 +531,9 @@ func (idx *Index) Delete(ctx context.Context, ids ...string) error {
 			if err := docs.Delete([]byte(id)); err != nil {
 				return err
 			}
+			if err := idx.clearExpiry(tx, b, id); err != nil {
+				return err
+			}
 			meta.DocCount--
 			meta.TotalLen -= int64(doc.Length)
 			changed = true
@@ -571,6 +587,7 @@ func (idx *Index) Search(ctx context.Context, query string, limit int) ([]Hit, e
 
 		n := float64(meta.DocCount)
 		avgdl := float64(meta.TotalLen) / n
+		nowNanos := idx.store.now().UnixNano()
 		if avgdl <= 0 {
 			avgdl = 1
 		}
@@ -604,6 +621,9 @@ func (idx *Index) Search(ctx context.Context, query string, limit int) ([]Hit, e
 					}
 					doc = loaded
 					cache[id] = doc
+				}
+				if doc.ExpiresAt > 0 && doc.ExpiresAt <= nowNanos {
+					continue
 				}
 				tf := float64(doc.TF[term])
 				if tf == 0 {
@@ -747,9 +767,10 @@ func (s *Store) Close() error {
 // its term frequencies. The original text is never stored, so it cannot be
 // recovered from an index or an export.
 type DocEntry struct {
-	ID     string         `json:"id"`
-	Length int            `json:"len"`
-	TF     map[string]int `json:"tf"`
+	ID        string         `json:"id"`
+	Length    int            `json:"len"`
+	TF        map[string]int `json:"tf"`
+	ExpiresAt int64          `json:"expires_at,omitempty"`
 }
 
 // TermEntry is one posting list, sorted by term.
@@ -828,7 +849,7 @@ func (idx *Index) Docs(ctx context.Context) ([]DocEntry, error) {
 			if !found {
 				return nil
 			}
-			out = append(out, DocEntry{ID: string(k), Length: doc.Length, TF: doc.TF})
+			out = append(out, DocEntry{ID: string(k), Length: doc.Length, TF: doc.TF, ExpiresAt: doc.ExpiresAt})
 			return nil
 		})
 	})
@@ -952,8 +973,13 @@ func (s *Store) RestoreIndex(ctx context.Context, name string, cfg Config, meta 
 			if tf == nil {
 				tf = map[string]int{}
 			}
-			if err := idx.saveDoc(docsB, doc.ID, docRecord{Length: doc.Length, TF: tf}); err != nil {
+			if err := idx.saveDoc(docsB, doc.ID, docRecord{Length: doc.Length, TF: tf, ExpiresAt: doc.ExpiresAt}); err != nil {
 				return err
+			}
+			if doc.ExpiresAt != 0 {
+				if err := idx.setExpiry(tx, b, doc.ID, doc.ExpiresAt); err != nil {
+					return err
+				}
 			}
 		}
 		for _, term := range terms {

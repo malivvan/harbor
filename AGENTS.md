@@ -168,7 +168,7 @@ Inside the configured root:
 ```text
 __collections_meta__/         collection metadata records
 <collection>/                 one bucket per collection (name may be encrypted)
-  <point ID>                  encoded StoredPoint
+  <point ID>                  encoded StoredPoint (payload may hold __expires_at__)
 ```
 
 - Point values use the hand-written, positional binary format documented in
@@ -179,6 +179,9 @@ __collections_meta__/         collection metadata records
   parameters, quantization mode, format version and schema fingerprints. A
   reordered or incompatible binary codec is rejected on load instead of
   silently reinterpreting old blobs.
+- Point expiry lives in the reserved payload key `__expires_at__` and upgrades
+  the collection to format 2. Version 1 collections still open; an older build
+  refuses 2.
 - Search indexes (Flat or HNSW) live in memory. Opening a collection reloads
   its points from disk into the index.
 - `Upsert` updates the in-memory index immediately and appends to a buffer.
@@ -197,6 +200,8 @@ Inside the configured root:
   __meta__                   document count, total length, K1/B, tokenizer name
   docs/<id>                  document length and term frequencies
   terms/<term>               posting list (term keys may be deterministically encrypted)
+__expiry__/at/<time><id>   expiry sweep index (format 2)
+__expiry__/byid/<id>       per-document expiry lookup (format 2)
 ```
 
 - Values (documents, posting lists and metadata) are sealed when value
@@ -205,6 +210,8 @@ Inside the configured root:
   AES-SIV, which hides the vocabulary but leaks term equality and result sizes.
 - The tokenizer and BM25 parameters are persisted and checked on reopen; a
   mismatch is `ErrInvalidConfig`.
+- Expiry metadata upgrades an index to format 2. Version 1 indexes still open;
+  an older build refuses 2, so it cannot serve expired documents unfiltered.
 - `Upsert` removes the previous postings before adding the new ones and adjusts
   the document count and total length in one transaction.
 

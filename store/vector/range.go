@@ -46,6 +46,9 @@ func (c *Collection) RangeSearchN(query []float32, radius float32, filter *Filte
 		if len(point.Vector) != len(query) {
 			continue
 		}
+		if pointExpired(&point, c.now()) {
+			continue
+		}
 
 		var distance, score float32
 		switch c.Metric {

@@ -105,6 +105,12 @@ type CollectionMeta struct {
 // value fails the load with ErrInvalidConfig.
 const CollectionFormatVersion uint32 = 1
 
+// CollectionFormatVersionExpiry is written when a collection carries point
+// expiry metadata. Version 1 collections still open; version 2 is refused by
+// older builds, which is what keeps expired points from being served by a
+// build that does not implement the filter.
+const CollectionFormatVersionExpiry uint32 = 2
+
 // MatchFilter evaluates whether a given payload matches the filter criteria.
 // It returns true if:
 //   - The filter is nil (no filtering)

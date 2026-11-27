@@ -173,6 +173,7 @@ func (s *Store) newCollection(opts CollectionOptions) (*Collection, error) {
 		// An existing collection must keep the configuration it was created
 		// with. Silently overwriting it would reinterpret old vectors with a
 		// different metric or index type.
+		formatVersion := uint32(CollectionFormatVersion)
 		existing, metaErr := s.LoadCollectionMeta(name)
 		switch {
 		case metaErr == nil:
@@ -184,6 +185,9 @@ func (s *Store) newCollection(opts CollectionOptions) (*Collection, error) {
 			}
 			if existing.SchemaFingerprint != "" && existing.SchemaFingerprint != StoredPointSchemaFingerprint {
 				return nil, fmt.Errorf("%w: collection %q uses an incompatible point schema", ErrInvalidConfig, name)
+			}
+			if existing.FormatVersion > 0 {
+				formatVersion = existing.FormatVersion
 			}
 		case errors.Is(metaErr, ErrMetadataNotFound):
 			if s.readOnly {
@@ -226,7 +230,7 @@ func (s *Store) newCollection(opts CollectionOptions) (*Collection, error) {
 			UseHNSW:           useHNSW,
 			HNSWParams:        hnswParams,
 			UseQuant:          s.useQuant,
-			FormatVersion:     CollectionFormatVersion,
+			FormatVersion:     formatVersion,
 			SchemaFingerprint: StoredPointSchemaFingerprint,
 		}
 		if !s.readOnly {
@@ -456,6 +460,9 @@ func (c *Collection) Search(queryVector []float32, filter *Filter, topK int) ([]
 
 	started := time.Now()
 	results, err := c.index.Search(queryVector, filter, topK)
+	if err == nil {
+		results = c.filterExpiredScored(results)
+	}
 	c.observeSearch(time.Since(started), len(results), err)
 	return results, err
 }
@@ -490,7 +497,7 @@ func (c *Collection) GetPointsByFilter(filter *Filter) ([]PointStruct, error) {
 	}
 
 	// A nil filter matches every point, consistent with Search.
-	return c.index.GetPointsByFilter(filter), nil
+	return c.filterExpiredPoints(c.index.GetPointsByFilter(filter)), nil
 }
 
 // Get returns the point with the given ID, or ErrPointNotFound. It reads the
@@ -508,6 +515,9 @@ func (c *Collection) Get(id string) (*PointStruct, error) {
 		return nil, err
 	}
 	if point == nil {
+		return nil, ErrPointNotFound
+	}
+	if pointExpired(point, c.now()) {
 		return nil, ErrPointNotFound
 	}
 	return point, nil
@@ -562,8 +572,8 @@ func (c *Collection) ListPoints(filter *Filter, opts ListOptions) ([]PointStruct
 		end = start + opts.Limit
 	}
 
-	out := make([]PointStruct, 0, end-start)
-	for _, id := range ids[start:end] {
+	live := make([]PointStruct, 0, len(ids))
+	for _, id := range ids {
 		point, err := c.index.Get(id)
 		if err != nil {
 			return nil, err
@@ -571,9 +581,20 @@ func (c *Collection) ListPoints(filter *Filter, opts ListOptions) ([]PointStruct
 		if point == nil {
 			continue // deleted concurrently
 		}
-		out = append(out, *point)
+		if pointExpired(point, c.now()) {
+			continue
+		}
+		live = append(live, *point)
 	}
-	return out, nil
+	start = opts.Offset
+	if start > len(live) {
+		start = len(live)
+	}
+	end = len(live)
+	if opts.Limit > 0 && start+opts.Limit < end {
+		end = start + opts.Limit
+	}
+	return live[start:end], nil
 }
 
 // ForEachPoint streams points matching filter in ascending ID order, calling fn

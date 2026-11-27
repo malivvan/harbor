@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/malivvan/tempest/internal/compress"
 	"github.com/malivvan/tempest/internal/crypto"
@@ -29,6 +30,11 @@ import (
 // FormatVersion is the on-disk full-text format revision this build writes and
 // accepts. Any other value fails the open with ErrIncompatibleVersion.
 const FormatVersion uint64 = 1
+
+// FormatVersionExpiry is written when an index carries document expiry
+// metadata. Version 1 indexes still open; version 2 is refused by older
+// builds, so expired documents cannot be served by a build without the filter.
+const FormatVersionExpiry uint64 = 2
 
 // Default BM25 parameters.
 const (
@@ -62,6 +68,9 @@ var (
 
 	// ErrIndexNotFound reports a missing index.
 	ErrIndexNotFound = errors.New("search: index not found")
+
+	// ErrDocNotFound reports a missing document in an index.
+	ErrDocNotFound = errors.New("search: document not found")
 
 	// ErrInvalidKey is returned for a missing or malformed encryption key.
 	ErrInvalidKey = crypto.ErrInvalidKey
@@ -133,6 +142,11 @@ type Store struct {
 	rotMu    sync.RWMutex
 	closed   atomic.Bool
 	readOnly bool
+
+	// nowMu guards nowFn, the optional clock used by expiry checks. A nil
+	// nowFn selects time.Now.
+	nowMu sync.RWMutex
+	nowFn func() time.Time
 }
 
 // encState holds the resolved encryption settings for one store.
