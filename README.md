@@ -423,6 +423,25 @@ err = users.Select(q.Eq("Team", "blocked")).Delete(ctx, &User{})
 Matchers include `Eq`, `StrictEq`, `Gt`, `Gte`, `Lt`, `Lte`, `In`, `Re`,
 `EqF`, `GtF`, `LtF`, and the combinators `And`, `Or`, `Not`.
 
+### Revisions, conditional writes and expiry
+
+`Save`, `Update`, `UpdateField` and `UpdateIf` bump a per-record revision.
+`UpdateIf` and `DeleteIf` take a `record.Precondition`, so a stale writer gets
+`record.ErrConflict` instead of overwriting a newer value.
+
+With `Options.Expiry`, `SetExpiry` attaches a TTL to a record without rewriting
+it. Reads hide expired records, `record.WithExpired(ctx)` includes them for
+audit, and `SweepExpired` removes them in bounded batches per type. The store
+persists a capability bit, so reopening without the option still hides expired
+rows, and a build that does not implement the bit refuses to open the store.
+
+```go
+rev, err := users.Revision(ctx, &u)
+next, err := users.UpdateIf(ctx, &u, record.Precondition{Revision: rev})
+err = users.SetExpiry(ctx, &u, time.Now().Add(7*24*time.Hour))
+expired, err := users.SweepExpired(ctx, &User{}, time.Now(), 100)
+```
+
 ### Transactions
 
 tempest exposes callback-managed transactions only:

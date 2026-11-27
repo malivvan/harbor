@@ -222,6 +222,12 @@ type Options struct {
 	// reopened with the same settings.
 	Dedup Dedup
 
+	// Expiry enables per-record expiry metadata and read-time exclusion of
+	// expired records. It is a write-time preference stored with the record
+	// store's capability bits, so reopening without it still excludes expired
+	// records.
+	Expiry bool
+
 	// Timeout bounds how long Open waits for bbolt's exclusive file lock before
 	// failing. A zero Timeout selects DefaultBoltOptions.Timeout (two seconds),
 	// not bbolt's wait-forever. A negative value is ignored for the same
@@ -577,6 +583,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Compress:        options.Compression.Enable,
 		CompressLevel:   options.Compression.Level,
 		MinCompress:     options.Compression.MinSize,
+		Expiry:          options.Expiry,
 		Trace:           traceSink(TraceRecord),
 		Metrics:         options.Metrics,
 	}); err != nil {

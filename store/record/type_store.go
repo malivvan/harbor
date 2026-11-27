@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/malivvan/tempest/store/record/index"
 	bolt "go.etcd.io/bbolt"
@@ -43,6 +44,16 @@ type TypeStore interface {
 
 	// Revision returns the current revision of the record named by data's ID.
 	Revision(ctx context.Context, data any) (uint64, error)
+
+	// SetExpiry stores an expiry for the record named by data's ID. A zero
+	// time clears it.
+	SetExpiry(ctx context.Context, data any, at time.Time) error
+
+	// Expiry returns the stored expiry for data's ID.
+	Expiry(ctx context.Context, data any) (time.Time, bool, error)
+
+	// SweepExpired deletes up to limit expired records of the type of data.
+	SweepExpired(ctx context.Context, data any, now time.Time, limit int) (int, error)
 }
 
 // Init creates the indexes and buckets for a given structure
@@ -552,6 +563,9 @@ func (n *node) update(ctx context.Context, data interface{}, op string, fn func(
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
+	// Update must be able to read and resurrect an expired record; the expiry
+	// gate belongs on ordinary reads, not on the maintenance path.
+	ctx = WithExpired(ctx)
 
 	ref := reflect.ValueOf(data)
 	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
@@ -759,6 +773,16 @@ func (n *node) deleteStruct(ctx context.Context, tx *bolt.Tx, cfg *structConfig,
 	}
 	m, err := newMeta(bucket, n)
 	if err != nil {
+		return err
+	}
+	if at, has, err := m.expiry(id); err != nil {
+		return err
+	} else if has {
+		if err := n.deleteExpiryIndex(tx, cfg.Name, id, at); err != nil {
+			return err
+		}
+	}
+	if err := m.deleteExpiry(id); err != nil {
 		return err
 	}
 	if err := m.deleteRevision(id); err != nil {

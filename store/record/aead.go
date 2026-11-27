@@ -58,6 +58,12 @@ type Config struct {
 	// MinCompress skips compressing values smaller than this many bytes.
 	MinCompress int
 
+	// Expiry enables per-record expiry metadata and default read-time
+	// exclusion of expired records. Opening a store that already carries the
+	// expiry capability enables it even when this field is false. The zero
+	// value leaves the store byte-identical to a build without expiry.
+	Expiry bool
+
 	// Trace, when non-nil, receives an entry for every committed write.
 	Trace ledger.Sink
 

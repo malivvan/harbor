@@ -174,6 +174,9 @@ func (it *Iterator) Next() bool {
 			// Nested buckets are not records.
 			continue
 		}
+		if it.node != nil && it.node.s != nil && it.node.s.expiry && !expiredAllowed(it.ctx) && it.node.expiredKey(it.bucket, k) {
+			continue
+		}
 
 		matched, err := it.match(v)
 		if err != nil {

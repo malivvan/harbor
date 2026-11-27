@@ -172,6 +172,10 @@ func (n *node) one(ctx context.Context, tx *bolt.Tx, bucketName, fieldName strin
 		return ErrNotFound
 	}
 
+	if !expiredAllowed(ctx) && n.expiredKey(bucket, id) {
+		return ErrNotFound
+	}
+
 	if err := checkContext(ctx); err != nil {
 		return err
 	}
@@ -419,14 +423,25 @@ func (n *node) allByIndex(ctx context.Context, tx *bolt.Tx, fieldName string, cf
 		return err
 	}
 
-	results := reflect.MakeSlice(reflect.Indirect(*ref).Type(), len(list), len(list))
+	live := make([][]byte, 0, len(list))
+	for _, id := range list {
+		if err := checkContext(ctx); err != nil {
+			return err
+		}
+		if !expiredAllowed(ctx) && n.expiredKey(bucket, id) {
+			continue
+		}
+		live = append(live, id)
+	}
 
-	for i := range list {
+	results := reflect.MakeSlice(reflect.Indirect(*ref).Type(), len(live), len(live))
+
+	for i := range live {
 		if err := checkContext(ctx); err != nil {
 			return err
 		}
 
-		raw := bucket.Get(list[i])
+		raw := bucket.Get(live[i])
 		if raw == nil {
 			return ErrNotFound
 		}

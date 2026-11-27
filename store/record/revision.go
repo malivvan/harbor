@@ -159,6 +159,8 @@ func (n *node) UpdateIf(ctx context.Context, data any, pre Precondition) (uint64
 	if err := checkContext(ctx); err != nil {
 		return 0, wrapError("update if", err)
 	}
+	// Like Update, a conditional write may replace an expired record.
+	ctx = WithExpired(ctx)
 	ref := reflect.ValueOf(data)
 	if !ref.IsValid() || ref.Kind() != reflect.Pointer || ref.Elem().Kind() != reflect.Struct {
 		return 0, wrapError("update if", ErrStructPtrNeeded)

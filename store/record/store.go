@@ -11,6 +11,7 @@ import (
 	"math"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/malivvan/tempest/metrics"
 	"github.com/malivvan/tempest/store/ledger"
@@ -93,6 +94,11 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		return nil, wrapError("open", err)
 	}
 
+	if err := s.checkCapabilities(ctx); err != nil {
+		return nil, wrapError("open", err)
+	}
+	s.expiry = cfg.Expiry || s.caps&CapExpiry != 0
+
 	return s, nil
 }
 
@@ -133,6 +139,16 @@ type Store struct {
 	// opened without instrumentation. It is set once at Open and never
 	// mutated.
 	obs metrics.Observer
+
+	// caps is the validated persisted capability bitmask, and expiry reports
+	// whether reads must exclude expired records. Both are set at Open.
+	caps   uint64
+	expiry bool
+
+	// nowMu guards nowFn, the optional clock override used by expiry checks
+	// and sweeps. A nil nowFn selects time.Now.
+	nowMu sync.RWMutex
+	nowFn func() time.Time
 }
 
 // Close releases the tempest wrapper. The underlying bbolt database is owned by

@@ -97,6 +97,9 @@ func (s *sorter) filter(ctx context.Context, tree q.Matcher, bucket *bolt.Bucket
 		k:      k,
 		v:      v,
 	}
+	if s.node != nil && s.node.s != nil && s.node.s.expiry && !expiredAllowed(ctx) && s.node.expiredKey(bucket, k) {
+		return false, nil
+	}
 	rsink, ok := s.sink.(reflectSink)
 	if !ok {
 		return s.add(ctx, itm)

@@ -84,9 +84,13 @@ User/                          one bucket per mapped struct
   __metadata/
     codec                      codec name
     <field>                    auto-increment counters
+    revision:<key>             8-byte per-record revision
+    expiry:<key>               8-byte per-record expiry (UnixNano, sealed)
   __tempest_index_<Field>/       list or unique index bucket
+__tempest_expiry_/             expiry index: expiry + type + key
 __database/
   version                      "1.0.0"
+  capabilities                 big-endian uint64 feature bits
   \x00__db_enc__                optional encryption marker (DENC)
 ```
 

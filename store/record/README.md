@@ -440,6 +440,28 @@ A mismatch returns `record.ErrConflict`, wrapped with the current and expected
 revisions. `DeleteIf` with a zero revision deletes regardless of revision; a
 missing record returns `record.ErrNotFound`.
 
+### Expiry
+
+`Config.Expiry` (root `Options.Expiry`) enables per-record expiry metadata.
+`SetExpiry` records an expiry without rewriting the record or its indexes,
+`Expiry` reads it, and `SweepExpired` deletes expired records of one type,
+bounded by a limit. Reads exclude expired records by default;
+`record.WithExpired(ctx)` includes them for audit and maintenance.
+
+The first `SetExpiry` writes a `capabilities` bit in `__database`, so reopening
+the store without `Expiry` still filters expired records, and a build that does
+not implement the bit refuses to open it instead of serving them.
+
+```go
+records, err := record.Open(ctx, bdb, record.Config{Expiry: true})
+err = records.SetExpiry(ctx, &Session{ID: "s1"}, time.Now().Add(24*time.Hour))
+expired, err := records.SweepExpired(ctx, &Session{}, time.Now(), 100)
+```
+
+`SweepExpired` is per type: call it once for each struct whose records can
+expire. An expired record is still readable under `WithExpired` and can be
+updated or resurrected by clearing its expiry.
+
 ## Transactions
 
 tempest exposes callback-managed transactions only; there is no
