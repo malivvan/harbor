@@ -24,13 +24,12 @@ separate `docs/` tree.
 | `.../store/vector/hnsw/heap` | The heap used on the HNSW search hot path. |
 | `.../store/vector/doc` | Document-oriented facade over `vector`: id, content, embedding and string metadata; the collection dimension is taken from the first upsert. |
 | `.../metrics` | Dependency-free observer interface and nil-safe metric helpers used by every store; a nil observer means no instrumentation. |
-| `.../store/ledger` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write. |
+| `.../store/ledger` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write, encoded with the package's deterministic JSON encoder. |
 | `.../cluster` | Raft-backed cluster replication of a whole store: replicated command facades, snapshots, and the bolt-backed raft log/stable store it persists with (no raft-boltdb dependency). |
 | `.../store/object` | Independent flat object store with buckets, path containment and atomic `Put`; works without the file store and migrates file-backed blobs explicitly. |
 | `.../backup` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore. |
 | `.../backup/blobstore` | Adapter from `backup.ObjectStore` to one bucket of the object store. |
 | `.../ulid` | ULID generation: 26-character Crockford base32, time-sortable. |
-| `.../compact` | Deterministic JSON encoding for signatures and content addressing: sorted keys, stable numbers, no whitespace. |
 | `.../ranking` | Reciprocal rank fusion for combining full-text and vector result lists. |
 | `.../internal/bucket` | The root bucket name registry for the sub-stores (`RECORD`, `SERIES`, `VECTOR`, `FSTREE`, `SEARCH`, `GRAPHS`, `OBJECT`, `SYSTEM`, `LEDGER`). Append a name for a new store; never rename an existing one. Not public API. |
 | `.../internal/...` | Shared bbolt helpers, AEAD primitives, Argon2id/BLAKE2b, SLIP-0010/0021 and CPU detection. Not public API. |
@@ -913,7 +912,6 @@ Generated API documentation:
 - [github.com/malivvan/tempest/cluster](https://pkg.go.dev/github.com/malivvan/tempest/cluster)
 - [github.com/malivvan/tempest/ulid](https://pkg.go.dev/github.com/malivvan/tempest/ulid)
 - [github.com/malivvan/tempest/metrics](https://pkg.go.dev/github.com/malivvan/tempest/metrics)
-- [github.com/malivvan/tempest/compact](https://pkg.go.dev/github.com/malivvan/tempest/compact)
 - [github.com/malivvan/tempest/backup](https://pkg.go.dev/github.com/malivvan/tempest/backup)
 - [github.com/malivvan/tempest/backup/blobstore](https://pkg.go.dev/github.com/malivvan/tempest/backup/blobstore)
 - [github.com/malivvan/tempest/store](https://pkg.go.dev/github.com/malivvan/tempest/store)

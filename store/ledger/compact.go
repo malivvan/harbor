@@ -1,15 +1,21 @@
-// Package compact serialises Go values to deterministic JSON.
+package ledger
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"sort"
+)
+
+// canonicalBytes serialises v to the deterministic JSON that audit events are
+// signed and hash-chained over.
 //
 // The output is byte-stable across runs and processes: object keys are sorted
 // lexicographically at every level of nesting, there is no insignificant
 // whitespace, and numbers keep their exact source representation. That is what
 // makes it possible to sign the serialised form of a struct — or to compare two
-// independently produced encodings for equality — without a canonicalisation step
-// on the receiving side.
-//
-// The intended use is detached signatures over structured messages, but the
-// encoder is a plain deterministic JSON writer and is equally usable for
-// content-addressing a record.
+// independently produced encodings for equality — without a canonicalisation
+// step on the receiving side.
 //
 // Conventions, all of which the tests pin:
 //
@@ -23,20 +29,10 @@
 // Input may be any JSON-marshallable value. A value that is already encoded
 // (a json.RawMessage or []byte holding JSON) is re-encoded through the canonical
 // path, so pre-encoded input cannot smuggle in unsorted keys.
-package compact
-
-import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"sort"
-)
-
-// Bytes serialises v to canonical JSON.
-func Bytes(v any) ([]byte, error) {
+func canonicalBytes(v any) ([]byte, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
-		return nil, fmt.Errorf("compact: marshal: %w", err)
+		return nil, fmt.Errorf("audit: marshal: %w", err)
 	}
 	return fromRaw(json.RawMessage(raw))
 }
@@ -47,7 +43,7 @@ func fromRaw(raw json.RawMessage) ([]byte, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber() // keep the literal numeric text instead of float64
 	if err := dec.Decode(&v); err != nil {
-		return nil, fmt.Errorf("compact: decode: %w", err)
+		return nil, fmt.Errorf("audit: decode: %w", err)
 	}
 	return encode(v)
 }
@@ -87,13 +83,13 @@ func encodeObject(m map[string]any) ([]byte, error) {
 		}
 		keyBytes, err := json.Marshal(k)
 		if err != nil {
-			return nil, fmt.Errorf("compact: marshal key %q: %w", k, err)
+			return nil, fmt.Errorf("audit: marshal key %q: %w", k, err)
 		}
 		buf.Write(keyBytes)
 		buf.WriteByte(':')
 		valBytes, err := encode(m[k])
 		if err != nil {
-			return nil, fmt.Errorf("compact: marshal value for key %q: %w", k, err)
+			return nil, fmt.Errorf("audit: marshal value for key %q: %w", k, err)
 		}
 		buf.Write(valBytes)
 	}
@@ -110,7 +106,7 @@ func encodeArray(a []any) ([]byte, error) {
 		}
 		b, err := encode(elem)
 		if err != nil {
-			return nil, fmt.Errorf("compact: marshal array element %d: %w", i, err)
+			return nil, fmt.Errorf("audit: marshal array element %d: %w", i, err)
 		}
 		buf.Write(b)
 	}

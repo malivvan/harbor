@@ -1,4 +1,4 @@
-package compact
+package ledger
 
 import (
 	"encoding/json"
@@ -12,9 +12,9 @@ import (
 
 func mustBytes(t *testing.T, v any) string {
 	t.Helper()
-	b, err := Bytes(v)
+	b, err := canonicalBytes(v)
 	if err != nil {
-		t.Fatalf("Bytes: %v", err)
+		t.Fatalf("canonicalBytes: %v", err)
 	}
 	return string(b)
 }
@@ -142,7 +142,7 @@ func TestPreEncodedInputIsCanonicalised(t *testing.T) {
 }
 
 func TestInvalidInputErrors(t *testing.T) {
-	if _, err := Bytes(func() {}); err == nil {
+	if _, err := canonicalBytes(func() {}); err == nil {
 		t.Fatal("Bytes of an unmarshallable value: want an error")
 	}
 	if _, err := fromRaw(json.RawMessage(`{`)); err == nil {

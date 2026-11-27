@@ -5,6 +5,12 @@
 // payload, is signed with an Ed25519 key derived from the store's key material
 // (see DeriveKey), and links to its predecessor with a hash chain. Verify
 // replays the chain and rejects forged or reordered events.
+//
+// Events are serialised with the deterministic JSON encoder in this package:
+// object keys sorted at every depth, no insignificant whitespace, numbers
+// preserved verbatim. The signed and chained bytes therefore do not depend on
+// struct field order, and a later map field cannot produce two encodings for
+// one logical event.
 package ledger
 
 import (
@@ -17,7 +23,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/malivvan/tempest/compact"
 	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/internal/slip10"
 	bolt "go.etcd.io/bbolt"
@@ -166,7 +171,7 @@ func (r *Recorder) recordTx(tx *bolt.Tx, key ed25519.PrivateKey, entry Entry) er
 	// Sign the canonical encoding, not encoding/json's struct order: an event
 	// that later grows a map field must still produce one signature for one
 	// logical value. The bytes stored are the bytes signed.
-	encoded, err := compact.Bytes(ev)
+	encoded, err := canonicalBytes(ev)
 	if err != nil {
 		return fmt.Errorf("audit: encode event: %w", err)
 	}
