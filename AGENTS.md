@@ -26,7 +26,7 @@ separate `docs/` tree.
 | `.../pkg/metrics` | Dependency-free observer interface and nil-safe metric helpers used by every store; a nil observer means no instrumentation. |
 | `.../store/ledger` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write. |
 | `.../pkg/consensus` | Raft-backed cluster replication of a whole store: replicated command facades, snapshots, and the bolt-backed raft log/stable store it persists with (no raft-boltdb dependency). |
-| `.../pkg/store` | Process-wide database manager: resolves a directory, reads or creates the password file (`O_EXCL`, mode 0600, never logged), and opens one handle. |
+| `.../pkg/store` | Process-wide database manager: resolves a directory, reads or creates the password file (published atomically by link, `O_EXCL` fallback, mode 0600, never logged), and opens one handle. |
 | `.../store/object` | Independent flat object store with buckets, path containment and atomic `Put`; works without the file store and migrates file-backed blobs explicitly. |
 | `.../pkg/snapshot` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore. |
 | `.../pkg/snapshot/blobstore` | Adapter from `snapshot.ObjectStore` to one bucket of the object store. |

@@ -10,9 +10,11 @@
 //
 // When Config.Password is empty the password is a 32-byte random value, hex
 // encoded (64 characters) and stored at <Dir>/<KeyFile> with mode 0600. The file
-// is created with O_EXCL, so two processes racing to initialise the same
-// directory agree on one key instead of clobbering each other. The value is never
-// logged.
+// is published atomically (a synced temporary file hard-linked into place, with
+// an O_EXCL create as the fallback where links are unsupported), so two
+// processes racing to initialise the same directory agree on one key instead of
+// clobbering each other, and a racing reader never sees a partial key. The value
+// is never logged.
 //
 // A password is a secret: reading it from the file is what makes the database
 // reopenable across restarts, and losing the file loses the data. Back it up with
@@ -37,6 +39,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/malivvan/eidos-db"
 	"github.com/malivvan/eidos-db/store/fstree"
@@ -390,6 +393,13 @@ func Close() error {
 
 // loadOrCreatePassword reads the hex password at path, or creates it with KeySize
 // random bytes if it does not exist.
+//
+// The file is published atomically: the key is written and synced to a
+// temporary file in the same directory, which is then hard-linked into place.
+// A racing caller therefore sees either no file or a complete one, never the
+// empty file that an O_EXCL create exposes between creation and write. Linking
+// fails with ErrExist when another caller published first, which is the same
+// "exactly one winner" guarantee O_EXCL gave.
 func loadOrCreatePassword(path string, mode os.FileMode) (string, error) {
 	if data, err := os.ReadFile(path); err == nil {
 		return validateKeyFile(path, data)
@@ -397,7 +407,8 @@ func loadOrCreatePassword(path string, mode os.FileMode) (string, error) {
 		return "", fmt.Errorf("store: read key %s: %w", path, err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", fmt.Errorf("store: create key dir: %w", err)
 	}
 	buf := make([]byte, KeySize)
@@ -406,16 +417,66 @@ func loadOrCreatePassword(path string, mode os.FileMode) (string, error) {
 	}
 	encoded := hex.EncodeToString(buf)
 
+	tmp, err := writeKeyTemp(dir, mode, encoded)
+	if err != nil {
+		return "", err
+	}
+	// The temporary name is gone after a successful link; this only removes it
+	// on a lost race or a failure.
+	defer os.Remove(tmp)
+
+	if err := os.Link(tmp, path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			// Lost the race: use the winner's key, so both open the same database.
+			return readWinningKey(path)
+		}
+		// File systems without hard links (FAT, some network mounts) keep the
+		// exclusive-create path, which publishes the name before the content.
+		return createKeyExclusive(path, mode, encoded)
+	}
+	syncDir(dir)
+	return encoded, nil
+}
+
+// writeKeyTemp writes encoded to a new temporary file in dir and returns its
+// path. The file is synced before its name is published, so a crash cannot
+// leave an empty key file behind.
+func writeKeyTemp(dir string, mode os.FileMode, encoded string) (string, error) {
+	f, err := os.CreateTemp(dir, ".eidos-key-*")
+	if err != nil {
+		return "", fmt.Errorf("store: create key temp file: %w", err)
+	}
+	tmp := f.Name()
+	fail := func(err error) (string, error) {
+		f.Close()
+		os.Remove(tmp)
+		return "", err
+	}
+	if err := f.Chmod(mode); err != nil {
+		return fail(fmt.Errorf("store: set key mode %s: %w", tmp, err))
+	}
+	if _, err := f.WriteString(encoded); err != nil {
+		return fail(fmt.Errorf("store: write key %s: %w", tmp, err))
+	}
+	if err := f.Sync(); err != nil {
+		return fail(fmt.Errorf("store: sync key %s: %w", tmp, err))
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return "", fmt.Errorf("store: close key %s: %w", tmp, err)
+	}
+	return tmp, nil
+}
+
+// createKeyExclusive creates the password file with O_EXCL and writes the key
+// into it. It is the fallback for file systems that do not support hard links;
+// a concurrent reader can briefly observe the empty file it publishes first,
+// which readWinningKey tolerates.
+func createKeyExclusive(path string, mode os.FileMode, encoded string) (string, error) {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
-			// Lost the race with another process: use the winner's key, so both
-			// processes open the same database.
-			data, rerr := os.ReadFile(path)
-			if rerr != nil {
-				return "", fmt.Errorf("store: read key after race: %w", rerr)
-			}
-			return validateKeyFile(path, data)
+			return readWinningKey(path)
 		}
 		return "", fmt.Errorf("store: create key %s: %w", path, err)
 	}
@@ -423,10 +484,55 @@ func loadOrCreatePassword(path string, mode os.FileMode) (string, error) {
 		f.Close()
 		return "", fmt.Errorf("store: write key %s: %w", path, err)
 	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return "", fmt.Errorf("store: sync key %s: %w", path, err)
+	}
 	if err := f.Close(); err != nil {
 		return "", fmt.Errorf("store: close key %s: %w", path, err)
 	}
 	return encoded, nil
+}
+
+// readWinningKey reads the key file another caller published. It retries for a
+// short while because createKeyExclusive publishes the name before the content;
+// the hard-link path returns a complete file immediately.
+func readWinningKey(path string) (string, error) {
+	const (
+		budget = 2 * time.Second
+		pause  = 10 * time.Millisecond
+	)
+	deadline := time.Now().Add(budget)
+	for {
+		data, err := os.ReadFile(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("store: read key %s: %w", path, err)
+		}
+		if err == nil {
+			key, verr := validateKeyFile(path, data)
+			if verr == nil {
+				return key, nil
+			}
+			if time.Now().After(deadline) {
+				return "", verr
+			}
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("store: key file %s was not readable after creation", path)
+		}
+		time.Sleep(pause)
+	}
+}
+
+// syncDir fsyncs dir so a newly published key file survives a crash. It is
+// best-effort: some platforms and file systems do not support directory sync.
+func syncDir(dir string) {
+	d, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	_ = d.Sync()
+	_ = d.Close()
 }
 
 // validateKeyFile checks that path holds a hex password of the expected length.

@@ -37,8 +37,11 @@ func main() {
 
 When `Config.Password` is empty, the password is 32 random bytes, hex encoded
 (64 characters) and stored at `<Dir>/eidos.key` with mode `0600`. The file is
-created with `O_EXCL`, so two processes racing to initialise the same directory
-agree on one key instead of overwriting each other. The value is never logged.
+created atomically: the key is written and synced to a temporary file that is
+hard-linked into place, so two processes racing to initialise the same directory
+agree on one key instead of overwriting each other, and a reader never observes
+an empty or partial key file. File systems without hard links fall back to an
+`O_EXCL` create. The value is never logged.
 
 Losing the key file loses the data: back it up with the database.
 

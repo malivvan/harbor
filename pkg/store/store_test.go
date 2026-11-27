@@ -263,6 +263,56 @@ func TestProcessWideDefault(t *testing.T) {
 	}
 }
 
+// Rule: the password file is published atomically, so a racing reader never sees
+// an empty key file, and no temporary file survives the publish.
+func TestKeyFileIsPublishedAtomically(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(Config{Dir: dir})
+	t.Cleanup(func() { _ = m.Close() })
+	if _, err := m.Open(context.Background()); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	got := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		got[e.Name()] = true
+	}
+	want := []string{DefaultDBFile, DefaultKeyFile}
+	if len(got) != len(want) {
+		t.Fatalf("directory holds %v, want only %v (left-over temp key file?)", got, want)
+	}
+	for _, name := range want {
+		if !got[name] {
+			t.Fatalf("directory holds %v, want %s", got, name)
+		}
+	}
+}
+
+// Rule: when the exclusive-create fallback loses the race, the loser adopts the
+// winner's key instead of opening the same directory with a different password.
+func TestKeyExclusiveCreateAdoptsWinnerKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), DefaultKeyFile)
+	winner := strings.Repeat("b", KeySize*2)
+	if err := os.WriteFile(path, []byte(winner), DefaultMode); err != nil {
+		t.Fatalf("seed key file: %v", err)
+	}
+
+	got, err := createKeyExclusive(path, DefaultMode, strings.Repeat("a", KeySize*2))
+	if err != nil {
+		t.Fatalf("createKeyExclusive: %v", err)
+	}
+	if got != winner {
+		t.Fatalf("fallback key = %.8s…, want the winner's key", got)
+	}
+	if on := strings.TrimSpace(readKey(t, path)); on != winner {
+		t.Fatal("fallback overwrote the winner's key file")
+	}
+}
+
 func TestValidateKeyFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), DefaultKeyFile)
 	if _, err := validateKeyFile(path, []byte(strings.Repeat("a", KeySize*2))); err != nil {
