@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/malivvan/harbor/store/record/index"
+	"github.com/malivvan/eidos-db/store/record/index"
 	bolt "go.etcd.io/bbolt"
 )
 

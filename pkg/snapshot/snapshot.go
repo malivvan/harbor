@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	harborid "github.com/malivvan/harbor/pkg/id"
+	eidosid "github.com/malivvan/eidos-db/pkg/id"
 )
 
 // Snapshot kinds recorded on the index.
@@ -117,7 +117,7 @@ func (s *Snapshotter) indexKey(id string) string { return s.snapPfx + "index/" +
 // already present are uploaded, so the snapshot is incremental + deduped. kind
 // is one of the Kind* constants; parentID (optional) records lineage.
 func (s *Snapshotter) Create(ctx context.Context, kind, parentID string) (*Index, error) {
-	id := harborid.New()
+	id := eidosid.New()
 	objs, err := s.liveObjects(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("snapshot: list live objects: %w", err)

@@ -3,7 +3,7 @@
 // A ULID is a 26-character Crockford-base32 string holding a 48-bit millisecond
 // timestamp followed by 80 bits of randomness. Because the timestamp is the high
 // order part of the encoding, ULIDs sort lexicographically by creation time —
-// which makes them usable as database keys for both Harbor's record store and any
+// which makes them usable as database keys for both eidos-db's record store and any
 // application built on it.
 //
 // The package makes no network calls and has no dependencies beyond the standard

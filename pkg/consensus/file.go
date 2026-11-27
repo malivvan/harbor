@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/malivvan/harbor/store/fstree"
+	"github.com/malivvan/eidos-db/store/fstree"
 )
 
 // File is the replicated write view of a named file system in the fstree sub-store.

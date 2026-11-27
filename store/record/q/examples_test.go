@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	harbor "github.com/malivvan/harbor/store/record"
-	"github.com/malivvan/harbor/store/record/q"
+	eidos "github.com/malivvan/eidos-db/store/record"
+	"github.com/malivvan/eidos-db/store/record/q"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -49,17 +49,17 @@ type User struct {
 	CreatedAt time.Time `db:"index"`
 }
 
-func prepareDB() (string, *harbor.Store, *bolt.DB) {
-	dir, err := os.MkdirTemp(os.TempDir(), "harbor")
+func prepareDB() (string, *eidos.Store, *bolt.DB) {
+	dir, err := os.MkdirTemp(os.TempDir(), "eidos")
 	if err != nil {
 		log.Fatal(err)
 	}
 	ctx := context.Background()
-	bdb, err := bolt.Open(filepath.Join(dir, "harbor.db"), 0600, nil)
+	bdb, err := bolt.Open(filepath.Join(dir, "eidos.db"), 0600, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	db, err := harbor.Open(ctx, bdb, harbor.Config{})
+	db, err := eidos.Open(ctx, bdb, eidos.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}

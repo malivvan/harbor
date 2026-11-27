@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/pkg/metrics"
-	"github.com/malivvan/harbor/store/ledger"
+	"github.com/malivvan/eidos-db/internal/crypto"
+	"github.com/malivvan/eidos-db/pkg/metrics"
+	"github.com/malivvan/eidos-db/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -18,9 +18,9 @@ const KeySize = crypto.KeySize
 // crypto. A zero Config, or one with no encryption feature enabled, keeps
 // the plaintext on-disk format and uses the default JSON codec.
 type Config struct {
-	// Root is the bucket path below which all Harbor data lives. Each element
+	// Root is the bucket path below which all eidos-db data lives. Each element
 	// is one nested bucket name. A nil or empty Root means the database root,
-	// so Harbor's buckets are top-level. The harbor root package passes
+	// so eidos-db's buckets are top-level. The eidos root package passes
 	// [][]byte{[]byte(store.RECORD)} explicitly.
 	Root [][]byte
 
@@ -91,7 +91,7 @@ const (
 )
 
 // sivInfoPrefix domain-separates the deterministic key ciphers.
-const sivInfoPrefix = "harbor/db/keys/"
+const sivInfoPrefix = "eidos/db/keys/"
 
 // encState is the shared encryption configuration of a Store. Reachable from
 // every node through its Store pointer. A nil encState means plaintext: every
@@ -190,7 +190,7 @@ func (e *encState) openKey(cipherKey []byte, domain string) ([]byte, error) {
 const (
 	markerKey       = "\x00__db_enc__"
 	markerMagic     = "DENC"
-	canaryPlaintext = "harbor/db/aead/v1"
+	canaryPlaintext = "eidos/db/aead/v1"
 )
 
 const (
@@ -364,7 +364,7 @@ func (n *node) hasUserData(ctx context.Context) (bool, error) {
 		if b == nil {
 			return nil
 		}
-		// The reserved entries of __database are written by Harbor itself:
+		// The reserved entries of __database are written by eidos-db itself:
 		// the marker, the version record and the per-bucket metadata bucket.
 		// Anything else counts as user data.
 		if err := b.ForEach(func(key, value []byte) error {

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/malivvan/harbor/pkg/metrics"
-	"github.com/malivvan/harbor/store"
+	"github.com/malivvan/eidos-db/pkg/metrics"
+	"github.com/malivvan/eidos-db/store"
 	bolt "go.etcd.io/bbolt"
 )
 

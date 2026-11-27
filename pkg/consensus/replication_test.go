@@ -8,8 +8,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/malivvan/harbor/store/series"
-	"github.com/malivvan/harbor/store/vector"
+	"github.com/malivvan/eidos-db/store/series"
+	"github.com/malivvan/eidos-db/store/vector"
 )
 
 // TestReplicateDBKeyValue covers the raw key/value writes: Set encodes the

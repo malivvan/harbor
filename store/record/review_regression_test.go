@@ -13,9 +13,9 @@ type pointerNamed struct {
 	Name string `db:"index"`
 }
 
-// HarborBucketName is deliberately defined on the pointer receiver: Save must
+// EidosBucketName is deliberately defined on the pointer receiver: Save must
 // honour it rather than falling back to the static type name.
-func (p *pointerNamed) HarborBucketName() string { return "pointer_named_bucket" }
+func (p *pointerNamed) EidosBucketName() string { return "pointer_named_bucket" }
 
 func TestBucketNamerPointerReceiver(t *testing.T) {
 	db, cleanup := createDB(t)
@@ -87,29 +87,29 @@ func TestReverseRangeAboveMax(t *testing.T) {
 	require.Equal(t, "abc3", reverse[0].Name)
 }
 
-// TestListIndexValueMatchingSentinel guards D3: the value "harbor" shares the
-// "harbor__" prefix with the internal harbor__ids sentinel bucket.
+// TestListIndexValueMatchingSentinel guards D3: the value "eidos" shares the
+// "eidos__" prefix with the internal eidos__ids sentinel bucket.
 func TestListIndexValueMatchingSentinel(t *testing.T) {
 	db, cleanup := createDB(t)
 	defer cleanup()
 
 	ctx := context.Background()
-	require.NoError(t, db.Save(ctx, &User{ID: 1, Name: "harbor"}))
-	require.NoError(t, db.Save(ctx, &User{ID: 2, Name: "harbory"}))
+	require.NoError(t, db.Save(ctx, &User{ID: 1, Name: "eidos"}))
+	require.NoError(t, db.Save(ctx, &User{ID: 2, Name: "eidosy"}))
 
 	var found []User
-	require.NoError(t, db.Find(ctx, "Name", "harbor", &found))
+	require.NoError(t, db.Find(ctx, "Name", "eidos", &found))
 	require.Len(t, found, 1)
 	require.Equal(t, 1, found[0].ID)
 
 	var one User
-	require.NoError(t, db.One(ctx, "Name", "harbor", &one))
+	require.NoError(t, db.One(ctx, "Name", "eidos", &one))
 	require.Equal(t, 1, one.ID)
 
-	require.NoError(t, db.DeleteStruct(ctx, &User{ID: 1, Name: "harbor"}))
+	require.NoError(t, db.DeleteStruct(ctx, &User{ID: 1, Name: "eidos"}))
 
 	var after []User
-	require.ErrorIs(t, db.Find(ctx, "Name", "harbor", &after), ErrNotFound)
+	require.ErrorIs(t, db.Find(ctx, "Name", "eidos", &after), ErrNotFound)
 }
 
 // TestKVSetNilReadsBackAsZero guards D4: a nil value is stored as a

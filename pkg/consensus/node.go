@@ -14,11 +14,11 @@ import (
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/raft"
-	"github.com/malivvan/harbor"
-	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/eidos-db"
+	"github.com/malivvan/eidos-db/pkg/metrics"
 )
 
-// Node is one member of a Harbor cluster. It owns the local *harbor.Store
+// Node is one member of an eidos-db cluster. It owns the local *eidos.Store
 // replica and the raft state machine that keeps it in sync with the cluster.
 type Node struct {
 	cfg Config
@@ -40,7 +40,7 @@ type Node struct {
 	obs metrics.Observer
 
 	mu     sync.RWMutex
-	store  *harbor.Store
+	store  *eidos.Store
 	closed bool
 }
 
@@ -76,7 +76,7 @@ func (n *Node) SetNow(fn func() int64) {
 	n.now = fn
 }
 
-// Open starts a cluster node. It opens the harbor store at StorePath, wires up
+// Open starts a cluster node. It opens the eidos-db store at StorePath, wires up
 // the raft transport, log/stable/snapshot stores, and — when Bootstrap is set
 // and no state exists yet — forms a single-node cluster.
 func Open(ctx context.Context, cfg Config) (*Node, error) {
@@ -94,9 +94,9 @@ func Open(ctx context.Context, cfg Config) (*Node, error) {
 		return nil, fmt.Errorf("consensus: create data dir: %w", err)
 	}
 
-	st, err := harbor.Open(ctx, cfg.StorePath, cfg.storeMode(), cfg.StoreOpts)
+	st, err := eidos.Open(ctx, cfg.StorePath, cfg.storeMode(), cfg.StoreOpts)
 	if err != nil {
-		return nil, fmt.Errorf("consensus: open harbor store: %w", err)
+		return nil, fmt.Errorf("consensus: open eidos-db store: %w", err)
 	}
 
 	n := &Node{cfg: cfg, store: st, obs: cfg.Metrics}
@@ -182,7 +182,7 @@ func newLogger(w io.Writer) hclog.Logger {
 	})
 }
 
-// Close shuts down raft and closes the local harbor store. It is safe to call
+// Close shuts down raft and closes the local eidos-db store. It is safe to call
 // more than once.
 func (n *Node) Close() error {
 	if n == nil {
@@ -212,22 +212,22 @@ func (n *Node) Close() error {
 			errs = append(errs, fmt.Errorf("close raft log store: %w", err))
 		}
 	}
-	// Close the harbor store (flushing vec) last, after raft is stopped.
+	// Close the eidos-db store (flushing vec) last, after raft is stopped.
 	n.mu.Lock()
 	st := n.store
 	n.store = nil
 	n.mu.Unlock()
 	if st != nil {
 		if err := st.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close harbor store: %w", err))
+			errs = append(errs, fmt.Errorf("close eidos-db store: %w", err))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// Store returns the local harbor store for reads. It must not be written to
+// Store returns the local eidos-db store for reads. It must not be written to
 // directly: writes made outside the facade methods are not replicated.
-func (n *Node) Store() *harbor.Store {
+func (n *Node) Store() *eidos.Store {
 	if n == nil {
 		return nil
 	}
@@ -353,13 +353,13 @@ func (n *Node) apply(op string, arg any) (any, error) {
 }
 
 // storeHandle returns the current store, or nil when closed.
-func (n *Node) storeHandle() *harbor.Store {
+func (n *Node) storeHandle() *eidos.Store {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.store
 }
 
-// serializeStore writes a consistent snapshot of the harbor database.
+// serializeStore writes a consistent snapshot of the eidos-db store.
 //
 // Backup drains the vector write buffer first, so a point the leader accepted
 // but has not yet flushed is part of the snapshot instead of being silently
@@ -376,7 +376,7 @@ func (n *Node) serializeStore() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// restoreStore atomically replaces the harbor database with the snapshot
+// restoreStore atomically replaces the eidos-db store with the snapshot
 // contents and reopens it, rebuilding the in-memory caches from disk.
 func (n *Node) restoreStore(data []byte) error {
 	// Stage the snapshot first: a failed write leaves the running store alone.
@@ -396,7 +396,7 @@ func (n *Node) restoreStore(data []byte) error {
 	// The handle is gone from here on, so every failure path reopens the file
 	// at StorePath instead of leaving the node with no store at all.
 	failed := func(err error) error {
-		reopened, rerr := harbor.Open(context.Background(), n.cfg.StorePath, n.cfg.storeMode(), n.cfg.StoreOpts)
+		reopened, rerr := eidos.Open(context.Background(), n.cfg.StorePath, n.cfg.storeMode(), n.cfg.StoreOpts)
 		if rerr != nil {
 			return fmt.Errorf("%w (reopen: %v)", err, rerr)
 		}
@@ -411,7 +411,7 @@ func (n *Node) restoreStore(data []byte) error {
 		return failed(fmt.Errorf("consensus: replace store: %w", err))
 	}
 
-	newStore, err := harbor.Open(context.Background(), n.cfg.StorePath, n.cfg.storeMode(), n.cfg.StoreOpts)
+	newStore, err := eidos.Open(context.Background(), n.cfg.StorePath, n.cfg.storeMode(), n.cfg.StoreOpts)
 	if err != nil {
 		return failed(fmt.Errorf("consensus: reopen restored store: %w", err))
 	}

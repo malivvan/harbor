@@ -9,11 +9,11 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
-	hstore "github.com/malivvan/harbor/store"
-	"github.com/malivvan/harbor/store/record"
+	hstore "github.com/malivvan/eidos-db/store"
+	"github.com/malivvan/eidos-db/store/record"
 )
 
-// newTestGraph opens a graph on a fresh harbor file with a controllable clock.
+// newTestGraph opens a graph on a fresh eidos-db file with a controllable clock.
 func newTestGraph(t *testing.T) (*Graph, *clock) {
 	t.Helper()
 	c := &clock{at: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}

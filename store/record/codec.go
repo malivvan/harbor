@@ -42,7 +42,7 @@ type Codec interface {
 	// Unmarshal decodes b into v.
 	Unmarshal(b []byte, v interface{}) error
 
-	// Name returns the stable codec identifier stored in Harbor metadata.
+	// Name returns the stable codec identifier stored in eidos-db metadata.
 	Name() string
 }
 
@@ -55,7 +55,7 @@ type ProjectedCodec interface {
 }
 
 // JSONCodec encodes and decodes entities with encoding/json. It is the codec
-// Harbor uses when Config.Codec is nil.
+// eidos-db uses when Config.Codec is nil.
 var JSONCodec Codec = jsonCodec{}
 
 // jsonCodec implements Codec on top of encoding/json.
@@ -71,7 +71,7 @@ func (jsonCodec) Unmarshal(b []byte, v interface{}) error {
 	return json.Unmarshal(b, v)
 }
 
-// Name returns the codec identifier stored in Harbor metadata.
+// Name returns the codec identifier stored in eidos-db metadata.
 func (jsonCodec) Name() string {
 	return jsonCodecName
 }

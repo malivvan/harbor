@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/malivvan/harbor/internal/crypto"
+	"github.com/malivvan/eidos-db/internal/crypto"
 	bolt "go.etcd.io/bbolt"
 )
 

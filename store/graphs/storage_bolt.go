@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/malivvan/harbor/store/ledger"
+	"github.com/malivvan/eidos-db/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 

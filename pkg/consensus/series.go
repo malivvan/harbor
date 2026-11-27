@@ -3,7 +3,7 @@ package consensus
 import (
 	"context"
 
-	"github.com/malivvan/harbor/store/series"
+	"github.com/malivvan/eidos-db/store/series"
 )
 
 // Series is the replicated write view of the series sub-store.

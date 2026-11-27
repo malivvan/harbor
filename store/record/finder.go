@@ -6,12 +6,12 @@ import (
 	"reflect"
 	"regexp"
 
-	"github.com/malivvan/harbor/store/record/index"
-	"github.com/malivvan/harbor/store/record/q"
+	"github.com/malivvan/eidos-db/store/record/index"
+	"github.com/malivvan/eidos-db/store/record/q"
 	bolt "go.etcd.io/bbolt"
 )
 
-// Finder retrieves records from Harbor buckets.
+// Finder retrieves records from eidos-db buckets.
 type Finder interface {
 	// GetMany returns records by primary key in one read transaction, in
 	// request order, and reports the IDs it did not find.

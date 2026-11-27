@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/eidos-db/pkg/metrics"
 )
 
-// fsm adapts a Node's harbor store to raft.FSM. Apply dispatches commands to
-// the four stores; Snapshot serializes the harbor database; Restore replaces it.
+// fsm adapts a Node's eidos-db store to raft.FSM. Apply dispatches commands to
+// the four stores; Snapshot serializes the eidos-db store; Restore replaces it.
 type fsm struct {
 	node *Node
 
@@ -25,7 +25,7 @@ type fsm struct {
 
 var _ raft.FSM = (*fsm)(nil)
 
-// Apply applies one committed log entry to the local harbor store. It returns
+// Apply applies one committed log entry to the local eidos-db store. It returns
 // the operation result (or an error) as the raft future's response.
 //
 // A corrupt, incompatible, or manually edited log entry is reported as an
@@ -85,7 +85,7 @@ func asError(resp any) error {
 	return nil
 }
 
-// Snapshot returns a serialized snapshot of the harbor database.
+// Snapshot returns a serialized snapshot of the eidos-db store.
 func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 	f.applyMu.Lock()
 	defer f.applyMu.Unlock()
@@ -97,7 +97,7 @@ func (f *fsm) Snapshot() (raft.FSMSnapshot, error) {
 	return &fsmSnapshot{data: data}, nil
 }
 
-// Restore replaces the harbor database with the snapshot contents.
+// Restore replaces the eidos-db store with the snapshot contents.
 func (f *fsm) Restore(rc io.ReadCloser) error {
 	defer rc.Close()
 

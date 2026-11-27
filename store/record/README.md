@@ -1,16 +1,16 @@
 # record — structured records on BoltDB
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/harbor/store/record.svg)](https://pkg.go.dev/github.com/malivvan/harbor/store/record)
+[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/eidos-db/store/record.svg)](https://pkg.go.dev/github.com/malivvan/eidos-db/store/record)
 
 `record` maps Go structs to bbolt buckets and adds indexes, unique constraints, a
 matcher-based query API, managed transactions, and key/value access. It is the
-record store used by the root `harbor` package.
+record store used by the root `eidos` package.
 
 It can be used in two ways:
 
 ```go
 // 1. Through the root package (one file, one password, all four stores).
-store, err := harbor.Open(ctx, "app.db", 0o600, &harbor.Options{Password: password})
+store, err := eidos.Open(ctx, "app.db", 0o600, &eidos.Options{Password: password})
 records := store.Record()
 
 // 2. Directly with a caller-owned bbolt handle.
@@ -94,7 +94,7 @@ type User struct {
 Implement `record.BucketNamer`:
 
 ```go
-func (u User) HarborBucketName() string {
+func (u User) EidosBucketName() string {
 	return "customers"
 }
 ```
@@ -171,8 +171,8 @@ For richer predicates, use `Select` with matchers from `db/q`:
 
 ```go
 import (
-	"github.com/malivvan/harbor/store/record"
-	"github.com/malivvan/harbor/store/record/q"
+	"github.com/malivvan/eidos-db/store/record"
+	"github.com/malivvan/eidos-db/store/record/q"
 )
 
 var users []User
@@ -308,7 +308,7 @@ type Chunk struct {
   not supported.
 - `Node.ValidateSchema(ctx, &Doc{}, &Chunk{})` checks at startup that every
   reference names an existing bucket, catching a typo before the first save.
-- The relation registry (`__harbor_refs__`) is metadata: it stores bucket and
+- The relation registry (`__eidos_refs__`) is metadata: it stores bucket and
   field names, not record values.
 
 ### Multi-get by key
@@ -418,7 +418,7 @@ err = records.ReIndex(ctx, &User{}) // rebuild indexes
 
 ## Transactions
 
-Harbor exposes callback-managed transactions only; there is no
+eidos-db exposes callback-managed transactions only; there is no
 `Begin`/`Commit`/`Rollback` API.
 
 ```go
@@ -444,12 +444,12 @@ Semantics:
   `ctx.Err()` is returned. A callback error takes precedence over a
   cancellation caused by the callback itself.
 - A cancellation after a successful commit is not applied retroactively.
-- Panics propagate unchanged after bbolt unwinds the transaction. Harbor does
+- Panics propagate unchanged after bbolt unwinds the transaction. eidos-db does
   not recover panics.
 
 ### Attach to a caller-owned transaction
 
-Use `Attach` to mix Harbor operations with raw bbolt writes atomically:
+Use `Attach` to mix eidos-db operations with raw bbolt writes atomically:
 
 ```go
 tx, err := brecord.Begin(true)
@@ -477,7 +477,7 @@ if err := audit.Put([]byte("event"), []byte("created")); err != nil {
 return tx.Commit()
 ```
 
-- Harbor never commits, rolls back, closes, or replaces the supplied
+- eidos-db never commits, rolls back, closes, or replaces the supplied
   transaction, and never opens a managed transaction for a bound `Tx`.
 - The full `Node` surface is available, including descendants from `From`,
   `WithCodec`, `PrefixScan` and `RangeScan`.
@@ -638,7 +638,7 @@ Classify with `errors.Is`, not string comparison:
 | `ErrInvalidConfig` | Inconsistent encryption config. |
 | `ErrWrongMode` | Store mode does not match the persisted marker. |
 
-Errors are wrapped as `harbor <operation>: <cause>` while preserving the cause
+Errors are wrapped as `eidos <operation>: <cause>` while preserving the cause
 in the chain.
 
 ## Contexts

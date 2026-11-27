@@ -1,4 +1,4 @@
-// Package search is a full-text index for Harbor records.
+// Package search is a full-text index for eidos-db records.
 //
 // An index stores a document per id: the text is tokenized into terms, each
 // term keeps a posting list of document ids, and each document keeps its length
@@ -18,8 +18,8 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/eidos-db/internal/crypto"
+	"github.com/malivvan/eidos-db/pkg/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -160,7 +160,7 @@ func resolveEnc(cfg Config) (*encState, error) {
 	if err != nil {
 		return nil, err
 	}
-	siv, err := crypto.NewSIVNameCipher(key, "harbor/fts/v1")
+	siv, err := crypto.NewSIVNameCipher(key, "eidos/fts/v1")
 	if err != nil {
 		return nil, err
 	}

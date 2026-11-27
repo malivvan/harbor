@@ -15,17 +15,17 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-func TestNewHarbor(t *testing.T) {
+func TestNewEidos(t *testing.T) {
 	db, err := Open(context.Background(), nil, Config{})
 
 	require.Error(t, err)
 	require.Nil(t, db)
 
-	dir, err := os.MkdirTemp(os.TempDir(), "harbor")
+	dir, err := os.MkdirTemp(os.TempDir(), "eidos")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
-	file := filepath.Join(dir, "harbor.db")
+	file := filepath.Join(dir, "eidos.db")
 	bdb, err := bolt.Open(file, 0600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	defer bdb.Close()
@@ -44,13 +44,13 @@ func TestNewHarbor(t *testing.T) {
 	require.Equal(t, Version, v)
 }
 
-func TestNewHarborWithRootAndCodec(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+func TestNewEidosWithRootAndCodec(t *testing.T) {
+	dir, _ := os.MkdirTemp(os.TempDir(), "eidos")
 	defer os.RemoveAll(dir)
 
 	dc := new(dummyCodec)
 
-	bdb1, err := bolt.Open(filepath.Join(dir, "harbor1.db"), 0660, &bolt.Options{Timeout: 10 * time.Second})
+	bdb1, err := bolt.Open(filepath.Join(dir, "eidos1.db"), 0660, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
 	defer bdb1.Close()
 	db1, err := Open(context.Background(), bdb1, Config{Root: [][]byte{[]byte("a")}, Codec: dc})
@@ -61,7 +61,7 @@ func TestNewHarborWithRootAndCodec(t *testing.T) {
 	err = db1.Save(context.Background(), &SimpleUser{ID: 1})
 	require.NoError(t, err)
 
-	bdb2, err := bolt.Open(filepath.Join(dir, "harbor2.db"), 0600, &bolt.Options{Timeout: 10 * time.Second})
+	bdb2, err := bolt.Open(filepath.Join(dir, "eidos2.db"), 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
 	defer bdb2.Close()
 	db2, err := Open(context.Background(), bdb2, Config{Codec: dc})
@@ -70,7 +70,7 @@ func TestNewHarborWithRootAndCodec(t *testing.T) {
 }
 
 func TestBoltDB(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	dir, _ := os.MkdirTemp(os.TempDir(), "eidos")
 	defer os.RemoveAll(dir)
 	bDB, err := bolt.Open(filepath.Join(dir, "bolt.db"), 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
@@ -162,12 +162,12 @@ func createDB(t errorHandler, opts ...testOpenOption) (*Store, func()) {
 		opt(&cfg)
 	}
 
-	dir, err := os.MkdirTemp(os.TempDir(), "harbor")
+	dir, err := os.MkdirTemp(os.TempDir(), "eidos")
 	if err != nil {
 		t.Error(err)
 	}
 
-	bdb, err := bolt.Open(filepath.Join(dir, "harbor.db"), cfg.mode, cfg.boltOptions)
+	bdb, err := bolt.Open(filepath.Join(dir, "eidos.db"), cfg.mode, cfg.boltOptions)
 	if err != nil {
 		t.Error(err)
 	}
@@ -279,7 +279,7 @@ func TestOpenNilDBRejected(t *testing.T) {
 	require.Nil(t, db)
 }
 
-// TestCallerOwnsLifecycle verifies that Harbor borrows the supplied bbolt Store.
+// TestCallerOwnsLifecycle verifies that eidos-db borrows the supplied bbolt Store.
 func TestCallerOwnsLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	bDBPath := filepath.Join(dir, "borrowed.db")
@@ -293,14 +293,14 @@ func TestCallerOwnsLifecycle(t *testing.T) {
 	// The store keeps the exact pointer supplied to Open.
 	require.Same(t, bDB, db.bolt, "the store must keep the supplied bDB pointer")
 
-	// Close releases the Harbor wrapper without closing the caller's Store.
+	// Close releases the eidos-db wrapper without closing the caller's Store.
 	require.NoError(t, db.Close(), "Close must return nil")
 
 	err = bDB.View(func(tx *bolt.Tx) error { return nil })
-	require.NoError(t, err, "bbolt Store must still be usable after Harbor Close")
+	require.NoError(t, err, "bbolt Store must still be usable after eidos-db Close")
 
 	// The caller remains responsible for closing the database.
-	require.NoError(t, bDB.Close(), "caller must be able to close the Store after Harbor Close")
+	require.NoError(t, bDB.Close(), "caller must be able to close the Store after eidos-db Close")
 }
 
 // TestInitFailureDoesNotClose verifies a failed Open leaves the caller's Store open.
@@ -371,7 +371,7 @@ func TestDBNilClose(t *testing.T) {
 	require.ErrorIs(t, err, ErrNilParam)
 }
 
-// TestNativeKVInteroperability verifies native writes are visible to Harbor and vice versa.
+// TestNativeKVInteroperability verifies native writes are visible to eidos-db and vice versa.
 func TestNativeKVInteroperability(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "native_interop.db")
@@ -385,8 +385,8 @@ func TestNativeKVInteroperability(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Step 1: Harbor write via KV API.
-	err = db.Set(ctx, "interop", "key1", "harbor_value")
+	// Step 1: eidos-db write via KV API.
+	err = db.Set(ctx, "interop", "key1", "eidos_value")
 	require.NoError(t, err)
 
 	// Step 2: Verify via native DB (read back the raw bytes).
@@ -404,7 +404,7 @@ func TestNativeKVInteroperability(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	require.Equal(t, `"harbor_value"`, string(nativeVal), "Harbor value must be visible through native DB")
+	require.Equal(t, `"eidos_value"`, string(nativeVal), "eidos-db value must be visible through native DB")
 
 	// Step 3: Native write via native DB (write raw JSON-encoded string).
 	err = db.bolt.Update(func(tx *bolt.Tx) error {
@@ -416,11 +416,11 @@ func TestNativeKVInteroperability(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Step 4: Verify via Harbor.
+	// Step 4: Verify via eidos-db.
 	var got string
 	err = db.Get(ctx, "interop", "key2", &got)
 	require.NoError(t, err)
-	require.Equal(t, "native_value", got, "native write must be visible through Harbor")
+	require.Equal(t, "native_value", got, "native write must be visible through eidos-db")
 
 	require.NoError(t, db.Close())
 }

@@ -105,7 +105,7 @@ func (c *httpS3Client) do(ctx context.Context, method, bucket, key string, query
 		return nil, err
 	}
 	req.ContentLength = int64(len(body))
-	req.Header.Set("User-Agent", "harbor-s3fs/1.0")
+	req.Header.Set("User-Agent", "eidos-s3fs/1.0")
 	for name, value := range headers {
 		req.Header.Set(name, value)
 	}

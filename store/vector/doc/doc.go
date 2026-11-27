@@ -1,4 +1,4 @@
-// Package doc is a document-oriented facade over Harbor's vector store.
+// Package doc is a document-oriented facade over eidos-db's vector store.
 //
 // `vec` is point-oriented: a point has an ID, a vector and a payload of
 // map[string]any. Callers modelling text embeddings usually want something
@@ -19,7 +19,7 @@
 //
 // A document is stored as one point: the embedding is the vector, and
 // {content, metadata} ride in the payload. Metadata is carried as a JSON string
-// because Harbor payloads hold arbitrary JSON while this model is
+// because eidos-db payloads hold arbitrary JSON while this model is
 // string-to-string.
 package doc
 
@@ -29,7 +29,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/malivvan/harbor/store/vector"
+	"github.com/malivvan/eidos-db/store/vector"
 )
 
 // Payload keys used for a document's two non-vector fields.
@@ -52,7 +52,7 @@ type SearchResult struct {
 	Score float64 `json:"score"`
 }
 
-// Index is one named document collection in the Harbor vector store.
+// Index is one named document collection in the eidos-db vector store.
 //
 // An Index is safe for concurrent use. Its collection is created on first write
 // and reopened from stored metadata afterwards, so opening an Index is cheap and

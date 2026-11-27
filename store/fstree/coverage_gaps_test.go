@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/harbor/store"
+	hstore "github.com/malivvan/eidos-db/store"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )

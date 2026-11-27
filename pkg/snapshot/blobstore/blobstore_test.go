@@ -10,21 +10,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/malivvan/harbor"
-	"github.com/malivvan/harbor/pkg/snapshot"
+	"github.com/malivvan/eidos-db"
+	"github.com/malivvan/eidos-db/pkg/snapshot"
 )
 
-// newStore returns an adapter over a throwaway Harbor database.
+// newStore returns an adapter over a throwaway eidos-db store.
 func newStore(t *testing.T, bucket string) *Store {
 	t.Helper()
 	ctx := context.Background()
-	harborStore, err := harbor.Open(ctx, filepath.Join(t.TempDir(), "test.db"), 0o600, &harbor.Options{Password: "test-password"})
+	eidosStore, err := eidos.Open(ctx, filepath.Join(t.TempDir(), "test.db"), 0o600, &eidos.Options{Password: "test-password"})
 	if err != nil {
-		t.Fatalf("harbor.Open: %v", err)
+		t.Fatalf("eidos.Open: %v", err)
 	}
-	t.Cleanup(func() { _ = harborStore.Close() })
+	t.Cleanup(func() { _ = eidosStore.Close() })
 
-	return New(harborStore.Objects(), bucket)
+	return New(eidosStore.Objects(), bucket)
 }
 
 func readAll(t *testing.T, s *Store, key string) (string, error) {

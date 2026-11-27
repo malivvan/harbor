@@ -1,6 +1,6 @@
 # ledger
 
-Tamper-evident, append-only audit trail for Harbor. Every mutating operation in
+Tamper-evident, append-only audit trail for eidos-db. Every mutating operation in
 the `record`, `file`, `series` and `vector` stores can be recorded as a signed, hash-linked
 event, so the trail proves *what* changed and *in which order* — and cannot be
 forged, altered, reordered or spliced without the store's key material.
@@ -23,7 +23,7 @@ store write ──commit──▶ ledger.Record(Entry)
   previous encoded event. Deleting, reordering or inserting an interior event
   breaks a hash and fails verification.
 - **Start anchoring.** The first event links to a fixed genesis hash,
-  `SHA-256("harbor/audit/v1/genesis")`, so the beginning of the chain is fixed.
+  `SHA-256("eidos/audit/v1/genesis")`, so the beginning of the chain is fixed.
 
 The trail lives in a top-level `ledger/` bucket (`store.LEDGER`) in the same
 bbolt file as the stores, so it travels with snapshots and backups
@@ -31,13 +31,13 @@ automatically.
 
 ## Quick start
 
-Auditing is enabled per open with `harbor.Options.Audit`, mirroring the
+Auditing is enabled per open with `eidos.Options.Audit`, mirroring the
 encryption flags:
 
 ```go
-store, err := harbor.Open(ctx, "app.db", 0o600, &harbor.Options{
+store, err := eidos.Open(ctx, "app.db", 0o600, &eidos.Options{
 	Password: "correct horse battery staple",
-	Audit:    harbor.AuditAll, // or AuditRecord | AuditSeries, …
+	Audit:    eidos.AuditAll, // or AuditRecord | AuditSeries, …
 })
 if err != nil {
 	log.Fatal(err)
@@ -81,7 +81,7 @@ count, tip, err := store.Audit().Head()
 Later, compare the anchored tip against `VerifyAudit`'s `Result.Tip`. A tip that
 is no longer a prefix of the current chain means events were removed from the
 end. A scheduler that calls `Head` every few minutes and writes the pair to an
-append-only log outside the store is enough; there is no helper in Harbor
+append-only log outside the store is enough; there is no helper in eidos-db
 because the destination is the operator's choice.
 
 ## Using the package directly

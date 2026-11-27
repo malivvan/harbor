@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/malivvan/harbor/store/record/index"
+	"github.com/malivvan/eidos-db/store/record/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
@@ -24,19 +24,19 @@ import (
 func TestSharedSentinelIdentity(t *testing.T) {
 	t.Run("ErrNotFound", func(t *testing.T) {
 		require.Equal(t, index.ErrNotFound, ErrNotFound,
-			"harbor.ErrNotFound must be identical to index.ErrNotFound")
+			"eidos.ErrNotFound must be identical to index.ErrNotFound")
 	})
 	t.Run("ErrAlreadyExists", func(t *testing.T) {
 		require.Equal(t, index.ErrAlreadyExists, ErrAlreadyExists,
-			"harbor.ErrAlreadyExists must be identical to index.ErrAlreadyExists")
+			"eidos.ErrAlreadyExists must be identical to index.ErrAlreadyExists")
 	})
 	t.Run("ErrNilParam", func(t *testing.T) {
 		require.Equal(t, index.ErrNilParam, ErrNilParam,
-			"harbor.ErrNilParam must be identical to index.ErrNilParam")
+			"eidos.ErrNilParam must be identical to index.ErrNilParam")
 	})
 	t.Run("ErrNilContext", func(t *testing.T) {
 		require.Equal(t, index.ErrNilContext, ErrNilContext,
-			"harbor.ErrNilContext must be identical to index.ErrNilContext")
+			"eidos.ErrNilContext must be identical to index.ErrNilContext")
 	})
 }
 

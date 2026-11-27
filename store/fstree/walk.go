@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/malivvan/harbor/internal/absfs"
+	"github.com/malivvan/eidos-db/internal/absfs"
 )
 
 // Walk walks the file tree rooted at path in depth-first pre-order, calling fn
@@ -73,7 +73,7 @@ type dirReader interface {
 func walkChildren(filer absfs.Filer, e *walkEntry) ([]*walkEntry, error) {
 	dir := e.path()
 
-	// Prefer ReadDir: it avoids a file handle per directory and, for harbor's
+	// Prefer ReadDir: it avoids a file handle per directory and, for eidos's
 	// FS, reuses the inodes already loaded by the batched ReadDir.
 	if rd, ok := filer.(dirReader); ok {
 		list, err := rd.ReadDir(dir)

@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	hdb "github.com/malivvan/harbor/store/record"
+	hdb "github.com/malivvan/eidos-db/store/record"
 )
 
 var (

@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	harbor "github.com/malivvan/harbor/store/record"
-	"github.com/malivvan/harbor/store/record/index"
-	"github.com/malivvan/harbor/store/record/q"
+	eidos "github.com/malivvan/eidos-db/store/record"
+	"github.com/malivvan/eidos-db/store/record/index"
+	"github.com/malivvan/eidos-db/store/record/q"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -26,10 +26,10 @@ type SimpleProduct struct {
 }
 
 func TestIDIndex(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	dir, _ := os.MkdirTemp(os.TempDir(), "eidos")
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
-	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
+	db := openEidosDB(t, filepath.Join(dir, "eidos.db"))
 	defer db.Close()
 
 	err := db.Init(ctx, &SimpleLogin{})
@@ -63,10 +63,10 @@ func TestIDIndex(t *testing.T) {
 }
 
 func TestIDIndexPrefix(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	dir, _ := os.MkdirTemp(os.TempDir(), "eidos")
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
-	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
+	db := openEidosDB(t, filepath.Join(dir, "eidos.db"))
 	defer db.Close()
 
 	err := db.Init(ctx, &SimpleLogin{})
@@ -104,7 +104,7 @@ func TestIDIndexPrefix(t *testing.T) {
 	}
 	err = db.Prefix(ctx, "Email", "uni", &simpleLogins, setZeroedLimit)
 	require.Error(t, err)
-	require.ErrorIs(t, err, harbor.ErrNotFound)
+	require.ErrorIs(t, err, eidos.ErrNotFound)
 
 	setLimit := func(opt *index.Options) {
 		opt.Limit = 1
@@ -114,10 +114,10 @@ func TestIDIndexPrefix(t *testing.T) {
 }
 
 func TestIDIndexRange(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	dir, _ := os.MkdirTemp(os.TempDir(), "eidos")
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
-	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
+	db := openEidosDB(t, filepath.Join(dir, "eidos.db"))
 	defer db.Close()
 
 	err := db.Init(ctx, &SimpleProduct{})
@@ -150,7 +150,7 @@ func TestIDIndexRange(t *testing.T) {
 
 	err = db.Range(ctx, "Barcode", 5, 8, &simpleProducts, setZeroedLimit)
 	require.Error(t, err)
-	require.ErrorIs(t, err, harbor.ErrNotFound)
+	require.ErrorIs(t, err, eidos.ErrNotFound)
 
 	setLimit := func(opt *index.Options) {
 		opt.Limit = 1
@@ -162,10 +162,10 @@ func TestIDIndexRange(t *testing.T) {
 }
 
 func TestIDIndexParams(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	dir, _ := os.MkdirTemp(os.TempDir(), "eidos")
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
-	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
+	db := openEidosDB(t, filepath.Join(dir, "eidos.db"))
 	defer db.Close()
 
 	err := db.bdb.Update(func(tx *bolt.Tx) error {
@@ -202,11 +202,11 @@ func TestIDIndexParams(t *testing.T) {
 }
 
 /*func TestIDIndex(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	dir, _ := os.MkdirTemp(os.TempDir(), "eidos")
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
-	bDB, _ := bolt.Open(filepath.Join(dir, "harbor.db"), 0600, nil)
-	db, _ := harbor.Open(ctx, bDB, harbor.Config{})
+	bDB, _ := bolt.Open(filepath.Join(dir, "eidos.db"), 0600, nil)
+	db, _ := eidos.Open(ctx, bDB, eidos.Config{})
 	defer db.Close()
 
 	err := db.bdb.Update(func(tx *bolt.Tx) error {
@@ -309,10 +309,10 @@ func TestIDIndexParams(t *testing.T) {
 }
 
 func TestIDIndexRange(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	dir, _ := os.MkdirTemp(os.TempDir(), "eidos")
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
-	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
+	db := openEidosDB(t, filepath.Join(dir, "eidos.db"))
 	defer db.Close()
 
 	db.bdb.Update(func(tx *bolt.Tx) error {
@@ -382,10 +382,10 @@ func TestIDIndexRange(t *testing.T) {
 }
 
 func TestIDIndexPrefix(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	dir, _ := os.MkdirTemp(os.TempDir(), "eidos")
 	defer os.RemoveAll(dir)
 	ctx := context.Background()
-	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
+	db := openEidosDB(t, filepath.Join(dir, "eidos.db"))
 	defer db.Close()
 
 	db.bdb.Update(func(tx *bolt.Tx) error {

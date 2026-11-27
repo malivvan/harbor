@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/malivvan/harbor/internal/absfs"
-	"github.com/malivvan/harbor/pkg/metrics"
-	"github.com/malivvan/harbor/store"
+	"github.com/malivvan/eidos-db/internal/absfs"
+	"github.com/malivvan/eidos-db/pkg/metrics"
+	"github.com/malivvan/eidos-db/store"
 )
 
 // FastWalkFunc is the callback function type for FastWalk.

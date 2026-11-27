@@ -3,8 +3,8 @@ package snapshot
 // objectstore.go — the provider-agnostic object-store contract the snapshotter
 // operates over, plus its errors.
 //
-// The box has exactly one backend for this today: harborstore.go's HarborStore,
-// which keeps objects in the single encrypted harbor database. The interface is
+// The box has exactly one backend for this today: eidosstore.go's EidosStore,
+// which keeps objects in the single encrypted eidos-db store. The interface is
 // kept narrow and explicit so the snapshotter, retention and restore code stay
 // testable against an in-memory double (memstore_test.go) without a database.
 
@@ -37,5 +37,5 @@ type ObjectStore interface {
 }
 
 // ErrNotConfigured is returned when a snapshotter is asked to run before the
-// harbor database has been opened.
+// eidos-db store has been opened.
 var ErrNotConfigured = errors.New("snapshot: object store not configured")

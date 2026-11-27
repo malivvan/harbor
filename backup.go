@@ -1,4 +1,4 @@
-package harbor
+package eidos
 
 import (
 	"context"
@@ -12,24 +12,24 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/malivvan/harbor/store"
-	"github.com/malivvan/harbor/store/fstree"
-	"github.com/malivvan/harbor/store/graphs"
-	"github.com/malivvan/harbor/store/object"
-	"github.com/malivvan/harbor/store/record"
-	"github.com/malivvan/harbor/store/search"
-	"github.com/malivvan/harbor/store/series"
-	"github.com/malivvan/harbor/store/system"
-	"github.com/malivvan/harbor/store/vector"
+	"github.com/malivvan/eidos-db/store"
+	"github.com/malivvan/eidos-db/store/fstree"
+	"github.com/malivvan/eidos-db/store/graphs"
+	"github.com/malivvan/eidos-db/store/object"
+	"github.com/malivvan/eidos-db/store/record"
+	"github.com/malivvan/eidos-db/store/search"
+	"github.com/malivvan/eidos-db/store/series"
+	"github.com/malivvan/eidos-db/store/system"
+	"github.com/malivvan/eidos-db/store/vector"
 	bolt "go.etcd.io/bbolt"
 )
 
 // ErrBackupManifest reports a backup whose bytes or metadata do not match the
 // manifest written next to it.
-var ErrBackupManifest = errors.New("harbor: backup manifest does not match the fstree")
+var ErrBackupManifest = errors.New("eidos: backup manifest does not match the fstree")
 
-// ErrInvalidBackup reports a fstree that is not a readable Harbor database.
-var ErrInvalidBackup = errors.New("harbor: invalid backup")
+// ErrInvalidBackup reports a fstree that is not a readable eidos-db database.
+var ErrInvalidBackup = errors.New("eidos: invalid backup")
 
 // BackupInfo describes one backup fstree.
 type BackupInfo struct {
@@ -80,19 +80,19 @@ func manifestPath(path string) string { return path + ".manifest.json" }
 func (s *Store) BackupFile(ctx context.Context, path string, opts BackupOptions) (BackupInfo, error) {
 	var info BackupInfo
 	if path == "" {
-		return info, fmt.Errorf("harbor: backup: %w: path is required", ErrInvalidOptions)
+		return info, fmt.Errorf("eidos: backup: %w: path is required", ErrInvalidOptions)
 	}
 	if !opts.Overwrite {
 		if _, err := os.Stat(path); err == nil {
-			return info, fmt.Errorf("harbor: backup: %w: %s already exists", os.ErrExist, path)
+			return info, fmt.Errorf("eidos: backup: %w: %s already exists", os.ErrExist, path)
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return info, fmt.Errorf("harbor: backup: %w", err)
+			return info, fmt.Errorf("eidos: backup: %w", err)
 		}
 	}
 
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".harbor-backup-*")
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".eidos-backup-*")
 	if err != nil {
-		return info, fmt.Errorf("harbor: backup to %q: %w", path, err)
+		return info, fmt.Errorf("eidos: backup to %q: %w", path, err)
 	}
 	tmpPath := tmp.Name()
 	discard := func() {
@@ -108,15 +108,15 @@ func (s *Store) BackupFile(ctx context.Context, path string, opts BackupOptions)
 	}
 	if err := tmp.Sync(); err != nil {
 		discard()
-		return info, fmt.Errorf("harbor: backup to %q: sync: %w", path, err)
+		return info, fmt.Errorf("eidos: backup to %q: sync: %w", path, err)
 	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpPath)
-		return info, fmt.Errorf("harbor: backup to %q: close: %w", path, err)
+		return info, fmt.Errorf("eidos: backup to %q: close: %w", path, err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
-		return info, fmt.Errorf("harbor: backup to %q: %w", path, err)
+		return info, fmt.Errorf("eidos: backup to %q: %w", path, err)
 	}
 
 	info = BackupInfo{
@@ -151,31 +151,31 @@ func writeBackupManifest(path string, info BackupInfo) error {
 	}
 	raw, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
-		return fmt.Errorf("harbor: encode backup manifest: %w", err)
+		return fmt.Errorf("eidos: encode backup manifest: %w", err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".harbor-manifest-*")
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".eidos-manifest-*")
 	if err != nil {
-		return fmt.Errorf("harbor: write manifest: %w", err)
+		return fmt.Errorf("eidos: write manifest: %w", err)
 	}
 	tmpPath := tmp.Name()
 	remove := func() { _ = os.Remove(tmpPath) }
 	if _, err := tmp.Write(raw); err != nil {
 		_ = tmp.Close()
 		remove()
-		return fmt.Errorf("harbor: write manifest: %w", err)
+		return fmt.Errorf("eidos: write manifest: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
 		remove()
-		return fmt.Errorf("harbor: write manifest: %w", err)
+		return fmt.Errorf("eidos: write manifest: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		remove()
-		return fmt.Errorf("harbor: write manifest: %w", err)
+		return fmt.Errorf("eidos: write manifest: %w", err)
 	}
 	if err := os.Rename(tmpPath, manifestPath(path)); err != nil {
 		remove()
-		return fmt.Errorf("harbor: write manifest: %w", err)
+		return fmt.Errorf("eidos: write manifest: %w", err)
 	}
 	return nil
 }
@@ -187,11 +187,11 @@ func readBackupManifest(path string) (backupManifest, bool, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return backupManifest{}, false, nil
 		}
-		return backupManifest{}, false, fmt.Errorf("harbor: read backup manifest: %w", err)
+		return backupManifest{}, false, fmt.Errorf("eidos: read backup manifest: %w", err)
 	}
 	var m backupManifest
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return backupManifest{}, false, fmt.Errorf("harbor: decode backup manifest: %w", err)
+		return backupManifest{}, false, fmt.Errorf("eidos: decode backup manifest: %w", err)
 	}
 	return m, true, nil
 }
@@ -212,15 +212,15 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		return info, err
 	}
 	if path == "" {
-		return info, fmt.Errorf("harbor: verify backup: %w: path is required", ErrInvalidOptions)
+		return info, fmt.Errorf("eidos: verify backup: %w: path is required", ErrInvalidOptions)
 	}
 	if password == "" {
-		return info, fmt.Errorf("harbor: verify backup: %w: password is required", ErrInvalidPassword)
+		return info, fmt.Errorf("eidos: verify backup: %w: password is required", ErrInvalidPassword)
 	}
 
 	fi, err := os.Stat(path)
 	if err != nil {
-		return info, fmt.Errorf("harbor: verify backup: %w", err)
+		return info, fmt.Errorf("eidos: verify backup: %w", err)
 	}
 	sum, err := hashBackup(ctx, path)
 	if err != nil {
@@ -270,7 +270,7 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		return info, fmt.Errorf("%w: %w", ErrInvalidBackup, err)
 	}
 	if creating {
-		return info, fmt.Errorf("%w: %s holds no Harbor metadata", ErrInvalidBackup, path)
+		return info, fmt.Errorf("%w: %s holds no eidos-db metadata", ErrInvalidBackup, path)
 	}
 
 	keys, err := system.Derive(password, md.Salt, md.Time, md.Memory, md.Threads)
@@ -297,7 +297,7 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		EncryptValues:   system.HasFlag(md.Flags, EncryptRecordValues),
 		EncryptMetadata: system.HasFlag(md.Flags, EncryptRecordMetadata),
 	}); err != nil {
-		return info, fmt.Errorf("harbor: verify backup: record: %w", err)
+		return info, fmt.Errorf("eidos: verify backup: record: %w", err)
 	}
 
 	fsStore, err := fstree.Open(ctx, bdb, fstree.Config{
@@ -307,15 +307,15 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		EncryptContent:  system.HasFlag(md.Flags, EncryptFileContent),
 	})
 	if err != nil {
-		return info, fmt.Errorf("harbor: verify backup: fstree: %w", err)
+		return info, fmt.Errorf("eidos: verify backup: fstree: %w", err)
 	}
 	names, err := fsStore.FileSystems()
 	if err != nil {
-		return info, fmt.Errorf("harbor: verify backup: fstree: %w", err)
+		return info, fmt.Errorf("eidos: verify backup: fstree: %w", err)
 	}
 	for _, name := range names {
 		if _, err := fsStore.OpenReadOnly(name); err != nil {
-			return info, fmt.Errorf("harbor: verify backup: fstree %q: %w", name, err)
+			return info, fmt.Errorf("eidos: verify backup: fstree %q: %w", name, err)
 		}
 	}
 
@@ -325,7 +325,7 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		EncryptValues:      system.HasFlag(md.Flags, EncryptSeriesValues),
 		EncryptSeriesNames: system.HasFlag(md.Flags, EncryptSeriesNames),
 	}); err != nil {
-		return info, fmt.Errorf("harbor: verify backup: series: %w", err)
+		return info, fmt.Errorf("eidos: verify backup: series: %w", err)
 	}
 
 	vecStore, err := vector.Open(ctx, bdb, vector.Config{
@@ -337,15 +337,15 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		SharedDB:               true,
 	})
 	if err != nil {
-		return info, fmt.Errorf("harbor: verify backup: vector: %w", err)
+		return info, fmt.Errorf("eidos: verify backup: vector: %w", err)
 	}
 	collections, err := vecStore.ListCollections()
 	if err != nil {
-		return info, fmt.Errorf("harbor: verify backup: vector: %w", err)
+		return info, fmt.Errorf("eidos: verify backup: vector: %w", err)
 	}
 	for _, name := range collections {
 		if _, err := vecStore.LoadCollectionMeta(name); err != nil && !errors.Is(err, vector.ErrMetadataNotFound) {
-			return info, fmt.Errorf("harbor: verify backup: vector %q: %w", name, err)
+			return info, fmt.Errorf("eidos: verify backup: vector %q: %w", name, err)
 		}
 	}
 
@@ -355,15 +355,15 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		EncryptValues: system.HasFlag(md.Flags, EncryptRecordValues),
 	})
 	if err != nil {
-		return info, fmt.Errorf("harbor: verify backup: search: %w", err)
+		return info, fmt.Errorf("eidos: verify backup: search: %w", err)
 	}
 	indexes, err := ftsStore.Indexes(ctx)
 	if err != nil {
-		return info, fmt.Errorf("harbor: verify backup: search: %w", err)
+		return info, fmt.Errorf("eidos: verify backup: search: %w", err)
 	}
 	for _, name := range indexes {
 		if _, err := ftsStore.Open(name, search.Config{}); err != nil {
-			return info, fmt.Errorf("harbor: verify backup: search %q: %w", name, err)
+			return info, fmt.Errorf("eidos: verify backup: search %q: %w", name, err)
 		}
 	}
 
@@ -374,15 +374,15 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 			EncryptValues: system.HasFlag(md.Flags, EncryptGraphValues) || system.HasFlag(md.Flags, EncryptRecordValues),
 		})
 		if err != nil {
-			return info, fmt.Errorf("harbor: verify backup: graphs: %w", err)
+			return info, fmt.Errorf("eidos: verify backup: graphs: %w", err)
 		}
 		graphNames, err := graphStore.Names(ctx)
 		if err != nil {
-			return info, fmt.Errorf("harbor: verify backup: graphs: %w", err)
+			return info, fmt.Errorf("eidos: verify backup: graphs: %w", err)
 		}
 		for _, name := range graphNames {
 			if _, err := graphStore.Open(name); err != nil {
-				return info, fmt.Errorf("harbor: verify backup: graph %q: %w", name, err)
+				return info, fmt.Errorf("eidos: verify backup: graph %q: %w", name, err)
 			}
 		}
 	}
@@ -393,7 +393,7 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 			Secret:        keys.Object,
 			EncryptValues: system.HasFlag(md.Flags, EncryptObjectValues) || system.HasFlag(md.Flags, EncryptRecordValues),
 		}); err != nil {
-			return info, fmt.Errorf("harbor: verify backup: object: %w", err)
+			return info, fmt.Errorf("eidos: verify backup: object: %w", err)
 		}
 	}
 
@@ -405,7 +405,7 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 func hashBackup(ctx context.Context, path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("harbor: verify backup: %w", err)
+		return "", fmt.Errorf("eidos: verify backup: %w", err)
 	}
 	defer f.Close()
 
@@ -418,14 +418,14 @@ func hashBackup(ctx context.Context, path string) (string, error) {
 		n, rerr := f.Read(buf)
 		if n > 0 {
 			if _, werr := h.Write(buf[:n]); werr != nil {
-				return "", fmt.Errorf("harbor: verify backup: %w", werr)
+				return "", fmt.Errorf("eidos: verify backup: %w", werr)
 			}
 		}
 		if rerr == io.EOF {
 			break
 		}
 		if rerr != nil {
-			return "", fmt.Errorf("harbor: verify backup: %w", rerr)
+			return "", fmt.Errorf("eidos: verify backup: %w", rerr)
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil

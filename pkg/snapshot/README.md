@@ -9,8 +9,8 @@ Stat over prefix-keyed objects), so it has no opinion about where bytes live. Th
 
 ```go
 import (
-    "github.com/malivvan/harbor/pkg/snapshot"
-    "github.com/malivvan/harbor/pkg/snapshot/blobstore"
+    "github.com/malivvan/eidos-db/pkg/snapshot"
+    "github.com/malivvan/eidos-db/pkg/snapshot/blobstore"
 )
 
 st := blobstore.New(store.Objects(), "app-data")

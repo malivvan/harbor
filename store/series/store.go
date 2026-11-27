@@ -10,9 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/malivvan/harbor/pkg/metrics"
-	"github.com/malivvan/harbor/store"
-	"github.com/malivvan/harbor/store/ledger"
+	"github.com/malivvan/eidos-db/pkg/metrics"
+	"github.com/malivvan/eidos-db/store"
+	"github.com/malivvan/eidos-db/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 

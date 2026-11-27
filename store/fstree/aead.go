@@ -3,9 +3,9 @@ package fstree
 import (
 	"fmt"
 
-	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/pkg/metrics"
-	"github.com/malivvan/harbor/store/ledger"
+	"github.com/malivvan/eidos-db/internal/crypto"
+	"github.com/malivvan/eidos-db/pkg/metrics"
+	"github.com/malivvan/eidos-db/store/ledger"
 )
 
 // KeySize is the required key length in bytes (256 bits).
@@ -17,7 +17,7 @@ const KeySize = crypto.KeySize
 type Config struct {
 	// Root is the bucket path below which all file systems live. Each element
 	// is one nested bucket name. A nil or empty Root means the database root;
-	// the harbor root package passes [][]byte{[]byte(store.FSTREE)} explicitly.
+	// the eidos root package passes [][]byte{[]byte(store.FSTREE)} explicitly.
 	Root [][]byte
 
 	// Secret is a raw 32-byte master key. It must be set when encryption is
@@ -131,7 +131,7 @@ func (e *encState) openContent(raw []byte) ([]byte, error) {
 const (
 	markerKey       = "\x00__fs_enc__"
 	markerMagic     = "FENC"
-	canaryPlaintext = "harbor/fs/aead/v1"
+	canaryPlaintext = "eidos/fs/aead/v1"
 )
 
 const (

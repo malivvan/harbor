@@ -1,6 +1,6 @@
 # graphs
 
-`graphs` is both Harbor's bitemporal property-graph store and the reusable graph
+`graphs` is both eidos-db's bitemporal property-graph store and the reusable graph
 core that operates on it. A `Store` owns a dedicated root bucket (`graphs/`), its
 own record encoding and its own encryption settings, so graph data does not
 depend on the record store's buckets or codec. The core — nodes, directed edges,
@@ -74,9 +74,9 @@ stay readable. The store writes its own format version, encryption-mode marker
 and canary; an unknown version or wrong mode fails the open.
 
 The record-backed layout keeps the record names of eidos's earlier graph
-implementation and pins their buckets with `HarborBucketName`
-(`harborNodeRecord`, `harborNodeVersion`, `harborEdgeRecord`,
-`harborEdgeVersion`); their field names and order are identical. Harbor's
+implementation and pins their buckets with `EidosBucketName`
+(`eidosNodeRecord`, `eidosNodeVersion`, `eidosEdgeRecord`,
+`eidosEdgeVersion`); their field names and order are identical. eidos-db's
 `record` derives a bucket from the type name, so the pin is what keeps an
 existing file readable.
 
@@ -114,14 +114,14 @@ application's rule, not this package's.
 ## Lifecycle
 
 `graphs.Open` borrows a caller-owned `*bolt.DB` and never closes it. The root
-`harbor.Store` opens the conventional store under `graphs/` and exposes it as
+`eidos.Store` opens the conventional store under `graphs/` and exposes it as
 `Graphs()`. Extra accessor segments select a rooted view
 (`store.Graphs("tenant")`). A transaction-bound view is available as
 `tx.Graphs()`.
 
 `New` borrows the store it wraps; the caller closes it. `Init` is a no-op —
 buckets are created by the first write. Reads and writes honour
-`context.Context` cancellation through Harbor. `CreatedAt` is the store's unless
+`context.Context` cancellation through eidos-db. `CreatedAt` is the store's unless
 the caller sets it, which an import does to keep the time a record first existed.
 Ids are not generated: a caller names records. Results are returned in id order;
 `Diff` and history are ordered by recorded time, then valid time. Upserts,
@@ -133,8 +133,8 @@ are per-record: a failed element does not roll back the ones before it.
 ## Migration from the record-backed layout
 
 Earlier graph builds stored records in the record store's buckets
-(`harborNodeRecord`, `harborNodeVersion`, `harborEdgeRecord`,
-`harborEdgeVersion`). That layout is still readable through the legacy
+(`eidosNodeRecord`, `eidosNodeVersion`, `eidosEdgeRecord`,
+`eidosEdgeVersion`). That layout is still readable through the legacy
 constructor:
 
 ```go
@@ -168,5 +168,5 @@ The application-facing surfaces of a graph store stay in the application or are
 later optional packages: RDF/SPARQL and its projections, rule engines, RDFS/OWL
 and SHACL reasoning, Cypher, ontology-driven single-valued supersession,
 PageRank and community detection, merge-entities, and GraphML/GEXF export. The
-core exposes the reads and writes those need; moving one of them into Harbor is
+core exposes the reads and writes those need; moving one of them into eidos-db is
 a separate decision, not a side effect of this package.

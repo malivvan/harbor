@@ -1,4 +1,4 @@
-module github.com/malivvan/harbor
+module github.com/malivvan/eidos-db
 
 go 1.27.4
 

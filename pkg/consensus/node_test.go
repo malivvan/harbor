@@ -11,9 +11,9 @@ import (
 	"github.com/hashicorp/raft"
 	"github.com/stretchr/testify/require"
 
-	"github.com/malivvan/harbor"
-	"github.com/malivvan/harbor/store/series"
-	"github.com/malivvan/harbor/store/vector"
+	"github.com/malivvan/eidos-db"
+	"github.com/malivvan/eidos-db/store/series"
+	"github.com/malivvan/eidos-db/store/vector"
 )
 
 // testUser is a db record with a string primary key and an indexed field.
@@ -22,7 +22,7 @@ type testUser struct {
 	Name string `db:"index"`
 }
 
-func (testUser) HarborBucketName() string { return "users" }
+func (testUser) EidosBucketName() string { return "users" }
 
 func freeAddr(t *testing.T) string {
 	t.Helper()
@@ -35,13 +35,13 @@ func freeAddr(t *testing.T) string {
 	return addr
 }
 
-func testStoreOpts() *harbor.Options {
-	return &harbor.Options{
+func testStoreOpts() *eidos.Options {
+	return &eidos.Options{
 		Password:   "test-password",
 		Plaintext:  true,
-		KDFTime:    harbor.FastKDFTime,
-		KDFMemory:  harbor.FastKDFMemory,
-		KDFThreads: harbor.FastKDFThreads,
+		KDFTime:    eidos.FastKDFTime,
+		KDFMemory:  eidos.FastKDFMemory,
+		KDFThreads: eidos.FastKDFThreads,
 	}
 }
 
@@ -52,7 +52,7 @@ func testConfig(id raft.ServerID, addr string, bootstrap bool, t *testing.T) Con
 		BindAddr:     addr,
 		Dir:          dir,
 		Bootstrap:    bootstrap,
-		StorePath:    filepath.Join(dir, "harbor.db"),
+		StorePath:    filepath.Join(dir, "eidos.db"),
 		StoreMode:    0o600,
 		StoreOpts:    testStoreOpts(),
 		ApplyTimeout: 10 * time.Second,
@@ -219,7 +219,7 @@ func TestReplicateFS(t *testing.T) {
 	leader := waitLeader(t, nodes...)
 	fs := leader.File().Open("data")
 	require.NoError(t, fs.Mkdir(ctx, "/docs", 0o755))
-	require.NoError(t, fs.WriteFile(ctx, "/docs/readme.txt", []byte("hello harbor"), 0o644))
+	require.NoError(t, fs.WriteFile(ctx, "/docs/readme.txt", []byte("hello eidos"), 0o644))
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
@@ -227,7 +227,7 @@ func TestReplicateFS(t *testing.T) {
 		require.NoError(t, err)
 		data, err := fsys.ReadFile("/docs/readme.txt")
 		require.NoError(t, err)
-		require.Equal(t, "hello harbor", string(data))
+		require.Equal(t, "hello eidos", string(data))
 	}
 }
 

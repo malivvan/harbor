@@ -7,6 +7,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/malivvan/eidos-db"
+	bolt "go.etcd.io/bbolt"
 )
 
 func TestOpenCreatesOneStoreAndKey(t *testing.T) {
@@ -167,7 +171,11 @@ func TestConcurrentFirstOpenAgreesOnOneKey(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func() {
 			defer wg.Done()
-			m := NewManager(Config{Dir: dir})
+			// This test opens the same directory eight times: every winner
+			// holds the file lock through Argon2id, so it must not use the
+			// short production lock timeout.
+			opts := &eidos.Options{Options: bolt.Options{Timeout: time.Minute}}
+			m := NewManager(Config{Dir: dir, Options: opts})
 			if _, oerr := m.Open(context.Background()); oerr != nil {
 				mu.Lock()
 				err = oerr

@@ -4,17 +4,17 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/malivvan/harbor"
-	"github.com/malivvan/harbor/store/vector"
+	"github.com/malivvan/eidos-db"
+	"github.com/malivvan/eidos-db/store/vector"
 )
 
-// newStore returns a throwaway Harbor database's vector store.
+// newStore returns a throwaway eidos-db database's vector store.
 func newStore(t *testing.T) *vector.Store {
 	t.Helper()
-	st, err := harbor.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"), 0o600,
-		&harbor.Options{Password: "test-password"})
+	st, err := eidos.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"), 0o600,
+		&eidos.Options{Password: "test-password"})
 	if err != nil {
-		t.Fatalf("harbor.Open: %v", err)
+		t.Fatalf("eidos.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	return st.Vector()
@@ -223,9 +223,9 @@ func TestReopenAfterCloseStillSearches(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "reopen.db")
 
-	st1, err := harbor.Open(t.Context(), path, 0o600, &harbor.Options{Password: "pw"})
+	st1, err := eidos.Open(t.Context(), path, 0o600, &eidos.Options{Password: "pw"})
 	if err != nil {
-		t.Fatalf("harbor.Open: %v", err)
+		t.Fatalf("eidos.Open: %v", err)
 	}
 	idx1, err := Open(st1.Vector(), "persist")
 	if err != nil {
@@ -241,7 +241,7 @@ func TestReopenAfterCloseStillSearches(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	st2, err := harbor.Open(t.Context(), path, 0o600, &harbor.Options{Password: "pw"})
+	st2, err := eidos.Open(t.Context(), path, 0o600, &eidos.Options{Password: "pw"})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}

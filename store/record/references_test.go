@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/malivvan/harbor/store/record/q"
+	"github.com/malivvan/eidos-db/store/record/q"
 	bolt "go.etcd.io/bbolt"
 )
 

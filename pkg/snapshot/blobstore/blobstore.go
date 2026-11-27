@@ -1,4 +1,4 @@
-// Package blobstore adapts Harbor's object store to snapshot.ObjectStore.
+// Package blobstore adapts eidos-db's object store to snapshot.ObjectStore.
 //
 // The snapshotter is written against a prefix-keyed object store: List/Get/Put/
 // Delete/Stat all take one key, and snapshot artifacts live under a reserved
@@ -13,8 +13,8 @@ import (
 	"context"
 	"io"
 
-	"github.com/malivvan/harbor/pkg/snapshot"
-	"github.com/malivvan/harbor/store/object"
+	"github.com/malivvan/eidos-db/pkg/snapshot"
+	"github.com/malivvan/eidos-db/store/object"
 )
 
 // Store is a snapshot.ObjectStore over one bucket of the object store.

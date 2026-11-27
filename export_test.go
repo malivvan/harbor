@@ -1,4 +1,4 @@
-package harbor
+package eidos
 
 import (
 	"bytes"
@@ -9,9 +9,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/malivvan/harbor/store/record/q"
-	"github.com/malivvan/harbor/store/series"
-	"github.com/malivvan/harbor/store/vector"
+	"github.com/malivvan/eidos-db/store/record/q"
+	"github.com/malivvan/eidos-db/store/series"
+	"github.com/malivvan/eidos-db/store/vector"
 )
 
 // exportTestRecord is the db record shape used by the export/import tests.

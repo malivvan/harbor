@@ -3,9 +3,9 @@ package vector
 import (
 	"fmt"
 
-	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/pkg/metrics"
-	"github.com/malivvan/harbor/store/ledger"
+	"github.com/malivvan/eidos-db/internal/crypto"
+	"github.com/malivvan/eidos-db/pkg/metrics"
+	"github.com/malivvan/eidos-db/store/ledger"
 	"go.etcd.io/bbolt"
 )
 
@@ -18,7 +18,7 @@ const KeySize = crypto.KeySize
 type Config struct {
 	// Root is the bucket path below which all collections live. Each element
 	// is one nested bucket name. A nil or empty Root means the database root;
-	// the harbor root package passes [][]byte{[]byte(store.VECTOR)} explicitly.
+	// the eidos root package passes [][]byte{[]byte(store.VECTOR)} explicitly.
 	Root [][]byte
 
 	// UseQuant enables vector quantization. When true and Quantizer is nil,
@@ -51,7 +51,7 @@ type Config struct {
 
 	// SharedDB reports that the caller owns the bbolt handle. Store.Close then
 	// flushes buffered points and releases the wrapper without closing the
-	// handle, which is what an embedding store (the harbor root package) needs.
+	// handle, which is what an embedding store (the eidos root package) needs.
 	// It is equivalent to calling SetOwnsDB(false) after Open. The zero value
 	// keeps standalone ownership: Close closes the handle.
 	SharedDB bool
@@ -108,7 +108,7 @@ const (
 )
 
 // sivInfoPrefix domain-separates the deterministic name ciphers.
-const sivInfoPrefix = "harbor/vec/keys/"
+const sivInfoPrefix = "eidos/vec/keys/"
 
 // encState is the shared encryption configuration of a Store. A nil encState
 // means plaintext: every helper is then an exact passthrough to the point
@@ -202,7 +202,7 @@ func (e *encState) openName(cipherName []byte, domain string) (string, error) {
 const (
 	markerKey       = "\x00__vec_enc__"
 	markerMagic     = "VENC"
-	canaryPlaintext = "harbor/vec/aead/v1"
+	canaryPlaintext = "eidos/vec/aead/v1"
 )
 
 const (

@@ -7,7 +7,7 @@ import (
 )
 
 // AppID identifies this module in persisted metadata.
-const AppID = "com.github.malivvan.harbor"
+const AppID = "com.github.malivvan.eidos"
 
 // Cursor that can be reversed
 type Cursor struct {

@@ -224,7 +224,7 @@ func TestAEADVerifyAllDetectsTampering(t *testing.T) {
 			c := b.Cursor()
 			var k, v []byte
 			for key, val := c.First(); key != nil; key, val = c.Next() {
-				if val != nil { // skip the nested harbor__ids bucket
+				if val != nil { // skip the nested eidos__ids bucket
 					k, v = key, val
 					break
 				}

@@ -9,7 +9,7 @@ do not know the collection's dimension until the first embedding arrives.
 
 ```go
 import (
-    "github.com/malivvan/harbor/store/vector/doc"
+    "github.com/malivvan/eidos-db/store/vector/doc"
 )
 
 idx, err := doc.Open(st.Vector(), "recall")
@@ -52,6 +52,6 @@ Opening an `Index` touches no data, so it is cheap to create one per request.
 ## Payload layout
 
 A document is one point: the embedding is the vector, and `{content, metadata}`
-ride in the payload. Metadata is carried as a JSON string because Harbor payloads
+ride in the payload. Metadata is carried as a JSON string because eidos-db payloads
 hold arbitrary JSON while this model is string-to-string. A corrupt metadata blob
 keeps the document with empty metadata rather than dropping the hit.

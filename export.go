@@ -1,4 +1,4 @@
-package harbor
+package eidos
 
 import (
 	"bufio"
@@ -16,17 +16,17 @@ import (
 	"sort"
 	"time"
 
-	"github.com/malivvan/harbor/store/fstree"
-	"github.com/malivvan/harbor/store/record"
-	"github.com/malivvan/harbor/store/series"
-	"github.com/malivvan/harbor/store/vector"
+	"github.com/malivvan/eidos-db/store/fstree"
+	"github.com/malivvan/eidos-db/store/record"
+	"github.com/malivvan/eidos-db/store/series"
+	"github.com/malivvan/eidos-db/store/vector"
 )
 
 // Export format constants. The container is newline-delimited JSON: one header
 // line, one line per record, and a footer with the record count and a SHA-256
 // checksum of the header and record lines.
 const (
-	exportFormat  = "harbor-export"
+	exportFormat  = "eidos-export"
 	exportVersion = 1
 
 	// exportBatch bounds how many time-series or vector points share one
@@ -51,19 +51,19 @@ const (
 
 // Errors returned by Export and Import.
 var (
-	// ErrExportFormat reports a stream that is not a Harbor export: a bad
+	// ErrExportFormat reports a stream that is not an eidos-db export: a bad
 	// header, an unknown record kind, or an unexpected ordering.
-	ErrExportFormat = errors.New("harbor: unrecognized export format")
+	ErrExportFormat = errors.New("eidos: unrecognized export format")
 
 	// ErrExportVersion reports an export written by an incompatible version.
-	ErrExportVersion = errors.New("harbor: unsupported export version")
+	ErrExportVersion = errors.New("eidos: unsupported export version")
 
 	// ErrExportChecksum reports a checksum mismatch: the container was modified
 	// after it was written.
-	ErrExportChecksum = errors.New("harbor: export checksum mismatch")
+	ErrExportChecksum = errors.New("eidos: export checksum mismatch")
 
 	// ErrExportTruncated reports a stream that ended before its footer.
-	ErrExportTruncated = errors.New("harbor: export is truncated")
+	ErrExportTruncated = errors.New("eidos: export is truncated")
 )
 
 // Progress describes how far an export or import has advanced.
@@ -179,7 +179,7 @@ func Export(ctx context.Context, src *Store, w io.Writer, opts ExportOptions) (E
 	}
 	if src.vector != nil {
 		if err := src.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
-			return ExportSummary{}, fmt.Errorf("harbor: export: flush vec store: %w", err)
+			return ExportSummary{}, fmt.Errorf("eidos: export: flush vec store: %w", err)
 		}
 	}
 
@@ -206,13 +206,13 @@ func Export(ctx context.Context, src *Store, w io.Writer, opts ExportOptions) (E
 	sum := hex.EncodeToString(hasher.Sum(nil))
 	footer, err := json.Marshal(exportRecord{Kind: exportKindFooter, Records: e.records, Checksum: sum})
 	if err != nil {
-		return ExportSummary{}, fmt.Errorf("harbor: export: encode footer: %w", err)
+		return ExportSummary{}, fmt.Errorf("eidos: export: encode footer: %w", err)
 	}
 	if _, err := buffered.Write(append(footer, '\n')); err != nil {
-		return ExportSummary{}, fmt.Errorf("harbor: export: write footer: %w", err)
+		return ExportSummary{}, fmt.Errorf("eidos: export: write footer: %w", err)
 	}
 	if err := buffered.Flush(); err != nil {
-		return ExportSummary{}, fmt.Errorf("harbor: export: write: %w", err)
+		return ExportSummary{}, fmt.Errorf("eidos: export: write: %w", err)
 	}
 
 	return ExportSummary{Records: e.records, Bytes: counted.n, Checksum: sum}, nil
@@ -237,11 +237,11 @@ func (e *exporter) writeHeader(flags uint16) error {
 		Flags:   flags,
 	})
 	if err != nil {
-		return fmt.Errorf("harbor: export: encode header: %w", err)
+		return fmt.Errorf("eidos: export: encode header: %w", err)
 	}
 	line = append(line, '\n')
 	if _, err := e.payload.Write(line); err != nil {
-		return fmt.Errorf("harbor: export: write header: %w", err)
+		return fmt.Errorf("eidos: export: write header: %w", err)
 	}
 	e.bytes += int64(len(line))
 	return nil
@@ -253,11 +253,11 @@ func (e *exporter) writeRecord(rec exportRecord) error {
 	}
 	line, err := json.Marshal(rec)
 	if err != nil {
-		return fmt.Errorf("harbor: export: encode %s record: %w", rec.Kind, err)
+		return fmt.Errorf("eidos: export: encode %s record: %w", rec.Kind, err)
 	}
 	line = append(line, '\n')
 	if _, err := e.payload.Write(line); err != nil {
-		return fmt.Errorf("harbor: export: write: %w", err)
+		return fmt.Errorf("eidos: export: write: %w", err)
 	}
 	e.records++
 	e.bytes += int64(len(line))
@@ -290,7 +290,7 @@ func (e *exporter) exportDB() error {
 		}
 		records := reflect.New(reflect.SliceOf(reflect.PointerTo(t)))
 		if err := e.src.Record().Select().Find(e.ctx, records.Interface()); err != nil && !errors.Is(err, record.ErrNotFound) {
-			return fmt.Errorf("harbor: export db %s: %w", t, err)
+			return fmt.Errorf("eidos: export db %s: %w", t, err)
 		}
 		slice := records.Elem()
 		for i := 0; i < slice.Len(); i++ {
@@ -299,7 +299,7 @@ func (e *exporter) exportDB() error {
 			}
 			data, err := json.Marshal(slice.Index(i).Interface())
 			if err != nil {
-				return fmt.Errorf("harbor: export db record %s: %w", t, err)
+				return fmt.Errorf("eidos: export db record %s: %w", t, err)
 			}
 			if err := e.writeRecord(exportRecord{Kind: exportKindDBRecord, Type: t.String(), Data: data}); err != nil {
 				return err
@@ -312,7 +312,7 @@ func (e *exporter) exportDB() error {
 func (e *exporter) exportFS() error {
 	names, err := e.src.File().FileSystems()
 	if err != nil {
-		return fmt.Errorf("harbor: export fs: %w", err)
+		return fmt.Errorf("eidos: export fs: %w", err)
 	}
 	sort.Strings(names)
 	for _, name := range names {
@@ -321,7 +321,7 @@ func (e *exporter) exportFS() error {
 		}
 		vfs, err := e.src.File().Open(name)
 		if err != nil {
-			return fmt.Errorf("harbor: export fs %q: %w", name, err)
+			return fmt.Errorf("eidos: export fs %q: %w", name, err)
 		}
 		if err := e.exportFSTree(name, vfs, "/"); err != nil {
 			return err
@@ -333,7 +333,7 @@ func (e *exporter) exportFS() error {
 func (e *exporter) exportFSTree(container string, vfs *fstree.FS, dir string) error {
 	entries, err := vfs.ReadDir(dir)
 	if err != nil {
-		return fmt.Errorf("harbor: export fs %q %s: %w", container, dir, err)
+		return fmt.Errorf("eidos: export fs %q %s: %w", container, dir, err)
 	}
 	for _, entry := range entries {
 		if err := e.ctx.Err(); err != nil {
@@ -342,14 +342,14 @@ func (e *exporter) exportFSTree(container string, vfs *fstree.FS, dir string) er
 		p := path.Join(dir, entry.Name())
 		info, err := vfs.Lstat(p)
 		if err != nil {
-			return fmt.Errorf("harbor: export fs %q %s: %w", container, p, err)
+			return fmt.Errorf("eidos: export fs %q %s: %w", container, p, err)
 		}
 		mtime := info.ModTime()
 		switch {
 		case info.Mode()&os.ModeSymlink != 0:
 			target, err := vfs.Readlink(p)
 			if err != nil {
-				return fmt.Errorf("harbor: export fs %q %s: %w", container, p, err)
+				return fmt.Errorf("eidos: export fs %q %s: %w", container, p, err)
 			}
 			if err := e.writeRecord(exportRecord{Kind: exportKindFSSymlink, Container: container, Path: p, Link: target}); err != nil {
 				return err
@@ -371,7 +371,7 @@ func (e *exporter) exportFSTree(container string, vfs *fstree.FS, dir string) er
 		default:
 			data, err := vfs.ReadFile(p)
 			if err != nil {
-				return fmt.Errorf("harbor: export fs %q %s: %w", container, p, err)
+				return fmt.Errorf("eidos: export fs %q %s: %w", container, p, err)
 			}
 			if err := e.writeRecord(exportRecord{
 				Kind:      exportKindFSFile,
@@ -392,7 +392,7 @@ func (e *exporter) exportFSTree(container string, vfs *fstree.FS, dir string) er
 func (e *exporter) exportTS() error {
 	seriesInfos, err := e.src.Series().ListSeries(e.ctx)
 	if err != nil {
-		return fmt.Errorf("harbor: export ts: %w", err)
+		return fmt.Errorf("eidos: export ts: %w", err)
 	}
 	for _, info := range seriesInfos {
 		if err := e.ctx.Err(); err != nil {
@@ -416,7 +416,7 @@ func (e *exporter) exportTS() error {
 			return nil
 		})
 		if err != nil {
-			return fmt.Errorf("harbor: export series %q: %w", info.Name, err)
+			return fmt.Errorf("eidos: export series %q: %w", info.Name, err)
 		}
 		if err := flush(); err != nil {
 			return err
@@ -445,7 +445,7 @@ func (e *exporter) exportTS() error {
 func (e *exporter) exportVec() error {
 	names, err := e.src.Vector().ListCollections()
 	if err != nil {
-		return fmt.Errorf("harbor: export vec: %w", err)
+		return fmt.Errorf("eidos: export vec: %w", err)
 	}
 	sort.Strings(names)
 	for _, name := range names {
@@ -454,7 +454,7 @@ func (e *exporter) exportVec() error {
 		}
 		meta, err := e.src.Vector().LoadCollectionMeta(name)
 		if err != nil {
-			return fmt.Errorf("harbor: export collection %q: %w", name, err)
+			return fmt.Errorf("eidos: export collection %q: %w", name, err)
 		}
 		if err := e.writeRecord(exportRecord{
 			Kind:      exportKindVecCollection,
@@ -469,7 +469,7 @@ func (e *exporter) exportVec() error {
 
 		points, err := e.src.Vector().LoadCollection(name)
 		if err != nil {
-			return fmt.Errorf("harbor: export collection %q: %w", name, err)
+			return fmt.Errorf("eidos: export collection %q: %w", name, err)
 		}
 		ids := make([]string, 0, len(points))
 		for id := range points {
@@ -484,7 +484,7 @@ func (e *exporter) exportVec() error {
 			}
 			raw, err := json.Marshal(batch)
 			if err != nil {
-				return fmt.Errorf("harbor: export collection %q: %w", name, err)
+				return fmt.Errorf("eidos: export collection %q: %w", name, err)
 			}
 			batch = nil
 			return e.writeRecord(exportRecord{Kind: exportKindVecPoints, Container: name, Vectors: raw})

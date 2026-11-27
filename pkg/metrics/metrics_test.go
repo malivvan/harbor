@@ -64,13 +64,13 @@ func TestHelpersForwardToObserver(t *testing.T) {
 	Counter(rec, MetricTxTotal, 3, Labels{LabelStore: "db"})
 	Histogram(rec, MetricTxDuration, 42, Labels{LabelStore: "db"})
 	Gauge(rec, MetricCacheSize, 7, Labels{LabelStore: "fs"})
-	_, end := StartSpan(context.Background(), rec, "harbor.op", nil)
+	_, end := StartSpan(context.Background(), rec, "eidos.op", nil)
 	end(nil)
 
 	require.Equal(t, int64(3), rec.counters[MetricTxTotal])
 	require.Equal(t, []float64{42}, rec.histograms[MetricTxDuration])
 	require.Equal(t, 7.0, rec.gauges[MetricCacheSize])
-	require.Equal(t, []string{"harbor.op"}, rec.spans)
+	require.Equal(t, []string{"eidos.op"}, rec.spans)
 }
 
 // TestNopObserver verifies the discard implementation is usable as a default.

@@ -39,7 +39,7 @@ func aeadOpenBolt(t *testing.T, path string) *bolt.DB {
 	return bdb
 }
 
-// aeadOpenStore opens a Harbor store on bdb with the given encryption config.
+// aeadOpenStore opens an eidos-db store on bdb with the given encryption config.
 func aeadOpenStore(t *testing.T, bdb *bolt.DB, cfg Config) *Store {
 	t.Helper()
 	st, err := Open(context.Background(), bdb, cfg)

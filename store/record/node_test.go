@@ -184,7 +184,7 @@ type testUser struct {
 // TestNode_ConsumerCanUseNode verifies that an external consumer can declare
 // and use a Node.
 func TestNode_ConsumerCanUseNode(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "harbor.db")
+	path := filepath.Join(t.TempDir(), "eidos.db")
 	bDB, err := bolt.Open(path, 0600, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() {

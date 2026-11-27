@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/malivvan/harbor"
-	hstore "github.com/malivvan/harbor/store"
-	"github.com/malivvan/harbor/store/graphs"
-	hrecord "github.com/malivvan/harbor/store/record"
+	"github.com/malivvan/eidos-db"
+	hstore "github.com/malivvan/eidos-db/store"
+	"github.com/malivvan/eidos-db/store/graphs"
+	hrecord "github.com/malivvan/eidos-db/store/record"
 )
 
 func openDirect(t *testing.T, cfg graphs.Config) (*graphs.Store, *bolt.DB) {
@@ -95,17 +95,17 @@ func TestIsolationFromRecordStore(t *testing.T) {
 	// The graph lives under its own root.
 	require.NoError(t, bdb.View(func(tx *bolt.Tx) error {
 		require.NotNil(t, tx.Bucket([]byte(hstore.GRAPHS)))
-		require.Nil(t, tx.Bucket([]byte("harborNodeRecord")))
+		require.Nil(t, tx.Bucket([]byte("eidosNodeRecord")))
 		return nil
 	}))
 }
 
 func TestRootStoreGraphsAccessAndTransactions(t *testing.T) {
 	ctx := context.Background()
-	store, err := harbor.Open(ctx, filepath.Join(t.TempDir(), "harbor.db"), 0o600, &harbor.Options{
+	store, err := eidos.Open(ctx, filepath.Join(t.TempDir(), "eidos.db"), 0o600, &eidos.Options{
 		Password:   "graph-password",
 		KDFTime:    1,
-		KDFMemory:  8 * harbor.MiB,
+		KDFMemory:  8 * eidos.MiB,
 		KDFThreads: 1,
 	})
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestRootStoreGraphsAccessAndTransactions(t *testing.T) {
 
 	// Transactions expose a bound graph store; commit and abort behave like the
 	// other sub-stores.
-	require.NoError(t, store.WriteTransaction(ctx, func(tx *harbor.Tx) error {
+	require.NoError(t, store.WriteTransaction(ctx, func(tx *eidos.Tx) error {
 		tg, err := tx.Graphs().Open("social")
 		if err != nil {
 			return err
@@ -130,7 +130,7 @@ func TestRootStoreGraphsAccessAndTransactions(t *testing.T) {
 	require.NoError(t, err)
 
 	abortErr := errors.New("abort")
-	err = store.WriteTransaction(ctx, func(tx *harbor.Tx) error {
+	err = store.WriteTransaction(ctx, func(tx *eidos.Tx) error {
 		tg, err := tx.Graphs().Open("social")
 		if err != nil {
 			return err

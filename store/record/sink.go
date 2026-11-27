@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/malivvan/harbor/store/record/index"
-	"github.com/malivvan/harbor/store/record/q"
+	"github.com/malivvan/eidos-db/store/record/index"
+	"github.com/malivvan/eidos-db/store/record/q"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -446,10 +446,10 @@ func newListSink(node Node, to interface{}) (*listSink, error) {
 	name := ""
 	proto := reflect.New(elemType)
 	if bn, ok := proto.Interface().(BucketNamer); ok {
-		name = bn.HarborBucketName()
+		name = bn.EidosBucketName()
 	} else if proto.Elem().CanInterface() {
 		if bn, ok := proto.Elem().Interface().(BucketNamer); ok {
-			name = bn.HarborBucketName()
+			name = bn.EidosBucketName()
 		}
 	}
 	if name == "" {

@@ -1,6 +1,6 @@
 # vector — vector storage and similarity search
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/harbor/store/vector.svg)](https://pkg.go.dev/github.com/malivvan/harbor/store/vector)
+[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/eidos-db/store/vector.svg)](https://pkg.go.dev/github.com/malivvan/eidos-db/store/vector)
 
 `vector` stores float32 vectors with JSON-like payloads in bbolt and searches them
 with either an exact Flat index or an approximate HNSW graph. It supports

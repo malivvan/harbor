@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/malivvan/harbor/internal/absfs"
+	"github.com/malivvan/eidos-db/internal/absfs"
 )
 
 // Snapshot represents a read-only point-in-time view of the filesystem.

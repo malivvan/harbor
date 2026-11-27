@@ -1,8 +1,8 @@
 # search
 
-`search` is a full-text index for Harbor: one document per id, BM25 ranking, and
+`search` is a full-text index for eidos-db: one document per id, BM25 ranking, and
 tokenizers for word text and CJK scripts. The package was historically named
-`fts`; its key label (`harbor/fts/v1`) keeps that name, so existing indexes stay
+`fts`; its key label (`eidos/fts/v1`) keeps that name, so existing indexes stay
 readable. It lives under the `search` root bucket (`store.SEARCH`) in the same
 bbolt file and
 participates in [cross-store transactions](../../README.md#cross-store-transactions).
@@ -13,7 +13,7 @@ if err != nil {
     log.Fatal(err)
 }
 
-err = idx.Upsert(ctx, "article-42", "Harbor keeps records, files, series and vectors")
+err = idx.Upsert(ctx, "article-42", "eidos-db keeps records, files, series and vectors")
 hits, err := idx.Search(ctx, "vectors", 10) // []search.Hit, best first
 ```
 

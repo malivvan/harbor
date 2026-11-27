@@ -1,20 +1,20 @@
-// Package metrics defines the optional observability hooks Harbor uses to
+// Package metrics defines the optional observability hooks eidos-db uses to
 // report operation counters, latency histograms and tracing spans.
 //
-// Harbor does not depend on any metrics or tracing library. Instead it calls
+// eidos-db does not depend on any metrics or tracing library. Instead it calls
 // the small Observer interface defined here, and the application supplies an
 // implementation that forwards to Prometheus, OpenTelemetry, expvar, or
 // anything else. A nil Observer is valid everywhere and means "no
 // instrumentation", so an uninstrumented store pays only the cost of a nil
 // check.
 //
-// Observers must be safe for concurrent use: Harbor calls them from many
+// Observers must be safe for concurrent use: eidos-db calls them from many
 // goroutines, including the raft FSM goroutine.
 package metrics
 
 import "context"
 
-// Observer receives Harbor's operation metrics and spans.
+// Observer receives eidos-db's operation metrics and spans.
 //
 // Every method must tolerate being called concurrently. Implementations should
 // not block: a slow observer stalls the operation that reported to it.
@@ -24,7 +24,7 @@ type Observer interface {
 	Counter(name string, delta int64, labels Labels)
 
 	// Histogram records one observation of the named distribution, in the
-	// unit implied by the metric name (Harbor uses nanoseconds for the
+	// unit implied by the metric name (eidos-db uses nanoseconds for the
 	// duration metrics and bytes for the size metrics).
 	Histogram(name string, value float64, labels Labels)
 
@@ -39,7 +39,7 @@ type Observer interface {
 }
 
 // Labels is a small, allocation-friendly set of key/value pairs attached to a
-// metric. Harbor uses a handful of well-known keys (see the Label* constants)
+// metric. eidos-db uses a handful of well-known keys (see the Label* constants)
 // and keeps cardinality bounded by never using record keys or file names as
 // label values.
 type Labels map[string]string
@@ -68,80 +68,80 @@ const (
 	ResultError = "error"
 )
 
-// Metric names Harbor reports. They are exported so an application can
+// Metric names eidos-db reports. They are exported so an application can
 // pre-register them with its exporter.
 const (
 	// MetricTxDuration is the wall-clock duration of a bbolt transaction, in
 	// nanoseconds, labelled by store and read/write kind.
-	MetricTxDuration = "harbor.tx.duration"
+	MetricTxDuration = "eidos.tx.duration"
 
 	// MetricTxTotal counts bbolt transactions, labelled by store, kind and
 	// result.
-	MetricTxTotal = "harbor.tx.total"
+	MetricTxTotal = "eidos.tx.total"
 
 	// MetricChunkBytes is the number of content bytes read or written by the
 	// fs chunk layer, labelled by op.
-	MetricChunkBytes = "harbor.fs.chunk.bytes"
+	MetricChunkBytes = "eidos.fs.chunk.bytes"
 
 	// MetricChunkOps counts fs chunk read/write operations, labelled by op
 	// and result.
-	MetricChunkOps = "harbor.fs.chunk.ops"
+	MetricChunkOps = "eidos.fs.chunk.ops"
 
 	// MetricCacheHits counts fs inode-cache lookups, labelled by result
 	// (hit or miss).
-	MetricCacheHits = "harbor.fs.cache.lookups"
+	MetricCacheHits = "eidos.fs.cache.lookups"
 
 	// MetricCacheSize is the current number of entries in the fs inode cache.
-	MetricCacheSize = "harbor.fs.cache.size"
+	MetricCacheSize = "eidos.fs.cache.size"
 
 	// MetricSeriesDecodedPoints counts time-series points decoded from blocks.
-	MetricSeriesDecodedPoints = "harbor.ts.points.decoded"
+	MetricSeriesDecodedPoints = "eidos.ts.points.decoded"
 
 	// MetricSeriesAggregateDuration is the duration of a time-series aggregate
 	// call, in nanoseconds.
-	MetricSeriesAggregateDuration = "harbor.ts.aggregate.duration"
+	MetricSeriesAggregateDuration = "eidos.ts.aggregate.duration"
 
 	// MetricVectorCandidates counts vectors examined during a vector search.
-	MetricVectorCandidates = "harbor.vec.search.candidates"
+	MetricVectorCandidates = "eidos.vec.search.candidates"
 
 	// MetricVectorFallbacks counts vector searches that fell back to an exact
 	// scan because the index could not prove enough matches.
-	MetricVectorFallbacks = "harbor.vec.search.fallbacks"
+	MetricVectorFallbacks = "eidos.vec.search.fallbacks"
 
 	// MetricVectorScanSize is the number of points scanned by an exact fallback,
 	// which signals how sparse a filter is.
-	MetricVectorScanSize = "harbor.vec.search.scan.size"
+	MetricVectorScanSize = "eidos.vec.search.scan.size"
 
 	// MetricVectorSearchDuration is the duration of a vector search, in
 	// nanoseconds.
-	MetricVectorSearchDuration = "harbor.vec.search.duration"
+	MetricVectorSearchDuration = "eidos.vec.search.duration"
 
 	// MetricVectorFlushDuration is the duration of a vector flush to disk, in
 	// nanoseconds.
-	MetricVectorFlushDuration = "harbor.vec.flush.duration"
+	MetricVectorFlushDuration = "eidos.vec.flush.duration"
 
 	// MetricVectorFlushTotal counts vector flushes, labelled by result.
-	MetricVectorFlushTotal = "harbor.vec.flush.total"
+	MetricVectorFlushTotal = "eidos.vec.flush.total"
 
 	// MetricRotateDuration is the duration of a key rotation, in
 	// nanoseconds.
-	MetricRotateDuration = "harbor.rotate.duration"
+	MetricRotateDuration = "eidos.rotate.duration"
 
 	// MetricConsensusApplyLag is the delay between a raft log entry being
 	// committed and applied locally, in nanoseconds.
-	MetricConsensusApplyLag = "harbor.consensus.apply.lag"
+	MetricConsensusApplyLag = "eidos.consensus.apply.lag"
 
 	// MetricConsensusApplyTotal counts applied raft log entries, labelled by
 	// result.
-	MetricConsensusApplyTotal = "harbor.consensus.apply.total"
+	MetricConsensusApplyTotal = "eidos.consensus.apply.total"
 
 	// MetricWalkCallbackDuration is the duration of one FastWalk callback, in
 	// nanoseconds.
-	MetricWalkCallbackDuration = "harbor.fs.walk.callback.duration"
+	MetricWalkCallbackDuration = "eidos.fs.walk.callback.duration"
 
 	// MetricWalkQueueDepth is the number of directories buffered for traversal
 	// by FastWalk.
-	MetricWalkQueueDepth = "harbor.fs.walk.queue.depth"
+	MetricWalkQueueDepth = "eidos.fs.walk.queue.depth"
 )
 
 // Nop is an Observer that discards everything. It is useful as an explicit

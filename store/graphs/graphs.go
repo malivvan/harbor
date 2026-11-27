@@ -1,4 +1,4 @@
-// Package graphs is Harbor's bitemporal property-graph store and the reusable
+// Package graphs is eidos-db's bitemporal property-graph store and the reusable
 // graph core that operates on it.
 //
 // A Store owns a dedicated root bucket and its own record encoding, so graph
@@ -47,10 +47,10 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/pkg/metrics"
-	"github.com/malivvan/harbor/store/ledger"
-	hrecord "github.com/malivvan/harbor/store/record"
+	"github.com/malivvan/eidos-db/internal/crypto"
+	"github.com/malivvan/eidos-db/pkg/metrics"
+	"github.com/malivvan/eidos-db/store/ledger"
+	hrecord "github.com/malivvan/eidos-db/store/record"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -63,7 +63,7 @@ const (
 	modeKey    = "__mode__"
 	canaryKey  = "__canary__"
 
-	canaryPlaintext = "harbor/graphs/v1"
+	canaryPlaintext = "eidos/graphs/v1"
 )
 
 // Errors returned by the package.

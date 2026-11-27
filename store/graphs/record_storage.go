@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 
-	hdb "github.com/malivvan/harbor/store/record"
-	"github.com/malivvan/harbor/store/record/q"
+	hdb "github.com/malivvan/eidos-db/store/record"
+	"github.com/malivvan/eidos-db/store/record/q"
 )
 
 // recordStorage is the legacy adapter: it keeps graph records in the
 // record-backed layout the graph package used before the independent graphs
 // store existed. The bucket names and field order are pinned by the record
-// structs' HarborBucketName methods and tags, so existing files stay readable.
+// structs' EidosBucketName methods and tags, so existing files stay readable.
 type recordStorage struct {
 	db     *hdb.Store
 	prefix []string

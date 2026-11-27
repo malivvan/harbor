@@ -1,7 +1,7 @@
-// Package consensus provides cluster-wide replication for a Harbor store using
+// Package consensus provides cluster-wide replication for an eidos-db store using
 // the Raft consensus algorithm (github.com/hashicorp/raft).
 //
-// A Node owns one *harbor.Store replica and the raft machinery that keeps it in
+// A Node owns one *eidos.Store replica and the raft machinery that keeps it in
 // sync with the rest of the cluster. Writes are proposed through raft on the
 // leader and applied, in raft-log order, to the local store on every node;
 // reads are served directly from the local store. See README.md for the full

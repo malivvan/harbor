@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	file "github.com/malivvan/harbor/store/fstree"
+	file "github.com/malivvan/eidos-db/store/fstree"
 	bolt "go.etcd.io/bbolt"
 )
 

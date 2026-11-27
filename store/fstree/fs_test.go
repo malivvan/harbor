@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/harbor/internal/absfs"
+	"github.com/malivvan/eidos-db/internal/absfs"
 	bolt "go.etcd.io/bbolt"
 )
 

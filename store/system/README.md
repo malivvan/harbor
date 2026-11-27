@@ -1,10 +1,10 @@
 # system
 
-`system` owns Harbor's store header: the unencrypted metadata record, the
+`system` owns eidos-db's store header: the unencrypted metadata record, the
 Argon2id settings, the encryption and audit flag vocabulary, the canary, and the
 derivation of every per-store key from the password.
 
-The root `harbor` package uses it when opening a store; the sub-store packages
+The root `eidos` package uses it when opening a store; the sub-store packages
 only receive the derived keys through their `Config` values. Keeping this in one
 place means the KDF, canary, key labels and flag bits cannot drift between
 stores.
@@ -39,9 +39,9 @@ password
    ▼
 32-byte seed
    │ SLIP-0021 master
-   ├── harbor/canary/v1
-   ├── harbor/db/v1, fs/v1, ts/v1, vec/v1, fts/v1
-   └── harbor/graphs/v1, object/v1
+   ├── eidos/canary/v1
+   ├── eidos/db/v1, fs/v1, ts/v1, vec/v1, fts/v1
+   └── eidos/graphs/v1, object/v1
 ```
 
 The audit signing keys hang off the same seed at SLIP-10 hardened paths
@@ -57,7 +57,7 @@ values; `AuditAll` includes their writes.
 
 ## Canary
 
-The canary plaintext is `harbor/canary/v1/0x<flags>`. Opening verifies it, which
+The canary plaintext is `eidos/canary/v1/0x<flags>`. Opening verifies it, which
 proves the password derives the expected key and that the persisted encryption
 flags are the ones the canary was sealed with. Flipping a flag bit makes the
 canary fail to authenticate instead of silently opening the store in a different

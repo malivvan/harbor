@@ -37,7 +37,7 @@ type SIVEngine struct {
 // NewSIVEngine creates a new AES-SIV cipher engine.
 //
 // RFC 5297 keys are two equal halves: 32 bytes (AES-128-SIV), 48 bytes
-// (AES-192-SIV) or 64 bytes (AES-256-SIV). Harbor derives 64-byte keys, but the
+// (AES-192-SIV) or 64 bytes (AES-256-SIV). eidos-db derives 64-byte keys, but the
 // shorter forms are accepted so the published RFC 5297 test vectors can be
 // verified directly. The key material is copied, so the caller may reuse its
 // buffer.

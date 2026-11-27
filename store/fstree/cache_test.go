@@ -2,7 +2,7 @@ package fstree
 
 import (
 	"fmt"
-	hstore "github.com/malivvan/harbor/store"
+	hstore "github.com/malivvan/eidos-db/store"
 	"path/filepath"
 	"testing"
 	"time"

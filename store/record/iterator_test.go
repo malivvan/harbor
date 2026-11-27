@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/malivvan/harbor/store/record/q"
+	"github.com/malivvan/eidos-db/store/record/q"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )

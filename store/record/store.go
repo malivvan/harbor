@@ -12,8 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/malivvan/harbor/pkg/metrics"
-	"github.com/malivvan/harbor/store/ledger"
+	"github.com/malivvan/eidos-db/pkg/metrics"
+	"github.com/malivvan/eidos-db/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -27,16 +27,16 @@ const (
 // a custom bucket name. This is essential for runtime-generated types
 // (via reflect.StructOf) that have no static type name.
 type BucketNamer interface {
-	HarborBucketName() string
+	EidosBucketName() string
 }
 
 // defaultCodec is the codec used when none is supplied.
 var defaultCodec = JSONCodec
 
-// Open initializes Harbor on an already-open bbolt database.
+// Open initializes eidos-db on an already-open bbolt database.
 //
 // The caller owns db and must keep it open for the lifetime of the returned
-// Store. Harbor never closes db.
+// Store. eidos-db never closes db.
 //
 // cfg configures the store. cfg.Root is an optional bucket path; an empty path
 // means the database root. A zero cfg selects the default JSON codec and
@@ -135,7 +135,7 @@ type Store struct {
 	obs metrics.Observer
 }
 
-// Close releases the Harbor wrapper. The underlying bbolt database is owned by
+// Close releases the eidos-db wrapper. The underlying bbolt database is owned by
 // the caller and is not closed.
 //
 // If the receiver is nil or the underlying bbolt database is nil, Close returns
@@ -325,7 +325,7 @@ func toBytes(key interface{}, c Codec) ([]byte, error) {
 	}
 }
 
-// EncodeKey returns the logical byte encoding Harbor uses for a bucket key,
+// EncodeKey returns the logical byte encoding eidos-db uses for a bucket key,
 // before the at-rest encryption a store applies. A replicated layer can send
 // this encoding to another node and pass it back as a []byte key: toBytes
 // treats []byte as already encoded, so the receiver seals the same logical key

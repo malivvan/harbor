@@ -1,6 +1,6 @@
-// Package store manages the process-wide Harbor database.
+// Package store manages the process-wide eidos-db store.
 //
-// A Harbor deployment normally has exactly one database file and one password for
+// An eidos-db deployment normally has exactly one database file and one password for
 // the whole process. This package owns that convention: it resolves a directory,
 // reads or creates the password file, opens the database, and hands out the same
 // handle to every caller. Applications that want a different lifecycle can use a
@@ -38,21 +38,21 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/malivvan/harbor"
-	"github.com/malivvan/harbor/store/fstree"
-	"github.com/malivvan/harbor/store/graphs"
-	"github.com/malivvan/harbor/store/object"
-	"github.com/malivvan/harbor/store/record"
-	"github.com/malivvan/harbor/store/search"
-	"github.com/malivvan/harbor/store/series"
-	"github.com/malivvan/harbor/store/vector"
+	"github.com/malivvan/eidos-db"
+	"github.com/malivvan/eidos-db/store/fstree"
+	"github.com/malivvan/eidos-db/store/graphs"
+	"github.com/malivvan/eidos-db/store/object"
+	"github.com/malivvan/eidos-db/store/record"
+	"github.com/malivvan/eidos-db/store/search"
+	"github.com/malivvan/eidos-db/store/series"
+	"github.com/malivvan/eidos-db/store/vector"
 )
 
 const (
 	// DefaultDBFile is the database file name used when Config.DBFile is empty.
-	DefaultDBFile = "harbor.db"
+	DefaultDBFile = "eidos.db"
 	// DefaultKeyFile is the password file name used when Config.KeyFile is empty.
-	DefaultKeyFile = "harbor.key"
+	DefaultKeyFile = "eidos.key"
 	// DefaultMode is the permission used for both files.
 	DefaultMode os.FileMode = 0o600
 	// KeySize is the password length in bytes (hex-encoded to 64 characters).
@@ -72,9 +72,9 @@ type Config struct {
 	// Password is an explicit password. When empty it is read from, or created
 	// at, Dir/KeyFile.
 	Password string
-	// Options are extra Harbor options (KDF cost, encryption flags, metrics).
+	// Options are extra eidos-db options (KDF cost, encryption flags, metrics).
 	// The Password field is always taken from Config, not from here.
-	Options *harbor.Options
+	Options *eidos.Options
 }
 
 // withDefaults returns a copy of cfg with the defaulted fields filled in.
@@ -97,14 +97,14 @@ func (c Config) keyPath() string { return filepath.Join(c.Dir, c.KeyFile) }
 // dbPath is the resolved database file path.
 func (c Config) dbPath() string { return filepath.Join(c.Dir, c.DBFile) }
 
-// Manager owns one Harbor store for one directory at a time.
+// Manager owns one eidos-db store for one directory at a time.
 //
 // A Manager is safe for concurrent use. Its zero value is not usable; build one
 // with NewManager.
 type Manager struct {
 	mu   sync.Mutex
 	cfg  Config
-	st   *harbor.Store
+	st   *eidos.Store
 	root string // directory the open store belongs to
 }
 
@@ -140,13 +140,13 @@ func (m *Manager) Dir() string {
 //
 // If the configured directory differs from the one the current store belongs to,
 // that store is closed first and the new directory's database is opened.
-func (m *Manager) Open(ctx context.Context) (*harbor.Store, error) {
+func (m *Manager) Open(ctx context.Context) (*eidos.Store, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.openLocked(ctx)
 }
 
-func (m *Manager) openLocked(ctx context.Context) (*harbor.Store, error) {
+func (m *Manager) openLocked(ctx context.Context) (*eidos.Store, error) {
 	if m.cfg.Dir == "" {
 		return nil, errors.New("store: Config.Dir is required")
 	}
@@ -175,13 +175,13 @@ func (m *Manager) openLocked(ctx context.Context) (*harbor.Store, error) {
 		}
 	}
 
-	opts := harbor.Options{}
+	opts := eidos.Options{}
 	if m.cfg.Options != nil {
 		opts = *m.cfg.Options
 	}
 	opts.Password = password
 
-	st, err := harbor.Open(ctx, m.cfg.dbPath(), m.cfg.Mode, &opts)
+	st, err := eidos.Open(ctx, m.cfg.dbPath(), m.cfg.Mode, &opts)
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", m.cfg.dbPath(), err)
 	}
@@ -190,7 +190,7 @@ func (m *Manager) openLocked(ctx context.Context) (*harbor.Store, error) {
 }
 
 // Store returns the open store, or nil before Open.
-func (m *Manager) Store() *harbor.Store {
+func (m *Manager) Store() *eidos.Store {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.st
@@ -283,7 +283,7 @@ var (
 // Repeated calls reuse the default manager. A call whose cfg.Dir differs from the
 // currently open directory closes that store and opens the new one, which is what
 // lets a test harness isolate each test with its own directory.
-func Open(ctx context.Context, cfg Config) (*harbor.Store, error) {
+func Open(ctx context.Context, cfg Config) (*eidos.Store, error) {
 	defMu.Lock()
 	if def == nil {
 		def = NewManager(cfg)
@@ -303,7 +303,7 @@ func Default() *Manager {
 }
 
 // Store returns the process-wide store, or nil before Open.
-func Store() *harbor.Store {
+func Store() *eidos.Store {
 	if m := Default(); m != nil {
 		return m.Store()
 	}

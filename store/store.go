@@ -1,4 +1,4 @@
-// Package store defines the root bucket names of Harbor's stores.
+// Package store defines the root bucket names of eidos-db's stores.
 //
 // The values are part of the public registry: append a new name for a new
 // store and never rename an existing one. They are the persisted top-level

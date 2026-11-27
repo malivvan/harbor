@@ -4,7 +4,7 @@ import (
 	"github.com/hashicorp/raft"
 )
 
-// fsmSnapshot is a byte-serialized harbor database.
+// fsmSnapshot is a byte-serialized eidos-db store.
 type fsmSnapshot struct {
 	data []byte
 }
@@ -20,5 +20,5 @@ func (s *fsmSnapshot) Persist(sink raft.SnapshotSink) error {
 	return sink.Close()
 }
 
-// Release frees the snapshot. The harbor database needs no cleanup.
+// Release frees the snapshot. The eidos-db store needs no cleanup.
 func (s *fsmSnapshot) Release() {}

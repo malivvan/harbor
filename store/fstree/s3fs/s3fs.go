@@ -24,7 +24,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/malivvan/harbor/internal/absfs"
+	"github.com/malivvan/eidos-db/internal/absfs"
 )
 
 // DefaultPartSize is the buffer threshold for switching to multipart upload.

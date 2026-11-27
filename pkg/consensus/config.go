@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/malivvan/harbor"
-	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/eidos-db"
+	"github.com/malivvan/eidos-db/pkg/metrics"
 )
 
 const (
@@ -24,7 +24,7 @@ const (
 	transportTimeout = 10 * time.Second
 )
 
-// Config configures one node in a Harbor cluster.
+// Config configures one node in an eidos-db cluster.
 type Config struct {
 	// NodeID is the stable identifier of this node. It must be unique within
 	// the cluster and stable across restarts.
@@ -42,17 +42,17 @@ type Config struct {
 	// only on the first node; subsequent nodes join with Join.
 	Bootstrap bool
 
-	// StorePath is the harbor database file. It is created if missing.
+	// StorePath is the eidos-db file. It is created if missing.
 	StorePath string
 
 	// StoreMode is the file mode used when creating the store file. Zero
 	// selects 0600.
 	StoreMode os.FileMode
 
-	// StoreOpts configures the harbor store (password, KDF, encryption, codec).
+	// StoreOpts configures the eidos-db store (password, KDF, encryption, codec).
 	// The password must be identical across the cluster; encryption flags matter
 	// only when the store is first created.
-	StoreOpts *harbor.Options
+	StoreOpts *eidos.Options
 
 	// ApplyTimeout bounds each raft.Apply. Zero selects DefaultApplyTimeout.
 	ApplyTimeout time.Duration

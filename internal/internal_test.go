@@ -117,5 +117,5 @@ func TestPrefixCursor(t *testing.T) {
 }
 
 func TestAppID(t *testing.T) {
-	require.Equal(t, "com.github.malivvan.harbor", AppID)
+	require.Equal(t, "com.github.malivvan.eidos", AppID)
 }

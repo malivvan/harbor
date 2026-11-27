@@ -14,14 +14,14 @@ import (
 // reference which buckets so a delete or drop can enforce the relation without
 // a compile-time schema.
 const (
-	refsBucketName  = "__harbor_refs__"
+	refsBucketName  = "__eidos_refs__"
 	refSchemaPrefix = "schema:"
 
 	onDeleteRestrict   = "restrict"
 	onDeleteCascade    = "cascade"
 	maxRefCascadeDepth = 32
 
-	idsIndexBucketName = "harbor__ids"
+	idsIndexBucketName = "eidos__ids"
 )
 
 // refSchema is the persisted schema of one referencing bucket.

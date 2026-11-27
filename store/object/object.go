@@ -1,4 +1,4 @@
-// Package object is Harbor's independent flat object store.
+// Package object is eidos-db's independent flat object store.
 //
 // A bucket is a namespace and a key is a slash-separated name inside it. The
 // pair maps to exactly one record in the object store's own root bucket, so the
@@ -6,7 +6,8 @@
 // buckets. Keys containing a ".." segment are rejected rather than rewritten,
 // so a key can never address a sibling bucket.
 //
-// The API is the blob API Harbour shipped before this store existed: Put
+// The API is the blob API the earlier file store shipped before this store
+// existed: Put
 // installs a complete object atomically, Get returns a reader, Delete is a
 // no-op for a missing key, Move relocates one key, and Stat/List report the
 // size and ETag. Existing file-backed blobs are not abandoned: the file store
@@ -29,10 +30,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/pkg/metrics"
-	"github.com/malivvan/harbor/store/fstree"
-	"github.com/malivvan/harbor/store/ledger"
+	"github.com/malivvan/eidos-db/internal/crypto"
+	"github.com/malivvan/eidos-db/pkg/metrics"
+	"github.com/malivvan/eidos-db/store/fstree"
+	"github.com/malivvan/eidos-db/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -45,7 +46,7 @@ const (
 	modeKey    = "__mode__"
 	canaryKey  = "__canary__"
 
-	canaryPlaintext = "harbor/object/v1"
+	canaryPlaintext = "eidos/object/v1"
 )
 
 // Errors returned by the package.

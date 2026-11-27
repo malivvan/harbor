@@ -3,7 +3,7 @@ package series
 import (
 	"testing"
 
-	hstore "github.com/malivvan/harbor/store"
+	hstore "github.com/malivvan/eidos-db/store"
 	"github.com/stretchr/testify/require"
 )
 

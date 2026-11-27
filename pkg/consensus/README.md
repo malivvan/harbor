@@ -1,7 +1,7 @@
 # consensus
 
-Raft-backed cluster replication for a Harbor store. Each node owns its own
-`*harbor.Store`; writes are proposed through
+Raft-backed cluster replication for an eidos-db store. Each node owns its own
+`*eidos.Store`; writes are proposed through
 [`hashicorp/raft`](https://github.com/hashicorp/raft) on the leader and applied,
 in raft-log order, to the same logical state on every node. Reads are served
 directly from the local replica.
@@ -12,9 +12,9 @@ directly from the local replica.
 write ──▶ leader encodes command ──▶ raft.Apply ──▶ committed to quorum
                                                        │
                  every node's FSM applies the command  ▼
-                 to its own *harbor.Store (record/fstree/series/vector)
+                 to its own *eidos.Store (record/fstree/series/vector)
 
-read  ──▶ local *harbor.Store  (no raft round-trip)
+read  ──▶ local *eidos.Store  (no raft round-trip)
 ```
 
 - The **leader is the only writer**. A write facade encodes the operation into
@@ -39,9 +39,9 @@ node, err := consensus.Open(ctx, consensus.Config{
     BindAddr:  "127.0.0.1:7001",          // raft transport address
     Dir:       "./data/node-1",           // raft log/stable/snapshot store
     Bootstrap: true,                      // first node forms the cluster
-    StorePath: "./data/node-1/harbor.db",
+    StorePath: "./data/node-1/eidos.db",
     StoreMode: 0o600,
-    StoreOpts: &harbor.Options{Password: "shared-secret"},
+    StoreOpts: &eidos.Options{Password: "shared-secret"},
 })
 if err != nil { /* ... */ }
 defer node.Close()
@@ -61,7 +61,7 @@ leader.Join("node-2", "127.0.0.1:7002")
 ## Persistence
 
 A node keeps two files under `Dir`: `raft.db` for the raft log and stable store,
-and `snapshots/` for snapshots. The Harbor replica lives at `StorePath`.
+and `snapshots/` for snapshots. The eidos-db replica lives at `StorePath`.
 
 `raft.db` is written by a bolt-backed store defined in this package
 (`raftstore.go`) rather than by `hashicorp/raft-boltdb`, so the module carries no
@@ -181,11 +181,11 @@ err := leader.Leave(id)            // remove a voter (leader only)
 - The raft transport is **unauthenticated TCP**: run the cluster on a private
   network/VPN.
 - `NodeID` must be stable across restarts. `Dir` (raft state) and `StorePath`
-  (harbor data) must be local to each node and not shared.
+  (eidos-db data) must be local to each node and not shared.
 - The raft log carries plaintext commands; treat `Dir` with the same care as
   the raft log of any raft deployment.
 - A node that is far behind catches up from a snapshot automatically: the FSM
-  serializes the harbor database with `bbolt.Tx.WriteTo` and a joining node
+  serializes the eidos-db store with `bbolt.Tx.WriteTo` and a joining node
   reopens over the restored bytes.
 
 ## Limitations (v1)

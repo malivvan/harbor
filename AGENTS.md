@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file is for contributors, reviewers and coding agents working on Harbor.
+This file is for contributors, reviewers and coding agents working on eidos-db.
 User-facing documentation lives in [README.md](README.md); per-package guides
 live next to their code (`store/record/README.md`, `store/fstree/README.md`, `store/series/README.md`,
 `store/vector/README.md`, `store/fstree/s3fs/README.md`). Keep it that way: do not recreate a
@@ -10,7 +10,7 @@ separate `docs/` tree.
 
 | Package | Responsibility |
 |---------|----------------|
-| `github.com/malivvan/harbor` | Opens one bbolt file, derives per-store keys from a password, and exposes `Record()`, `File()`, `Series()`, `Vector()`, `Search()`, `Graphs()`, `Objects()`, `Flags()` and `Meta()`. Each accessor takes optional bucket-path segments. |
+| `github.com/malivvan/eidos-db` | Opens one bbolt file, derives per-store keys from a password, and exposes `Record()`, `File()`, `Series()`, `Vector()`, `Search()`, `Graphs()`, `Objects()`, `Flags()` and `Meta()`. Each accessor takes optional bucket-path segments. |
 | `.../store/record` | Struct-to-bucket mapping, indexes, matchers, managed transactions, key/value access, codecs. |
 | `.../store/fstree` | Named file systems implementing the `absfs` interfaces, with symlinks, snapshots, inode cache and chunked content. |
 | `.../store/series` | Named time series with ordered scans, aggregation, labels and retention. |
@@ -83,7 +83,7 @@ User/                          one bucket per mapped struct
   __metadata/
     codec                      codec name
     <field>                    auto-increment counters
-  __harbor_index_<Field>/      list or unique index bucket
+  __eidos_index_<Field>/       list or unique index bucket
 __database/
   version                      "1.0.0"
   \x00__db_enc__                optional encryption marker (DENC)
@@ -93,7 +93,7 @@ __database/
   `Marshal` output.
 - `__metadata` is created per mapped bucket and records the codec name. Opening
   a bucket with a different codec returns `ErrDifferentCodec`.
-- Index buckets use the reserved `__harbor_index_` prefix. List indexes map
+- Index buckets use the reserved `__eidos_index_` prefix. List indexes map
   value → primary keys; unique indexes enforce uniqueness.
 - `__database` holds the on-disk version and, when encryption is enabled, the
   `DENC` marker with its canary. Unknown versions return
@@ -237,13 +237,13 @@ Inside the configured root, one bucket per logical object bucket:
 
 ### Transactions and concurrency
 
-bbolt provides one writer and many readers, and Harbor follows that model:
+bbolt provides one writer and many readers, and eidos-db follows that model:
 
 - A `record.Store` is safe for concurrent use. CRUD operations use short
   transactions; `ReadTransaction` and `WriteTransaction` provide explicit
   callback boundaries.
-- `Attach` lets a caller own the bbolt transaction and mix Harbor operations
-  with raw bucket writes. Harbor never opens a nested managed transaction for
+- `Attach` lets a caller own the bbolt transaction and mix eidos-db operations
+  with raw bucket writes. eidos-db never opens a nested managed transaction for
   an attached handle.
 - `record.TransactionManager`, `fstree.Walk`, `series.Store`, and `vector.Collection` all use
   the same bbolt handle and therefore share the single-writer constraint.
@@ -271,13 +271,64 @@ bbolt provides one writer and many readers, and Harbor follows that model:
 
 ### Buffering and fsync
 
-Every bbolt commit is an fsync. Harbor batches where it can:
+Every bbolt commit is an fsync. eidos-db batches where it can:
 
 - `record.WriteTransaction` groups entity operations into one write transaction.
 - `series.Series.InsertMany` writes a batch in one transaction.
 - `vector.Collection.Upsert` buffers points and flushes in batches.
 - `fstree` merges the inode and content writes of a single `Write` into one
   transaction, and chunking avoids rewriting unaffected content.
+
+### Durability and crash consistency
+
+`eidos.Open` fills the `bolt.Options` fields that a caller leaves unset from
+`eidos.DefaultBoltOptions()`. This is what makes a default store safe to lose
+power in; it is not a per-store setting and is not persisted.
+
+| Field | Default | Reason |
+|-------|---------|--------|
+| `NoSync` | `false` | Each commit fdatasyncs the data pages, writes the meta page, then fdatasyncs again. After a crash the newest valid meta page wins and at most the uncommitted transaction is lost. |
+| `NoGrowSync` | `false` | The file extension is truncated and synced before pages are written into it, so a crash cannot leave a mapped-but-unwritten tail (zero pages, SIGBUS). |
+| `NoFreelistSync` | `false` | The freelist is written with the transaction that frees the pages. Reopen reads it instead of scanning the whole file, and freed pages are never reused without a durable record. |
+| `PreLoadFreelist` | `true` | bbolt loads the freelist at open for a writable database regardless; stating it keeps the struct complete and the one-time open read explicit. |
+| `FreelistType` | `bolt.FreelistMapType` | The array freelist degrades to a linear scan once a long-lived, frequently updated store fragments. The hashmap freelist keeps commits fast and does not change the durable format. |
+| `Timeout` | `2s` | bbolt's zero value waits forever for the file lock; a stale second process must fail the open instead of hanging the caller. |
+| `ReadOnly`, `Mlock` | `false` | The store must be writable, and pinning a growing database in memory is the caller's decision. |
+
+`DefaultBoltOptions` sets every field explicitly, including the ones that stay
+at bbolt's zero value, so a bbolt release cannot change eidos-db's behaviour
+quietly:
+
+| Field | Default | Reason |
+|-------|---------|--------|
+| `MmapFlags` | `0` | The OS default mapping is portable; `MAP_POPULATE` is Linux-only and only moves page faults to open time. |
+| `InitialMmapSize` | `0` | The mapping grows on demand. Pre-sizing avoids read/write remap contention, but on Windows it resizes the file to that size immediately, so a default would impose an arbitrary size on every store. |
+| `PageSize` | `0` | The OS page size, which bbolt also records in the file header. Overriding it changes the on-disk layout. |
+| `MaxSize` | `0` | No cap: a cap turns "disk full" into an opaque write error and can leave a store that cannot grow. |
+| `OpenFile` | `nil` | Selects `os.OpenFile`, so the mode passed to `Open` applies; callers can still inject their own file for tests. |
+| `Logger` | `nil` | Selects bbolt's discard logger: eidos-db must not emit paths, keys or contents by default. |
+| `NoStatistics` | `false` | Keeps `Stats` available; the cost is small next to sealing and fsync, and it is what makes write-latency regressions diagnosable. |
+
+`applyBoltDefaults` therefore only fills the three fields whose default is not
+the zero value: `Timeout`, `FreelistType` and `PreLoadFreelist` (bbolt forces
+the latter on for writable databases anyway, so an explicit `false` is moot).
+Callers may override any field, including the ones above;
+`NoSync`/`NoGrowSync`/`NoFreelistSync` set to `true` deliberately weaken the
+guarantees. `Open` applies the defaults to a copy of `Options`, so a shared or
+reused value is never mutated, and a nil `Options` selects them all (the
+password still has to come from somewhere, so nil fails with
+`ErrInvalidPassword`).
+
+Three caveats sit above the bbolt layer and are not fixed by these options:
+
+- `vector.Collection.Upsert` acknowledges points that are still buffered in
+  memory. They are durable after `Flush`, the flush threshold, or `Close`, not
+  before. Callers that must not lose an acknowledged point flush explicitly.
+- Audit events are written in their own transaction after the data commit, so a
+  crash can leave a committed write without its audit event.
+- bbolt does not fsync the parent directory when it creates a new database file.
+  A crash immediately after the very first `Open` can lose the directory entry
+  (and with it a store that was only just created).
 
 ### Compatibility and versioning
 
@@ -293,6 +344,15 @@ Every bbolt commit is an fsync. Harbor batches where it can:
   so keys and formats advance together. A future format change bumps the
   relevant constant and ships a compatibility path; unknown versions are never
   reinterpreted.
+- The project was renamed from Harbor to eidos-db, and the persisted
+  identifiers moved with it: derivation labels are now `eidos/...`, and the
+  schema bucket (`eidos.schema`), index sentinel (`eidos__ids`), index prefix
+  (`__eidos_index_`), legacy graph buckets (`eidosNodeRecord`, …), vector
+  payload key (`\x00__eidos_json_payload__`), export container
+  (`eidos-export`) and the `eidos.db`/`eidos.key` defaults changed too. Because
+  a derivation label determines the keys it derives, a store written by v0.3.0
+  or earlier cannot be opened by this build, and its exports do not import
+  directly. This is a deliberate break; do not reintroduce the old strings.
 - Encryption markers are versioned (`DENC`, `FENC`, `TENC`, `VENC`), and the
   sealed canary binds the mode flags.
 - Vector schema fingerprints detect a reordered or otherwise incompatible
@@ -470,7 +530,7 @@ Platform summary:
 - Permissions are advisory: enforcement depends on the backend. Do not rely on
   `Chmod` for isolation.
 - The abstraction layer does not encrypt data and does not audit operations.
-  Encryption belongs to the Harbor stores (`record`, `file`, `series`, `vector`); the
+  Encryption belongs to the eidos-db stores (`record`, `file`, `series`, `vector`); the
   `internal/absfs` layer must remain a transparent pass-through.
 - Apply resource limits where untrusted paths or sizes are accepted; do not log
   file contents, credentials or keys.
@@ -535,7 +595,7 @@ implementation contracts that must not drift.
 
 ### Key derivation
 
-A Harbor password never reaches the database. When the root `harbor` package
+An eidos-db password never reaches the database. When the root `eidos` package
 creates a store it performs this pipeline:
 
 ```text
@@ -546,20 +606,20 @@ password
    │  SLIP-0021 master node
    ▼
 master key
-   ├── harbor/canary/v1  → canary key
-   ├── harbor/db/v1      → record store key
-   ├── harbor/fs/v1      → file store key
-   ├── harbor/ts/v1      → series store key
-   ├── harbor/vec/v1     → vector store key
-   └── harbor/fts/v1     → search store key
+   ├── eidos/canary/v1  → canary key
+   ├── eidos/db/v1      → record store key
+   ├── eidos/fs/v1      → file store key
+   ├── eidos/ts/v1      → series store key
+   ├── eidos/vec/v1     → vector store key
+   └── eidos/fts/v1     → search store key
 ```
 
-- The salt is 16 random bytes (`harbor.SaltSize`) generated for each new store.
-- Argon2id produces a 32-byte seed (`harbor.KeySize`). The default parameters
+- The salt is 16 random bytes (`eidos.SaltSize`) generated for each new store.
+- Argon2id produces a 32-byte seed (`eidos.KeySize`). The default parameters
   follow RFC 9106's second recommendation: `t=3`, `m=64 MiB`, `p=4`.
 - SLIP-0021 derives independent child keys. Compromise of one sub-store key
   does not expose the others. Full-text values reuse the record encryption
-  flag, under their own `harbor/fts/v1` key.
+  flag, under their own `eidos/fts/v1` key.
 - Temporary byte slices are wiped after use. The password is a Go string and
   cannot be reliably wiped from memory; keep it out of long-lived state.
 
@@ -582,7 +642,7 @@ unbounded Argon2id allocation.
 
 ### The canary
 
-Every store contains a canary: `"harbor/canary/v1/0x<flags>"` sealed with the
+Every store contains a canary: `"eidos/canary/v1/0x<flags>"` sealed with the
 canary key. Opening the store decrypts it and compares the result. This proves:
 
 - the password derives the expected key, and
@@ -685,7 +745,7 @@ There is no plaintext ↔ encrypted in-place migration. Export and re-import.
 
 `Store.Migrate` applies a `Schema` of ordered `Step`s inside one
 `WriteTransaction`; the application version lives in its own top-level
-`harbor.schema` bucket (8-byte big-endian), not in `system/Metadata`, so
+`eidos.schema` bucket (8-byte big-endian), not in `system/Metadata`, so
 existing stores keep opening. Steps must be contiguous, end at `Schema.Version`
 and be deterministic/idempotent. A newer stored version fails with
 `ErrSchemaTooNew`; malformed plans fail with `ErrInvalidSchema`. The version is
@@ -768,7 +828,7 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 - Keep the public API and on-disk formats stable. A format change requires a
   version bump and a compatibility path; unknown versions must fail closed.
-- Preserve ownership contracts: `harbor.Store.Close` closes the handle it
+- Preserve ownership contracts: `eidos.Store.Close` closes the handle it
   opened; `record.Open`, `fstree.Open`, `series.Open` and `vector.Open` borrow a caller-owned
   `*bolt.DB` and must never close it.
 - Preserve context semantics: check at boundaries and loop checkpoints, do not
@@ -805,23 +865,23 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 Generated API documentation:
 
-- [github.com/malivvan/harbor](https://pkg.go.dev/github.com/malivvan/harbor)
-- [github.com/malivvan/harbor/store/record](https://pkg.go.dev/github.com/malivvan/harbor/store/record)
-- [github.com/malivvan/harbor/store/fstree](https://pkg.go.dev/github.com/malivvan/harbor/store/fstree)
-- [github.com/malivvan/harbor/store/series](https://pkg.go.dev/github.com/malivvan/harbor/store/series)
-- [github.com/malivvan/harbor/store/vector](https://pkg.go.dev/github.com/malivvan/harbor/store/vector)
-- [github.com/malivvan/harbor/store/search](https://pkg.go.dev/github.com/malivvan/harbor/store/search)
-- [github.com/malivvan/harbor/store/ledger](https://pkg.go.dev/github.com/malivvan/harbor/store/ledger)
-- [github.com/malivvan/harbor/store/object](https://pkg.go.dev/github.com/malivvan/harbor/store/object)
-- [github.com/malivvan/harbor/store/graphs](https://pkg.go.dev/github.com/malivvan/harbor/store/graphs)
-- [github.com/malivvan/harbor/store/system](https://pkg.go.dev/github.com/malivvan/harbor/store/system)
-- [github.com/malivvan/harbor/pkg/consensus](https://pkg.go.dev/github.com/malivvan/harbor/pkg/consensus)
-- [github.com/malivvan/harbor/pkg/id](https://pkg.go.dev/github.com/malivvan/harbor/pkg/id)
-- [github.com/malivvan/harbor/pkg/metrics](https://pkg.go.dev/github.com/malivvan/harbor/pkg/metrics)
-- [github.com/malivvan/harbor/pkg/sign/canonical](https://pkg.go.dev/github.com/malivvan/harbor/pkg/sign/canonical)
-- [github.com/malivvan/harbor/pkg/snapshot](https://pkg.go.dev/github.com/malivvan/harbor/pkg/snapshot)
-- [github.com/malivvan/harbor/pkg/snapshot/blobstore](https://pkg.go.dev/github.com/malivvan/harbor/pkg/snapshot/blobstore)
-- [github.com/malivvan/harbor/pkg/store](https://pkg.go.dev/github.com/malivvan/harbor/pkg/store)
+- [github.com/malivvan/eidos-db](https://pkg.go.dev/github.com/malivvan/eidos-db)
+- [github.com/malivvan/eidos-db/store/record](https://pkg.go.dev/github.com/malivvan/eidos-db/store/record)
+- [github.com/malivvan/eidos-db/store/fstree](https://pkg.go.dev/github.com/malivvan/eidos-db/store/fstree)
+- [github.com/malivvan/eidos-db/store/series](https://pkg.go.dev/github.com/malivvan/eidos-db/store/series)
+- [github.com/malivvan/eidos-db/store/vector](https://pkg.go.dev/github.com/malivvan/eidos-db/store/vector)
+- [github.com/malivvan/eidos-db/store/search](https://pkg.go.dev/github.com/malivvan/eidos-db/store/search)
+- [github.com/malivvan/eidos-db/store/ledger](https://pkg.go.dev/github.com/malivvan/eidos-db/store/ledger)
+- [github.com/malivvan/eidos-db/store/object](https://pkg.go.dev/github.com/malivvan/eidos-db/store/object)
+- [github.com/malivvan/eidos-db/store/graphs](https://pkg.go.dev/github.com/malivvan/eidos-db/store/graphs)
+- [github.com/malivvan/eidos-db/store/system](https://pkg.go.dev/github.com/malivvan/eidos-db/store/system)
+- [github.com/malivvan/eidos-db/pkg/consensus](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/consensus)
+- [github.com/malivvan/eidos-db/pkg/id](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/id)
+- [github.com/malivvan/eidos-db/pkg/metrics](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/metrics)
+- [github.com/malivvan/eidos-db/pkg/sign/canonical](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/sign/canonical)
+- [github.com/malivvan/eidos-db/pkg/snapshot](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/snapshot)
+- [github.com/malivvan/eidos-db/pkg/snapshot/blobstore](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/snapshot/blobstore)
+- [github.com/malivvan/eidos-db/pkg/store](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/store)
 
 ## Pre-release checklist
 

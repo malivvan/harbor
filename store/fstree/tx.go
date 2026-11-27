@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/malivvan/harbor/pkg/metrics"
+	"github.com/malivvan/eidos-db/pkg/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 

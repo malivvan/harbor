@@ -1,8 +1,8 @@
-// Package system owns Harbor's store header: the unencrypted metadata record,
+// Package system owns eidos-db's store header: the unencrypted metadata record,
 // the Argon2id settings, the encryption and audit flag vocabulary, and the
 // derivation of every per-store key from the password.
 //
-// The root harbor package uses it to open a store; the sub-stores only receive
+// The root eidos package uses it to open a store; the sub-stores only receive
 // the derived keys through their Config values. Keeping the header in one place
 // means the KDF, canary, key labels and flag bits cannot drift between stores.
 package system
@@ -15,11 +15,11 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/malivvan/harbor/internal/argon2"
-	"github.com/malivvan/harbor/internal/crypto"
-	"github.com/malivvan/harbor/internal/slip21"
-	"github.com/malivvan/harbor/store"
-	"github.com/malivvan/harbor/store/ledger"
+	"github.com/malivvan/eidos-db/internal/argon2"
+	"github.com/malivvan/eidos-db/internal/crypto"
+	"github.com/malivvan/eidos-db/internal/slip21"
+	"github.com/malivvan/eidos-db/store"
+	"github.com/malivvan/eidos-db/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -140,11 +140,11 @@ const (
 // Errors returned by the package.
 var (
 	// ErrCorruptStore reports missing or malformed store metadata.
-	ErrCorruptStore = errors.New("harbor: corrupt store Metadata")
+	ErrCorruptStore = errors.New("eidos: corrupt store Metadata")
 	// ErrInvalidPassword reports an empty password or a failed canary.
-	ErrInvalidPassword = errors.New("harbor: invalid password")
+	ErrInvalidPassword = errors.New("eidos: invalid password")
 	// ErrInvalidOptions reports an unusable header configuration.
-	ErrInvalidOptions = errors.New("harbor: invalid options")
+	ErrInvalidOptions = errors.New("eidos: invalid options")
 )
 
 // Metadata bucket and record names. The header lives in its own top-level
@@ -155,7 +155,7 @@ var (
 )
 
 const (
-	canaryPlaintext = "harbor/canary/v1"
+	canaryPlaintext = "eidos/canary/v1"
 
 	// metadataFixedSize is salt | time | flags | memory | threads | canary length.
 	metadataFixedSize = SaltSize + 4 + 2 + 4 + 1 + 4
@@ -284,7 +284,7 @@ func WriteMetadata(bdb *bolt.DB, md Metadata) error {
 		}
 		return b.Put(metadataRecordKey, raw)
 	}); err != nil {
-		return fmt.Errorf("harbor: write store Metadata: %w", err)
+		return fmt.Errorf("eidos: write store Metadata: %w", err)
 	}
 	return nil
 }
@@ -311,7 +311,7 @@ func ValidateKDFParams(time, memory uint32, threads uint8, flags uint16, base er
 func NewSalt() ([]byte, error) {
 	salt := make([]byte, SaltSize)
 	if _, err := rand.Read(salt); err != nil {
-		return nil, fmt.Errorf("harbor: generate KDF salt: %w", err)
+		return nil, fmt.Errorf("eidos: generate KDF salt: %w", err)
 	}
 	return salt, nil
 }
@@ -389,11 +389,11 @@ func CanaryPlaintextFor(flags uint16) string {
 func SealCanary(key []byte, flags uint16) ([]byte, error) {
 	keychain, err := canaryKeychain(key)
 	if err != nil {
-		return nil, fmt.Errorf("harbor: initialize canary key: %w", err)
+		return nil, fmt.Errorf("eidos: initialize canary key: %w", err)
 	}
 	sealed, err := keychain.Seal([]byte(CanaryPlaintextFor(flags)))
 	if err != nil {
-		return nil, fmt.Errorf("harbor: seal canary: %w", err)
+		return nil, fmt.Errorf("eidos: seal canary: %w", err)
 	}
 	return sealed, nil
 }
@@ -416,18 +416,20 @@ func cryptoVerifyCanary(keychain *crypto.Keychain, sealed []byte, want string) e
 	return crypto.VerifyCanary(keychain, sealed, want)
 }
 
-// Key labels. Each value is a fixed /v1 derivation domain: it is persisted
-// indirectly through the derived keys, so the strings must never change even
-// though the identifiers were renamed to follow the store names.
+// Key labels. Each value is a fixed /v1 derivation domain that is persisted
+// indirectly through the derived keys: changing one changes every key it
+// derives. The project rename from Harbor to eidos-db renamed these from
+// "harbor/..." to "eidos/...", which is why stores written before the rename
+// cannot be opened by this build.
 const (
-	LabelCanary = "harbor/canary/v1"
-	LabelRecord = "harbor/db/v1"
-	LabelFile   = "harbor/fs/v1"
-	LabelSeries = "harbor/ts/v1"
-	LabelVector = "harbor/vec/v1"
-	LabelSearch = "harbor/fts/v1"
-	LabelGraphs = "harbor/graphs/v1"
-	LabelObject = "harbor/object/v1"
+	LabelCanary = "eidos/canary/v1"
+	LabelRecord = "eidos/db/v1"
+	LabelFile   = "eidos/fs/v1"
+	LabelSeries = "eidos/ts/v1"
+	LabelVector = "eidos/vec/v1"
+	LabelSearch = "eidos/fts/v1"
+	LabelGraphs = "eidos/graphs/v1"
+	LabelObject = "eidos/object/v1"
 )
 
 // SLIP-10 hardened paths for the per-store audit signing keys.
@@ -488,19 +490,19 @@ func Derive(password string, salt []byte, time, memory uint32, threads uint8) (*
 
 	master, err := slip21.New(seed)
 	if err != nil {
-		return nil, fmt.Errorf("harbor: derive master key: %w", err)
+		return nil, fmt.Errorf("eidos: derive master key: %w", err)
 	}
 	defer master.Destroy()
 
 	derive := func(label string) ([]byte, error) {
 		node, err := master.Derive([]byte(label))
 		if err != nil {
-			return nil, fmt.Errorf("harbor: derive %s key: %w", label, err)
+			return nil, fmt.Errorf("eidos: derive %s key: %w", label, err)
 		}
 		defer node.Destroy()
 		key := node.Key()
 		if len(key) != KeySize {
-			return nil, fmt.Errorf("harbor: derived %s key has %d bytes", label, len(key))
+			return nil, fmt.Errorf("eidos: derived %s key has %d bytes", label, len(key))
 		}
 		return key, nil
 	}

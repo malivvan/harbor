@@ -7,7 +7,7 @@ import (
 )
 
 // TransactionManager provides callback-managed transactions.
-// These are the canonical transaction boundaries for Harbor.
+// These are the canonical transaction boundaries for eidos-db.
 type TransactionManager interface {
 	ReadTransaction(ctx context.Context, fn func(Node) error) error
 	WriteTransaction(ctx context.Context, fn func(Node) error) error
@@ -24,7 +24,7 @@ var _ TransactionManager = (*Store)(nil)
 // returns successfully, the cancellation error is returned.
 //
 // Panic behavior: if fn panics, bbolt closes (rolls back) the read
-// transaction and the panic propagates to the caller. Harbor does
+// transaction and the panic propagates to the caller. eidos-db does
 // not recover panics.
 func (s *Store) ReadTransaction(ctx context.Context, fn func(Node) error) error {
 	if err := checkContext(ctx); err != nil {
@@ -68,7 +68,7 @@ func (s *Store) ReadTransaction(ctx context.Context, fn func(Node) error) error 
 //
 // Panic behavior: if fn panics, bbolt rolls back the transaction and
 // the panic propagates to the caller. Writes performed before the panic are
-// discarded. Harbor does not recover panics.
+// discarded. eidos-db does not recover panics.
 func (s *Store) WriteTransaction(ctx context.Context, fn func(Node) error) error {
 	if err := checkContext(ctx); err != nil {
 		return wrapError("write transaction", err)

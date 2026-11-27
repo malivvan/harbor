@@ -1,4 +1,4 @@
-package harbor
+package eidos
 
 import (
 	"context"
@@ -11,11 +11,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	hstore "github.com/malivvan/harbor/store"
-	"github.com/malivvan/harbor/store/graphs"
-	"github.com/malivvan/harbor/store/search"
-	"github.com/malivvan/harbor/store/series"
-	"github.com/malivvan/harbor/store/vector"
+	hstore "github.com/malivvan/eidos-db/store"
+	"github.com/malivvan/eidos-db/store/graphs"
+	"github.com/malivvan/eidos-db/store/search"
+	"github.com/malivvan/eidos-db/store/series"
+	"github.com/malivvan/eidos-db/store/vector"
 )
 
 // seedBackup writes one record, fstree, series, vector and full-text document.
@@ -43,7 +43,7 @@ func seedBackup(t *testing.T, s *Store) {
 
 func TestBackupFileVerifyAndRestore(t *testing.T) {
 	ctx := context.Background()
-	src := filepath.Join(t.TempDir(), "harbor.db")
+	src := filepath.Join(t.TempDir(), "eidos.db")
 	s := mustOpen(t, src, "backup-password")
 	defer mustClose(t, s)
 	seedBackup(t, s)
@@ -103,7 +103,7 @@ func TestBackupFileVerifyAndRestore(t *testing.T) {
 
 func TestVerifyBackupRejectsWrongPassword(t *testing.T) {
 	ctx := context.Background()
-	s := mustOpen(t, filepath.Join(t.TempDir(), "harbor.db"), "right-password")
+	s := mustOpen(t, filepath.Join(t.TempDir(), "eidos.db"), "right-password")
 	defer mustClose(t, s)
 	seedBackup(t, s)
 
@@ -117,7 +117,7 @@ func TestVerifyBackupRejectsWrongPassword(t *testing.T) {
 
 func TestVerifyBackupRejectsCorruptFile(t *testing.T) {
 	ctx := context.Background()
-	s := mustOpen(t, filepath.Join(t.TempDir(), "harbor.db"), "backup-password")
+	s := mustOpen(t, filepath.Join(t.TempDir(), "eidos.db"), "backup-password")
 	defer mustClose(t, s)
 	seedBackup(t, s)
 
@@ -133,7 +133,7 @@ func TestVerifyBackupRejectsCorruptFile(t *testing.T) {
 
 func TestVerifyBackupRejectsManifestMismatch(t *testing.T) {
 	ctx := context.Background()
-	s := mustOpen(t, filepath.Join(t.TempDir(), "harbor.db"), "backup-password")
+	s := mustOpen(t, filepath.Join(t.TempDir(), "eidos.db"), "backup-password")
 	defer mustClose(t, s)
 	seedBackup(t, s)
 
@@ -154,7 +154,7 @@ func TestVerifyBackupRejectsManifestMismatch(t *testing.T) {
 
 func TestBackupFileOverwritePolicy(t *testing.T) {
 	ctx := context.Background()
-	s := mustOpen(t, filepath.Join(t.TempDir(), "harbor.db"), "backup-password")
+	s := mustOpen(t, filepath.Join(t.TempDir(), "eidos.db"), "backup-password")
 	defer mustClose(t, s)
 
 	path := filepath.Join(t.TempDir(), "copy.db")
@@ -177,7 +177,7 @@ func TestBackupFileCancellationLeavesNoFile(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	s := mustOpen(t, filepath.Join(t.TempDir(), "harbor.db"), "backup-password")
+	s := mustOpen(t, filepath.Join(t.TempDir(), "eidos.db"), "backup-password")
 	defer mustClose(t, s)
 
 	path := filepath.Join(t.TempDir(), "copy.db")
@@ -189,7 +189,7 @@ func TestBackupFileCancellationLeavesNoFile(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Dir(path))
 	require.NoError(t, err)
 	for _, entry := range entries {
-		require.NotContains(t, entry.Name(), ".harbor-backup-", "temporary fstree left behind")
+		require.NotContains(t, entry.Name(), ".eidos-backup-", "temporary fstree left behind")
 	}
 }
 
@@ -197,7 +197,7 @@ func TestBackupFileCancellationLeavesNoFile(t *testing.T) {
 // writing. The backup must verify, and the source must still serve reads.
 func TestBackupUnderConcurrentWrites(t *testing.T) {
 	ctx := context.Background()
-	s := mustOpen(t, filepath.Join(t.TempDir(), "harbor.db"), "backup-password")
+	s := mustOpen(t, filepath.Join(t.TempDir(), "eidos.db"), "backup-password")
 	defer mustClose(t, s)
 	seedBackup(t, s)
 

@@ -1,4 +1,4 @@
-// Package harbor exposes a single bbolt-backed store that combines the record,
+// Package eidos exposes a single bbolt-backed store that combines the record,
 // fstree, series, vector and other sub-stores behind one password.
 //
 // The password is stretched with Argon2id using the salt and cost parameters
@@ -11,7 +11,7 @@
 // Graphs and Objects. Flags reports the persisted encryption flags and Meta
 // reports the KDF parameters. Use EncryptNone/Plaintext to create an
 // unencrypted store.
-package harbor
+package eidos
 
 import (
 	"context"
@@ -23,17 +23,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/malivvan/harbor/pkg/metrics"
-	"github.com/malivvan/harbor/store"
-	"github.com/malivvan/harbor/store/fstree"
-	"github.com/malivvan/harbor/store/graphs"
-	"github.com/malivvan/harbor/store/ledger"
-	"github.com/malivvan/harbor/store/object"
-	"github.com/malivvan/harbor/store/record"
-	"github.com/malivvan/harbor/store/search"
-	"github.com/malivvan/harbor/store/series"
-	"github.com/malivvan/harbor/store/system"
-	"github.com/malivvan/harbor/store/vector"
+	"github.com/malivvan/eidos-db/pkg/metrics"
+	"github.com/malivvan/eidos-db/store"
+	"github.com/malivvan/eidos-db/store/fstree"
+	"github.com/malivvan/eidos-db/store/graphs"
+	"github.com/malivvan/eidos-db/store/ledger"
+	"github.com/malivvan/eidos-db/store/object"
+	"github.com/malivvan/eidos-db/store/record"
+	"github.com/malivvan/eidos-db/store/search"
+	"github.com/malivvan/eidos-db/store/series"
+	"github.com/malivvan/eidos-db/store/system"
+	"github.com/malivvan/eidos-db/store/vector"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -45,7 +45,7 @@ func namedRoot(name string) [][]byte {
 // Errors returned by the package.
 var (
 	// ErrClosed is returned by operations on a closed Store.
-	ErrClosed = errors.New("harbor: store is closed")
+	ErrClosed = errors.New("eidos: store is closed")
 
 	// ErrInvalidOptions reports a nil Options value or an unusable
 	// configuration.
@@ -134,7 +134,8 @@ type Store struct {
 //
 // Password is required and is never stored: it is stretched with Argon2id and
 // the result is used to derive one key per sub-store. The embedded
-// bolt.Options configure the underlying database handle.
+// bolt.Options configure the underlying database handle; the fields a caller
+// leaves unset are filled from DefaultBoltOptions.
 type Options struct {
 	bolt.Options
 
@@ -183,10 +184,138 @@ type Options struct {
 	// and tracing spans from every sub-store. A nil Observer disables
 	// instrumentation and costs only a nil check per operation.
 	//
-	// Harbor does not depend on a metrics library: implement
+	// eidos-db does not depend on a metrics library: implement
 	// metrics.Observer to forward to Prometheus, OpenTelemetry or anything
 	// else. See the metrics package for the metric names and labels.
 	Metrics metrics.Observer
+}
+
+// defaultBoltLockTimeout bounds how long Open waits for the exclusive file
+// lock. bbolt treats a zero Timeout as "wait forever"; a stale lock would then
+// hang the opening process instead of reporting a second instance.
+const defaultBoltLockTimeout = 2 * time.Second
+
+// DefaultBoltOptions returns the complete bbolt.Options eidos-db applies to the
+// fields a caller leaves unset in Options.Options.
+//
+// Every field is set explicitly, including the ones that keep bbolt's zero
+// value, so the defaults do not drift when bbolt changes its own defaults and
+// the reason for each value is visible next to it. Crash consistency comes
+// first: an acknowledged write must survive a power loss, and a crash mid-write
+// must reopen as the last committed transaction. Throughput is the second
+// consideration, mostly through the freelist type and by not adding tuning that
+// costs memory, file size or portability.
+//
+// A caller may override any field by setting it explicitly; the field comments
+// note which changes weaken a guarantee.
+func DefaultBoltOptions() bolt.Options {
+	return bolt.Options{
+		// Timeout: bbolt's zero value waits forever for the exclusive file
+		// lock. Two seconds lets another process finish a clean shutdown and
+		// still fails a stale or hung lock instead of blocking the agent that
+		// owns the memories.
+		Timeout: defaultBoltLockTimeout,
+
+		// NoGrowSync: false truncates and fsyncs the file extension before any
+		// page is written into it, so a crash cannot leave a mapping over a
+		// tail that was never persisted (zero-filled pages, SIGBUS on the next
+		// access). It costs one extra sync per growth, not per commit.
+		NoGrowSync: false,
+
+		// NoFreelistSync: false writes the free-page list in the same
+		// transaction that frees the pages. Reopen then reads one page instead
+		// of scanning the whole file to rebuild the list, and a freed page is
+		// never reused without a durable record of the free.
+		NoFreelistSync: false,
+
+		// PreLoadFreelist: bbolt loads the freelist at open for a writable
+		// database regardless. Setting it keeps the struct complete and makes
+		// the one-time read at open explicit instead of implied.
+		PreLoadFreelist: true,
+
+		// FreelistType: the array freelist scans free spans linearly once a
+		// long-lived, frequently updated store fragments, which is the normal
+		// shape of an agent's memory store. The hashmap freelist keeps
+		// allocation fast, persists the same on-disk format and therefore
+		// changes nothing about crash safety.
+		FreelistType: bolt.FreelistMapType,
+
+		// ReadOnly: eidos-db has to create and migrate its system header, so the
+		// handle is always writable. A read-only handle fails once
+		// LoadOrCreate needs to write and is not a supported Open mode.
+		ReadOnly: false,
+
+		// MmapFlags: zero keeps the OS default mapping. MAP_POPULATE is
+		// Linux-only and only moves page faults to open time; a wrong or
+		// non-portable flag makes the mapping fail or behave differently per
+		// platform.
+		MmapFlags: 0,
+
+		// InitialMmapSize: zero grows the mapping on demand. Pre-sizing makes
+		// read transactions less likely to block writers, but on Windows it
+		// resizes the file to that size immediately, so a default would impose
+		// an arbitrary file size on every store. Callers holding long read
+		// transactions open can raise it themselves.
+		InitialMmapSize: 0,
+
+		// PageSize: zero uses the OS page size, which bbolt also records in the
+		// file header. Overriding it changes the on-disk layout and makes the
+		// store unreadable on a host with a different page size.
+		PageSize: 0,
+
+		// MaxSize: zero means no cap. A cap turns "the disk is full" into an
+		// opaque write error and can leave a store that cannot grow; disk
+		// quotas and monitoring belong outside the database.
+		MaxSize: 0,
+
+		// NoSync: false fdatasyncs the data pages, writes the meta page, then
+		// fdatasyncs again. That order is what makes a crash leave either the
+		// old or the new transaction; NoSync true acknowledges writes that a
+		// power loss can still discard.
+		NoSync: false,
+
+		// OpenFile: nil selects os.OpenFile, so the mode passed to Open applies
+		// and callers can still inject a custom file (test hooks, in-memory or
+		// filesystem-level encryption) themselves.
+		OpenFile: nil,
+
+		// Mlock: false keeps the mapping reclaimable. Locking a growing
+		// multi-gigabyte memory store can exhaust RAM and get the process
+		// killed; callers that can afford the RSS opt in.
+		Mlock: false,
+
+		// Logger: nil selects bbolt's discard logger. eidos-db must not emit
+		// database paths, keys or contents by default; a caller that wants
+		// bbolt's internal diagnostics injects a logger explicitly.
+		Logger: nil,
+
+		// NoStatistics: false keeps bbolt's per-transaction and freelist
+		// statistics available through Stats. The cost is small next to sealing
+		// and fsync, and without them a write-latency regression is hard to
+		// explain.
+		NoStatistics: false,
+	}
+}
+
+// applyBoltDefaults fills the fields whose eidos-db default differs from bbolt's
+// zero value: the lock Timeout, the freelist type and PreLoadFreelist. Every
+// other field in DefaultBoltOptions is the zero value, so an unset field
+// already carries the default and an explicit caller value is preserved.
+func applyBoltDefaults(o *bolt.Options) {
+	if o == nil {
+		return
+	}
+	defaults := DefaultBoltOptions()
+	if o.Timeout <= 0 {
+		o.Timeout = defaults.Timeout
+	}
+	if o.FreelistType == "" {
+		o.FreelistType = defaults.FreelistType
+	}
+	// PreLoadFreelist is the one field an explicit false cannot override: bbolt
+	// forces it on for every writable database, so the choice would be ignored
+	// at open anyway. Setting it keeps the handle equal to DefaultBoltOptions.
+	o.PreLoadFreelist = defaults.PreLoadFreelist
 }
 
 // Validate checks the options that apply when a store is created: the password,
@@ -194,6 +323,10 @@ type Options struct {
 // Open ignores the KDF costs and the encryption selection for an existing
 // store; this method validates them as they would apply to a new store, so
 // callers can check their configuration before creating one.
+//
+// A nil receiver reports ErrInvalidOptions: there is nothing to validate. Open
+// treats a nil Options as all-defaults instead, and then fails on the missing
+// password with ErrInvalidPassword.
 func (o *Options) Validate() error {
 	if o == nil {
 		return fmt.Errorf("%w: options are required", ErrInvalidOptions)
@@ -248,10 +381,22 @@ type auditPublicKeys struct {
 // Later Opens use the stored settings; the KDF and encryption fields in options
 // only apply to a new store. A wrong or empty password fails with
 // ErrInvalidPassword and leaves the database closed.
+//
+// A nil options value is accepted and selects the defaults: the crash-safe
+// bolt.Options from DefaultBoltOptions, the DefaultKDF* costs and EncryptAll.
+// The password has no default, so a nil options value still fails with
+// ErrInvalidPassword. The caller's Options is never mutated; the defaults are
+// applied to a copy.
 func Open(ctx context.Context, path string, mode os.FileMode, options *Options) (*Store, error) {
-	if options == nil {
-		return nil, fmt.Errorf("%w: options are required", ErrInvalidOptions)
+	// Apply the defaults to a copy so a shared or reused Options keeps its
+	// configured values across calls.
+	effective := Options{}
+	if options != nil {
+		effective = *options
 	}
+	applyBoltDefaults(&effective.Options)
+	options = &effective
+
 	if options.Password == "" {
 		return nil, fmt.Errorf("%w: password is required", ErrInvalidPassword)
 	}
@@ -337,7 +482,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Audit:           auditSink(AuditRecord),
 		Metrics:         options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("harbor: open record store: %w", err)
+		return nil, fmt.Errorf("eidos: open record store: %w", err)
 	}
 	if s.fstree, err = fstree.Open(ctx, bdb, fstree.Config{
 		Root:            namedRoot(store.FSTREE),
@@ -347,7 +492,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Audit:           auditSink(AuditFile),
 		Metrics:         options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("harbor: open file store: %w", err)
+		return nil, fmt.Errorf("eidos: open file store: %w", err)
 	}
 	if s.series, err = series.Open(ctx, bdb, series.Config{
 		Root:               namedRoot(store.SERIES),
@@ -357,7 +502,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Audit:              auditSink(AuditSeries),
 		Metrics:            options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("harbor: open series store: %w", err)
+		return nil, fmt.Errorf("eidos: open series store: %w", err)
 	}
 	if s.search, err = search.Open(ctx, bdb, search.Config{
 		Root:          namedRoot(store.SEARCH),
@@ -365,7 +510,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptValues: system.HasFlag(md.Flags, EncryptRecordValues),
 		Metrics:       options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("harbor: open search store: %w", err)
+		return nil, fmt.Errorf("eidos: open search store: %w", err)
 	}
 	if s.graphs, err = graphs.Open(ctx, bdb, graphs.Config{
 		Root:   namedRoot(store.GRAPHS),
@@ -376,7 +521,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Audit:         auditSink(AuditGraphs),
 		Metrics:       options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("harbor: open graphs store: %w", err)
+		return nil, fmt.Errorf("eidos: open graphs store: %w", err)
 	}
 	if s.object, err = object.Open(ctx, bdb, object.Config{
 		Root:          namedRoot(store.OBJECT),
@@ -385,7 +530,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Audit:         auditSink(AuditObject),
 		Metrics:       options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("harbor: open object store: %w", err)
+		return nil, fmt.Errorf("eidos: open object store: %w", err)
 	}
 	if s.vector, err = vector.Open(ctx, bdb, vector.Config{
 		Root:                   namedRoot(store.VECTOR),
@@ -401,7 +546,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		// flush its buffers and never close the handle.
 		SharedDB: true,
 	}); err != nil {
-		return nil, fmt.Errorf("harbor: open vector store: %w", err)
+		return nil, fmt.Errorf("eidos: open vector store: %w", err)
 	}
 
 	opened = true
@@ -669,7 +814,7 @@ func (s *Store) View(fn func(*bolt.Tx) error) error {
 // fstree destination.
 func (s *Store) Backup(ctx context.Context, w io.Writer) error {
 	if w == nil {
-		return fmt.Errorf("harbor: backup: %w: writer is required", ErrInvalidOptions)
+		return fmt.Errorf("eidos: backup: %w: writer is required", ErrInvalidOptions)
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -691,7 +836,7 @@ func (s *Store) Backup(ctx context.Context, w io.Writer) error {
 	// consistent with what the store has accepted.
 	if s.vector != nil {
 		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
-			return fmt.Errorf("harbor: backup: flush vec store: %w", err)
+			return fmt.Errorf("eidos: backup: flush vec store: %w", err)
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -703,7 +848,7 @@ func (s *Store) Backup(ctx context.Context, w io.Writer) error {
 			return err
 		}
 		if _, err := tx.WriteTo(ctxWriter{ctx: ctx, w: w}); err != nil {
-			return fmt.Errorf("harbor: backup: %w", err)
+			return fmt.Errorf("eidos: backup: %w", err)
 		}
 		return nil
 	})
@@ -769,7 +914,7 @@ func (s *Store) CompactTo(ctx context.Context, path string, mode os.FileMode) er
 		return err
 	}
 	if path == "" {
-		return fmt.Errorf("harbor: compact: %w: path is required", ErrInvalidOptions)
+		return fmt.Errorf("eidos: compact: %w: path is required", ErrInvalidOptions)
 	}
 	if s == nil {
 		return ErrClosed
@@ -785,14 +930,14 @@ func (s *Store) CompactTo(ctx context.Context, path string, mode os.FileMode) er
 	// copy is complete.
 	if s.vector != nil {
 		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
-			return fmt.Errorf("harbor: compact: flush vec store: %w", err)
+			return fmt.Errorf("eidos: compact: flush vec store: %w", err)
 		}
 	}
 
 	if _, err := os.Stat(path); err == nil {
 		return &os.PathError{Op: "compact", Path: path, Err: os.ErrExist}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("harbor: compact: %w", err)
+		return fmt.Errorf("eidos: compact: %w", err)
 	}
 
 	if mode == 0 {
@@ -800,7 +945,7 @@ func (s *Store) CompactTo(ctx context.Context, path string, mode os.FileMode) er
 	}
 	dst, err := bolt.Open(path, mode, &bolt.Options{Timeout: time.Second})
 	if err != nil {
-		return fmt.Errorf("harbor: compact: %w", err)
+		return fmt.Errorf("eidos: compact: %w", err)
 	}
 	compactErr := bolt.Compact(dst, s.bs, compactTxMaxSize)
 	closeErr := dst.Close()
@@ -809,7 +954,7 @@ func (s *Store) CompactTo(ctx context.Context, path string, mode os.FileMode) er
 	}
 	if compactErr != nil {
 		_ = os.Remove(path)
-		return fmt.Errorf("harbor: compact: %w", compactErr)
+		return fmt.Errorf("eidos: compact: %w", compactErr)
 	}
 	return nil
 }
@@ -834,7 +979,7 @@ func (s *Store) Close() error {
 	var flushErr error
 	if s.vector != nil {
 		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
-			flushErr = fmt.Errorf("harbor: flush vec store: %w", err)
+			flushErr = fmt.Errorf("eidos: flush vec store: %w", err)
 		}
 	}
 	closeErr := s.bs.Close()

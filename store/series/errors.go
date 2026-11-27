@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/malivvan/harbor/internal/crypto"
+	"github.com/malivvan/eidos-db/internal/crypto"
 )
 
 var (

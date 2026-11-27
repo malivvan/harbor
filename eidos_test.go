@@ -1,4 +1,4 @@
-package harbor
+package eidos
 
 import (
 	"bytes"
@@ -9,21 +9,22 @@ import (
 	"testing"
 	"time"
 
-	file "github.com/malivvan/harbor/store/fstree"
-	"github.com/malivvan/harbor/store/record"
-	"github.com/malivvan/harbor/store/search"
+	file "github.com/malivvan/eidos-db/store/fstree"
+	"github.com/malivvan/eidos-db/store/record"
+	"github.com/malivvan/eidos-db/store/search"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
+	bolterrors "go.etcd.io/bbolt/errors"
 
-	"github.com/malivvan/harbor/internal/crypto"
-	hstore "github.com/malivvan/harbor/store"
-	"github.com/malivvan/harbor/store/ledger"
-	"github.com/malivvan/harbor/store/series"
-	"github.com/malivvan/harbor/store/system"
-	"github.com/malivvan/harbor/store/vector"
+	"github.com/malivvan/eidos-db/internal/crypto"
+	hstore "github.com/malivvan/eidos-db/store"
+	"github.com/malivvan/eidos-db/store/ledger"
+	"github.com/malivvan/eidos-db/store/series"
+	"github.com/malivvan/eidos-db/store/system"
+	"github.com/malivvan/eidos-db/store/vector"
 )
 
-type harborRecord struct {
+type eidosRecord struct {
 	ID   int    `db:"id,increment"`
 	Name string `db:"index"`
 }
@@ -58,7 +59,7 @@ func mustClose(t *testing.T, s *Store) {
 
 func TestStoreRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "harbor.db")
+	path := filepath.Join(t.TempDir(), "eidos.db")
 	const password = "correct horse battery staple"
 
 	s := mustOpen(t, path, password)
@@ -115,7 +116,7 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatalf("ts aggregate returned %d samples, want 1", len(samples))
 	}
 
-	if err := s.Record().Save(ctx, &harborRecord{Name: "alice"}); err != nil {
+	if err := s.Record().Save(ctx, &eidosRecord{Name: "alice"}); err != nil {
 		t.Fatalf("db save: %v", err)
 	}
 
@@ -155,7 +156,7 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatalf("ts range after reopen = %v, %v; want 1 point", points, err)
 	}
 
-	var rec harborRecord
+	var rec eidosRecord
 	if err := s.Record().One(ctx, "Name", "alice", &rec); err != nil {
 		t.Fatalf("db one after reopen: %v", err)
 	}
@@ -206,7 +207,7 @@ func TestOpenValidation(t *testing.T) {
 		options *Options
 		want    error
 	}{
-		{name: "nil options", ctx: ctx, options: nil, want: ErrInvalidOptions},
+		{name: "nil options", ctx: ctx, options: nil, want: ErrInvalidPassword},
 		{name: "empty password", ctx: ctx, options: testOptions(""), want: ErrInvalidPassword},
 		{
 			name: "incomplete KDF",
@@ -258,6 +259,89 @@ func TestOpenValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDefaultBoltOptions pins the complete default set. Every bbolt field is
+// specified, including the ones that stay at the zero value, so a change here
+// is a deliberate decision instead of a bbolt release altering behaviour.
+func TestDefaultBoltOptions(t *testing.T) {
+	require.Equal(t, bolt.Options{
+		Timeout:         defaultBoltLockTimeout,
+		NoGrowSync:      false,
+		NoFreelistSync:  false,
+		PreLoadFreelist: true,
+		FreelistType:    bolt.FreelistMapType,
+		ReadOnly:        false,
+		MmapFlags:       0,
+		InitialMmapSize: 0,
+		PageSize:        0,
+		MaxSize:         0,
+		NoSync:          false,
+		OpenFile:        nil,
+		Mlock:           false,
+		Logger:          nil,
+		NoStatistics:    false,
+	}, DefaultBoltOptions())
+}
+
+// TestApplyBoltDefaults checks that applying the defaults to an empty value
+// reproduces DefaultBoltOptions and that explicit choices are preserved.
+func TestApplyBoltDefaults(t *testing.T) {
+	var unset bolt.Options
+	applyBoltDefaults(&unset)
+	require.Equal(t, DefaultBoltOptions(), unset)
+
+	explicit := bolt.Options{
+		Timeout:         50 * time.Millisecond,
+		FreelistType:    bolt.FreelistArrayType,
+		NoSync:          true,
+		PreLoadFreelist: false,
+		InitialMmapSize: 1 << 20,
+	}
+	applyBoltDefaults(&explicit)
+	require.Equal(t, 50*time.Millisecond, explicit.Timeout)
+	require.Equal(t, bolt.FreelistArrayType, explicit.FreelistType)
+	require.True(t, explicit.NoSync)
+	require.Equal(t, 1<<20, explicit.InitialMmapSize)
+	// bbolt forces the freelist load on for a writable database anyway, so the
+	// default wins over an explicit false.
+	require.True(t, explicit.PreLoadFreelist)
+}
+
+// TestOpenDoesNotMutateOptions makes sure applying the defaults works on a copy:
+// a caller may reuse the same Options for several Open calls.
+func TestOpenDoesNotMutateOptions(t *testing.T) {
+	opts := testOptions("pw")
+	opts.Options = bolt.Options{}
+
+	path := filepath.Join(t.TempDir(), "copy.db")
+	st, err := Open(context.Background(), path, 0o600, opts)
+	require.NoError(t, err)
+	require.NoError(t, st.Close())
+	require.Equal(t, bolt.Options{}, opts.Options, "Open mutated the caller's Options")
+
+	// The same Options value opens the store again unchanged.
+	st, err = Open(context.Background(), path, 0o600, opts)
+	require.NoError(t, err)
+	require.NoError(t, st.Close())
+}
+
+// TestOpenAppliesDefaultLockTimeout proves the default reaches bbolt: a second
+// Open of a locked database waits defaultBoltLockTimeout and then fails instead
+// of blocking forever.
+func TestOpenAppliesDefaultLockTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits for the default lock timeout")
+	}
+	path := filepath.Join(t.TempDir(), "locked.db")
+	held := mustOpen(t, path, "pw")
+	defer mustClose(t, held)
+
+	// Zero Timeout selects the eidos-db default rather than bbolt's wait-forever.
+	start := time.Now()
+	_, err := Open(context.Background(), path, 0o600, &Options{Password: "pw"})
+	require.ErrorIs(t, err, bolterrors.ErrTimeout)
+	require.GreaterOrEqual(t, time.Since(start), time.Second)
 }
 
 func canceledContext() context.Context {
@@ -855,7 +939,7 @@ func TestOpenNilReceiverHelpers(t *testing.T) {
 
 func TestAuditTrailEndToEnd(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "harbor-ledger.db")
+	path := filepath.Join(t.TempDir(), "eidos-ledger.db")
 	const password = "correct horse battery staple"
 
 	opts := testOptions(password)
@@ -868,7 +952,7 @@ func TestAuditTrailEndToEnd(t *testing.T) {
 	require.NotNil(t, s.Audit())
 
 	// One write per store.
-	require.NoError(t, s.Record().Save(ctx, &harborRecord{Name: "alice"}))
+	require.NoError(t, s.Record().Save(ctx, &eidosRecord{Name: "alice"}))
 	require.NoError(t, s.Series().Series("cpu").Insert(ctx, series.Point{Timestamp: 1, Value: 1}))
 
 	col, err := s.Vector().NewCollection("docs", 3, vector.Cosine, false)
@@ -898,7 +982,7 @@ func TestAuditTrailEndToEnd(t *testing.T) {
 
 func TestAuditDisabledHasNoTrail(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "harbor-noaudit.db")
+	path := filepath.Join(t.TempDir(), "eidos-noaudit.db")
 
 	s := mustOpen(t, path, "pw")
 	t.Cleanup(func() { _ = s.Close() })
@@ -906,7 +990,7 @@ func TestAuditDisabledHasNoTrail(t *testing.T) {
 	require.Equal(t, AuditNone, s.AuditFlags())
 	require.Nil(t, s.Audit())
 
-	require.NoError(t, s.Record().Save(ctx, &harborRecord{Name: "alice"}))
+	require.NoError(t, s.Record().Save(ctx, &eidosRecord{Name: "alice"}))
 
 	_, err := s.VerifyAudit()
 	require.ErrorIs(t, err, ledger.ErrNoLog)
@@ -914,13 +998,13 @@ func TestAuditDisabledHasNoTrail(t *testing.T) {
 
 func TestAuditWrongPasswordIsRejectedOnOpen(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "harbor-audit-pw.db")
+	path := filepath.Join(t.TempDir(), "eidos-audit-pw.db")
 
 	opts := testOptions("right")
 	opts.Audit = AuditRecord
 	s, err := Open(ctx, path, 0600, opts)
 	require.NoError(t, err)
-	require.NoError(t, s.Record().Save(ctx, &harborRecord{Name: "alice"}))
+	require.NoError(t, s.Record().Save(ctx, &eidosRecord{Name: "alice"}))
 	require.NoError(t, s.Close())
 
 	// The audit signing keys derive from the same seed as the encryption keys,
@@ -1086,7 +1170,7 @@ func TestOptionsValidate(t *testing.T) {
 func TestOpenRejectsUnknownAuditFlags(t *testing.T) {
 	opts := testOptions("pw")
 	opts.Audit = 1 << 15
-	_, err := Open(context.Background(), filepath.Join(t.TempDir(), "harbor.db"), 0o600, opts)
+	_, err := Open(context.Background(), filepath.Join(t.TempDir(), "eidos.db"), 0o600, opts)
 	require.ErrorIs(t, err, ErrInvalidOptions)
 }
 

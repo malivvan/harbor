@@ -7,15 +7,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/malivvan/harbor/store/record/index"
+	"github.com/malivvan/eidos-db/store/record/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
 
 func TestUniqueIndex(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	dir, _ := os.MkdirTemp(os.TempDir(), "eidos")
 	defer os.RemoveAll(dir)
-	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
+	db := openEidosDB(t, filepath.Join(dir, "eidos.db"))
 	defer db.Close()
 
 	err := db.bdb.Update(func(tx *bolt.Tx) error {
@@ -118,9 +118,9 @@ func TestUniqueIndex(t *testing.T) {
 }
 
 func TestUniqueIndexRange(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	dir, _ := os.MkdirTemp(os.TempDir(), "eidos")
 	defer os.RemoveAll(dir)
-	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
+	db := openEidosDB(t, filepath.Join(dir, "eidos.db"))
 	defer db.Close()
 
 	db.bdb.Update(func(tx *bolt.Tx) error {
@@ -190,9 +190,9 @@ func TestUniqueIndexRange(t *testing.T) {
 }
 
 func TestUniqueIndexPrefix(t *testing.T) {
-	dir, _ := os.MkdirTemp(os.TempDir(), "harbor")
+	dir, _ := os.MkdirTemp(os.TempDir(), "eidos")
 	defer os.RemoveAll(dir)
-	db := openHarborDB(t, filepath.Join(dir, "harbor.db"))
+	db := openEidosDB(t, filepath.Join(dir, "eidos.db"))
 	defer db.Close()
 
 	db.bdb.Update(func(tx *bolt.Tx) error {

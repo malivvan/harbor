@@ -6,9 +6,9 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/malivvan/harbor/pkg/metrics"
-	"github.com/malivvan/harbor/store"
-	"github.com/malivvan/harbor/store/vector/hnsw"
+	"github.com/malivvan/eidos-db/pkg/metrics"
+	"github.com/malivvan/eidos-db/store"
+	"github.com/malivvan/eidos-db/store/vector/hnsw"
 )
 
 // HNSWParams contains configurable parameters for HNSW index
