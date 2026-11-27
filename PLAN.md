@@ -43,7 +43,7 @@ dependency. It will be deleted in the next step.
 - [x] Phase 3 — series compression
 - [x] Phase 4 — vector compression
 - [x] Phase 5 — search compression
-- [ ] Phase 6 — graphs compression
+- [x] Phase 6 — graphs compression
 - [ ] Phase 7 — object compression
 - [ ] Phase 8 — fstree content-addressed chunk deduplication
 - [ ] Phase 9 — object blob deduplication

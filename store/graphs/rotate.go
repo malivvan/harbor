@@ -13,7 +13,7 @@ import (
 // the canary are written with newKey and no previous key is kept.
 func (s *Store) withKey(newKey []byte) (*encState, error) {
 	cur := s.encState()
-	if cur == nil {
+	if !cur.encrypted() {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 	if len(newKey) != crypto.KeySize {
@@ -23,14 +23,14 @@ func (s *Store) withKey(newKey []byte) (*encState, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &encState{kc: kc}, nil
+	return &encState{kc: kc, comp: cur.comp}, nil
 }
 
 // withRotationKey keeps the previous key available for decryption, so the
 // graphs that were not rewritten yet stay readable until RotateAll.
 func (s *Store) withRotationKey(newKey []byte) (*encState, error) {
 	cur := s.encState()
-	if cur == nil {
+	if !cur.encrypted() {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 	if len(newKey) != crypto.KeySize {
@@ -40,7 +40,7 @@ func (s *Store) withRotationKey(newKey []byte) (*encState, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &encState{kc: kc}, nil
+	return &encState{kc: kc, comp: cur.comp}, nil
 }
 
 // adoptEnc installs next as the encryption state of the store.
@@ -123,7 +123,7 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 	}
 	return s.view(ctx, func(tx *bolt.Tx) error {
 		enc := s.encState()
-		if enc == nil {
+		if !enc.encrypted() {
 			return fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 		}
 		root := s.rootBucket(tx)
