@@ -91,6 +91,7 @@ const (
 	AuditVector                  = system.AuditVector
 	AuditGraphs                  = system.AuditGraphs
 	AuditObject                  = system.AuditObject
+	AuditSearch                  = system.AuditSearch
 	AuditAll                     = system.AuditAll
 	SaltSize                     = system.SaltSize
 	KeySize                      = system.KeySize
@@ -420,6 +421,7 @@ type auditPublicKeys struct {
 	auditVector ed25519.PublicKey
 	auditGraphs ed25519.PublicKey
 	auditObject ed25519.PublicKey
+	auditSearch ed25519.PublicKey
 }
 
 // Open opens (or creates) a Store at path.
@@ -499,6 +501,9 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		if system.HasFlag(options.Audit, AuditObject) {
 			recKeys[ledger.StoreObject] = append(ed25519.PrivateKey(nil), keys.AuditObject...)
 		}
+		if system.HasFlag(options.Audit, AuditSearch) {
+			recKeys[ledger.StoreSearch] = append(ed25519.PrivateKey(nil), keys.AuditSearch...)
+		}
 		s.audit = ledger.NewRecorder(bdb, recKeys)
 		s.auditFlags = options.Audit
 		s.auditPubs = auditPublicKeys{
@@ -508,6 +513,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 			auditVector: publicOf(keys.AuditVector),
 			auditGraphs: publicOf(keys.AuditGraphs),
 			auditObject: publicOf(keys.AuditObject),
+			auditSearch: publicOf(keys.AuditSearch),
 		}
 	}
 	auditSink := func(flag uint16) ledger.Sink {
@@ -556,6 +562,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Root:          namedRoot(bucket.SEARCH),
 		Secret:        keys.Search,
 		EncryptValues: system.HasFlag(md.Flags, EncryptRecordValues),
+		Audit:         auditSink(AuditSearch),
 		Metrics:       options.Metrics,
 	}); err != nil {
 		return nil, fmt.Errorf("tempest: open search store: %w", err)
@@ -815,6 +822,9 @@ func (s *Store) VerifyAudit() (ledger.Result, error) {
 	}
 	if system.HasFlag(s.auditFlags, AuditObject) {
 		keys[ledger.StoreObject] = s.auditPubs.auditObject
+	}
+	if system.HasFlag(s.auditFlags, AuditSearch) {
+		keys[ledger.StoreSearch] = s.auditPubs.auditSearch
 	}
 	return ledger.Verify(s.bs, keys)
 }

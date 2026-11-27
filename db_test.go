@@ -3,13 +3,16 @@ package tempest
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	file "github.com/malivvan/tempest/store/fstree"
+	"github.com/malivvan/tempest/store/graphs"
 	"github.com/malivvan/tempest/store/record"
 	"github.com/malivvan/tempest/store/search"
 	"github.com/stretchr/testify/require"
@@ -1271,4 +1274,108 @@ func TestFSSessionSurvivesReopen(t *testing.T) {
 
 	// The session fstree is part of the encrypted at-rest store.
 	_ = ctx
+}
+
+// auditEventStores returns the store name of every event in the audit chain.
+func auditEventStores(t *testing.T, s *Store) []string {
+	t.Helper()
+	var stores []string
+	err := s.bs.View(func(tx *bolt.Tx) error {
+		root := tx.Bucket([]byte(bucket.LEDGER))
+		if root == nil {
+			return nil
+		}
+		events := root.Bucket([]byte("events"))
+		if events == nil {
+			return nil
+		}
+		return events.ForEach(func(_, v []byte) error {
+			if len(v) < ed25519.SignatureSize {
+				return errors.New("truncated audit event")
+			}
+			var ev ledger.Event
+			if err := json.Unmarshal(v[:len(v)-ed25519.SignatureSize], &ev); err != nil {
+				return err
+			}
+			stores = append(stores, ev.Store)
+			return nil
+		})
+	})
+	require.NoError(t, err)
+	return stores
+}
+
+// TestAuditAllIncludesSearch proves AuditAll derives and verifies the search
+// signing key and that search writes reach the audit chain.
+func TestAuditAllIncludesSearch(t *testing.T) {
+	ctx := context.Background()
+	opts := testOptions("pw")
+	opts.Audit = AuditAll
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "audit-search.db"), 0o600, opts)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	idx, err := s.Search().Open("docs", search.Config{})
+	require.NoError(t, err)
+	require.NoError(t, idx.Upsert(ctx, "d1", "alpha beta"))
+
+	res, err := s.VerifyAudit()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, res.Count, uint64(2))
+
+	stores := auditEventStores(t, s)
+	require.Contains(t, stores, ledger.StoreSearch)
+}
+
+// TestAuditAllCoversEveryStore performs one representative write in each
+// sub-store and proves AuditAll produced a verifiable event for every one of
+// them, including the search store.
+func TestAuditAllCoversEveryStore(t *testing.T) {
+	ctx := context.Background()
+	opts := testOptions("pw")
+	opts.Audit = AuditAll
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "audit-every-store.db"), 0o600, opts)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	require.NoError(t, s.Record().Save(ctx, &tempestRecord{Name: "alice"}))
+
+	vfs, err := s.File().Open("data")
+	require.NoError(t, err)
+	f, err := vfs.Create("/note.txt")
+	require.NoError(t, err)
+	_, err = f.Write([]byte("hello"))
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	require.NoError(t, s.Series().Series("cpu").Insert(ctx, series.Point{Timestamp: 1, Value: 1}))
+
+	col, err := s.Vector().NewCollection("docs", 2, vector.Cosine, false)
+	require.NoError(t, err)
+	require.NoError(t, col.Upsert([]vector.PointStruct{{ID: "p1", Vector: []float32{1, 0}}}))
+	require.NoError(t, col.Flush())
+
+	g, err := s.Graphs().Open("social")
+	require.NoError(t, err)
+	require.NoError(t, g.UpsertNode(ctx, &graphs.Node{ID: "a", Type: "person"}))
+
+	_, err = s.Objects().Put(ctx, "tenant", "k", strings.NewReader("v"), 1, "")
+	require.NoError(t, err)
+
+	idx, err := s.Search().Open("idx", search.Config{})
+	require.NoError(t, err)
+	require.NoError(t, idx.Upsert(ctx, "d1", "alpha"))
+
+	res, err := s.VerifyAudit()
+	require.NoError(t, err)
+	require.Greater(t, res.Count, uint64(0))
+
+	stores := auditEventStores(t, s)
+	require.Equal(t, int(res.Count), len(stores))
+	for _, want := range []string{
+		ledger.StoreRecord, ledger.StoreFile, ledger.StoreSeries, ledger.StoreVector,
+		ledger.StoreGraphs, ledger.StoreObject, ledger.StoreSearch,
+	} {
+		require.Contains(t, stores, want, "no audit event for store %q", want)
+	}
 }
