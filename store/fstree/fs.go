@@ -18,9 +18,9 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/malivvan/eidos-db/internal/absfs"
-	"github.com/malivvan/eidos-db/pkg/metrics"
-	"github.com/malivvan/eidos-db/store/ledger"
+	"github.com/malivvan/tempest/internal/absfs"
+	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/store/ledger"
 )
 
 var errNilIno = errors.New("ino is nil")

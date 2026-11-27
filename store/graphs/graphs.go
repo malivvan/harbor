@@ -1,4 +1,4 @@
-// Package graphs is eidos-db's bitemporal property-graph store and the reusable
+// Package graphs is tempest's bitemporal property-graph store and the reusable
 // graph core that operates on it.
 //
 // A Store owns a dedicated root bucket and its own record encoding, so graph
@@ -17,7 +17,7 @@
 // # Storage
 //
 // The record-backed layout uses the bucket names NodeRecord, NodeVersion,
-// EdgeRecord and EdgeVersion pins the graph kept in eidos, and the same field
+// EdgeRecord and EdgeVersion pins the graph kept in tempest, and the same field
 // order, so a file written by that earlier implementation stays readable by a
 // build whose codec can encode the records. The codec is the store's; the
 // property bytes are produced by a ValueCodec the caller may replace (JSON by
@@ -47,10 +47,10 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/malivvan/eidos-db/internal/crypto"
-	"github.com/malivvan/eidos-db/pkg/metrics"
-	"github.com/malivvan/eidos-db/store/ledger"
-	hrecord "github.com/malivvan/eidos-db/store/record"
+	"github.com/malivvan/tempest/internal/crypto"
+	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/store/ledger"
+	hrecord "github.com/malivvan/tempest/store/record"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -63,7 +63,7 @@ const (
 	modeKey    = "__mode__"
 	canaryKey  = "__canary__"
 
-	canaryPlaintext = "eidos/graphs/v1"
+	canaryPlaintext = "tempest/graphs/v1"
 )
 
 // Errors returned by the package.

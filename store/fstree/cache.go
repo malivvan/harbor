@@ -4,8 +4,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/malivvan/eidos-db/pkg/metrics"
-	"github.com/malivvan/eidos-db/store"
+	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/store"
 )
 
 // inodeCache provides a thread-safe in-memory cache for inodes to improve

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file is for contributors, reviewers and coding agents working on eidos-db.
+This file is for contributors, reviewers and coding agents working on tempest.
 User-facing documentation lives in [README.md](README.md); per-package guides
 live next to their code (`store/record/README.md`, `store/fstree/README.md`, `store/series/README.md`,
 `store/vector/README.md`, `store/fstree/s3fs/README.md`). Keep it that way: do not recreate a
@@ -10,7 +10,7 @@ separate `docs/` tree.
 
 | Package | Responsibility |
 |---------|----------------|
-| `github.com/malivvan/eidos-db` | Opens one bbolt file, derives per-store keys from a password, and exposes `Record()`, `File()`, `Series()`, `Vector()`, `Search()`, `Graphs()`, `Objects()`, `Flags()` and `Meta()`. Each accessor takes optional bucket-path segments. |
+| `github.com/malivvan/tempest` | Opens one bbolt file, derives per-store keys from a password, and exposes `Record()`, `File()`, `Series()`, `Vector()`, `Search()`, `Graphs()`, `Objects()`, `Flags()` and `Meta()`. Each accessor takes optional bucket-path segments. |
 | `.../store/record` | Struct-to-bucket mapping, indexes, matchers, managed transactions, key/value access, codecs. |
 | `.../store/fstree` | Named file systems implementing the `absfs` interfaces, with symlinks, snapshots, inode cache and chunked content. |
 | `.../store/series` | Named time series with ordered scans, aggregation, labels and retention. |
@@ -83,7 +83,7 @@ User/                          one bucket per mapped struct
   __metadata/
     codec                      codec name
     <field>                    auto-increment counters
-  __eidos_index_<Field>/       list or unique index bucket
+  __tempest_index_<Field>/       list or unique index bucket
 __database/
   version                      "1.0.0"
   \x00__db_enc__                optional encryption marker (DENC)
@@ -93,7 +93,7 @@ __database/
   `Marshal` output.
 - `__metadata` is created per mapped bucket and records the codec name. Opening
   a bucket with a different codec returns `ErrDifferentCodec`.
-- Index buckets use the reserved `__eidos_index_` prefix. List indexes map
+- Index buckets use the reserved `__tempest_index_` prefix. List indexes map
   value → primary keys; unique indexes enforce uniqueness.
 - `__database` holds the on-disk version and, when encryption is enabled, the
   `DENC` marker with its canary. Unknown versions return
@@ -237,13 +237,13 @@ Inside the configured root, one bucket per logical object bucket:
 
 ### Transactions and concurrency
 
-bbolt provides one writer and many readers, and eidos-db follows that model:
+bbolt provides one writer and many readers, and tempest follows that model:
 
 - A `record.Store` is safe for concurrent use. CRUD operations use short
   transactions; `ReadTransaction` and `WriteTransaction` provide explicit
   callback boundaries.
-- `Attach` lets a caller own the bbolt transaction and mix eidos-db operations
-  with raw bucket writes. eidos-db never opens a nested managed transaction for
+- `Attach` lets a caller own the bbolt transaction and mix tempest operations
+  with raw bucket writes. tempest never opens a nested managed transaction for
   an attached handle.
 - `record.TransactionManager`, `fstree.Walk`, `series.Store`, and `vector.Collection` all use
   the same bbolt handle and therefore share the single-writer constraint.
@@ -271,7 +271,7 @@ bbolt provides one writer and many readers, and eidos-db follows that model:
 
 ### Buffering and fsync
 
-Every bbolt commit is an fsync. eidos-db batches where it can:
+Every bbolt commit is an fsync. tempest batches where it can:
 
 - `record.WriteTransaction` groups entity operations into one write transaction.
 - `series.Series.InsertMany` writes a batch in one transaction.
@@ -281,8 +281,8 @@ Every bbolt commit is an fsync. eidos-db batches where it can:
 
 ### Durability and crash consistency
 
-`eidos.Open` fills the `bolt.Options` fields that a caller leaves unset from
-`eidos.DefaultBoltOptions()`. This is what makes a default store safe to lose
+`tempest.Open` fills the `bolt.Options` fields that a caller leaves unset from
+`tempest.DefaultBoltOptions()`. This is what makes a default store safe to lose
 power in; it is not a per-store setting and is not persisted.
 
 | Field | Default | Reason |
@@ -296,7 +296,7 @@ power in; it is not a per-store setting and is not persisted.
 | `ReadOnly`, `Mlock` | `false` | The store must be writable, and pinning a growing database in memory is the caller's decision. |
 
 `DefaultBoltOptions` sets every field explicitly, including the ones that stay
-at bbolt's zero value, so a bbolt release cannot change eidos-db's behaviour
+at bbolt's zero value, so a bbolt release cannot change tempest's behaviour
 quietly:
 
 | Field | Default | Reason |
@@ -306,7 +306,7 @@ quietly:
 | `PageSize` | `0` | The OS page size, which bbolt also records in the file header. Overriding it changes the on-disk layout. |
 | `MaxSize` | `0` | No cap: a cap turns "disk full" into an opaque write error and can leave a store that cannot grow. |
 | `OpenFile` | `nil` | Selects `os.OpenFile`, so the mode passed to `Open` applies; callers can still inject their own file for tests. |
-| `Logger` | `nil` | Selects bbolt's discard logger: eidos-db must not emit paths, keys or contents by default. |
+| `Logger` | `nil` | Selects bbolt's discard logger: tempest must not emit paths, keys or contents by default. |
 | `NoStatistics` | `false` | Keeps `Stats` available; the cost is small next to sealing and fsync, and it is what makes write-latency regressions diagnosable. |
 
 `applyBoltDefaults` therefore only fills the three fields whose default is not
@@ -344,15 +344,18 @@ Three caveats sit above the bbolt layer and are not fixed by these options:
   so keys and formats advance together. A future format change bumps the
   relevant constant and ships a compatibility path; unknown versions are never
   reinterpreted.
-- The project was renamed from Harbor to eidos-db, and the persisted
-  identifiers moved with it: derivation labels are now `eidos/...`, and the
-  schema bucket (`eidos.schema`), index sentinel (`eidos__ids`), index prefix
-  (`__eidos_index_`), legacy graph buckets (`eidosNodeRecord`, …), vector
-  payload key (`\x00__eidos_json_payload__`), export container
-  (`eidos-export`) and the `eidos.db`/`eidos.key` defaults changed too. Because
-  a derivation label determines the keys it derives, a store written by v0.3.0
-  or earlier cannot be opened by this build, and its exports do not import
-  directly. This is a deliberate break; do not reintroduce the old strings.
+- The project was renamed twice: Harbor → eidos-db → tempest (current). This
+  build is tempest, module `github.com/malivvan/tempest`, root package
+  `tempest`, and the persisted identifiers follow it: derivation labels are
+  `tempest/...`, and the schema bucket (`tempest.schema`), index sentinel
+  (`tempest__ids`), index prefix (`__tempest_index_`), legacy graph buckets
+  (`tempestNodeRecord`, …), vector payload key
+  (`\x00__tempest_json_payload__`), export container (`tempest-export`) and the
+  `tempest.db`/`tempest.key` defaults carry the new name too. Because a
+  derivation label determines the keys it derives, a store written by eidos-db
+  (or by the older Harbor) cannot be opened by this build, and its exports do
+  not import directly. This is a deliberate break; do not reintroduce the old
+  strings.
 - Encryption markers are versioned (`DENC`, `FENC`, `TENC`, `VENC`), and the
   sealed canary binds the mode flags.
 - Vector schema fingerprints detect a reordered or otherwise incompatible
@@ -530,7 +533,7 @@ Platform summary:
 - Permissions are advisory: enforcement depends on the backend. Do not rely on
   `Chmod` for isolation.
 - The abstraction layer does not encrypt data and does not audit operations.
-  Encryption belongs to the eidos-db stores (`record`, `file`, `series`, `vector`); the
+  Encryption belongs to the tempest stores (`record`, `file`, `series`, `vector`); the
   `internal/absfs` layer must remain a transparent pass-through.
 - Apply resource limits where untrusted paths or sizes are accepted; do not log
   file contents, credentials or keys.
@@ -595,7 +598,7 @@ implementation contracts that must not drift.
 
 ### Key derivation
 
-An eidos-db password never reaches the database. When the root `eidos` package
+A tempest password never reaches the database. When the root `tempest` package
 creates a store it performs this pipeline:
 
 ```text
@@ -606,20 +609,20 @@ password
    │  SLIP-0021 master node
    ▼
 master key
-   ├── eidos/canary/v1  → canary key
-   ├── eidos/db/v1      → record store key
-   ├── eidos/fs/v1      → file store key
-   ├── eidos/ts/v1      → series store key
-   ├── eidos/vec/v1     → vector store key
-   └── eidos/fts/v1     → search store key
+   ├── tempest/canary/v1  → canary key
+   ├── tempest/db/v1      → record store key
+   ├── tempest/fs/v1      → file store key
+   ├── tempest/ts/v1      → series store key
+   ├── tempest/vec/v1     → vector store key
+   └── tempest/fts/v1     → search store key
 ```
 
-- The salt is 16 random bytes (`eidos.SaltSize`) generated for each new store.
-- Argon2id produces a 32-byte seed (`eidos.KeySize`). The default parameters
+- The salt is 16 random bytes (`tempest.SaltSize`) generated for each new store.
+- Argon2id produces a 32-byte seed (`tempest.KeySize`). The default parameters
   follow RFC 9106's second recommendation: `t=3`, `m=64 MiB`, `p=4`.
 - SLIP-0021 derives independent child keys. Compromise of one sub-store key
   does not expose the others. Full-text values reuse the record encryption
-  flag, under their own `eidos/fts/v1` key.
+  flag, under their own `tempest/fts/v1` key.
 - Temporary byte slices are wiped after use. The password is a Go string and
   cannot be reliably wiped from memory; keep it out of long-lived state.
 
@@ -642,7 +645,7 @@ unbounded Argon2id allocation.
 
 ### The canary
 
-Every store contains a canary: `"eidos/canary/v1/0x<flags>"` sealed with the
+Every store contains a canary: `"tempest/canary/v1/0x<flags>"` sealed with the
 canary key. Opening the store decrypts it and compares the result. This proves:
 
 - the password derives the expected key, and
@@ -745,7 +748,7 @@ There is no plaintext ↔ encrypted in-place migration. Export and re-import.
 
 `Store.Migrate` applies a `Schema` of ordered `Step`s inside one
 `WriteTransaction`; the application version lives in its own top-level
-`eidos.schema` bucket (8-byte big-endian), not in `system/Metadata`, so
+`tempest.schema` bucket (8-byte big-endian), not in `system/Metadata`, so
 existing stores keep opening. Steps must be contiguous, end at `Schema.Version`
 and be deterministic/idempotent. A newer stored version fails with
 `ErrSchemaTooNew`; malformed plans fail with `ErrInvalidSchema`. The version is
@@ -774,17 +777,21 @@ test -z "$(gofmt -l .)"
 go vet ./...
 go build ./...
 
-# Tests
-go test -count=1 -timeout 180s ./...
-go test -race -count=1 -timeout 300s ./...
-CGO_ENABLED=0 go test -count=1 -timeout 180s ./...
+# Tests (CGO is not required)
+go test -count=1 -timeout 300s ./...
+CGO_ENABLED=0 go test -count=1 -timeout 300s ./...
+go test -race -count=1 -timeout 600s ./...
+
+# 32-bit: run the suite and the alignment vet on a 32-bit word size
+CGO_ENABLED=0 GOARCH=386 go vet ./...
+CGO_ENABLED=0 GOARCH=386 go test -count=1 -timeout 600s ./...
 
 # Static analysis
 go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
 go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
-# Coverage
-go test -count=1 -timeout 180s -covermode=atomic -coverprofile=coverage.out ./...
+# Coverage (cross-package, the number CI gates on and uploads to coveralls)
+go test -count=1 -timeout 600s -coverpkg=./... -covermode=atomic -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out
 
 # Benchmarks (distance kernels, encrypted overhead, filtered search, FS I/O,
@@ -794,10 +801,26 @@ go test -run '^$' -bench . -benchmem -benchtime=100ms ./store/vector ./store/ser
 
 CI runs formatting, vet, build, tests, race tests, coverage, staticcheck,
 `govulncheck` and `go mod tidy -diff` on every push to `master` and every pull
-request. A compatibility matrix builds with `CGO_ENABLED=0` for linux/amd64,
-linux/arm64, linux/loong64, darwin/arm64, windows/amd64 and windows/arm64, and
-runs the native CGO-free test suite. The benchmark job posts a pinned
-`benchstat` comparison against the base commit for pull requests.
+request. Everything is built and tested with `CGO_ENABLED=0`; the race detector
+is the single cgo step and runs on linux/amd64 only.
+
+32-bit is a first-class target, not an afterthought:
+
+- `test-386` runs the whole suite natively as linux/386 (the ubuntu runner
+  executes 386 binaries) and runs `go vet` under `GOARCH=386`, which is what
+  flags an unaligned 64-bit atomic — a hard fault on 386 and arm.
+- `test-qemu` runs the suite under qemu-user for linux/arm (GOARM=7), arm64,
+  ppc64le, riscv64 and s390x.
+- `compat` cross-builds with `CGO_ENABLED=0` for 17 targets, including
+  linux/386, linux/arm v5 and v7, linux/mips, linux/mipsle, windows/386,
+  freebsd/386, freebsd/arm, netbsd/386, netbsd/arm, openbsd/386 and
+  openbsd/arm. (`windows/arm` is not a supported Go pair and must not be
+  added.)
+
+The coverage job measures cross-package coverage with `-coverpkg=./...`, fails
+below the floor declared in the workflow, and uploads to coveralls
+(`COVERALLS_REPO_TOKEN`). The benchmark job posts a pinned `benchstat`
+comparison against the base commit for pull requests.
 See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 ## Documentation conventions
@@ -828,7 +851,7 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 - Keep the public API and on-disk formats stable. A format change requires a
   version bump and a compatibility path; unknown versions must fail closed.
-- Preserve ownership contracts: `eidos.Store.Close` closes the handle it
+- Preserve ownership contracts: `tempest.Store.Close` closes the handle it
   opened; `record.Open`, `fstree.Open`, `series.Open` and `vector.Open` borrow a caller-owned
   `*bolt.DB` and must never close it.
 - Preserve context semantics: check at boundaries and loop checkpoints, do not
@@ -865,23 +888,23 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 Generated API documentation:
 
-- [github.com/malivvan/eidos-db](https://pkg.go.dev/github.com/malivvan/eidos-db)
-- [github.com/malivvan/eidos-db/store/record](https://pkg.go.dev/github.com/malivvan/eidos-db/store/record)
-- [github.com/malivvan/eidos-db/store/fstree](https://pkg.go.dev/github.com/malivvan/eidos-db/store/fstree)
-- [github.com/malivvan/eidos-db/store/series](https://pkg.go.dev/github.com/malivvan/eidos-db/store/series)
-- [github.com/malivvan/eidos-db/store/vector](https://pkg.go.dev/github.com/malivvan/eidos-db/store/vector)
-- [github.com/malivvan/eidos-db/store/search](https://pkg.go.dev/github.com/malivvan/eidos-db/store/search)
-- [github.com/malivvan/eidos-db/store/ledger](https://pkg.go.dev/github.com/malivvan/eidos-db/store/ledger)
-- [github.com/malivvan/eidos-db/store/object](https://pkg.go.dev/github.com/malivvan/eidos-db/store/object)
-- [github.com/malivvan/eidos-db/store/graphs](https://pkg.go.dev/github.com/malivvan/eidos-db/store/graphs)
-- [github.com/malivvan/eidos-db/store/system](https://pkg.go.dev/github.com/malivvan/eidos-db/store/system)
-- [github.com/malivvan/eidos-db/pkg/consensus](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/consensus)
-- [github.com/malivvan/eidos-db/pkg/id](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/id)
-- [github.com/malivvan/eidos-db/pkg/metrics](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/metrics)
-- [github.com/malivvan/eidos-db/pkg/sign/canonical](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/sign/canonical)
-- [github.com/malivvan/eidos-db/pkg/snapshot](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/snapshot)
-- [github.com/malivvan/eidos-db/pkg/snapshot/blobstore](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/snapshot/blobstore)
-- [github.com/malivvan/eidos-db/pkg/store](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/store)
+- [github.com/malivvan/tempest](https://pkg.go.dev/github.com/malivvan/tempest)
+- [github.com/malivvan/tempest/store/record](https://pkg.go.dev/github.com/malivvan/tempest/store/record)
+- [github.com/malivvan/tempest/store/fstree](https://pkg.go.dev/github.com/malivvan/tempest/store/fstree)
+- [github.com/malivvan/tempest/store/series](https://pkg.go.dev/github.com/malivvan/tempest/store/series)
+- [github.com/malivvan/tempest/store/vector](https://pkg.go.dev/github.com/malivvan/tempest/store/vector)
+- [github.com/malivvan/tempest/store/search](https://pkg.go.dev/github.com/malivvan/tempest/store/search)
+- [github.com/malivvan/tempest/store/ledger](https://pkg.go.dev/github.com/malivvan/tempest/store/ledger)
+- [github.com/malivvan/tempest/store/object](https://pkg.go.dev/github.com/malivvan/tempest/store/object)
+- [github.com/malivvan/tempest/store/graphs](https://pkg.go.dev/github.com/malivvan/tempest/store/graphs)
+- [github.com/malivvan/tempest/store/system](https://pkg.go.dev/github.com/malivvan/tempest/store/system)
+- [github.com/malivvan/tempest/pkg/consensus](https://pkg.go.dev/github.com/malivvan/tempest/pkg/consensus)
+- [github.com/malivvan/tempest/pkg/id](https://pkg.go.dev/github.com/malivvan/tempest/pkg/id)
+- [github.com/malivvan/tempest/pkg/metrics](https://pkg.go.dev/github.com/malivvan/tempest/pkg/metrics)
+- [github.com/malivvan/tempest/pkg/sign/canonical](https://pkg.go.dev/github.com/malivvan/tempest/pkg/sign/canonical)
+- [github.com/malivvan/tempest/pkg/snapshot](https://pkg.go.dev/github.com/malivvan/tempest/pkg/snapshot)
+- [github.com/malivvan/tempest/pkg/snapshot/blobstore](https://pkg.go.dev/github.com/malivvan/tempest/pkg/snapshot/blobstore)
+- [github.com/malivvan/tempest/pkg/store](https://pkg.go.dev/github.com/malivvan/tempest/pkg/store)
 
 ## Pre-release checklist
 

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/malivvan/eidos-db/internal/crypto"
-	"github.com/malivvan/eidos-db/store/record/index"
+	"github.com/malivvan/tempest/internal/crypto"
+	"github.com/malivvan/tempest/store/record/index"
 )
 
 // Errors
@@ -123,5 +123,5 @@ func wrapError(operation string, err error) error {
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("eidos %s: %w", operation, err)
+	return fmt.Errorf("tempest %s: %w", operation, err)
 }

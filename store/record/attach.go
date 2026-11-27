@@ -1,11 +1,11 @@
 package record
 
 import (
-	"github.com/malivvan/eidos-db/store/ledger"
+	"github.com/malivvan/tempest/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 
-// Tx is an eidos-db facade bound to a bbolt transaction owned by the caller.
+// Tx is a tempest facade bound to a bbolt transaction owned by the caller.
 //
 // It exposes the complete Node operation surface — Save, Update,
 // DeleteStruct, One, Find, All, AllByIndex, Range, Prefix, Count, Select
@@ -28,7 +28,7 @@ var _ Tx = (*node)(nil)
 //
 // Guarantees:
 //
-//   - eidos-db never commits, rolls back, closes, or replaces the supplied
+//   - tempest never commits, rolls back, closes, or replaces the supplied
 //     transaction. No operation on the returned Tx acquires a managed
 //     transaction.
 //   - All reads and writes through the returned Tx, including nodes derived
@@ -43,7 +43,7 @@ var _ Tx = (*node)(nil)
 // The returned Tx is valid only for the lifetime of the supplied transaction.
 // Using it after the caller commits or rolls back is undefined behavior, just
 // as using the bbolt transaction itself would be: reads may panic and writes
-// fail with bbolt's ErrTxClosed. eidos-db never falls back to a managed
+// fail with bbolt's ErrTxClosed. tempest never falls back to a managed
 // transaction for a dead handle.
 func (s *Store) Attach(tx *bolt.Tx) (Tx, error) {
 	return s.attach(tx, nil)

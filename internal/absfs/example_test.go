@@ -3,7 +3,7 @@ package absfs_test
 import (
 	"fmt"
 
-	"github.com/malivvan/eidos-db/internal/absfs"
+	"github.com/malivvan/tempest/internal/absfs"
 )
 
 // Example demonstrates basic usage of creating a filesystem

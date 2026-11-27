@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/malivvan/eidos-db/store/record/q"
+	"github.com/malivvan/tempest/store/record/q"
 	"github.com/stretchr/testify/require"
 )
 
 // An ordered query with a matcher must return only matching records. This is
-// the regression for a port of eidos's graph: selecting FromNodeID = "a" with
+// the regression for a port of tempest's graph: selecting FromNodeID = "a" with
 // OrderBy("ID") returned the non-matching record, while the same query without
 // OrderBy returned the right one.
 type orderedFilterRec struct {

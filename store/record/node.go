@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/malivvan/eidos-db/pkg/metrics"
-	"github.com/malivvan/eidos-db/store"
-	"github.com/malivvan/eidos-db/store/ledger"
+	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -37,13 +37,13 @@ func resultLabel(err error) string {
 	return metrics.ResultOK
 }
 
-// Node exposes eidos-db operations relative to a bbolt bucket path.
+// Node exposes tempest operations relative to a bbolt bucket path.
 type Node interface {
 	TypeStore
 	KeyValueStore
 	BucketScanner
 
-	// From returns a new eidos-db node with a new bucket root below the current.
+	// From returns a new tempest node with a new bucket root below the current.
 	// All Store operations on the new node are executed relative to this bucket.
 	From(addend ...string) Node
 
@@ -72,7 +72,7 @@ var _ Node = (*node)(nil)
 type node struct {
 	s *Store
 
-	// The root bucket path. An empty path is the database root; the eidos root
+	// The root bucket path. An empty path is the database root; the tempest root
 	// package configures [store.RECORD] explicitly.
 	root [][]byte
 
@@ -106,7 +106,7 @@ func cloneBucketPath(path [][]byte) [][]byte {
 	return cloned
 }
 
-// From returns a new eidos-db Node with a new bucket root below the current.
+// From returns a new tempest Node with a new bucket root below the current.
 // All Store operations on the new node will be executed relative to this bucket.
 func (n node) From(addend ...string) Node {
 	path := make([][]byte, 0, len(n.root)+len(addend))
@@ -120,13 +120,13 @@ func (n node) From(addend ...string) Node {
 	return &n
 }
 
-// withTransaction returns a new eidos-db Node that will use the given transaction.
+// withTransaction returns a new tempest Node that will use the given transaction.
 func (n node) withTransaction(tx *bolt.Tx) *node {
 	n.tx = tx
 	return &n
 }
 
-// WithCodec returns a new eidos-db Node that will use the given Codec.
+// WithCodec returns a new tempest Node that will use the given Codec.
 func (n node) WithCodec(codec Codec) Node {
 	n.codec = codec
 	return &n
@@ -145,7 +145,7 @@ func (n *node) Bucket() []string {
 	return parts
 }
 
-// Codec returns the EncodeDecoder used by this instance of eidos-db
+// Codec returns the EncodeDecoder used by this instance of tempest
 func (n *node) Codec() Codec {
 	return n.codec
 }

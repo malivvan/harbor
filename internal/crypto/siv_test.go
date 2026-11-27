@@ -11,11 +11,11 @@ import (
 func TestDeriveSIV(t *testing.T) {
 	master := testKey(20)
 
-	engine, err := DeriveSIV(master, "eidos/test/keys/id/v1")
+	engine, err := DeriveSIV(master, "tempest/test/keys/id/v1")
 	require.NoError(t, err)
 
 	// Deterministic: the same master key and info always derive the same engine.
-	again, err := DeriveSIV(master, "eidos/test/keys/id/v1")
+	again, err := DeriveSIV(master, "tempest/test/keys/id/v1")
 	require.NoError(t, err)
 
 	first, err := engine.Encrypt([]byte("value"))
@@ -25,18 +25,18 @@ func TestDeriveSIV(t *testing.T) {
 	require.Equal(t, first, second)
 
 	// Different info yields an independent key.
-	other, err := DeriveSIV(master, "eidos/test/keys/name/v1")
+	other, err := DeriveSIV(master, "tempest/test/keys/name/v1")
 	require.NoError(t, err)
 	third, err := other.Encrypt([]byte("value"))
 	require.NoError(t, err)
 	require.NotEqual(t, first, third, "domains must be separated")
 
-	_, err = DeriveSIV(master[:16], "eidos/test/keys/id/v1")
+	_, err = DeriveSIV(master[:16], "tempest/test/keys/id/v1")
 	require.ErrorIs(t, err, ErrInvalidKey)
 }
 
 func TestSIVNameCipher(t *testing.T) {
-	cipher, err := NewSIVNameCipher(testKey(21), "eidos/test/keys/id/v1")
+	cipher, err := NewSIVNameCipher(testKey(21), "tempest/test/keys/id/v1")
 	require.NoError(t, err)
 
 	first, err := cipher.SealName([]byte("point-1"))
@@ -66,7 +66,7 @@ func TestSIVNameCipher(t *testing.T) {
 	_, err = cipher.OpenName([]byte("not base64!!"))
 	require.ErrorIs(t, err, ErrAuthFailed, "a malformed name is an authentication failure")
 
-	_, err = NewSIVNameCipher(testKey(21)[:16], "eidos/test/keys/id/v1")
+	_, err = NewSIVNameCipher(testKey(21)[:16], "tempest/test/keys/id/v1")
 	require.ErrorIs(t, err, ErrInvalidKey)
 }
 
@@ -85,9 +85,9 @@ func TestNilSIVNameCipherIsPlaintext(t *testing.T) {
 func TestSIVNameCipherDomainSeparation(t *testing.T) {
 	master := testKey(22)
 
-	idCipher, err := NewSIVNameCipher(master, "eidos/test/keys/id/v1")
+	idCipher, err := NewSIVNameCipher(master, "tempest/test/keys/id/v1")
 	require.NoError(t, err)
-	nameCipher, err := NewSIVNameCipher(master, "eidos/test/keys/name/v1")
+	nameCipher, err := NewSIVNameCipher(master, "tempest/test/keys/name/v1")
 	require.NoError(t, err)
 
 	asID, err := idCipher.SealName([]byte("shared"))
@@ -249,7 +249,7 @@ func TestSIVPadNeverPanics(t *testing.T) {
 }
 
 func TestSIVNameCipherRejectsShortNames(t *testing.T) {
-	cipher, err := NewSIVNameCipher(testKey(33), "eidos/test/keys/id/v1")
+	cipher, err := NewSIVNameCipher(testKey(33), "tempest/test/keys/id/v1")
 	require.NoError(t, err)
 
 	for _, encoded := range [][]byte{nil, []byte(""), []byte("AAAA"), []byte("AAAAAA")} {

@@ -1,4 +1,4 @@
-// Package object is eidos-db's independent flat object store.
+// Package object is tempest's independent flat object store.
 //
 // A bucket is a namespace and a key is a slash-separated name inside it. The
 // pair maps to exactly one record in the object store's own root bucket, so the
@@ -30,10 +30,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/malivvan/eidos-db/internal/crypto"
-	"github.com/malivvan/eidos-db/pkg/metrics"
-	"github.com/malivvan/eidos-db/store/fstree"
-	"github.com/malivvan/eidos-db/store/ledger"
+	"github.com/malivvan/tempest/internal/crypto"
+	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/store/fstree"
+	"github.com/malivvan/tempest/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -46,7 +46,7 @@ const (
 	modeKey    = "__mode__"
 	canaryKey  = "__canary__"
 
-	canaryPlaintext = "eidos/object/v1"
+	canaryPlaintext = "tempest/object/v1"
 )
 
 // Errors returned by the package.

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/eidos-db/internal/crypto"
-	hstore "github.com/malivvan/eidos-db/store"
+	"github.com/malivvan/tempest/internal/crypto"
+	hstore "github.com/malivvan/tempest/store"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )

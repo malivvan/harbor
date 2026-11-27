@@ -14,7 +14,7 @@ type changeUser struct {
 	Name string `db:"index"`
 }
 
-func (changeUser) EidosBucketName() string { return "change_users" }
+func (changeUser) TempestBucketName() string { return "change_users" }
 
 func TestChangeHookReceivesUpsertUpdateDelete(t *testing.T) {
 	bdb, err := bolt.Open(filepath.Join(t.TempDir(), "db"), 0o600, &bolt.Options{Timeout: time.Second})

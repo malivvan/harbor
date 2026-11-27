@@ -8,16 +8,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/malivvan/eidos-db/internal/crypto"
-	"github.com/malivvan/eidos-db/pkg/metrics"
-	"github.com/malivvan/eidos-db/store"
-	"github.com/malivvan/eidos-db/store/record/index"
+	"github.com/malivvan/tempest/internal/crypto"
+	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/store/record/index"
 	bolt "go.etcd.io/bbolt"
 )
 
 // listIndexIDsBucket is the nested bucket that list indexes use to map ids back
 // to their index entries.
-const listIndexIDsBucket = "eidos__ids"
+const listIndexIDsBucket = "tempest__ids"
 
 // withKey returns an encryption state that writes with newKey while keeping the
 // current cipher and flags.
@@ -94,7 +94,7 @@ func (s *Store) observeRotate(d time.Duration, err error) {
 	})
 }
 
-// RotateAll is ReEncrypt under the name used by the ts and fs stores. An eidos-db
+// RotateAll is ReEncrypt under the name used by the ts and fs stores. A tempest
 // database has a single key space, so both rotate everything.
 func (s *Store) RotateAll(ctx context.Context, newKey []byte) error {
 	return s.ReEncrypt(ctx, newKey)

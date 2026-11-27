@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	eidos "github.com/malivvan/eidos-db/store/record"
-	"github.com/malivvan/eidos-db/store/record/index"
+	tempest "github.com/malivvan/tempest/store/record"
+	"github.com/malivvan/tempest/store/record/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -56,18 +56,18 @@ func (c *stepContext) Value(key any) any { return nil }
 // ---------------------------------------------------------------------------
 
 type testDB struct {
-	db  *eidos.Store
+	db  *tempest.Store
 	bdb *bolt.DB
 	dir string
 }
 
 func openTestDB(t *testing.T) *testDB {
 	t.Helper()
-	dir, err := os.MkdirTemp(os.TempDir(), "eidos-index")
+	dir, err := os.MkdirTemp(os.TempDir(), "tempest-index")
 	require.NoError(t, err)
-	bdb, err := bolt.Open(filepath.Join(dir, "eidos.db"), 0600, nil)
+	bdb, err := bolt.Open(filepath.Join(dir, "tempest.db"), 0600, nil)
 	require.NoError(t, err)
-	db, err := eidos.Open(context.Background(), bdb, eidos.Config{})
+	db, err := tempest.Open(context.Background(), bdb, tempest.Config{})
 	require.NoError(t, err)
 	return &testDB{db: db, bdb: bdb, dir: dir}
 }

@@ -1,23 +1,23 @@
-package eidos
+package tempest
 
 import (
 	"context"
 	"errors"
 	"fmt"
 
-	"github.com/malivvan/eidos-db/store/fstree"
-	"github.com/malivvan/eidos-db/store/graphs"
-	"github.com/malivvan/eidos-db/store/ledger"
-	"github.com/malivvan/eidos-db/store/object"
-	"github.com/malivvan/eidos-db/store/record"
-	"github.com/malivvan/eidos-db/store/search"
-	"github.com/malivvan/eidos-db/store/series"
-	"github.com/malivvan/eidos-db/store/vector"
+	"github.com/malivvan/tempest/store/fstree"
+	"github.com/malivvan/tempest/store/graphs"
+	"github.com/malivvan/tempest/store/ledger"
+	"github.com/malivvan/tempest/store/object"
+	"github.com/malivvan/tempest/store/record"
+	"github.com/malivvan/tempest/store/search"
+	"github.com/malivvan/tempest/store/series"
+	"github.com/malivvan/tempest/store/vector"
 	bolt "go.etcd.io/bbolt"
 )
 
 // ErrTxNotWritable reports a write through a read-only transaction.
-var ErrTxNotWritable = errors.New("eidos: transaction is read-only")
+var ErrTxNotWritable = errors.New("tempest: transaction is read-only")
 
 // Tx is one bbolt transaction bound to all four sub-stores.
 //
@@ -27,7 +27,7 @@ var ErrTxNotWritable = errors.New("eidos: transaction is read-only")
 // several stores commits or rolls back as one unit.
 //
 // The views are single-goroutine: a callback must not use them from another
-// goroutine, and must not store them beyond the callback. eidos-db never commits,
+// goroutine, and must not store them beyond the callback. tempest never commits,
 // rolls back or closes the transaction on its own; the callback's return value
 // decides the outcome.
 type Tx struct {
@@ -220,7 +220,7 @@ func (s *Store) WriteTransaction(ctx context.Context, fn func(tx *Tx) error) err
 	// starts from the state the store has accepted.
 	if s.vector != nil {
 		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
-			return fmt.Errorf("eidos: transaction: flush vec store: %w", err)
+			return fmt.Errorf("tempest: transaction: flush vec store: %w", err)
 		}
 	}
 
@@ -262,7 +262,7 @@ func (s *Store) WriteTransaction(ctx context.Context, fn func(tx *Tx) error) err
 	s.vector.AdoptTransaction(bound.vector)
 	if sink != nil {
 		if err := sink.replay(s.audit); err != nil {
-			return fmt.Errorf("eidos: transaction committed, audit append failed: %w", err)
+			return fmt.Errorf("tempest: transaction committed, audit append failed: %w", err)
 		}
 	}
 	return nil
@@ -301,7 +301,7 @@ func (s *Store) ReadTransaction(ctx context.Context, fn func(tx *Tx) error) erro
 
 	if s.vector != nil {
 		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
-			return fmt.Errorf("eidos: transaction: flush vec store: %w", err)
+			return fmt.Errorf("tempest: transaction: flush vec store: %w", err)
 		}
 	}
 

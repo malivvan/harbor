@@ -3,7 +3,7 @@ package consensus
 import (
 	"context"
 
-	"github.com/malivvan/eidos-db/store/vector"
+	"github.com/malivvan/tempest/store/vector"
 )
 
 // Vector is the replicated write view of the vector sub-store.

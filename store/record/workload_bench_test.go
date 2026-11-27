@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/eidos-db/store/record/q"
+	"github.com/malivvan/tempest/store/record/q"
 	bolt "go.etcd.io/bbolt"
 )
 

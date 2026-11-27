@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/eidos-db/store"
-	"github.com/malivvan/eidos-db/store/ledger"
+	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/store/ledger"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -19,7 +19,7 @@ type auditUser struct {
 	Name string `db:"index"`
 }
 
-func (auditUser) EidosBucketName() string { return "audit_users" }
+func (auditUser) TempestBucketName() string { return "audit_users" }
 
 // auditSeed is a fixed 32-byte seed so the derived key is deterministic.
 func auditSeed() []byte {

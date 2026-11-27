@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 
-	"github.com/malivvan/eidos-db/internal"
+	"github.com/malivvan/tempest/internal"
 	bolt "go.etcd.io/bbolt"
 )
 

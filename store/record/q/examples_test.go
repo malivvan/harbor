@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	eidos "github.com/malivvan/eidos-db/store/record"
-	"github.com/malivvan/eidos-db/store/record/q"
+	tempest "github.com/malivvan/tempest/store/record"
+	"github.com/malivvan/tempest/store/record/q"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -49,17 +49,17 @@ type User struct {
 	CreatedAt time.Time `db:"index"`
 }
 
-func prepareDB() (string, *eidos.Store, *bolt.DB) {
-	dir, err := os.MkdirTemp(os.TempDir(), "eidos")
+func prepareDB() (string, *tempest.Store, *bolt.DB) {
+	dir, err := os.MkdirTemp(os.TempDir(), "tempest")
 	if err != nil {
 		log.Fatal(err)
 	}
 	ctx := context.Background()
-	bdb, err := bolt.Open(filepath.Join(dir, "eidos.db"), 0600, nil)
+	bdb, err := bolt.Open(filepath.Join(dir, "tempest.db"), 0600, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	db, err := eidos.Open(ctx, bdb, eidos.Config{})
+	db, err := tempest.Open(ctx, bdb, tempest.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}

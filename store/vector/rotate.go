@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/malivvan/eidos-db/internal/crypto"
+	"github.com/malivvan/tempest/internal/crypto"
 	"go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
 )

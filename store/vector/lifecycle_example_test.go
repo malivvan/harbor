@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/malivvan/eidos-db/store/vector"
+	"github.com/malivvan/tempest/store/vector"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -15,7 +15,7 @@ import (
 // bbolt handle, Close only flushes and releases the wrapper, and a collection
 // reports both buffered work and its closed state.
 func ExampleStore_sharedHandle() {
-	dir, err := os.MkdirTemp("", "eidos-vec-example")
+	dir, err := os.MkdirTemp("", "tempest-vec-example")
 	if err != nil {
 		log.Fatal(err)
 	}

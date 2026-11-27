@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	eidos "github.com/malivvan/eidos-db/store/record"
+	tempest "github.com/malivvan/tempest/store/record"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -28,7 +28,7 @@ func TestMain(m *testing.M) {
 }
 
 func ExampleOpen() {
-	dir, err := os.MkdirTemp(os.TempDir(), "eidos")
+	dir, err := os.MkdirTemp(os.TempDir(), "tempest")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func ExampleOpen() {
 
 	ctx := context.Background()
 
-	bdb, err := bolt.Open(filepath.Join(dir, "eidos.db"), 0600, nil)
+	bdb, err := bolt.Open(filepath.Join(dir, "tempest.db"), 0600, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func ExampleOpen() {
 		}
 	}()
 
-	db, err := eidos.Open(ctx, bdb, eidos.Config{})
+	db, err := tempest.Open(ctx, bdb, tempest.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func ExampleOpen() {
 }
 
 func ExampleStore_Save() {
-	dir, err := os.MkdirTemp(os.TempDir(), "eidos")
+	dir, err := os.MkdirTemp(os.TempDir(), "tempest")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func ExampleStore_Save() {
 
 	// Open the underlying bbolt database, then wrap it with a codec. JSON is
 	// the default; passing it explicitly documents the parameter.
-	bdb, err := bolt.Open(filepath.Join(dir, "eidos.db"), 0600, nil)
+	bdb, err := bolt.Open(filepath.Join(dir, "tempest.db"), 0600, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func ExampleStore_Save() {
 		}
 	}()
 
-	db, err := eidos.Open(ctx, bdb, eidos.Config{Codec: eidos.JSONCodec})
+	db, err := tempest.Open(ctx, bdb, tempest.Config{Codec: tempest.JSONCodec})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func ExampleStore_Save() {
 
 	// Output:
 	// 1
-	// eidos save: already exists
+	// tempest save: already exists
 }
 
 func ExampleStore_One() {
@@ -164,7 +164,7 @@ func ExampleStore_One() {
 	fmt.Println(err)
 
 	// Output:
-	// eidos one: not found
+	// tempest one: not found
 }
 
 func ExampleStore_Find() {
@@ -255,7 +255,7 @@ func ExampleLimit() {
 	ctx := context.Background()
 
 	var users []User
-	err := db.All(ctx, &users, eidos.Limit(2))
+	err := db.All(ctx, &users, tempest.Limit(2))
 
 	if err != nil {
 		log.Fatal(err)
@@ -275,7 +275,7 @@ func ExampleSkip() {
 	ctx := context.Background()
 
 	var users []User
-	err := db.All(ctx, &users, eidos.Skip(1))
+	err := db.All(ctx, &users, tempest.Skip(1))
 
 	if err != nil {
 		log.Fatal(err)
@@ -288,7 +288,7 @@ func ExampleSkip() {
 }
 
 func ExampleOpen_existingDB() {
-	dir, err := os.MkdirTemp(os.TempDir(), "eidos")
+	dir, err := os.MkdirTemp(os.TempDir(), "tempest")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func ExampleOpen_existingDB() {
 		log.Fatal(err)
 	}
 
-	db, err := eidos.Open(ctx, bDB, eidos.Config{})
+	db, err := tempest.Open(ctx, bDB, tempest.Config{})
 	if err != nil {
 		if closeErr := bDB.Close(); closeErr != nil {
 			log.Println("native close after open failure:", closeErr)
@@ -314,7 +314,7 @@ func ExampleOpen_existingDB() {
 	}
 	defer func() {
 		if err := db.Close(); err != nil {
-			log.Println("eidos close error:", err)
+			log.Println("tempest close error:", err)
 		}
 		if err := bDB.Close(); err != nil {
 			log.Println("native close error:", err)
@@ -366,7 +366,7 @@ func ExampleStore_WriteTransaction() {
 	// both start out with a balance of 10000 cents
 	var account1, account2 Account
 
-	err := db.WriteTransaction(ctx, func(tx eidos.Node) error {
+	err := db.WriteTransaction(ctx, func(tx tempest.Node) error {
 		err := tx.One(ctx, "ID", 1, &account1)
 		if err != nil {
 			return err
@@ -428,7 +428,7 @@ func ExampleStore_ReadTransaction() {
 
 	var u User
 	// ReadTransaction executes the callback in a managed read-only transaction.
-	err := db.ReadTransaction(ctx, func(tx eidos.Node) error {
+	err := db.ReadTransaction(ctx, func(tx tempest.Node) error {
 		return tx.One(ctx, "ID", 1, &u)
 	})
 	if err != nil {
@@ -451,7 +451,7 @@ func Example_errorsIs() {
 	var user User
 	err := db.One(ctx, "Name", "Nobody", &user)
 	// Classify errors with errors.Is, never with direct equality.
-	if errors.Is(err, eidos.ErrNotFound) {
+	if errors.Is(err, tempest.ErrNotFound) {
 		fmt.Println("not found")
 	}
 
@@ -528,7 +528,7 @@ func ExampleStore_From() {
 	fmt.Println(personalNote.Text)
 
 	// Output:
-	// eidos one: not found
+	// tempest one: not found
 	// Work related.
 	// This is some private text.
 	// This is some very personal text.
@@ -559,7 +559,7 @@ func ExampleStore_Drop() {
 	fmt.Println(err)
 
 	// Output:
-	// eidos one: not found
+	// tempest one: not found
 }
 
 func ExampleNode_PrefixScan() {
@@ -694,19 +694,19 @@ type Note struct {
 	Text string
 }
 
-func prepareDB() (string, *eidos.Store) {
-	dir, err := os.MkdirTemp(os.TempDir(), "eidos")
+func prepareDB() (string, *tempest.Store) {
+	dir, err := os.MkdirTemp(os.TempDir(), "tempest")
 	if err != nil {
 		log.Fatal(err)
 	}
 	ctx := context.Background()
-	bdb, err := bolt.Open(filepath.Join(dir, "eidos.db"), 0600, nil)
+	bdb, err := bolt.Open(filepath.Join(dir, "tempest.db"), 0600, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	exampleBoltDBs = append(exampleBoltDBs, bdb)
 
-	db, err := eidos.Open(ctx, bdb, eidos.Config{})
+	db, err := tempest.Open(ctx, bdb, tempest.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/malivvan/eidos-db/internal/absfs"
+	"github.com/malivvan/tempest/internal/absfs"
 	bolt "go.etcd.io/bbolt"
 )
 

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/eidos-db/store"
+	hstore "github.com/malivvan/tempest/store"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -98,7 +98,11 @@ func TestRotateAllRollsBackOnFailure(t *testing.T) {
 	require.NoError(t, db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(hstore.SERIES)).Bucket([]byte("b"))
 		key := encodeKey(1)
-		raw := bucket.Get(key[:])
+		// Copy before mutating: bucket.Get returns a slice into bbolt's mmap,
+		// and writing to it corrupts the mapped file (and faults under a
+		// CGO-free build) instead of staging a change in the transaction.
+		raw := append([]byte(nil), bucket.Get(key[:])...)
+		require.NotNil(t, raw)
 		raw[len(raw)-1] ^= 0xFF
 		return bucket.Put(key[:], raw)
 	}))

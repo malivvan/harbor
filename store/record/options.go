@@ -1,6 +1,6 @@
 package record
 
-import "github.com/malivvan/eidos-db/store/record/index"
+import "github.com/malivvan/tempest/store/record/index"
 
 // FindOption customizes a finder query.
 type FindOption func(*index.Options)

@@ -1,6 +1,6 @@
 # object
 
-`object` is eidos-db's independent flat object store. A bucket is a namespace and
+`object` is tempest's independent flat object store. A bucket is a namespace and
 a key is a slash-separated name inside it; the pair maps to exactly one record
 in the object store's own root bucket (`object/`). It does not use the file
 store, so it works without a file system and never touches file-store buckets.
@@ -29,7 +29,7 @@ infos, err := objects.List(ctx, "tenant-a", "reports/")
 ## Lifecycle and integration
 
 `object.Open` borrows a caller-owned `*bolt.DB` and never closes it. The root
-`eidos.Store` opens the conventional store under `object/` and exposes it as
+`tempest.Store` opens the conventional store under `object/` and exposes it as
 `Objects()`; extra segments select a rooted view (`store.Objects("tenant")`).
 A transaction-bound view is available as `tx.Objects()`, so object writes join
 the same bbolt transaction as the other stores.

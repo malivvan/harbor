@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/malivvan/eidos-db/store/record/index"
-	"github.com/malivvan/eidos-db/store/record/q"
+	"github.com/malivvan/tempest/store/record/index"
+	"github.com/malivvan/tempest/store/record/q"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -52,43 +52,43 @@ func TestWrap_Finder_LabelsAndClassification(t *testing.T) {
 	tests := []testCase{
 		{
 			name:   "One",
-			prefix: "eidos one:",
+			prefix: "tempest one:",
 			op:     func() error { return db.One(nilCtx, "Name", "John", &User{}) },
 			cause:  ErrNilContext,
 		},
 		{
 			name:   "Find",
-			prefix: "eidos find:",
+			prefix: "tempest find:",
 			op:     func() error { return db.Find(ctx, "Name", "John", &[]UniqueNameUser{}) },
 			cause:  ErrNotFound,
 		},
 		{
 			name:   "AllByIndex",
-			prefix: "eidos all by index:",
+			prefix: "tempest all by index:",
 			op:     func() error { return db.From("nonexistent-bucket-xyz").AllByIndex(ctx, "field", &[]User{}) },
 			cause:  index.ErrNotFound,
 		},
 		{
 			name:   "Copy",
-			prefix: "eidos all:",
+			prefix: "tempest all:",
 			op:     func() error { return db.All(nilCtx, &[]User{}) },
 			cause:  ErrNilContext,
 		},
 		{
 			name:   "Range",
-			prefix: "eidos range:",
+			prefix: "tempest range:",
 			op:     func() error { return db.Range(ctx, "Name", "John", "John", &User{}) },
 			cause:  ErrSlicePtrNeeded,
 		},
 		{
 			name:   "Prefix",
-			prefix: "eidos prefix:",
+			prefix: "tempest prefix:",
 			op:     func() error { return db.Prefix(ctx, "Name", "Jo", &User{}) },
 			cause:  ErrSlicePtrNeeded,
 		},
 		{
 			name:   "Count",
-			prefix: "eidos count:",
+			prefix: "tempest count:",
 			op:     func() error { _, err := db.Count(nilCtx, &User{}); return err },
 			cause:  ErrNilContext,
 		},
@@ -121,7 +121,7 @@ func TestWrap_AllByIndex_DelegatedBranchesKeepOuterLabel(t *testing.T) {
 			var users []User
 			err := db.AllByIndex(ctx, fieldName, &users, cancelOption)
 			require.ErrorIs(t, err, context.Canceled)
-			require.True(t, strings.HasPrefix(err.Error(), "eidos all by index:"))
+			require.True(t, strings.HasPrefix(err.Error(), "tempest all by index:"))
 		})
 	}
 }
@@ -140,7 +140,7 @@ func TestWrap_Finder_OutputSafety(t *testing.T) {
 		sctx := &finderStepContext{cancelAt: 3}
 		err := db.One(sctx, "Name", "Alice", &sentinel)
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos one:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest one:"))
 		require.Equal(t, "SENTINEL", sentinel.Name, "destination should be preserved on error")
 	})
 
@@ -151,7 +151,7 @@ func TestWrap_Finder_OutputSafety(t *testing.T) {
 		sctx := &finderStepContext{cancelAt: 5}
 		err := db.Find(sctx, "Name", "Alice", &users)
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos find:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest find:"))
 		require.Equal(t, "SENTINEL", users[0].Name, "slice destination should be preserved on error")
 	})
 
@@ -162,7 +162,7 @@ func TestWrap_Finder_OutputSafety(t *testing.T) {
 		sctx := &finderStepContext{cancelAt: 3}
 		err := db.AllByIndex(sctx, "Name", &users)
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos all by index:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest all by index:"))
 		require.Equal(t, "SENTINEL", users[0].Name, "destination should be preserved on error")
 	})
 
@@ -172,7 +172,7 @@ func TestWrap_Finder_OutputSafety(t *testing.T) {
 		users := []User{{ID: 999, Name: "SENTINEL", Slug: "sentinel"}}
 		err := db.Range(canceledCtx(), "Name", "A", "Z", &users)
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos range:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest range:"))
 		require.Equal(t, "SENTINEL", users[0].Name, "destination should be preserved on error")
 	})
 
@@ -183,7 +183,7 @@ func TestWrap_Finder_OutputSafety(t *testing.T) {
 		sctx := &finderStepContext{cancelAt: 3}
 		err := db.Prefix(sctx, "Name", "Ch", &users)
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos prefix:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest prefix:"))
 		require.Equal(t, "SENTINEL", users[0].Name, "destination should be preserved on error")
 	})
 
@@ -191,7 +191,7 @@ func TestWrap_Finder_OutputSafety(t *testing.T) {
 	t.Run("CountReturnsZeroOnError", func(t *testing.T) {
 		count, err := db.Count(canceledCtx(), &User{})
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos count:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest count:"))
 		require.Equal(t, 0, count)
 	})
 
@@ -233,37 +233,37 @@ func TestWrap_Query_LabelsAndClassification(t *testing.T) {
 	tests := []testCase{
 		{
 			name:   "QueryFind",
-			prefix: "eidos query find:",
+			prefix: "tempest query find:",
 			op:     func() error { return db.Select(q.True()).Find(nilCtx, &[]User{}) },
 			cause:  ErrNilContext,
 		},
 		{
 			name:   "QueryFirst",
-			prefix: "eidos query first:",
+			prefix: "tempest query first:",
 			op:     func() error { return db.Select(q.True()).First(nilCtx, &User{}) },
 			cause:  ErrNilContext,
 		},
 		{
 			name:   "QueryDelete",
-			prefix: "eidos query delete:",
+			prefix: "tempest query delete:",
 			op:     func() error { return db.Select(q.True()).Delete(nilCtx, &User{}) },
 			cause:  ErrNilContext,
 		},
 		{
 			name:   "QueryCount",
-			prefix: "eidos query count:",
+			prefix: "tempest query count:",
 			op:     func() error { _, err := db.Select(q.True()).Count(nilCtx, &User{}); return err },
 			cause:  ErrNilContext,
 		},
 		{
 			name:   "QueryRaw",
-			prefix: "eidos query raw:",
+			prefix: "tempest query raw:",
 			op:     func() error { _, err := db.Select(q.True()).Raw(nilCtx, nil); return err },
 			cause:  ErrNilContext,
 		},
 		{
 			name:   "QueryRawEach",
-			prefix: "eidos query raw each:",
+			prefix: "tempest query raw each:",
 			op: func() error {
 				return db.Select(q.True()).RawEach(ctx, nil, nil)
 			},
@@ -271,7 +271,7 @@ func TestWrap_Query_LabelsAndClassification(t *testing.T) {
 		},
 		{
 			name:   "QueryEach",
-			prefix: "eidos query each:",
+			prefix: "tempest query each:",
 			op: func() error {
 				return db.Select(q.True()).Each(ctx, &User{}, nil)
 			},
@@ -308,7 +308,7 @@ func TestWrap_Query_OutputSafety(t *testing.T) {
 		users := []User{{ID: 999, Name: "SENTINEL", Slug: "sentinel"}}
 		err := db.Select(q.True()).Find(canceledCtx(), &users)
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos query find:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest query find:"))
 		require.Equal(t, "SENTINEL", users[0].Name)
 	})
 
@@ -317,7 +317,7 @@ func TestWrap_Query_OutputSafety(t *testing.T) {
 		user := User{ID: 999, Name: "SENTINEL", Slug: "sentinel"}
 		err := db.Select(q.True()).First(canceledCtx(), &user)
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos query first:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest query first:"))
 		require.Equal(t, "SENTINEL", user.Name)
 	})
 
@@ -325,7 +325,7 @@ func TestWrap_Query_OutputSafety(t *testing.T) {
 	t.Run("QueryCountReturnsZeroOnCancel", func(t *testing.T) {
 		count, err := db.Select(q.True()).Count(canceledCtx(), &User{})
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos query count:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest query count:"))
 		require.Equal(t, 0, count)
 	})
 
@@ -333,7 +333,7 @@ func TestWrap_Query_OutputSafety(t *testing.T) {
 	t.Run("QueryRawReturnsNilOnCancel", func(t *testing.T) {
 		raw, err := db.Select(q.True()).Raw(canceledCtx(), nil)
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos query raw:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest query raw:"))
 		require.Nil(t, raw)
 	})
 
@@ -367,14 +367,14 @@ func TestWrap_Query_Callbacks(t *testing.T) {
 	t.Run("RawEachNilCallback", func(t *testing.T) {
 		err := db.Select(q.True()).RawEach(ctx, nil, nil)
 		require.ErrorIs(t, err, ErrNilParam)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos query raw each:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest query raw each:"))
 	})
 
 	// Each nil callback -> wrapped ErrNilParam
 	t.Run("EachNilCallback", func(t *testing.T) {
 		err := db.Select(q.True()).Each(ctx, &User{}, nil)
 		require.ErrorIs(t, err, ErrNilParam)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos query each:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest query each:"))
 	})
 
 	// RawEach callback error remains discoverable
@@ -384,7 +384,7 @@ func TestWrap_Query_Callbacks(t *testing.T) {
 			return errCallback
 		})
 		require.ErrorIs(t, err, errCallback)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos query raw each:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest query raw each:"))
 	})
 
 	// Each callback error remains discoverable
@@ -394,7 +394,7 @@ func TestWrap_Query_Callbacks(t *testing.T) {
 			return errCallback
 		})
 		require.ErrorIs(t, err, errCallback)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos query each:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest query each:"))
 	})
 
 	// Callback error beats cancellation triggered inside callback
@@ -407,7 +407,7 @@ func TestWrap_Query_Callbacks(t *testing.T) {
 		})
 		require.ErrorIs(t, err, errCallback)
 		require.NotErrorIs(t, err, context.Canceled)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos query raw each:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest query raw each:"))
 	})
 
 	// Cancellation after successful callback prevents later callbacks
@@ -423,12 +423,12 @@ func TestWrap_Query_Callbacks(t *testing.T) {
 			return qsc.step()
 		})
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos query raw each:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest query raw each:"))
 		require.ErrorIs(t, err, context.Canceled)
 		require.GreaterOrEqual(t, callCount, 2)
 	})
 
-	// Panic propagates unchanged; eidos-db does not recover it
+	// Panic propagates unchanged; tempest does not recover it
 	t.Run("RawEachPanicPropagates", func(t *testing.T) {
 		require.NoError(t, db.Save(ctx, &User{ID: 13, Name: "panic", Slug: "panic"}))
 		var recovered any
@@ -472,7 +472,7 @@ func TestWrap_QueryDelete_Rollback(t *testing.T) {
 	qsc.cancelAfter(2)
 	deleteErr := db.Select(&stepMatcher{qsc: qsc}).Delete(qsc.context(), &User{})
 	require.Error(t, deleteErr)
-	require.True(t, strings.HasPrefix(deleteErr.Error(), "eidos query delete:"))
+	require.True(t, strings.HasPrefix(deleteErr.Error(), "tempest query delete:"))
 	require.ErrorIs(t, deleteErr, context.Canceled)
 
 	require.GreaterOrEqual(t, qsc.count(), 2, "query must advance past the first mutated record")
@@ -511,7 +511,7 @@ func TestWrap_Scanners(t *testing.T) {
 	t.Run("PrefixScanNilContext", func(t *testing.T) {
 		nodes, err := node.PrefixScan(nilCtx, "scan")
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos prefix scan:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest prefix scan:"))
 		require.Nil(t, nodes)
 	})
 
@@ -519,7 +519,7 @@ func TestWrap_Scanners(t *testing.T) {
 	t.Run("RangeScanNilContext", func(t *testing.T) {
 		nodes, err := node.RangeScan(nilCtx, "a", "z")
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos range scan:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest range scan:"))
 		require.Nil(t, nodes)
 	})
 
@@ -527,7 +527,7 @@ func TestWrap_Scanners(t *testing.T) {
 	t.Run("PrefixScanCanceledContext", func(t *testing.T) {
 		nodes, err := node.PrefixScan(canceledCtx(), "scan")
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos prefix scan:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest prefix scan:"))
 		require.ErrorIs(t, err, context.Canceled)
 		require.Nil(t, nodes, "must return nil, not partial")
 	})
@@ -536,7 +536,7 @@ func TestWrap_Scanners(t *testing.T) {
 	t.Run("RangeScanCanceledContext", func(t *testing.T) {
 		nodes, err := node.RangeScan(canceledCtx(), "a", "z")
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos range scan:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest range scan:"))
 		require.ErrorIs(t, err, context.Canceled)
 		require.Nil(t, nodes, "must return nil, not partial")
 	})
@@ -550,7 +550,7 @@ func TestWrap_Scanners(t *testing.T) {
 		sctx := &stepContext{cancelAt: 5}
 		nodes, err := node.PrefixScan(sctx, "bucket")
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos prefix scan:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest prefix scan:"))
 		require.Nil(t, nodes, "must return nil, not partial")
 	})
 
@@ -571,13 +571,13 @@ func TestWrap_IndexConstructors(t *testing.T) {
 
 	_, err := index.NewIDIndex(nil, []byte("id-idx"))
 	require.ErrorIs(t, err, index.ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos index new id:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest index new id:"))
 	_, err = index.NewListIndex(nil, []byte("list-idx"))
 	require.ErrorIs(t, err, index.ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos index new list:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest index new list:"))
 	_, err = index.NewUniqueIndex(nil, []byte("unique-idx"))
 	require.ErrorIs(t, err, index.ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos index new unique:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest index new unique:"))
 
 	// Test constructor labels by creating in a writable transaction
 	require.NoError(t, bDB.Update(func(tx *bolt.Tx) error {
@@ -605,7 +605,7 @@ func TestWrap_IndexConstructors(t *testing.T) {
 		require.NotNil(t, b)
 		_, err := index.NewUniqueIndex(b, []byte("non-existent-unique"))
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos index new unique:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest index new unique:"))
 		require.ErrorIs(t, err, index.ErrNotFound)
 		return nil
 	}))
@@ -616,7 +616,7 @@ func TestWrap_IndexConstructors(t *testing.T) {
 		require.NotNil(t, b)
 		_, err := index.NewListIndex(b, []byte("non-existent-list"))
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos index new list:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest index new list:"))
 		require.ErrorIs(t, err, index.ErrNotFound)
 		return nil
 	}))
@@ -677,37 +677,37 @@ func TestWrap_IndexMethods(t *testing.T) {
 		tests := []idxTest{
 			{
 				label:  "IDIndex.Add nil context",
-				prefix: "eidos index add:",
+				prefix: "tempest index add:",
 				cause:  index.ErrNilContext,
 				op:     func() error { return idIdx.Add(nilCtx, []byte("v"), []byte("id")) },
 			},
 			{
 				label:  "IDIndex.Add nil param",
-				prefix: "eidos index add:",
+				prefix: "tempest index add:",
 				cause:  index.ErrNilParam,
 				op:     func() error { return idIdx.Add(context.Background(), nil, []byte("id")) },
 			},
 			{
 				label:  "ListIndex.Add nil context",
-				prefix: "eidos index add:",
+				prefix: "tempest index add:",
 				cause:  index.ErrNilContext,
 				op:     func() error { return listIdx.Add(nilCtx, []byte("v"), []byte("id")) },
 			},
 			{
 				label:  "ListIndex.Add nil param",
-				prefix: "eidos index add:",
+				prefix: "tempest index add:",
 				cause:  index.ErrNilParam,
 				op:     func() error { return listIdx.Add(context.Background(), nil, []byte("id")) },
 			},
 			{
 				label:  "UniqueIndex.Add nil context",
-				prefix: "eidos index add:",
+				prefix: "tempest index add:",
 				cause:  index.ErrNilContext,
 				op:     func() error { return uniqueIdx.Add(nilCtx, []byte("v"), []byte("id")) },
 			},
 			{
 				label:  "UniqueIndex.Add nil param",
-				prefix: "eidos index add:",
+				prefix: "tempest index add:",
 				cause:  index.ErrNilParam,
 				op:     func() error { return uniqueIdx.Add(context.Background(), nil, []byte("id")) },
 			},
@@ -738,19 +738,19 @@ func TestWrap_IndexMethods(t *testing.T) {
 		tests := []idxTest{
 			{
 				label:  "IDIndex.Remove nil context",
-				prefix: "eidos index remove:",
+				prefix: "tempest index remove:",
 				cause:  index.ErrNilContext,
 				op:     func() error { return idIdx.Remove(nilCtx, []byte("x")) },
 			},
 			{
 				label:  "ListIndex.Remove nil context",
-				prefix: "eidos index remove:",
+				prefix: "tempest index remove:",
 				cause:  index.ErrNilContext,
 				op:     func() error { return listIdx.Remove(nilCtx, []byte("x")) },
 			},
 			{
 				label:  "UniqueIndex.Remove nil context",
-				prefix: "eidos index remove:",
+				prefix: "tempest index remove:",
 				cause:  index.ErrNilContext,
 				op:     func() error { return uniqueIdx.Remove(nilCtx, []byte("x")) },
 			},
@@ -774,19 +774,19 @@ func TestWrap_IndexMethods(t *testing.T) {
 		tests := []idxTest{
 			{
 				label:  "IDIndex.RemoveID nil context",
-				prefix: "eidos index remove id:",
+				prefix: "tempest index remove id:",
 				cause:  index.ErrNilContext,
 				op:     func() error { return idIdx.RemoveID(nilCtx, []byte("x")) },
 			},
 			{
 				label:  "ListIndex.RemoveID nil context",
-				prefix: "eidos index remove id:",
+				prefix: "tempest index remove id:",
 				cause:  index.ErrNilContext,
 				op:     func() error { return listIdx.RemoveID(nilCtx, []byte("x")) },
 			},
 			{
 				label:  "UniqueIndex.RemoveID nil context",
-				prefix: "eidos index remove id:",
+				prefix: "tempest index remove id:",
 				cause:  index.ErrNilContext,
 				op:     func() error { return uniqueIdx.RemoveID(nilCtx, []byte("x")) },
 			},
@@ -810,26 +810,26 @@ func TestWrap_IndexMethods(t *testing.T) {
 		tests := []idxTest{
 			{
 				label:  "IDIndex.Get nil context",
-				prefix: "eidos index get:",
+				prefix: "tempest index get:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := idIdx.Get(nilCtx, []byte("x")); return err },
 			},
 			{
 				label:  "ListIndex.Get nil context",
-				prefix: "eidos index get:",
+				prefix: "tempest index get:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := listIdx.Get(nilCtx, []byte("x")); return err },
 			},
 			{
 				label:  "UniqueIndex.Get nil context",
-				prefix: "eidos index get:",
+				prefix: "tempest index get:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := uniqueIdx.Get(nilCtx, []byte("x")); return err },
 			},
 			// Get returns nil on error
 			{
 				label:  "IDIndex.Get returns nil on error",
-				prefix: "eidos index get:",
+				prefix: "tempest index get:",
 				cause:  index.ErrNilContext,
 				op: func() error {
 					val, err := idIdx.Get(nilCtx, []byte("x"))
@@ -857,26 +857,26 @@ func TestWrap_IndexMethods(t *testing.T) {
 		tests := []idxTest{
 			{
 				label:  "IDIndex.Copy nil context",
-				prefix: "eidos index all:",
+				prefix: "tempest index all:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := idIdx.All(nilCtx, []byte("x"), nil); return err },
 			},
 			{
 				label:  "ListIndex.Copy nil context",
-				prefix: "eidos index all:",
+				prefix: "tempest index all:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := listIdx.All(nilCtx, []byte("x"), nil); return err },
 			},
 			{
 				label:  "UniqueIndex.Copy nil context",
-				prefix: "eidos index all:",
+				prefix: "tempest index all:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := uniqueIdx.All(nilCtx, []byte("x"), nil); return err },
 			},
 			// Copy returns nil on error
 			{
 				label:  "IDIndex.Copy returns nil on error",
-				prefix: "eidos index all:",
+				prefix: "tempest index all:",
 				cause:  index.ErrNilContext,
 				op: func() error {
 					val, err := idIdx.All(nilCtx, []byte("x"), nil)
@@ -904,26 +904,26 @@ func TestWrap_IndexMethods(t *testing.T) {
 		tests := []idxTest{
 			{
 				label:  "IDIndex.AllRecords nil context",
-				prefix: "eidos index all records:",
+				prefix: "tempest index all records:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := idIdx.AllRecords(nilCtx, nil); return err },
 			},
 			{
 				label:  "ListIndex.AllRecords nil context",
-				prefix: "eidos index all records:",
+				prefix: "tempest index all records:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := listIdx.AllRecords(nilCtx, nil); return err },
 			},
 			{
 				label:  "UniqueIndex.AllRecords nil context",
-				prefix: "eidos index all records:",
+				prefix: "tempest index all records:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := uniqueIdx.AllRecords(nilCtx, nil); return err },
 			},
 			// AllRecords returns nil on error
 			{
 				label:  "UniqueIndex.AllRecords returns nil on error",
-				prefix: "eidos index all records:",
+				prefix: "tempest index all records:",
 				cause:  index.ErrNilContext,
 				op: func() error {
 					val, err := uniqueIdx.AllRecords(nilCtx, nil)
@@ -951,26 +951,26 @@ func TestWrap_IndexMethods(t *testing.T) {
 		tests := []idxTest{
 			{
 				label:  "IDIndex.Range nil context",
-				prefix: "eidos index range:",
+				prefix: "tempest index range:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := idIdx.Range(nilCtx, []byte("a"), []byte("z"), nil); return err },
 			},
 			{
 				label:  "ListIndex.Range nil context",
-				prefix: "eidos index range:",
+				prefix: "tempest index range:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := listIdx.Range(nilCtx, []byte("a"), []byte("z"), nil); return err },
 			},
 			{
 				label:  "UniqueIndex.Range nil context",
-				prefix: "eidos index range:",
+				prefix: "tempest index range:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := uniqueIdx.Range(nilCtx, []byte("a"), []byte("z"), nil); return err },
 			},
 			// Range returns nil on error
 			{
 				label:  "UniqueIndex.Range returns nil on error",
-				prefix: "eidos index range:",
+				prefix: "tempest index range:",
 				cause:  index.ErrNilContext,
 				op: func() error {
 					val, err := uniqueIdx.Range(nilCtx, []byte("a"), []byte("z"), nil)
@@ -998,26 +998,26 @@ func TestWrap_IndexMethods(t *testing.T) {
 		tests := []idxTest{
 			{
 				label:  "IDIndex.Prefix nil context",
-				prefix: "eidos index prefix:",
+				prefix: "tempest index prefix:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := idIdx.Prefix(nilCtx, []byte("a"), nil); return err },
 			},
 			{
 				label:  "ListIndex.Prefix nil context",
-				prefix: "eidos index prefix:",
+				prefix: "tempest index prefix:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := listIdx.Prefix(nilCtx, []byte("a"), nil); return err },
 			},
 			{
 				label:  "UniqueIndex.Prefix nil context",
-				prefix: "eidos index prefix:",
+				prefix: "tempest index prefix:",
 				cause:  index.ErrNilContext,
 				op:     func() error { _, err := uniqueIdx.Prefix(nilCtx, []byte("a"), nil); return err },
 			},
 			// Prefix returns nil on error
 			{
 				label:  "UniqueIndex.Prefix returns nil on error",
-				prefix: "eidos index prefix:",
+				prefix: "tempest index prefix:",
 				cause:  index.ErrNilContext,
 				op: func() error {
 					val, err := uniqueIdx.Prefix(nilCtx, []byte("a"), nil)
@@ -1086,14 +1086,14 @@ func TestWrap_Index_MutationRollback(t *testing.T) {
 			err = idx.Add(cancelled, []byte("val"), []byte("id"))
 			// Should return a wrapped context error
 			require.Error(t, err)
-			require.True(t, strings.HasPrefix(err.Error(), "eidos index add:"))
+			require.True(t, strings.HasPrefix(err.Error(), "tempest index add:"))
 			require.ErrorIs(t, err, context.Canceled)
 			// Return the error to trigger Bolt rollback
 			return err
 		})
 		// The Update itself fails because the callback returned an error (rollback)
 		require.Error(t, updateErr)
-		require.True(t, strings.HasPrefix(updateErr.Error(), "eidos index add:"))
+		require.True(t, strings.HasPrefix(updateErr.Error(), "tempest index add:"))
 		require.ErrorIs(t, updateErr, context.Canceled)
 		require.Equal(t, 3, cancelled.Hits(), "cancellation must occur after UniqueIndex.Put")
 
@@ -1155,12 +1155,12 @@ func TestWrap_Index_MutationRollback(t *testing.T) {
 			}
 			err = idx.Add(cancelled, []byte("val"), []byte("id"))
 			require.Error(t, err)
-			require.True(t, strings.HasPrefix(err.Error(), "eidos index add:"))
+			require.True(t, strings.HasPrefix(err.Error(), "tempest index add:"))
 			require.ErrorIs(t, err, context.Canceled)
 			return err
 		})
 		require.Error(t, updateErr)
-		require.True(t, strings.HasPrefix(updateErr.Error(), "eidos index add:"))
+		require.True(t, strings.HasPrefix(updateErr.Error(), "tempest index add:"))
 		require.ErrorIs(t, updateErr, context.Canceled)
 		require.Equal(t, 4, cancelled.Hits(), "cancellation must occur after ListIndex.Put")
 
@@ -1207,8 +1207,8 @@ func TestWrap_NestedWrapping(t *testing.T) {
 	t.Run("CancelledAllShowsNestedWrapping", func(t *testing.T) {
 		err := db.All(canceledCtx(), &[]User{})
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos all:"),
-			"outermost prefix for Copy must be 'eidos all:', got %q", err.Error())
+		require.True(t, strings.HasPrefix(err.Error(), "tempest all:"),
+			"outermost prefix for Copy must be 'tempest all:', got %q", err.Error())
 		require.ErrorIs(t, err, context.Canceled)
 	})
 
@@ -1218,8 +1218,8 @@ func TestWrap_NestedWrapping(t *testing.T) {
 
 		err := db.Select(q.Eq("ID", 1)).Delete(canceledCtx(), &UniqueNameUser{})
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos query delete:"),
-			"outermost prefix for Delete must be 'eidos query delete:'")
+		require.True(t, strings.HasPrefix(err.Error(), "tempest query delete:"),
+			"outermost prefix for Delete must be 'tempest query delete:'")
 		require.ErrorIs(t, err, context.Canceled)
 	})
 
@@ -1227,7 +1227,7 @@ func TestWrap_NestedWrapping(t *testing.T) {
 	t.Run("FindWithIndexWrapping", func(t *testing.T) {
 		err := db.Find(ctx, "Name", "John", &[]UniqueNameUser{})
 		require.Error(t, err)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos find:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest find:"))
 		require.ErrorIs(t, err, ErrNotFound)
 	})
 
@@ -1355,26 +1355,26 @@ func TestWrap_AllLabels_C2B(t *testing.T) {
 		op     func() error
 	}{
 		// Finder
-		{"one", "eidos one:", func() error { return db.One(nilCtx, "Name", "John", &User{}) }},
-		{"find", "eidos find:", func() error { return db.Find(ctx, "Name", "John", &[]UniqueNameUser{}) }},
-		{"all by index", "eidos all by index:", func() error { return db.From("nonexistent-b").AllByIndex(ctx, "field", &[]User{}) }},
-		{"all", "eidos all:", func() error { return db.All(nilCtx, &[]User{}) }},
-		{"range", "eidos range:", func() error { return db.Range(ctx, "Name", "John", "John", &User{}) }},
-		{"prefix", "eidos prefix:", func() error { return db.Prefix(ctx, "Name", "Jo", &User{}) }},
-		{"count", "eidos count:", func() error { _, err := db.Count(nilCtx, &User{}); return err }},
+		{"one", "tempest one:", func() error { return db.One(nilCtx, "Name", "John", &User{}) }},
+		{"find", "tempest find:", func() error { return db.Find(ctx, "Name", "John", &[]UniqueNameUser{}) }},
+		{"all by index", "tempest all by index:", func() error { return db.From("nonexistent-b").AllByIndex(ctx, "field", &[]User{}) }},
+		{"all", "tempest all:", func() error { return db.All(nilCtx, &[]User{}) }},
+		{"range", "tempest range:", func() error { return db.Range(ctx, "Name", "John", "John", &User{}) }},
+		{"prefix", "tempest prefix:", func() error { return db.Prefix(ctx, "Name", "Jo", &User{}) }},
+		{"count", "tempest count:", func() error { _, err := db.Count(nilCtx, &User{}); return err }},
 
 		// Query
-		{"query find", "eidos query find:", func() error { return db.Select(q.True()).Find(nilCtx, &[]User{}) }},
-		{"query first", "eidos query first:", func() error { return db.Select(q.True()).First(nilCtx, &User{}) }},
-		{"query delete", "eidos query delete:", func() error { return db.Select(q.True()).Delete(nilCtx, &User{}) }},
-		{"query count", "eidos query count:", func() error { _, err := db.Select(q.True()).Count(nilCtx, &User{}); return err }},
-		{"query raw", "eidos query raw:", func() error { _, err := db.Select(q.True()).Raw(nilCtx, nil); return err }},
-		{"query raw each", "eidos query raw each:", func() error { return db.Select(q.True()).RawEach(ctx, nil, nil) }},
-		{"query each", "eidos query each:", func() error { return db.Select(q.True()).Each(ctx, &User{}, nil) }},
+		{"query find", "tempest query find:", func() error { return db.Select(q.True()).Find(nilCtx, &[]User{}) }},
+		{"query first", "tempest query first:", func() error { return db.Select(q.True()).First(nilCtx, &User{}) }},
+		{"query delete", "tempest query delete:", func() error { return db.Select(q.True()).Delete(nilCtx, &User{}) }},
+		{"query count", "tempest query count:", func() error { _, err := db.Select(q.True()).Count(nilCtx, &User{}); return err }},
+		{"query raw", "tempest query raw:", func() error { _, err := db.Select(q.True()).Raw(nilCtx, nil); return err }},
+		{"query raw each", "tempest query raw each:", func() error { return db.Select(q.True()).RawEach(ctx, nil, nil) }},
+		{"query each", "tempest query each:", func() error { return db.Select(q.True()).Each(ctx, &User{}, nil) }},
 
 		// Scanners
-		{"prefix scan", "eidos prefix scan:", func() error { _, err := db.From("x").PrefixScan(nilCtx, "p"); return err }},
-		{"range scan", "eidos range scan:", func() error { _, err := db.From("x").RangeScan(nilCtx, "a", "z"); return err }},
+		{"prefix scan", "tempest prefix scan:", func() error { _, err := db.From("x").PrefixScan(nilCtx, "p"); return err }},
+		{"range scan", "tempest range scan:", func() error { _, err := db.From("x").RangeScan(nilCtx, "a", "z"); return err }},
 	}
 
 	for _, tc := range tests {

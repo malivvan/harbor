@@ -1,10 +1,11 @@
-# eidos-db
+# tempest
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/eidos-db.svg)](https://pkg.go.dev/github.com/malivvan/eidos-db)
-[![CI](https://github.com/malivvan/eidos-db/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/eidos-db/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/tempest.svg)](https://pkg.go.dev/github.com/malivvan/tempest)
+[![CI](https://github.com/malivvan/tempest/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/tempest/actions/workflows/ci.yml)
+[![Coverage Status](https://coveralls.io/repos/github/malivvan/tempest/badge.svg?branch=master)](https://coveralls.io/github/malivvan/tempest?branch=master)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-eidos-db is a self-contained, encrypted storage toolkit built on
+tempest is a self-contained, encrypted storage toolkit built on
 [BoltDB](https://github.com/etcd-io/bbolt). One database file, one password, and
 stores you can use together or on their own:
 
@@ -20,7 +21,7 @@ stores you can use together or on their own:
 - **`graphs`** — an independent bitemporal property-graph store.
 - **`object`** — an independent flat object store with buckets and atomic puts.
 
-The root `eidos` package opens a single bbolt file behind one password, derives
+The root `tempest` package opens a single bbolt file behind one password, derives
 a separate key for each store, and exposes them through `Record()`, `File()`, `Series()`, `Vector()`,
 `Search()`, `Graphs()` and `Objects()`. Each accessor accepts optional
 bucket-path segments that select a rooted view of the already-open store. Every store can also be used directly with its own `*bolt.DB`.
@@ -64,46 +65,46 @@ bucket-path segments that select a rooted view of the already-open store. Every 
 - **Context-aware.** Database operations accept `context.Context` and honor
   cancellation at operation boundaries and loop checkpoints.
 - **Transactional.** Managed read/write transactions, plus `Attach` for mixing
-  eidos-db operations with raw bbolt writes in one atomic transaction.
+  tempest operations with raw bbolt writes in one atomic transaction.
 - **Concurrency-tested.** The suite runs with `-race`, and CI also benchmarks
   the hot paths on every pull request.
-- **No C dependencies and no external database.** eidos-db is pure Go, builds
+- **No C dependencies and no external database.** tempest is pure Go, builds
   with `CGO_ENABLED=0`, and needs only one bbolt file.
 
 ## Installation
 
-eidos-db requires Go 1.27.4 or later and a writable path for the database file.
+tempest requires Go 1.27.4 or later and a writable path for the database file.
 It is pure Go and builds and tests with `CGO_ENABLED=0`.
 
 ```sh
-go get github.com/malivvan/eidos-db
+go get github.com/malivvan/tempest
 ```
 
-The module contains the root `eidos` package and the store packages under
+The module contains the root `tempest` package and the store packages under
 `store/`:
 
 | Package | Import path | Guide |
 |---------|-------------|-------|
-| `eidos` | `github.com/malivvan/eidos-db` | this file |
-| `record` | `github.com/malivvan/eidos-db/store/record` | [store/record/README.md](store/record/README.md) |
-| `fstree` | `github.com/malivvan/eidos-db/store/fstree` | [store/fstree/README.md](store/fstree/README.md) |
-| `series` | `github.com/malivvan/eidos-db/store/series` | [store/series/README.md](store/series/README.md) |
-| `vector` | `github.com/malivvan/eidos-db/store/vector` | [store/vector/README.md](store/vector/README.md) |
-| `search` | `github.com/malivvan/eidos-db/store/search` | [store/search/README.md](store/search/README.md) |
-| `graphs` | `github.com/malivvan/eidos-db/store/graphs` | [store/graphs/README.md](store/graphs/README.md) |
-| `object` | `github.com/malivvan/eidos-db/store/object` | [store/object/README.md](store/object/README.md) |
-| `system` | `github.com/malivvan/eidos-db/store/system` | [store/system/README.md](store/system/README.md) |
+| `tempest` | `github.com/malivvan/tempest` | this file |
+| `record` | `github.com/malivvan/tempest/store/record` | [store/record/README.md](store/record/README.md) |
+| `fstree` | `github.com/malivvan/tempest/store/fstree` | [store/fstree/README.md](store/fstree/README.md) |
+| `series` | `github.com/malivvan/tempest/store/series` | [store/series/README.md](store/series/README.md) |
+| `vector` | `github.com/malivvan/tempest/store/vector` | [store/vector/README.md](store/vector/README.md) |
+| `search` | `github.com/malivvan/tempest/store/search` | [store/search/README.md](store/search/README.md) |
+| `graphs` | `github.com/malivvan/tempest/store/graphs` | [store/graphs/README.md](store/graphs/README.md) |
+| `object` | `github.com/malivvan/tempest/store/object` | [store/object/README.md](store/object/README.md) |
+| `system` | `github.com/malivvan/tempest/store/system` | [store/system/README.md](store/system/README.md) |
 
-API reference: [pkg.go.dev/github.com/malivvan/eidos-db](https://pkg.go.dev/github.com/malivvan/eidos-db).
+API reference: [pkg.go.dev/github.com/malivvan/tempest](https://pkg.go.dev/github.com/malivvan/tempest).
 
 ### Migrating from Harbor
 
-The project was renamed from Harbor to eidos-db, and the persisted identifiers
-moved with it: the key-derivation labels are now `eidos/...` (so every derived
+The project was renamed from Harbor to tempest, and the persisted identifiers
+moved with it: the key-derivation labels are now `tempest/...` (so every derived
 key changed), and the schema bucket, index sentinel and prefix, legacy graph
-bucket names, vector payload key and default file names use `eidos` too. A
+bucket names, vector payload key and default file names use `tempest` too. A
 store written by Harbor v0.3.0 or earlier therefore cannot be opened by this
-build, and `Import` accepts the `eidos-export` container rather than the old
+build, and `Import` accepts the `tempest-export` container rather than the old
 `harbor-export` one, so old exports do not import directly either. Keep a
 v0.3.0 checkout if you still need to read data written by it.
 
@@ -118,8 +119,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/malivvan/eidos-db"
-	"github.com/malivvan/eidos-db/store/series"
+	"github.com/malivvan/tempest"
+	"github.com/malivvan/tempest/store/series"
 )
 
 type User struct {
@@ -131,7 +132,7 @@ type User struct {
 func main() {
 	ctx := context.Background()
 
-	store, err := eidos.Open(ctx, "app.db", 0o600, &eidos.Options{
+	store, err := tempest.Open(ctx, "app.db", 0o600, &tempest.Options{
 		Password: "correct horse battery staple",
 	})
 	if err != nil {
@@ -173,7 +174,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if _, err := f.Write([]byte("hello from eidos-db")); err != nil {
+	if _, err := f.Write([]byte("hello from tempest")); err != nil {
 		log.Fatal(err)
 	}
 	if err := f.Close(); err != nil {
@@ -184,22 +185,22 @@ func main() {
 }
 ```
 
-`eidos.Open` takes ownership of the bbolt handle it opens: `Store.Close` flushes
+`tempest.Open` takes ownership of the bbolt handle it opens: `Store.Close` flushes
 pending vector writes and closes it. The sub-store packages (`record.Open`, `file.Open`,
 `series.Open`, `vector.Open`) borrow a caller-owned `*bolt.DB` instead and never close
 it. See [Database lifecycle](#database-lifecycle).
 
 ## Opening a store
 
-`eidos.Open` opens or creates the database and returns `*eidos.Store`:
+`tempest.Open` opens or creates the database and returns `*tempest.Store`:
 
 ```go
-store, err := eidos.Open(ctx, "app.db", 0o600, &eidos.Options{
+store, err := tempest.Open(ctx, "app.db", 0o600, &tempest.Options{
 	Password: "correct horse battery staple",
 
 	// Optional: tune Argon2id for a new store. These are the defaults.
 	KDFTime:    3,
-	KDFMemory:  64 * eidos.MiB, // KiB
+	KDFMemory:  64 * tempest.MiB, // KiB
 	KDFThreads: 4,
 })
 if err != nil {
@@ -212,7 +213,7 @@ defer func() {
 }()
 ```
 
-The embedded `bolt.Options` is filled from `eidos.DefaultBoltOptions` for
+The embedded `bolt.Options` is filled from `tempest.DefaultBoltOptions` for
 every field you leave unset, so a default store is already crash-safe:
 
 - `NoSync`, `NoGrowSync` and `NoFreelistSync` stay `false`. Each commit
@@ -229,13 +230,13 @@ Every other bbolt field is set explicitly too — `MmapFlags`, `InitialMmapSize`
 `PageSize` and `MaxSize` to `0`, `OpenFile` and `Logger` to `nil`,
 `NoStatistics` to `false`, `PreLoadFreelist` to `true` — so a bbolt release
 cannot change the store's behaviour quietly. Each field carries a comment in
-`eidos.DefaultBoltOptions` explaining the choice.
+`tempest.DefaultBoltOptions` explaining the choice.
 
 Override a field to change that behaviour; `NoSync: true` trades durability for
 write speed, and `Mlock` or `InitialMmapSize` tune memory rather than
 consistency. A nil `options` value is accepted and selects every default, but
 the password has no default, so pass at least
-`&eidos.Options{Password: "..."}`; a nil value fails with `ErrInvalidPassword`.
+`&tempest.Options{Password: "..."}`; a nil value fails with `ErrInvalidPassword`.
 
 Important properties:
 
@@ -290,7 +291,7 @@ Supported tags are:
 | `unique` | Creates a unique index for the field. |
 | `inline` | Flattens an embedded struct into the parent. |
 
-Implement `record.BucketNamer` (`EidosBucketName() string`) for a custom bucket
+Implement `record.BucketNamer` (`TempestBucketName() string`) for a custom bucket
 name. Runtime-created structs can use `records.From("bucket")` to provide an
 explicit bucket.
 
@@ -399,7 +400,7 @@ are treated. See [store/record/README.md](store/record/README.md#aggregation).
 ### Matcher queries
 
 ```go
-import "github.com/malivvan/eidos-db/store/record/q"
+import "github.com/malivvan/tempest/store/record/q"
 
 var admins []User
 err := users.Select(q.In("Team", []string{"core", "admin"})).
@@ -416,7 +417,7 @@ Matchers include `Eq`, `StrictEq`, `Gt`, `Gte`, `Lt`, `Lte`, `In`, `Re`,
 
 ### Transactions
 
-eidos-db exposes callback-managed transactions only:
+tempest exposes callback-managed transactions only:
 
 ```go
 err := users.WriteTransaction(ctx, func(tx record.Node) error {
@@ -431,7 +432,7 @@ A returned error rolls back. If the context is cancelled before commit, the
 transaction is rolled back and `ctx.Err()` is returned. Panics propagate after
 bbolt unwinds the transaction. Read-only work uses `ReadTransaction`.
 
-To mix eidos-db operations with raw bbolt writes, attach eidos-db to a transaction
+To mix tempest operations with raw bbolt writes, attach tempest to a transaction
 you own:
 
 ```go
@@ -454,7 +455,7 @@ if _, err := tx.CreateBucketIfNotExists([]byte("audit")); err != nil {
 return tx.Commit()
 ```
 
-eidos-db never commits or rolls back an attached transaction.
+tempest never commits or rolls back an attached transaction.
 
 ### Nested buckets and key/value access
 
@@ -523,7 +524,7 @@ chunked encrypted content.
 
 A named file system is a good home for application state that is naturally a
 file: JSON sessions, uploaded documents, generated reports. Keep the meaning of
-those files in the application; eidos-db only stores them.
+those files in the application; tempest only stores them.
 
 ```go
 app, err := store.File().Open("app")
@@ -593,12 +594,12 @@ database file.
 
 `file.Config` enables encryption per store; `Config.ChunkSize` stores encrypted
 content as independently sealed chunks. When using the root package, encryption
-is selected at `eidos.Open` time instead:
+is selected at `tempest.Open` time instead:
 
 ```go
-store, err := eidos.Open(ctx, "encrypted.db", 0o600, &eidos.Options{
+store, err := tempest.Open(ctx, "encrypted.db", 0o600, &tempest.Options{
 	Password: password,
-	Encrypt:  eidos.EncryptFile,
+	Encrypt:  tempest.EncryptFile,
 })
 ```
 
@@ -625,7 +626,7 @@ the `Filer` subset, and the interfaces make file systems work with standard
 `io/fs` functions. The interface package itself is internal and cannot be
 imported by other modules.
 
-All eidos-db file systems use Unix-style `/` paths on every platform. On
+All tempest file systems use Unix-style `/` paths on every platform. On
 Windows, drives are `/c/`, `/d/`, etc., and UNC paths are `//server/share`.
 Use `path.Join` for virtual paths (`filepath.Join` can introduce backslashes);
 convert to native paths only when calling OS APIs. `ReadDir`, `ReadFile` and
@@ -846,7 +847,7 @@ vstore, err := vector.Open(ctx, bdb, vector.Config{
 ```
 
 `bdb` here is a caller-owned `*bolt.DB` opened with `bolt.Open`. The root
-package exposes the same setting as `eidos.Options{UseQuant: true}`.
+package exposes the same setting as `tempest.Options{UseQuant: true}`.
 
 The quantization mode is persisted in collection metadata: reopening a
 quantized collection without quantization, or a plaintext collection with
@@ -866,7 +867,7 @@ if err != nil {
 	return err
 }
 
-err = idx.Upsert(ctx, "article-42", "eidos-db keeps records, files, series and vectors")
+err = idx.Upsert(ctx, "article-42", "tempest keeps records, files, series and vectors")
 hits, err := idx.Search(ctx, "vectors", 10) // []search.Hit, best first
 ```
 
@@ -883,7 +884,7 @@ sizes. See [store/search/README.md](store/search/README.md) for the layout, erro
 
 ## Object storage: `object` and `snapshot`
 
-eidos-db has an independent flat object store and a snapshot package built on it:
+tempest has an independent flat object store and a snapshot package built on it:
 
 - **`store/object`** owns a dedicated root bucket, so it works without the file
   store. A bucket is a namespace and a key is a slash-separated name inside it.
@@ -897,8 +898,8 @@ eidos-db has an independent flat object store and a snapshot package built on it
 
 ```go
 import (
-	"github.com/malivvan/eidos-db/pkg/snapshot"
-	"github.com/malivvan/eidos-db/pkg/snapshot/blobstore"
+	"github.com/malivvan/tempest/pkg/snapshot"
+	"github.com/malivvan/tempest/pkg/snapshot/blobstore"
 )
 
 objects := store.Objects()
@@ -917,7 +918,7 @@ into the independent store explicitly. See
 
 ## Utilities
 
-Small packages shared by applications and by eidos-db itself:
+Small packages shared by applications and by tempest itself:
 
 - **`pkg/id`** generates ULIDs: 26-character Crockford-base32 strings with a
   48-bit millisecond timestamp followed by 80 random bits, so they sort
@@ -925,7 +926,7 @@ Small packages shared by applications and by eidos-db itself:
   the time. Use them where a time-ordered, collision-resistant record key helps.
 - **`pkg/metrics`** defines the dependency-free `Observer` interface the stores
   report counters, histograms, gauges and spans to. A nil observer disables
-  instrumentation, and `eidos.Options{Observer: ...}` installs one.
+  instrumentation, and `tempest.Options{Observer: ...}` installs one.
 - **`pkg/sign/canonical`** serialises a Go value to byte-stable JSON: keys
   sorted at every depth, no insignificant whitespace, numbers passed through
   unchanged. It is the encoding to sign or hash when a struct may later carry a
@@ -940,9 +941,9 @@ Small packages shared by applications and by eidos-db itself:
 
 ## Clustering
 
-eidos-db ships a `consensus` package that replicates a whole store across a
+tempest ships a `consensus` package that replicates a whole store across a
 cluster of processes using the [Raft](https://github.com/hashicorp/raft)
-consensus algorithm. Each node keeps its own eidos-db store; writes are
+consensus algorithm. Each node keeps its own tempest store; writes are
 proposed through raft on the leader and applied, in log order, to the same
 logical state on every node. Reads are served from the local replica.
 
@@ -952,8 +953,8 @@ node, err := consensus.Open(ctx, consensus.Config{
     BindAddr:   "127.0.0.1:7001",
     Dir:        "./data/node-1",
     Bootstrap:  true, // first node forms the cluster
-    StorePath:  "./data/node-1/eidos.db",
-    StoreOpts:  &eidos.Options{Password: "shared-secret"},
+    StorePath:  "./data/node-1/tempest.db",
+    StoreOpts:  &tempest.Options{Password: "shared-secret"},
 })
 
 // Writes go through the replicated facades (leader only).
@@ -981,9 +982,9 @@ a sealed canary, so opening a store with the wrong password, key, or mode fails
 loudly instead of returning garbage.
 
 ```go
-store, err := eidos.Open(ctx, "app.db", 0o600, &eidos.Options{
+store, err := tempest.Open(ctx, "app.db", 0o600, &tempest.Options{
 	Password: "correct horse battery staple",
-	Encrypt:  eidos.EncryptRecord | eidos.EncryptSeries,
+	Encrypt:  tempest.EncryptRecord | tempest.EncryptSeries,
 })
 ```
 
@@ -1029,7 +1030,7 @@ and import it into a new encrypted store.
 ### Rotation
 
 Key rotation rewrites existing data under a new raw 32-byte key. It does not
-change the password: the root `eidos` package derives its keys from the
+change the password: the root `tempest` package derives its keys from the
 password and does not expose a rotation API. Rotate keys only when you open a
 sub-store directly with your own key, or export and re-import to change the
 password.
@@ -1078,13 +1079,13 @@ wrong results. There are three honest options:
 3. **Order-preserving encryption.** Research only; it needs a security review
    and is not promised here.
 
-eidos-db keeps the current fail-closed behaviour for this release. Option 2 is
+tempest keeps the current fail-closed behaviour for this release. Option 2 is
 the planned path when a consumer needs ordering, because it needs no format
 change and can be enabled per index.
 
 ### Threat model
 
-eidos-db's encryption protects **data at rest** against someone who obtains the
+tempest's encryption protects **data at rest** against someone who obtains the
 database file without the password or key.
 
 It does **not** protect against:
@@ -1118,7 +1119,7 @@ store-specific encryption internals, see
 
 ## Audit trail
 
-eidos-db can record every mutating operation as a **tamper-evident, append-only
+tempest can record every mutating operation as a **tamper-evident, append-only
 audit trail**. Each event is signed with an Ed25519 key derived from the store
 password (SLIP-0010, one key per sub-store) and linked to its predecessor by a
 hash chain, so the history cannot be forged, altered, reordered or spliced
@@ -1128,9 +1129,9 @@ Auditing is enabled per open with `Options.Audit`, mirroring the encryption
 flags:
 
 ```go
-store, err := eidos.Open(ctx, "app.db", 0o600, &eidos.Options{
+store, err := tempest.Open(ctx, "app.db", 0o600, &tempest.Options{
 	Password: "correct horse battery staple",
-	Audit:    eidos.AuditAll, // or AuditRecord | AuditSeries, …
+	Audit:    tempest.AuditAll, // or AuditRecord | AuditSeries, …
 })
 if err != nil {
 	log.Fatal(err)
@@ -1178,7 +1179,7 @@ sub-store, so a record, a file, a time-series point, a vector upsert, a graph
 write and an object write commit or roll back together:
 
 ```go
-err := store.WriteTransaction(ctx, func(tx *eidos.Tx) error {
+err := store.WriteTransaction(ctx, func(tx *tempest.Tx) error {
 	if err := tx.Record().Save(ctx, &doc); err != nil {
 		return err
 	}
@@ -1246,7 +1247,7 @@ Behaviour worth knowing:
 
 The two entry points differ in who owns the bbolt handle:
 
-- `eidos.Open` opens the file itself; `Store.Close` flushes buffered vector
+- `tempest.Open` opens the file itself; `Store.Close` flushes buffered vector
   writes and closes the database. It is safe to call more than once, and the
   sub-store accessors return `nil` afterwards.
 - `record.Open`, `file.Open`, `series.Open` and `vector.Open` wrap an already-open
@@ -1259,12 +1260,12 @@ When embedding `vector` on a shared handle, set `vector.Config.SharedDB` (or cal
 closing the handle. Use `Store.Vector().Flush()` to drain explicitly and
 `Store.Vector().Closed()` to check the state. Per collection, `Pending()` reports
 buffered points and `Close()` flushes and retires that handle. The root store
-does this automatically: `eidos.Store.Close` and `eidos.Store.Backup` flush
+does this automatically: `tempest.Store.Close` and `tempest.Store.Backup` flush
 the vector buffer before touching the database.
 
 A `nil` context is rejected by context-aware operations with `ErrNilContext`
 (or the store's equivalent sentinel); `Close` is a lifecycle exception and
-takes no context. `eidos.Open` is the one exception: it treats a nil context
+takes no context. `tempest.Open` is the one exception: it treats a nil context
 as `context.Background()`.
 
 ### Backup
@@ -1277,9 +1278,9 @@ an `io.Writer`; `BackupTo` writes the same snapshot to a file atomically, and
 var buf bytes.Buffer
 err := store.Backup(ctx, &buf)
 
-err = store.BackupTo(ctx, "/backups/eidos-2026-11-23.db")
+err = store.BackupTo(ctx, "/backups/tempest-2026-11-23.db")
 
-info, err := store.BackupFile(ctx, "/backups/eidos-2026-11-24.db", eidos.BackupOptions{
+info, err := store.BackupFile(ctx, "/backups/tempest-2026-11-24.db", tempest.BackupOptions{
 	Manifest: true, // also write <path>.manifest.json
 })
 fmt.Println(info.Size, info.SHA256, info.Flags)
@@ -1298,7 +1299,7 @@ fmt.Println(info.Size, info.SHA256, info.Flags)
   temporary sibling, syncs, and renames it into place, so a failed or canceled
   backup never corrupts an existing file and leaves no partial output.
 
-To restore, open the snapshot file with `eidos.Open` and the same password.
+To restore, open the snapshot file with `tempest.Open` and the same password.
 `View` remains available for lower-level raw bbolt snapshots.
 
 `VerifyBackup` validates a copy before restoring it. It opens the file
@@ -1308,7 +1309,7 @@ sidecar manifest when one exists. A truncated or corrupted copy fails; the
 verification never writes to the file.
 
 ```go
-info, err := eidos.VerifyBackup(ctx, "/backups/eidos-2026-11-24.db", password, nil)
+info, err := tempest.VerifyBackup(ctx, "/backups/tempest-2026-11-24.db", password, nil)
 ```
 
 `BackupFile` writes `<path>.manifest.json` with the checksum, creation time,
@@ -1320,10 +1321,10 @@ an existing destination is replaced (`BackupTo` always replaces).
 `Migrate` applies application schema steps in one cross-store transaction:
 
 ```go
-err := store.Migrate(ctx, eidos.Schema{
+err := store.Migrate(ctx, tempest.Schema{
 	Version: 2,
-	Steps: []eidos.Step{
-		{From: 0, To: 1, Apply: func(ctx context.Context, tx *eidos.Tx) error {
+	Steps: []tempest.Step{
+		{From: 0, To: 1, Apply: func(ctx context.Context, tx *tempest.Tx) error {
 			return tx.Record().Save(ctx, &Backfill{})
 		}},
 		{From: 1, To: 2, Apply: migrateDocuments},
@@ -1331,7 +1332,7 @@ err := store.Migrate(ctx, eidos.Schema{
 })
 ```
 
-The version lives in its own `eidos.schema` bucket, so existing stores open
+The version lives in its own `tempest.schema` bucket, so existing stores open
 unchanged. A failing step rolls back the whole migration; a store written by a
 newer build is refused with `ErrSchemaTooNew` instead of being downgraded; an
 up-to-date store is a no-op. Steps must be deterministic and idempotent.
@@ -1345,13 +1346,13 @@ path between encryption modes and formats:
 
 ```go
 var buf bytes.Buffer
-summary, err := eidos.Export(ctx, store, &buf, eidos.ExportOptions{
+summary, err := tempest.Export(ctx, store, &buf, tempest.ExportOptions{
 	RecordTypes: []any{(*User)(nil)}, // db record types to include
-	Progress:    func(p eidos.Progress) { log.Printf("%s: %d", p.Section, p.Records) },
+	Progress:    func(p tempest.Progress) { log.Printf("%s: %d", p.Section, p.Records) },
 })
 
-restored, err := eidos.Open(ctx, "encrypted.db", 0o600, &eidos.Options{Password: "new"})
-err = eidos.Import(ctx, restored, bytes.NewReader(buf.Bytes()), eidos.ImportOptions{
+restored, err := tempest.Open(ctx, "encrypted.db", 0o600, &tempest.Options{Password: "new"})
+err = tempest.Import(ctx, restored, bytes.NewReader(buf.Bytes()), tempest.ImportOptions{
 	RecordTypes: []any{(*User)(nil)},
 })
 ```
@@ -1390,7 +1391,7 @@ case errors.Is(err, context.Canceled):
 }
 ```
 
-Errors are wrapped as `eidos <operation>: <cause>` while preserving the
+Errors are wrapped as `tempest <operation>: <cause>` while preserving the
 original cause, context errors, bbolt errors and callback errors in the chain.
 The package guides list each store's sentinels; use `errors.Is` with those
 values rather than parsing messages.
@@ -1398,7 +1399,7 @@ values rather than parsing messages.
 ## Contexts and cancellation
 
 CRUD, query, scan, key/value and managed-transaction operations accept a
-context. Cancellation is cooperative: eidos-db checks at operation boundaries and
+context. Cancellation is cooperative: tempest checks at operation boundaries and
 loop checkpoints, but cannot interrupt a bbolt lock wait, a syscall, codec code,
 or a callback that has not returned. No background goroutines are used to
 simulate cancellation, and successfully committed writes or published read
@@ -1456,29 +1457,29 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
 
 Generated API documentation is published on pkg.go.dev:
 
-- [github.com/malivvan/eidos-db](https://pkg.go.dev/github.com/malivvan/eidos-db)
-- [github.com/malivvan/eidos-db/store/record](https://pkg.go.dev/github.com/malivvan/eidos-db/store/record)
-- [github.com/malivvan/eidos-db/store/fstree](https://pkg.go.dev/github.com/malivvan/eidos-db/store/fstree)
-- [github.com/malivvan/eidos-db/store/series](https://pkg.go.dev/github.com/malivvan/eidos-db/store/series)
-- [github.com/malivvan/eidos-db/store/vector](https://pkg.go.dev/github.com/malivvan/eidos-db/store/vector)
-- [github.com/malivvan/eidos-db/store/search](https://pkg.go.dev/github.com/malivvan/eidos-db/store/search)
-- [github.com/malivvan/eidos-db/store/ledger](https://pkg.go.dev/github.com/malivvan/eidos-db/store/ledger)
-- [github.com/malivvan/eidos-db/store/object](https://pkg.go.dev/github.com/malivvan/eidos-db/store/object)
-- [github.com/malivvan/eidos-db/store/graphs](https://pkg.go.dev/github.com/malivvan/eidos-db/store/graphs)
-- [github.com/malivvan/eidos-db/store/system](https://pkg.go.dev/github.com/malivvan/eidos-db/store/system)
-- [github.com/malivvan/eidos-db/pkg/consensus](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/consensus)
-- [github.com/malivvan/eidos-db/pkg/id](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/id)
-- [github.com/malivvan/eidos-db/pkg/fusion](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/fusion)
-- [github.com/malivvan/eidos-db/pkg/metrics](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/metrics)
-- [github.com/malivvan/eidos-db/pkg/sign/canonical](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/sign/canonical)
-- [github.com/malivvan/eidos-db/pkg/snapshot](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/snapshot)
-- [github.com/malivvan/eidos-db/pkg/snapshot/blobstore](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/snapshot/blobstore)
-- [github.com/malivvan/eidos-db/pkg/store](https://pkg.go.dev/github.com/malivvan/eidos-db/pkg/store)
-- [github.com/malivvan/eidos-db/store/vector/doc](https://pkg.go.dev/github.com/malivvan/eidos-db/store/vector/doc)
+- [github.com/malivvan/tempest](https://pkg.go.dev/github.com/malivvan/tempest)
+- [github.com/malivvan/tempest/store/record](https://pkg.go.dev/github.com/malivvan/tempest/store/record)
+- [github.com/malivvan/tempest/store/fstree](https://pkg.go.dev/github.com/malivvan/tempest/store/fstree)
+- [github.com/malivvan/tempest/store/series](https://pkg.go.dev/github.com/malivvan/tempest/store/series)
+- [github.com/malivvan/tempest/store/vector](https://pkg.go.dev/github.com/malivvan/tempest/store/vector)
+- [github.com/malivvan/tempest/store/search](https://pkg.go.dev/github.com/malivvan/tempest/store/search)
+- [github.com/malivvan/tempest/store/ledger](https://pkg.go.dev/github.com/malivvan/tempest/store/ledger)
+- [github.com/malivvan/tempest/store/object](https://pkg.go.dev/github.com/malivvan/tempest/store/object)
+- [github.com/malivvan/tempest/store/graphs](https://pkg.go.dev/github.com/malivvan/tempest/store/graphs)
+- [github.com/malivvan/tempest/store/system](https://pkg.go.dev/github.com/malivvan/tempest/store/system)
+- [github.com/malivvan/tempest/pkg/consensus](https://pkg.go.dev/github.com/malivvan/tempest/pkg/consensus)
+- [github.com/malivvan/tempest/pkg/id](https://pkg.go.dev/github.com/malivvan/tempest/pkg/id)
+- [github.com/malivvan/tempest/pkg/fusion](https://pkg.go.dev/github.com/malivvan/tempest/pkg/fusion)
+- [github.com/malivvan/tempest/pkg/metrics](https://pkg.go.dev/github.com/malivvan/tempest/pkg/metrics)
+- [github.com/malivvan/tempest/pkg/sign/canonical](https://pkg.go.dev/github.com/malivvan/tempest/pkg/sign/canonical)
+- [github.com/malivvan/tempest/pkg/snapshot](https://pkg.go.dev/github.com/malivvan/tempest/pkg/snapshot)
+- [github.com/malivvan/tempest/pkg/snapshot/blobstore](https://pkg.go.dev/github.com/malivvan/tempest/pkg/snapshot/blobstore)
+- [github.com/malivvan/tempest/pkg/store](https://pkg.go.dev/github.com/malivvan/tempest/pkg/store)
+- [github.com/malivvan/tempest/store/vector/doc](https://pkg.go.dev/github.com/malivvan/tempest/store/vector/doc)
 
 Where to start:
 
-- **New to eidos-db:** [Quick start](#quick-start), then the guide sections for
+- **New to tempest:** [Quick start](#quick-start), then the guide sections for
   the stores you need.
 - **Records, indexes and transactions:** [store/record/README.md](store/record/README.md).
 - **Full-text search:** [Full-text search with `search`](#full-text-search-with-search)
@@ -1503,7 +1504,7 @@ code where they are most useful (for the `record` package, see
 
 ## Status
 
-eidos-db is preparing its first public release (`v0.1.x`). The on-disk formats
+tempest is preparing its first public release (`v0.1.x`). The on-disk formats
 are versioned and refuse data from an incompatible build instead of misreading
 it. Every persisted format is version 1 (`record.Version`, `file.FormatVersion`,
 `series.FormatVersion`, `vector.CollectionFormatVersion`, `ledger.FormatVersion`);
@@ -1514,7 +1515,7 @@ treat pre-1.0 API changes as potentially breaking.
 
 MIT — see [LICENSE](LICENSE).
 
-eidos-db is a fork of [asdine/storm](https://github.com/asdine/storm) and keeps
+tempest is a fork of [asdine/storm](https://github.com/asdine/storm) and keeps
 the original MIT copyright notices. It also vendors code derived from the Go
 project (Argon2, BLAKE2b, CPU feature detection), the `absfs` interfaces, and
 [`coder/hnsw`](https://github.com/coder/hnsw); their licenses are preserved next

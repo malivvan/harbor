@@ -1,4 +1,4 @@
-module github.com/malivvan/eidos-db
+module github.com/malivvan/tempest
 
 go 1.27.4
 

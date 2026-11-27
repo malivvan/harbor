@@ -264,10 +264,10 @@ func TestListIndexReaddAndRemove(t *testing.T) {
 		got, err := list.Get(ctx, nil)
 		require.NoError(t, err)
 		require.Nil(t, got)
-		got, err = list.Get(ctx, []byte("eidos"))
+		got, err = list.Get(ctx, []byte("tempest"))
 		require.NoError(t, err)
 		require.Nil(t, got)
-		require.NoError(t, list.Remove(ctx, []byte("eidos")))
+		require.NoError(t, list.Remove(ctx, []byte("tempest")))
 
 		canceled, cancel := context.WithCancel(context.Background())
 		cancel()

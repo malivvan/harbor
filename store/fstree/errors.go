@@ -1,6 +1,6 @@
 package fstree
 
-import "github.com/malivvan/eidos-db/internal/crypto"
+import "github.com/malivvan/tempest/internal/crypto"
 
 var (
 	// ErrAuthFailed is returned when encrypted data fails authentication.

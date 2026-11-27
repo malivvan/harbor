@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/eidos-db/internal/absfs"
+	"github.com/malivvan/tempest/internal/absfs"
 	"github.com/stretchr/testify/require"
 )
 

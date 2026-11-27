@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	hstore "github.com/malivvan/eidos-db/store"
+	hstore "github.com/malivvan/tempest/store"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )

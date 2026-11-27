@@ -6,7 +6,7 @@
 
 package argon2
 
-import "github.com/malivvan/eidos-db/internal/cpu"
+import "github.com/malivvan/tempest/internal/cpu"
 
 func init() {
 	useSSE4 = cpu.X86.HasSSE41

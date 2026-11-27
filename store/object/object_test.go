@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/malivvan/eidos-db"
-	hstore "github.com/malivvan/eidos-db/store"
-	"github.com/malivvan/eidos-db/store/object"
+	"github.com/malivvan/tempest"
+	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/store/object"
 )
 
 func openDirect(t *testing.T, cfg object.Config) (*object.Store, *bolt.DB) {
@@ -155,8 +155,8 @@ func TestPersistence(t *testing.T) {
 
 func TestIsolationFromFileStore(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "eidos.db")
-	store, err := eidos.Open(ctx, path, 0o600, &eidos.Options{Password: "object-password", Plaintext: true})
+	path := filepath.Join(t.TempDir(), "tempest.db")
+	store, err := tempest.Open(ctx, path, 0o600, &tempest.Options{Password: "object-password", Plaintext: true})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
@@ -187,10 +187,10 @@ func TestIsolationFromFileStore(t *testing.T) {
 
 func TestRootStoreAccessAndTransactions(t *testing.T) {
 	ctx := context.Background()
-	store, err := eidos.Open(ctx, filepath.Join(t.TempDir(), "eidos.db"), 0o600, &eidos.Options{
+	store, err := tempest.Open(ctx, filepath.Join(t.TempDir(), "tempest.db"), 0o600, &tempest.Options{
 		Password:   "object-password",
 		KDFTime:    1,
-		KDFMemory:  8 * eidos.MiB,
+		KDFMemory:  8 * tempest.MiB,
 		KDFThreads: 1,
 	})
 	require.NoError(t, err)
@@ -203,7 +203,7 @@ func TestRootStoreAccessAndTransactions(t *testing.T) {
 	require.Equal(t, "yes", string(body))
 
 	abort := errors.New("abort")
-	err = store.WriteTransaction(ctx, func(tx *eidos.Tx) error {
+	err = store.WriteTransaction(ctx, func(tx *tempest.Tx) error {
 		if _, err := tx.Objects().Put(ctx, "b", "aborted", strings.NewReader("no"), 2, ""); err != nil {
 			return err
 		}
@@ -227,10 +227,10 @@ func TestRootStoreAccessAndTransactions(t *testing.T) {
 
 func TestMigrateFromFile(t *testing.T) {
 	ctx := context.Background()
-	store, err := eidos.Open(ctx, filepath.Join(t.TempDir(), "eidos.db"), 0o600, &eidos.Options{
+	store, err := tempest.Open(ctx, filepath.Join(t.TempDir(), "tempest.db"), 0o600, &tempest.Options{
 		Password:   "object-password",
 		KDFTime:    1,
-		KDFMemory:  8 * eidos.MiB,
+		KDFMemory:  8 * tempest.MiB,
 		KDFThreads: 1,
 	})
 	require.NoError(t, err)

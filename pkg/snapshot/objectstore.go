@@ -3,10 +3,11 @@ package snapshot
 // objectstore.go — the provider-agnostic object-store contract the snapshotter
 // operates over, plus its errors.
 //
-// The box has exactly one backend for this today: eidosstore.go's EidosStore,
-// which keeps objects in the single encrypted eidos-db store. The interface is
-// kept narrow and explicit so the snapshotter, retention and restore code stay
-// testable against an in-memory double (memstore_test.go) without a database.
+// The box has exactly one backend for this today: blobstore.Store, which keeps
+// objects in one bucket of the single encrypted tempest object store. The
+// interface is kept narrow and explicit so the snapshotter, retention and
+// restore code stay testable against an in-memory double (memstore_test.go)
+// without a database.
 
 import (
 	"context"
@@ -37,5 +38,5 @@ type ObjectStore interface {
 }
 
 // ErrNotConfigured is returned when a snapshotter is asked to run before the
-// eidos-db store has been opened.
+// tempest store has been opened.
 var ErrNotConfigured = errors.New("snapshot: object store not configured")

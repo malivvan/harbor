@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/malivvan/eidos-db/store/record/q"
+	"github.com/malivvan/tempest/store/record/q"
 )
 
 type projUser struct {

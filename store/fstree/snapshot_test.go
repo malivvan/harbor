@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/eidos-db/store"
+	hstore "github.com/malivvan/tempest/store"
 	"github.com/stretchr/testify/require"
 )
 

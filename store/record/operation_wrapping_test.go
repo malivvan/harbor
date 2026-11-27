@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/eidos-db/store/record/index"
+	"github.com/malivvan/tempest/store/record/index"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
@@ -45,8 +45,8 @@ func TestWrapError_ContextErrorMatches(t *testing.T) {
 
 func TestWrapError_ExactPrefix(t *testing.T) {
 	err := wrapError("save", ErrNotFound)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos save:"),
-		"message must start with 'eidos save:'")
+	require.True(t, strings.HasPrefix(err.Error(), "tempest save:"),
+		"message must start with 'tempest save:'")
 }
 
 func TestWrapError_NoFormattingArtifacts(t *testing.T) {
@@ -66,7 +66,7 @@ func TestWrap_OpenNilContext(t *testing.T) {
 	var nilCtx context.Context
 	db, err := Open(nilCtx, nil, Config{})
 	require.ErrorIs(t, err, ErrNilContext)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos open:"),
+	require.True(t, strings.HasPrefix(err.Error(), "tempest open:"),
 		"error must have open prefix")
 	require.Nil(t, db)
 }
@@ -75,7 +75,7 @@ func TestWrap_OpenNilDB(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(ctx, nil, Config{})
 	require.ErrorIs(t, err, ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos open:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest open:"))
 	require.Nil(t, db)
 }
 
@@ -92,7 +92,7 @@ func TestWrap_OpenCanceledContext(t *testing.T) {
 
 	db, err := Open(ctx, bDB, Config{})
 	require.ErrorIs(t, err, context.Canceled)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos open:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest open:"))
 	require.Nil(t, db)
 
 	// The database remains usable by its owner.
@@ -123,7 +123,7 @@ func TestWrap_OpenBorrowedInitFailure(t *testing.T) {
 
 	db, err := Open(context.Background(), bDB, Config{})
 	require.ErrorIs(t, err, ErrDifferentCodec)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos open:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest open:"))
 	require.Nil(t, db)
 
 	// Borrowed Store must still be open.
@@ -140,14 +140,14 @@ func TestWrap_CloseNilReceiver(t *testing.T) {
 	var nilDB *Store
 	err := nilDB.Close()
 	require.ErrorIs(t, err, ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos close:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest close:"))
 }
 
 func TestWrap_CloseNilBackend(t *testing.T) {
 	db := &Store{}
 	err := db.Close()
 	require.ErrorIs(t, err, ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos close:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest close:"))
 }
 
 func TestWrap_CloseDoesNotCloseBackend(t *testing.T) {
@@ -190,7 +190,7 @@ func TestWrap_ReadTransactionNilContext(t *testing.T) {
 	var nilCtx context.Context
 	err := db.ReadTransaction(nilCtx, func(Node) error { return nil })
 	require.ErrorIs(t, err, ErrNilContext)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos read transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest read transaction:"))
 }
 
 func TestWrap_ReadTransactionNilCallback(t *testing.T) {
@@ -199,7 +199,7 @@ func TestWrap_ReadTransactionNilCallback(t *testing.T) {
 
 	err := db.ReadTransaction(context.Background(), nil)
 	require.ErrorIs(t, err, ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos read transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest read transaction:"))
 }
 
 func TestWrap_WriteTransactionNilContext(t *testing.T) {
@@ -209,7 +209,7 @@ func TestWrap_WriteTransactionNilContext(t *testing.T) {
 	var nilCtx context.Context
 	err := db.WriteTransaction(nilCtx, func(Node) error { return nil })
 	require.ErrorIs(t, err, ErrNilContext)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos write transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest write transaction:"))
 }
 
 func TestWrap_WriteTransactionNilCallback(t *testing.T) {
@@ -218,7 +218,7 @@ func TestWrap_WriteTransactionNilCallback(t *testing.T) {
 
 	err := db.WriteTransaction(context.Background(), nil)
 	require.ErrorIs(t, err, ErrNilParam)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos write transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest write transaction:"))
 }
 
 func TestWrap_WriteTransactionCallbackErrorDiscoverable(t *testing.T) {
@@ -230,7 +230,7 @@ func TestWrap_WriteTransactionCallbackErrorDiscoverable(t *testing.T) {
 		return errCallback
 	})
 	require.ErrorIs(t, err, errCallback)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos write transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest write transaction:"))
 }
 
 func TestWrap_WriteTransactionCallbackErrorBeatsCancel(t *testing.T) {
@@ -246,7 +246,7 @@ func TestWrap_WriteTransactionCallbackErrorBeatsCancel(t *testing.T) {
 	})
 	require.ErrorIs(t, err, errCallback)
 	require.NotErrorIs(t, err, context.Canceled, "callback error must take precedence")
-	require.True(t, strings.HasPrefix(err.Error(), "eidos write transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest write transaction:"))
 }
 
 func TestWrap_WriteTransactionPreCommitCancel(t *testing.T) {
@@ -263,7 +263,7 @@ func TestWrap_WriteTransactionPreCommitCancel(t *testing.T) {
 		return nil
 	})
 	require.ErrorIs(t, err, context.Canceled)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos write transaction:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest write transaction:"))
 
 	var user User
 	err = db.One(context.Background(), "ID", 1, &user)
@@ -319,37 +319,37 @@ func TestWrap_CRUD_OperationPrefixes(t *testing.T) {
 	}{
 		{
 			name:   "init",
-			prefix: "eidos init:",
+			prefix: "tempest init:",
 			op:     func() error { return db.Init(ctx, 10) },
 		},
 		{
 			name:   "reindex",
-			prefix: "eidos reindex:",
+			prefix: "tempest reindex:",
 			op:     func() error { return db.ReIndex(ctx, 10) },
 		},
 		{
 			name:   "save",
-			prefix: "eidos save:",
+			prefix: "tempest save:",
 			op:     func() error { return db.Save(ctx, nil) },
 		},
 		{
 			name:   "update",
-			prefix: "eidos update:",
+			prefix: "tempest update:",
 			op:     func() error { return db.Update(ctx, nil) },
 		},
 		{
 			name:   "update field",
-			prefix: "eidos update field:",
+			prefix: "tempest update field:",
 			op:     func() error { return db.UpdateField(ctx, nil, "", nil) },
 		},
 		{
 			name:   "drop",
-			prefix: "eidos drop:",
+			prefix: "tempest drop:",
 			op:     func() error { return db.Drop(ctx, "nonexistent-bucket-xyz") },
 		},
 		{
 			name:   "delete struct",
-			prefix: "eidos delete struct:",
+			prefix: "tempest delete struct:",
 			op:     func() error { return db.DeleteStruct(ctx, nil) },
 		},
 	}
@@ -376,67 +376,67 @@ func TestWrap_CRUD_Classification(t *testing.T) {
 	t.Run("InitBadType", func(t *testing.T) {
 		err := db.Init(ctx, 10)
 		require.ErrorIs(t, err, ErrBadType)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos init:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest init:"))
 	})
 
 	t.Run("ReIndexBadType", func(t *testing.T) {
 		err := db.ReIndex(ctx, 10)
 		require.ErrorIs(t, err, ErrStructPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos reindex:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest reindex:"))
 	})
 
 	t.Run("SaveNilData", func(t *testing.T) {
 		err := db.Save(ctx, nil)
 		require.ErrorIs(t, err, ErrStructPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos save:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest save:"))
 	})
 
 	t.Run("SaveDuplicateUnique", func(t *testing.T) {
 		err := db.Save(ctx, &UniqueNameUser{ID: 2, Name: "unique", Age: 20})
 		require.ErrorIs(t, err, ErrAlreadyExists)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos save:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest save:"))
 	})
 
 	t.Run("UpdateNilData", func(t *testing.T) {
 		err := db.Update(ctx, nil)
 		require.ErrorIs(t, err, ErrStructPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos update:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest update:"))
 	})
 
 	t.Run("UpdateNotFound", func(t *testing.T) {
 		err := db.Update(ctx, &User{ID: 999, Name: "nope"})
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos update:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest update:"))
 	})
 
 	t.Run("UpdateFieldNilData", func(t *testing.T) {
 		err := db.UpdateField(ctx, nil, "", nil)
 		require.ErrorIs(t, err, ErrStructPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos update field:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest update field:"))
 	})
 
 	t.Run("UpdateFieldIncompatibleValue", func(t *testing.T) {
 		err := db.UpdateField(ctx, &User{ID: 1}, "Name", 42)
 		require.ErrorIs(t, err, ErrIncompatibleValue)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos update field:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest update field:"))
 	})
 
 	t.Run("DropNonexistentBucket", func(t *testing.T) {
 		// Drop a bucket that doesn't exist -> bbolt BucketNotFound.
 		err := db.Drop(ctx, "nonexistent-bucket-xyz")
-		require.True(t, strings.HasPrefix(err.Error(), "eidos drop:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest drop:"))
 	})
 
 	t.Run("DeleteStructNilData", func(t *testing.T) {
 		err := db.DeleteStruct(ctx, nil)
 		require.ErrorIs(t, err, ErrStructPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos delete struct:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest delete struct:"))
 	})
 
 	t.Run("DeleteStructNotFound", func(t *testing.T) {
 		err := db.DeleteStruct(ctx, &User{ID: 999})
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos delete struct:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest delete struct:"))
 	})
 }
 
@@ -452,13 +452,13 @@ func TestWrap_CRUD_ContextErrors(t *testing.T) {
 		cancel()
 		err := db.Save(ctx, &User{ID: 2, Name: "x", Slug: "x"})
 		require.ErrorIs(t, err, context.Canceled)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos save:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest save:"))
 	})
 
 	t.Run("UpdateDeadlineExceeded", func(t *testing.T) {
 		err := db.Update(timedOutCtx(), &User{ID: 1, Name: "updated"})
 		require.ErrorIs(t, err, context.DeadlineExceeded)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos update:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest update:"))
 	})
 }
 
@@ -480,32 +480,32 @@ func TestWrap_KV_OperationPrefixes(t *testing.T) {
 	}{
 		{
 			name:   "kv get",
-			prefix: "eidos kv get:",
+			prefix: "tempest kv get:",
 			op:     func() error { return db.Get(ctx, "bucket", "key", nil) },
 		},
 		{
 			name:   "kv set",
-			prefix: "eidos kv set:",
+			prefix: "tempest kv set:",
 			op:     func() error { return db.Set(ctx, "bucket", nil, 100) },
 		},
 		{
 			name:   "kv delete",
-			prefix: "eidos kv delete:",
+			prefix: "tempest kv delete:",
 			op:     func() error { return db.Delete(ctx, "nonexistent", "key") },
 		},
 		{
 			name:   "kv get bytes",
-			prefix: "eidos kv get bytes:",
+			prefix: "tempest kv get bytes:",
 			op:     func() error { _, err := db.GetBytes(ctx, "bucket", 999); return err },
 		},
 		{
 			name:   "kv set bytes",
-			prefix: "eidos kv set bytes:",
+			prefix: "tempest kv set bytes:",
 			op:     func() error { return db.SetBytes(ctx, "bucket", nil, []byte("x")) },
 		},
 		{
 			name:   "kv key exists",
-			prefix: "eidos kv key exists:",
+			prefix: "tempest kv key exists:",
 			op:     func() error { _, err := db.KeyExists(deliberateNilCtx, "bucket", "key"); return err },
 		},
 	}
@@ -530,38 +530,38 @@ func TestWrap_KV_Classification(t *testing.T) {
 	t.Run("GetNilDest", func(t *testing.T) {
 		err := db.Get(ctx, "bucket", "key", nil)
 		require.ErrorIs(t, err, ErrPtrNeeded)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos kv get:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest kv get:"))
 	})
 
 	t.Run("GetNotFound", func(t *testing.T) {
 		var s string
 		err := db.Get(ctx, "bucket", "missing", &s)
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos kv get:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest kv get:"))
 	})
 
 	t.Run("SetNilKey", func(t *testing.T) {
 		err := db.Set(ctx, "bucket", nil, 100)
 		require.ErrorIs(t, err, ErrNilParam)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos kv set:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest kv set:"))
 	})
 
 	t.Run("DeleteNotFound", func(t *testing.T) {
 		err := db.Delete(ctx, "nonexistent-b", "key")
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos kv delete:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest kv delete:"))
 	})
 
 	t.Run("GetBytesNotFound", func(t *testing.T) {
 		_, err := db.GetBytes(ctx, "bucket", 999)
 		require.ErrorIs(t, err, ErrNotFound)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos kv get bytes:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest kv get bytes:"))
 	})
 
 	t.Run("SetBytesNilKey", func(t *testing.T) {
 		err := db.SetBytes(ctx, "bucket", nil, []byte("x"))
 		require.ErrorIs(t, err, ErrNilParam)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos kv set bytes:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest kv set bytes:"))
 	})
 
 	t.Run("KeyExistsMissingBucketIsFalse", func(t *testing.T) {
@@ -602,13 +602,13 @@ func TestWrap_KV_ContextErrors(t *testing.T) {
 		var s string
 		err := db.Get(canceledCtx(), "bucket", "key", &s)
 		require.ErrorIs(t, err, context.Canceled)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos kv get:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest kv get:"))
 	})
 
 	t.Run("SetBytesCanceled", func(t *testing.T) {
 		err := db.SetBytes(canceledCtx(), "bucket", "k", []byte("v"))
 		require.ErrorIs(t, err, context.Canceled)
-		require.True(t, strings.HasPrefix(err.Error(), "eidos kv set bytes:"))
+		require.True(t, strings.HasPrefix(err.Error(), "tempest kv set bytes:"))
 	})
 }
 
@@ -702,7 +702,7 @@ func TestWrap_OpenNestedWrapping(t *testing.T) {
 	// triggering nested KV wrapping under the open prefix.
 	_, err = Open(context.Background(), bDB, Config{})
 	require.Error(t, err)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos open:"),
+	require.True(t, strings.HasPrefix(err.Error(), "tempest open:"),
 		"outermost error must start with requested operation label")
 	require.NoError(t, bDB.Close())
 }
@@ -745,23 +745,23 @@ func TestWrap_AllOperationLabelsCovered(t *testing.T) {
 		prefix string
 		op     func() error
 	}{
-		{"open", "eidos open:", func() error { _, err := Open(nilCtx, nil, Config{}); return err }},
-		{"close", "eidos close:", func() error { return (*Store)(nil).Close() }},
-		{"read transaction", "eidos read transaction:", func() error { return db.ReadTransaction(nilCtx, nil) }},
-		{"write transaction", "eidos write transaction:", func() error { return db.WriteTransaction(nilCtx, nil) }},
-		{"init", "eidos init:", func() error { return db.Init(ctx, 10) }},
-		{"reindex", "eidos reindex:", func() error { return db.ReIndex(ctx, 10) }},
-		{"save", "eidos save:", func() error { return db.Save(ctx, nil) }},
-		{"update", "eidos update:", func() error { return db.Update(ctx, nil) }},
-		{"update field", "eidos update field:", func() error { return db.UpdateField(ctx, nil, "", nil) }},
-		{"drop", "eidos drop:", func() error { return db.Drop(ctx, "nonexistent") }},
-		{"delete struct", "eidos delete struct:", func() error { return db.DeleteStruct(ctx, nil) }},
-		{"kv get", "eidos kv get:", func() error { return db.Get(ctx, "b", "k", nil) }},
-		{"kv set", "eidos kv set:", func() error { return db.Set(ctx, "b", nil, 100) }},
-		{"kv delete", "eidos kv delete:", func() error { return db.Delete(ctx, "nx", "k") }},
-		{"kv get bytes", "eidos kv get bytes:", func() error { _, err := db.GetBytes(ctx, "b", 999); return err }},
-		{"kv set bytes", "eidos kv set bytes:", func() error { return db.SetBytes(ctx, "b", nil, []byte{}) }},
-		{"kv key exists", "eidos kv key exists:", func() error { _, err := db.KeyExists(nilCtx, "nx", "k"); return err }},
+		{"open", "tempest open:", func() error { _, err := Open(nilCtx, nil, Config{}); return err }},
+		{"close", "tempest close:", func() error { return (*Store)(nil).Close() }},
+		{"read transaction", "tempest read transaction:", func() error { return db.ReadTransaction(nilCtx, nil) }},
+		{"write transaction", "tempest write transaction:", func() error { return db.WriteTransaction(nilCtx, nil) }},
+		{"init", "tempest init:", func() error { return db.Init(ctx, 10) }},
+		{"reindex", "tempest reindex:", func() error { return db.ReIndex(ctx, 10) }},
+		{"save", "tempest save:", func() error { return db.Save(ctx, nil) }},
+		{"update", "tempest update:", func() error { return db.Update(ctx, nil) }},
+		{"update field", "tempest update field:", func() error { return db.UpdateField(ctx, nil, "", nil) }},
+		{"drop", "tempest drop:", func() error { return db.Drop(ctx, "nonexistent") }},
+		{"delete struct", "tempest delete struct:", func() error { return db.DeleteStruct(ctx, nil) }},
+		{"kv get", "tempest kv get:", func() error { return db.Get(ctx, "b", "k", nil) }},
+		{"kv set", "tempest kv set:", func() error { return db.Set(ctx, "b", nil, 100) }},
+		{"kv delete", "tempest kv delete:", func() error { return db.Delete(ctx, "nx", "k") }},
+		{"kv get bytes", "tempest kv get bytes:", func() error { _, err := db.GetBytes(ctx, "b", 999); return err }},
+		{"kv set bytes", "tempest kv set bytes:", func() error { return db.SetBytes(ctx, "b", nil, []byte{}) }},
+		{"kv key exists", "tempest kv key exists:", func() error { _, err := db.KeyExists(nilCtx, "nx", "k"); return err }},
 	}
 
 	for _, tc := range tests {
@@ -826,5 +826,5 @@ func TestWrap_BboltErrorClassification(t *testing.T) {
 	ctx := context.Background()
 	err = db.Save(ctx, &User{ID: 1, Name: "x", Slug: "x"})
 	require.ErrorIs(t, err, bolterrors.ErrDatabaseNotOpen)
-	require.True(t, strings.HasPrefix(err.Error(), "eidos save:"))
+	require.True(t, strings.HasPrefix(err.Error(), "tempest save:"))
 }

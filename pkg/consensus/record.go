@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/malivvan/eidos-db"
-	"github.com/malivvan/eidos-db/store/record"
+	"github.com/malivvan/tempest"
+	"github.com/malivvan/tempest/store/record"
 )
 
 // typeRegistry maps a record's reflect.Type name to its type, so the FSM can
@@ -241,7 +241,7 @@ func (d *Record) recordWrite(ctx context.Context, op, field string, value, data 
 }
 
 // recordNode resolves the db.Node for a bucket path.
-func recordNode(st *eidos.Store, path []string) record.Node {
+func recordNode(st *tempest.Store, path []string) record.Node {
 	var node record.Node = st.Record()
 	if len(path) > 0 {
 		node = node.From(path...)

@@ -1,4 +1,4 @@
-package eidos
+package tempest
 
 import (
 	"context"
@@ -10,9 +10,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/malivvan/eidos-db/store/search"
-	"github.com/malivvan/eidos-db/store/series"
-	"github.com/malivvan/eidos-db/store/vector"
+	"github.com/malivvan/tempest/store/search"
+	"github.com/malivvan/tempest/store/series"
+	"github.com/malivvan/tempest/store/vector"
 )
 
 type txRecord struct {
@@ -423,10 +423,10 @@ func TestWriteTransactionFTS(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if err := idx.Upsert(ctx, "d1", "eidos full text"); err != nil {
+		if err := idx.Upsert(ctx, "d1", "tempest full text"); err != nil {
 			return err
 		}
-		hits, err := idx.Search(ctx, "eidos", 10)
+		hits, err := idx.Search(ctx, "tempest", 10)
 		if err != nil {
 			return err
 		}
@@ -438,7 +438,7 @@ func TestWriteTransactionFTS(t *testing.T) {
 
 	idx, err := s.Search().Open("docs", search.Config{})
 	require.NoError(t, err)
-	hits, err := idx.Search(ctx, "eidos", 10)
+	hits, err := idx.Search(ctx, "tempest", 10)
 	require.NoError(t, err)
 	require.Len(t, hits, 1)
 

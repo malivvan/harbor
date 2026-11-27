@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"unicode/utf8"
 
-	"github.com/malivvan/eidos-db/pkg/metrics"
-	"github.com/malivvan/eidos-db/store"
-	"github.com/malivvan/eidos-db/store/ledger"
+	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/store/ledger"
 	"go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
 )
@@ -24,7 +24,7 @@ var ErrClosed = errors.New("vector: storage is closed")
 
 const collectionsMetaBucket = "__collections_meta__"
 
-// reservedTopLevelBuckets are the top-level buckets eidos-db itself creates in a
+// reservedTopLevelBuckets are the top-level buckets tempest itself creates in a
 // shared database. They are never vector collections, even when a vector Store is
 // opened at the database root.
 var reservedTopLevelBuckets = map[string]bool{
@@ -320,7 +320,7 @@ func (s *Store) AdoptTransaction(view *Store) {
 // document for every complex payload value of a point. It keeps the wire
 // format backward compatible: records written by older versions simply have
 // per-key KindJSON values instead.
-const payloadJSONKey = "\x00__eidos_json_payload__"
+const payloadJSONKey = "\x00__tempest_json_payload__"
 
 func toStoredPoint(p *PointStruct) (*StoredPoint, error) {
 	stored := &StoredPoint{
@@ -749,7 +749,7 @@ func (s *Store) metaBucket(tx *bbolt.Tx, create bool) (*bbolt.Bucket, error) {
 //
 // The caller owns the bbolt handle passed to Open; Store.Close closes it as a
 // convenience for standalone use. An embedding store that shares one handle
-// (the eidos root package) must call Flush instead of Close and close the
+// (the tempest root package) must call Flush instead of Close and close the
 // handle itself. Close is idempotent.
 func (s *Store) Close() error {
 	if s == nil {
@@ -779,7 +779,7 @@ func (s *Store) Close() error {
 }
 
 // SetOwnsDB controls whether Close closes the bbolt handle. An embedding store
-// that shares one handle (the eidos root package) sets it to false; standalone
+// that shares one handle (the tempest root package) sets it to false; standalone
 // users keep the default true. Config.SharedDB sets the same flag at Open time.
 func (s *Store) SetOwnsDB(owns bool) {
 	if s != nil {

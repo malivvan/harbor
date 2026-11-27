@@ -5,9 +5,9 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/malivvan/eidos-db/internal/crypto"
-	"github.com/malivvan/eidos-db/pkg/metrics"
-	"github.com/malivvan/eidos-db/store/ledger"
+	"github.com/malivvan/tempest/internal/crypto"
+	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -20,7 +20,7 @@ const KeySize = crypto.KeySize
 type Config struct {
 	// Root is the bucket path below which all series live. Each element is one
 	// nested bucket name. A nil or empty Root means the database root; the
-	// eidos root package passes [][]byte{[]byte(store.SERIES)} explicitly.
+	// tempest root package passes [][]byte{[]byte(store.SERIES)} explicitly.
 	//
 	// Encryption requires a non-empty Root: at the database root the store
 	// cannot distinguish its own series buckets from unrelated top-level
@@ -167,7 +167,7 @@ const (
 	markerKey       = "\x00__ts_enc__"
 	versionKey      = "\x00__ts_version__"
 	markerMagic     = "TENC"
-	canaryPlaintext = "eidos/ts/aead/v1"
+	canaryPlaintext = "tempest/ts/aead/v1"
 )
 
 const (

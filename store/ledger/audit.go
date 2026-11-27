@@ -1,4 +1,4 @@
-// Package ledger provides a tamper-evident, append-only audit trail for eidos-db.
+// Package ledger provides a tamper-evident, append-only audit trail for tempest.
 //
 // A Recorder appends signed, hash-linked events to a bbolt database: each event
 // carries the store, operation, entity and a SHA-256 digest of the written
@@ -17,9 +17,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/malivvan/eidos-db/internal/slip10"
-	"github.com/malivvan/eidos-db/pkg/sign/canonical"
-	"github.com/malivvan/eidos-db/store"
+	"github.com/malivvan/tempest/internal/slip10"
+	"github.com/malivvan/tempest/pkg/sign/canonical"
+	"github.com/malivvan/tempest/store"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -34,7 +34,7 @@ const (
 	FormatVersion = 1
 
 	// genesisDomain anchors the start of every chain.
-	genesisDomain = "eidos/audit/v1/genesis"
+	genesisDomain = "tempest/audit/v1/genesis"
 )
 
 // Store names used by the sub-stores. They are the root bucket names from the

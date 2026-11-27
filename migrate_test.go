@@ -1,4 +1,4 @@
-package eidos
+package tempest
 
 import (
 	"context"

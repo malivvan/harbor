@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/malivvan/eidos-db/store/record/index"
-	"github.com/malivvan/eidos-db/store/record/q"
+	"github.com/malivvan/tempest/store/record/index"
+	"github.com/malivvan/tempest/store/record/q"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -446,10 +446,10 @@ func newListSink(node Node, to interface{}) (*listSink, error) {
 	name := ""
 	proto := reflect.New(elemType)
 	if bn, ok := proto.Interface().(BucketNamer); ok {
-		name = bn.EidosBucketName()
+		name = bn.TempestBucketName()
 	} else if proto.Elem().CanInterface() {
 		if bn, ok := proto.Elem().Interface().(BucketNamer); ok {
-			name = bn.EidosBucketName()
+			name = bn.TempestBucketName()
 		}
 	}
 	if name == "" {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	hstore "github.com/malivvan/eidos-db/store"
+	hstore "github.com/malivvan/tempest/store"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/bbolt"
 )
@@ -30,7 +30,7 @@ func TestQuantizedCollectionRequiresMatchingMode(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidConfig)
 }
 
-func TestListCollectionsSkipsForeignEidosBuckets(t *testing.T) {
+func TestListCollectionsSkipsForeignTempestBuckets(t *testing.T) {
 	bdb, err := bbolt.Open(t.TempDir()+"/shared.db", 0600, nil)
 	require.NoError(t, err)
 	defer bdb.Close()

@@ -1,9 +1,9 @@
 # store
 
-`store` manages the process-wide eidos-db store: one directory, one password file,
+`store` manages the process-wide tempest store: one directory, one password file,
 one open handle.
 
-An eidos-db deployment normally has exactly one database and one password, and every
+A tempest deployment normally has exactly one database and one password, and every
 subsystem in the process should use the same handle rather than opening the file
 again. This package owns that convention.
 
@@ -11,7 +11,7 @@ again. This package owns that convention.
 import (
     "context"
 
-    "github.com/malivvan/eidos-db/pkg/store"
+    "github.com/malivvan/tempest/pkg/store"
 )
 
 func main() {
@@ -36,7 +36,7 @@ func main() {
 ## Password file
 
 When `Config.Password` is empty, the password is 32 random bytes, hex encoded
-(64 characters) and stored at `<Dir>/eidos.key` with mode `0600`. The file is
+(64 characters) and stored at `<Dir>/tempest.key` with mode `0600`. The file is
 created atomically: the key is written and synced to a temporary file that is
 hard-linked into place, so two processes racing to initialise the same directory
 agree on one key instead of overwriting each other, and a reader never observes
@@ -68,10 +68,10 @@ genuinely fresh database instead of a stale handle.
 | Field | Default | Meaning |
 |---|---|---|
 | `Dir` | — (required) | Directory holding the database and password files |
-| `DBFile` | `eidos.db` | Database file name |
-| `KeyFile` | `eidos.key` | Password file name |
+| `DBFile` | `tempest.db` | Database file name |
+| `KeyFile` | `tempest.key` | Password file name |
 | `Mode` | `0600` | Permission for both files |
 | `Password` | read/create `KeyFile` | Explicit password |
-| `Options` | — | Extra `eidos.Options` (KDF cost, encryption flags, metrics) |
+| `Options` | — | Extra `tempest.Options` (KDF cost, encryption flags, metrics) |
 
 `Config.Password` always wins over `Options.Password`; the manager fills that in.

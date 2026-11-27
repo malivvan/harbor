@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/malivvan/eidos-db"
-	hstore "github.com/malivvan/eidos-db/store"
-	"github.com/malivvan/eidos-db/store/graphs"
-	hrecord "github.com/malivvan/eidos-db/store/record"
+	"github.com/malivvan/tempest"
+	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/store/graphs"
+	hrecord "github.com/malivvan/tempest/store/record"
 )
 
 func openDirect(t *testing.T, cfg graphs.Config) (*graphs.Store, *bolt.DB) {
@@ -95,17 +95,17 @@ func TestIsolationFromRecordStore(t *testing.T) {
 	// The graph lives under its own root.
 	require.NoError(t, bdb.View(func(tx *bolt.Tx) error {
 		require.NotNil(t, tx.Bucket([]byte(hstore.GRAPHS)))
-		require.Nil(t, tx.Bucket([]byte("eidosNodeRecord")))
+		require.Nil(t, tx.Bucket([]byte("tempestNodeRecord")))
 		return nil
 	}))
 }
 
 func TestRootStoreGraphsAccessAndTransactions(t *testing.T) {
 	ctx := context.Background()
-	store, err := eidos.Open(ctx, filepath.Join(t.TempDir(), "eidos.db"), 0o600, &eidos.Options{
+	store, err := tempest.Open(ctx, filepath.Join(t.TempDir(), "tempest.db"), 0o600, &tempest.Options{
 		Password:   "graph-password",
 		KDFTime:    1,
-		KDFMemory:  8 * eidos.MiB,
+		KDFMemory:  8 * tempest.MiB,
 		KDFThreads: 1,
 	})
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestRootStoreGraphsAccessAndTransactions(t *testing.T) {
 
 	// Transactions expose a bound graph store; commit and abort behave like the
 	// other sub-stores.
-	require.NoError(t, store.WriteTransaction(ctx, func(tx *eidos.Tx) error {
+	require.NoError(t, store.WriteTransaction(ctx, func(tx *tempest.Tx) error {
 		tg, err := tx.Graphs().Open("social")
 		if err != nil {
 			return err
@@ -130,7 +130,7 @@ func TestRootStoreGraphsAccessAndTransactions(t *testing.T) {
 	require.NoError(t, err)
 
 	abortErr := errors.New("abort")
-	err = store.WriteTransaction(ctx, func(tx *eidos.Tx) error {
+	err = store.WriteTransaction(ctx, func(tx *tempest.Tx) error {
 		tg, err := tx.Graphs().Open("social")
 		if err != nil {
 			return err

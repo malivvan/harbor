@@ -1,6 +1,6 @@
-// Package store manages the process-wide eidos-db store.
+// Package store manages the process-wide tempest store.
 //
-// An eidos-db deployment normally has exactly one database file and one password for
+// A tempest deployment normally has exactly one database file and one password for
 // the whole process. This package owns that convention: it resolves a directory,
 // reads or creates the password file, opens the database, and hands out the same
 // handle to every caller. Applications that want a different lifecycle can use a
@@ -41,21 +41,21 @@ import (
 	"sync"
 	"time"
 
-	"github.com/malivvan/eidos-db"
-	"github.com/malivvan/eidos-db/store/fstree"
-	"github.com/malivvan/eidos-db/store/graphs"
-	"github.com/malivvan/eidos-db/store/object"
-	"github.com/malivvan/eidos-db/store/record"
-	"github.com/malivvan/eidos-db/store/search"
-	"github.com/malivvan/eidos-db/store/series"
-	"github.com/malivvan/eidos-db/store/vector"
+	"github.com/malivvan/tempest"
+	"github.com/malivvan/tempest/store/fstree"
+	"github.com/malivvan/tempest/store/graphs"
+	"github.com/malivvan/tempest/store/object"
+	"github.com/malivvan/tempest/store/record"
+	"github.com/malivvan/tempest/store/search"
+	"github.com/malivvan/tempest/store/series"
+	"github.com/malivvan/tempest/store/vector"
 )
 
 const (
 	// DefaultDBFile is the database file name used when Config.DBFile is empty.
-	DefaultDBFile = "eidos.db"
+	DefaultDBFile = "tempest.db"
 	// DefaultKeyFile is the password file name used when Config.KeyFile is empty.
-	DefaultKeyFile = "eidos.key"
+	DefaultKeyFile = "tempest.key"
 	// DefaultMode is the permission used for both files.
 	DefaultMode os.FileMode = 0o600
 	// KeySize is the password length in bytes (hex-encoded to 64 characters).
@@ -75,9 +75,9 @@ type Config struct {
 	// Password is an explicit password. When empty it is read from, or created
 	// at, Dir/KeyFile.
 	Password string
-	// Options are extra eidos-db options (KDF cost, encryption flags, metrics).
+	// Options are extra tempest options (KDF cost, encryption flags, metrics).
 	// The Password field is always taken from Config, not from here.
-	Options *eidos.Options
+	Options *tempest.Options
 }
 
 // withDefaults returns a copy of cfg with the defaulted fields filled in.
@@ -100,14 +100,14 @@ func (c Config) keyPath() string { return filepath.Join(c.Dir, c.KeyFile) }
 // dbPath is the resolved database file path.
 func (c Config) dbPath() string { return filepath.Join(c.Dir, c.DBFile) }
 
-// Manager owns one eidos-db store for one directory at a time.
+// Manager owns one tempest store for one directory at a time.
 //
 // A Manager is safe for concurrent use. Its zero value is not usable; build one
 // with NewManager.
 type Manager struct {
 	mu   sync.Mutex
 	cfg  Config
-	st   *eidos.Store
+	st   *tempest.Store
 	root string // directory the open store belongs to
 }
 
@@ -143,13 +143,13 @@ func (m *Manager) Dir() string {
 //
 // If the configured directory differs from the one the current store belongs to,
 // that store is closed first and the new directory's database is opened.
-func (m *Manager) Open(ctx context.Context) (*eidos.Store, error) {
+func (m *Manager) Open(ctx context.Context) (*tempest.Store, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.openLocked(ctx)
 }
 
-func (m *Manager) openLocked(ctx context.Context) (*eidos.Store, error) {
+func (m *Manager) openLocked(ctx context.Context) (*tempest.Store, error) {
 	if m.cfg.Dir == "" {
 		return nil, errors.New("store: Config.Dir is required")
 	}
@@ -178,13 +178,13 @@ func (m *Manager) openLocked(ctx context.Context) (*eidos.Store, error) {
 		}
 	}
 
-	opts := eidos.Options{}
+	opts := tempest.Options{}
 	if m.cfg.Options != nil {
 		opts = *m.cfg.Options
 	}
 	opts.Password = password
 
-	st, err := eidos.Open(ctx, m.cfg.dbPath(), m.cfg.Mode, &opts)
+	st, err := tempest.Open(ctx, m.cfg.dbPath(), m.cfg.Mode, &opts)
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", m.cfg.dbPath(), err)
 	}
@@ -193,7 +193,7 @@ func (m *Manager) openLocked(ctx context.Context) (*eidos.Store, error) {
 }
 
 // Store returns the open store, or nil before Open.
-func (m *Manager) Store() *eidos.Store {
+func (m *Manager) Store() *tempest.Store {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.st
@@ -286,7 +286,7 @@ var (
 // Repeated calls reuse the default manager. A call whose cfg.Dir differs from the
 // currently open directory closes that store and opens the new one, which is what
 // lets a test harness isolate each test with its own directory.
-func Open(ctx context.Context, cfg Config) (*eidos.Store, error) {
+func Open(ctx context.Context, cfg Config) (*tempest.Store, error) {
 	defMu.Lock()
 	if def == nil {
 		def = NewManager(cfg)
@@ -306,7 +306,7 @@ func Default() *Manager {
 }
 
 // Store returns the process-wide store, or nil before Open.
-func Store() *eidos.Store {
+func Store() *tempest.Store {
 	if m := Default(); m != nil {
 		return m.Store()
 	}
@@ -442,7 +442,7 @@ func loadOrCreatePassword(path string, mode os.FileMode) (string, error) {
 // path. The file is synced before its name is published, so a crash cannot
 // leave an empty key file behind.
 func writeKeyTemp(dir string, mode os.FileMode, encoded string) (string, error) {
-	f, err := os.CreateTemp(dir, ".eidos-key-*")
+	f, err := os.CreateTemp(dir, ".tempest-key-*")
 	if err != nil {
 		return "", fmt.Errorf("store: create key temp file: %w", err)
 	}

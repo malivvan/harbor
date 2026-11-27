@@ -32,7 +32,7 @@ func timedOutCtx() context.Context {
 // ============================================================================
 
 func TestOpen_CancelledContextDoesNotInitializeDatabase(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "eidos.db")
+	path := filepath.Join(t.TempDir(), "tempest.db")
 
 	bDB, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 10 * time.Second})
 	require.NoError(t, err)
@@ -77,7 +77,7 @@ func TestOpen_InitializationErrorDoesNotCloseBorrowedDatabase(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Step 2: hand the borrowed Store to eidos-db with the default (json) codec.
+	// Step 2: hand the borrowed Store to tempest with the default (json) codec.
 	// checkVersion will call Set on __database, which builds the data
 	// bucket via setBytes -> newMeta, and newMeta will compare codec names and
 	// return ErrDifferentCodec. That is our deterministic initialization error.
@@ -86,8 +86,8 @@ func TestOpen_InitializationErrorDoesNotCloseBorrowedDatabase(t *testing.T) {
 	require.True(t, errors.Is(err, ErrDifferentCodec), "expected ErrDifferentCodec, got %v", err)
 	require.Nil(t, db)
 
-	// The borrowed bolt.Store must NOT have been closed by eidos-db. We confirm
-	// by performing a fresh close on bDB directly: if eidos-db had closed it,
+	// The borrowed bolt.Store must NOT have been closed by tempest. We confirm
+	// by performing a fresh close on bDB directly: if tempest had closed it,
 	// this would fail with "database not open".
 	require.NoError(t, bDB.Close())
 

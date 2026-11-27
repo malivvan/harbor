@@ -1,7 +1,7 @@
 # fstree — a file system inside BoltDB
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/eidos-db/store/fstree.svg)](https://pkg.go.dev/github.com/malivvan/eidos-db/store/fstree)
-[![CI](https://github.com/malivvan/eidos-db/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/eidos-db/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/tempest/store/fstree.svg)](https://pkg.go.dev/github.com/malivvan/tempest/store/fstree)
+[![CI](https://github.com/malivvan/tempest/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/tempest/actions/workflows/ci.yml)
 
 `fstree` implements a complete file system on top of bbolt. It supports
 directories, regular files, symbolic links, POSIX-like metadata,

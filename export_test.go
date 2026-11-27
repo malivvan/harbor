@@ -1,4 +1,4 @@
-package eidos
+package tempest
 
 import (
 	"bytes"
@@ -9,9 +9,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/malivvan/eidos-db/store/record/q"
-	"github.com/malivvan/eidos-db/store/series"
-	"github.com/malivvan/eidos-db/store/vector"
+	"github.com/malivvan/tempest/store/record/q"
+	"github.com/malivvan/tempest/store/series"
+	"github.com/malivvan/tempest/store/vector"
 )
 
 // exportTestRecord is the db record shape used by the export/import tests.

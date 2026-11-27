@@ -1,4 +1,4 @@
-package eidos
+package tempest
 
 import (
 	"bytes"
@@ -9,22 +9,22 @@ import (
 	"testing"
 	"time"
 
-	file "github.com/malivvan/eidos-db/store/fstree"
-	"github.com/malivvan/eidos-db/store/record"
-	"github.com/malivvan/eidos-db/store/search"
+	file "github.com/malivvan/tempest/store/fstree"
+	"github.com/malivvan/tempest/store/record"
+	"github.com/malivvan/tempest/store/search"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
 
-	"github.com/malivvan/eidos-db/internal/crypto"
-	hstore "github.com/malivvan/eidos-db/store"
-	"github.com/malivvan/eidos-db/store/ledger"
-	"github.com/malivvan/eidos-db/store/series"
-	"github.com/malivvan/eidos-db/store/system"
-	"github.com/malivvan/eidos-db/store/vector"
+	"github.com/malivvan/tempest/internal/crypto"
+	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/store/ledger"
+	"github.com/malivvan/tempest/store/series"
+	"github.com/malivvan/tempest/store/system"
+	"github.com/malivvan/tempest/store/vector"
 )
 
-type eidosRecord struct {
+type tempestRecord struct {
 	ID   int    `db:"id,increment"`
 	Name string `db:"index"`
 }
@@ -59,7 +59,7 @@ func mustClose(t *testing.T, s *Store) {
 
 func TestStoreRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "eidos.db")
+	path := filepath.Join(t.TempDir(), "tempest.db")
 	const password = "correct horse battery staple"
 
 	s := mustOpen(t, path, password)
@@ -116,7 +116,7 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatalf("ts aggregate returned %d samples, want 1", len(samples))
 	}
 
-	if err := s.Record().Save(ctx, &eidosRecord{Name: "alice"}); err != nil {
+	if err := s.Record().Save(ctx, &tempestRecord{Name: "alice"}); err != nil {
 		t.Fatalf("db save: %v", err)
 	}
 
@@ -156,7 +156,7 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatalf("ts range after reopen = %v, %v; want 1 point", points, err)
 	}
 
-	var rec eidosRecord
+	var rec tempestRecord
 	if err := s.Record().One(ctx, "Name", "alice", &rec); err != nil {
 		t.Fatalf("db one after reopen: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestOpenAppliesDefaultLockTimeout(t *testing.T) {
 	held := mustOpen(t, path, "pw")
 	defer mustClose(t, held)
 
-	// Zero Timeout selects the eidos-db default rather than bbolt's wait-forever.
+	// Zero Timeout selects the tempest default rather than bbolt's wait-forever.
 	start := time.Now()
 	_, err := Open(context.Background(), path, 0o600, &Options{Password: "pw"})
 	require.ErrorIs(t, err, bolterrors.ErrTimeout)
@@ -939,7 +939,7 @@ func TestOpenNilReceiverHelpers(t *testing.T) {
 
 func TestAuditTrailEndToEnd(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "eidos-ledger.db")
+	path := filepath.Join(t.TempDir(), "tempest-ledger.db")
 	const password = "correct horse battery staple"
 
 	opts := testOptions(password)
@@ -952,7 +952,7 @@ func TestAuditTrailEndToEnd(t *testing.T) {
 	require.NotNil(t, s.Audit())
 
 	// One write per store.
-	require.NoError(t, s.Record().Save(ctx, &eidosRecord{Name: "alice"}))
+	require.NoError(t, s.Record().Save(ctx, &tempestRecord{Name: "alice"}))
 	require.NoError(t, s.Series().Series("cpu").Insert(ctx, series.Point{Timestamp: 1, Value: 1}))
 
 	col, err := s.Vector().NewCollection("docs", 3, vector.Cosine, false)
@@ -982,7 +982,7 @@ func TestAuditTrailEndToEnd(t *testing.T) {
 
 func TestAuditDisabledHasNoTrail(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "eidos-noaudit.db")
+	path := filepath.Join(t.TempDir(), "tempest-noaudit.db")
 
 	s := mustOpen(t, path, "pw")
 	t.Cleanup(func() { _ = s.Close() })
@@ -990,7 +990,7 @@ func TestAuditDisabledHasNoTrail(t *testing.T) {
 	require.Equal(t, AuditNone, s.AuditFlags())
 	require.Nil(t, s.Audit())
 
-	require.NoError(t, s.Record().Save(ctx, &eidosRecord{Name: "alice"}))
+	require.NoError(t, s.Record().Save(ctx, &tempestRecord{Name: "alice"}))
 
 	_, err := s.VerifyAudit()
 	require.ErrorIs(t, err, ledger.ErrNoLog)
@@ -998,13 +998,13 @@ func TestAuditDisabledHasNoTrail(t *testing.T) {
 
 func TestAuditWrongPasswordIsRejectedOnOpen(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "eidos-audit-pw.db")
+	path := filepath.Join(t.TempDir(), "tempest-audit-pw.db")
 
 	opts := testOptions("right")
 	opts.Audit = AuditRecord
 	s, err := Open(ctx, path, 0600, opts)
 	require.NoError(t, err)
-	require.NoError(t, s.Record().Save(ctx, &eidosRecord{Name: "alice"}))
+	require.NoError(t, s.Record().Save(ctx, &tempestRecord{Name: "alice"}))
 	require.NoError(t, s.Close())
 
 	// The audit signing keys derive from the same seed as the encryption keys,
@@ -1170,7 +1170,7 @@ func TestOptionsValidate(t *testing.T) {
 func TestOpenRejectsUnknownAuditFlags(t *testing.T) {
 	opts := testOptions("pw")
 	opts.Audit = 1 << 15
-	_, err := Open(context.Background(), filepath.Join(t.TempDir(), "eidos.db"), 0o600, opts)
+	_, err := Open(context.Background(), filepath.Join(t.TempDir(), "tempest.db"), 0o600, opts)
 	require.ErrorIs(t, err, ErrInvalidOptions)
 }
 

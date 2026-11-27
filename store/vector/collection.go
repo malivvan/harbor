@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/malivvan/eidos-db/pkg/metrics"
-	"github.com/malivvan/eidos-db/store"
+	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/store"
 )
 
 // Collection represents a single logical group of vectors, similar to a table in SQL databases.
@@ -378,7 +378,7 @@ func (c *Collection) observeFlush(d time.Duration, points int, err error) {
 // collection stays open so Close can be retried.
 //
 // Close deliberately does NOT close the Store's bbolt handle: that handle is
-// shared with every sibling collection (and, in the eidos root package, with
+// shared with every sibling collection (and, in the tempest root package, with
 // the other sub-stores) and is owned by whoever created it. Call
 // Store.Flush/Store.Close to finish the whole store.
 func (c *Collection) Close() error {

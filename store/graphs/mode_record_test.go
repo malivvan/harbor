@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/malivvan/eidos-db/store"
+	"github.com/malivvan/tempest/store"
 )
 
 // TestOpenRejectsEmptyModeRecord covers a present-but-empty mode record: the

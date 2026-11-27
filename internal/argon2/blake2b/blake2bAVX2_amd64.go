@@ -6,7 +6,7 @@
 
 package blake2b
 
-import "github.com/malivvan/eidos-db/internal/cpu"
+import "github.com/malivvan/tempest/internal/cpu"
 
 func init() {
 	useAVX2 = cpu.X86.HasAVX2

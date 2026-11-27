@@ -2,9 +2,9 @@ package graphs
 
 // The persisted records and the bitemporal reads and writes over them.
 //
-// The records keep the field names and order of the graph eidos previously kept
+// The records keep the field names and order of the graph tempest previously kept
 // in its own package, and pin the bucket names the earlier build used
-// (EidosBucketName). That is what lets a file written by an earlier build stay
+// (TempestBucketName). That is what lets a file written by an earlier build stay
 // readable: the record store derives a bucket from the type name, and a
 // schema-driven codec derives a record's fingerprint from its field names and
 // order.
@@ -32,8 +32,8 @@ type NodeRecord struct {
 	RetractedAt time.Time `json:"retractedAt,omitempty"`
 }
 
-// EidosBucketName pins the bucket the earlier graph implementation used.
-func (NodeRecord) EidosBucketName() string { return "eidosNodeRecord" }
+// TempestBucketName pins the bucket the earlier graph implementation used.
+func (NodeRecord) TempestBucketName() string { return "tempestNodeRecord" }
 
 // NodeVersion is one closed version of a node.
 type NodeVersion struct {
@@ -56,8 +56,8 @@ type NodeVersion struct {
 	SchemaVersion int       `json:"schemaVersion,omitempty"`
 }
 
-// EidosBucketName pins the bucket the earlier graph implementation used.
-func (NodeVersion) EidosBucketName() string { return "eidosNodeVersion" }
+// TempestBucketName pins the bucket the earlier graph implementation used.
+func (NodeVersion) TempestBucketName() string { return "tempestNodeVersion" }
 
 // EdgeRecord is one live directed edge.
 type EdgeRecord struct {
@@ -75,8 +75,8 @@ type EdgeRecord struct {
 	Retracted  time.Time `json:"retractedAt,omitempty"`
 }
 
-// EidosBucketName pins the bucket the earlier graph implementation used.
-func (EdgeRecord) EidosBucketName() string { return "eidosEdgeRecord" }
+// TempestBucketName pins the bucket the earlier graph implementation used.
+func (EdgeRecord) TempestBucketName() string { return "tempestEdgeRecord" }
 
 // EdgeVersion is one closed version of an edge.
 type EdgeVersion struct {
@@ -100,8 +100,8 @@ type EdgeVersion struct {
 	SchemaVersion int       `json:"schemaVersion,omitempty"`
 }
 
-// EidosBucketName pins the bucket the earlier graph implementation used.
-func (EdgeVersion) EidosBucketName() string { return "eidosEdgeVersion" }
+// TempestBucketName pins the bucket the earlier graph implementation used.
+func (EdgeVersion) TempestBucketName() string { return "tempestEdgeVersion" }
 
 // nodeFromRecord converts a stored node to its caller-facing value.
 func (g *Graph) nodeFromRecord(record *NodeRecord) (*Node, error) {

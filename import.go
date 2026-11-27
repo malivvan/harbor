@@ -1,4 +1,4 @@
-package eidos
+package tempest
 
 import (
 	"bufio"
@@ -14,9 +14,9 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/malivvan/eidos-db/store/fstree"
-	"github.com/malivvan/eidos-db/store/series"
-	"github.com/malivvan/eidos-db/store/vector"
+	"github.com/malivvan/tempest/store/fstree"
+	"github.com/malivvan/tempest/store/series"
+	"github.com/malivvan/tempest/store/vector"
 )
 
 // ImportOptions controls Import.
@@ -120,7 +120,7 @@ func Import(ctx context.Context, dest *Store, r io.Reader, opts ImportOptions) (
 			return ImportSummary{}, ErrExportTruncated
 		}
 		if err != nil && err != io.EOF {
-			return ImportSummary{}, fmt.Errorf("eidos: import: read: %w", err)
+			return ImportSummary{}, fmt.Errorf("tempest: import: read: %w", err)
 		}
 		atEOF := err == io.EOF
 		read += int64(len(line))
@@ -244,7 +244,7 @@ func (im *importer) applyDBRecord(rec exportRecord) error {
 	}
 	ptr := reflect.New(t).Interface()
 	if err := json.Unmarshal(rec.Data, ptr); err != nil {
-		return fmt.Errorf("eidos: import db record %s: %w", rec.Type, err)
+		return fmt.Errorf("tempest: import db record %s: %w", rec.Type, err)
 	}
 	if im.dryRun {
 		return nil
@@ -261,7 +261,7 @@ func (im *importer) fsFor(name string) (*fstree.FS, error) {
 	}
 	filesystem, err := im.dest.File().Open(name)
 	if err != nil {
-		return nil, fmt.Errorf("eidos: import fs %q: %w", name, err)
+		return nil, fmt.Errorf("tempest: import fs %q: %w", name, err)
 	}
 	im.fsystems[name] = filesystem
 	return filesystem, nil
@@ -279,10 +279,10 @@ func (im *importer) applyFSDir(rec exportRecord) error {
 		return err
 	}
 	if err := filesystem.MkdirAll(rec.Path, os.FileMode(rec.Mode).Perm()); err != nil {
-		return fmt.Errorf("eidos: import fs %q %s: %w", rec.Container, rec.Path, err)
+		return fmt.Errorf("tempest: import fs %q %s: %w", rec.Container, rec.Path, err)
 	}
 	if err := filesystem.Chtimes(rec.Path, rec.Atime, rec.Mtime); err != nil {
-		return fmt.Errorf("eidos: import fs %q %s: %w", rec.Container, rec.Path, err)
+		return fmt.Errorf("tempest: import fs %q %s: %w", rec.Container, rec.Path, err)
 	}
 	return nil
 }
@@ -300,22 +300,22 @@ func (im *importer) applyFSFile(rec exportRecord) error {
 	}
 	if parent := path.Dir(rec.Path); parent != "/" && parent != "." {
 		if err := filesystem.MkdirAll(parent, 0o755); err != nil {
-			return fmt.Errorf("eidos: import fs %q %s: %w", rec.Container, parent, err)
+			return fmt.Errorf("tempest: import fs %q %s: %w", rec.Container, parent, err)
 		}
 	}
 	file, err := filesystem.OpenFile(rec.Path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(rec.Mode).Perm())
 	if err != nil {
-		return fmt.Errorf("eidos: import fs %q %s: %w", rec.Container, rec.Path, err)
+		return fmt.Errorf("tempest: import fs %q %s: %w", rec.Container, rec.Path, err)
 	}
 	if _, err := file.Write(rec.Data); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("eidos: import fs %q %s: %w", rec.Container, rec.Path, err)
+		return fmt.Errorf("tempest: import fs %q %s: %w", rec.Container, rec.Path, err)
 	}
 	if err := file.Close(); err != nil {
-		return fmt.Errorf("eidos: import fs %q %s: %w", rec.Container, rec.Path, err)
+		return fmt.Errorf("tempest: import fs %q %s: %w", rec.Container, rec.Path, err)
 	}
 	if err := filesystem.Chtimes(rec.Path, rec.Atime, rec.Mtime); err != nil {
-		return fmt.Errorf("eidos: import fs %q %s: %w", rec.Container, rec.Path, err)
+		return fmt.Errorf("tempest: import fs %q %s: %w", rec.Container, rec.Path, err)
 	}
 	return nil
 }
@@ -332,7 +332,7 @@ func (im *importer) applyFSSymlink(rec exportRecord) error {
 		return err
 	}
 	if err := filesystem.Symlink(rec.Link, rec.Path); err != nil {
-		return fmt.Errorf("eidos: import fs %q %s: %w", rec.Container, rec.Path, err)
+		return fmt.Errorf("tempest: import fs %q %s: %w", rec.Container, rec.Path, err)
 	}
 	return nil
 }
@@ -345,7 +345,7 @@ func (im *importer) applyTSPoints(rec exportRecord) error {
 		return nil
 	}
 	if err := im.dest.Series().Series(rec.Container).InsertMany(im.ctx, rec.Points); err != nil {
-		return fmt.Errorf("eidos: import series %q: %w", rec.Container, err)
+		return fmt.Errorf("tempest: import series %q: %w", rec.Container, err)
 	}
 	return nil
 }
@@ -358,7 +358,7 @@ func (im *importer) applyTSLabels(rec exportRecord) error {
 		return nil
 	}
 	if err := im.dest.Series().Series(rec.Container).SetLabels(im.ctx, rec.Labels); err != nil {
-		return fmt.Errorf("eidos: import series %q: %w", rec.Container, err)
+		return fmt.Errorf("tempest: import series %q: %w", rec.Container, err)
 	}
 	return nil
 }
@@ -372,7 +372,7 @@ func (im *importer) applyTSRetention(rec exportRecord) error {
 	}
 	retention := series.Retention{MaxAge: time.Duration(rec.MaxAge), MaxPoints: rec.MaxPoints}
 	if err := im.dest.Series().Series(rec.Container).SetRetention(im.ctx, retention); err != nil {
-		return fmt.Errorf("eidos: import series %q: %w", rec.Container, err)
+		return fmt.Errorf("tempest: import series %q: %w", rec.Container, err)
 	}
 	return nil
 }
@@ -388,14 +388,14 @@ func (im *importer) applyVecCollection(rec exportRecord) error {
 		options.HNSWParams = *rec.HNSW
 	}
 	if err := options.Validate(); err != nil {
-		return fmt.Errorf("eidos: import collection %q: %w", rec.Container, err)
+		return fmt.Errorf("tempest: import collection %q: %w", rec.Container, err)
 	}
 	if im.dryRun {
 		return nil
 	}
 	collection, err := im.dest.Vector().NewCollectionWithOptions(options)
 	if err != nil {
-		return fmt.Errorf("eidos: import collection %q: %w", rec.Container, err)
+		return fmt.Errorf("tempest: import collection %q: %w", rec.Container, err)
 	}
 	im.collections[rec.Container] = collection
 	return nil
@@ -407,7 +407,7 @@ func (im *importer) applyVecPoints(rec exportRecord) error {
 	}
 	batch, err := decodeVectorBatch(rec.Vectors)
 	if err != nil {
-		return fmt.Errorf("eidos: import collection %q: %w", rec.Container, err)
+		return fmt.Errorf("tempest: import collection %q: %w", rec.Container, err)
 	}
 	if im.dryRun {
 		return nil
@@ -420,7 +420,7 @@ func (im *importer) applyVecPoints(rec exportRecord) error {
 		batch[i].Version = 0 // store-managed
 	}
 	if err := collection.Upsert(batch); err != nil {
-		return fmt.Errorf("eidos: import collection %q: %w", rec.Container, err)
+		return fmt.Errorf("tempest: import collection %q: %w", rec.Container, err)
 	}
 	return nil
 }
@@ -433,7 +433,7 @@ func (im *importer) finish() error {
 	}
 	for name, collection := range im.collections {
 		if err := collection.Flush(); err != nil {
-			return fmt.Errorf("eidos: import collection %q: %w", name, err)
+			return fmt.Errorf("tempest: import collection %q: %w", name, err)
 		}
 	}
 	return nil

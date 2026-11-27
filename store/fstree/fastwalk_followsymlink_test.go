@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/eidos-db/internal/absfs"
+	"github.com/malivvan/tempest/internal/absfs"
 )
 
 // fsTestInfo is a minimal os.FileInfo for the follow-symlink walker test.

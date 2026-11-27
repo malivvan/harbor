@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/eidos-db/store"
-	"github.com/malivvan/eidos-db/store/ledger"
+	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/store/ledger"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )

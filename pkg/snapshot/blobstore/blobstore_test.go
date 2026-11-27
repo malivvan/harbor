@@ -10,21 +10,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/malivvan/eidos-db"
-	"github.com/malivvan/eidos-db/pkg/snapshot"
+	"github.com/malivvan/tempest"
+	"github.com/malivvan/tempest/pkg/snapshot"
 )
 
-// newStore returns an adapter over a throwaway eidos-db store.
+// newStore returns an adapter over a throwaway tempest store.
 func newStore(t *testing.T, bucket string) *Store {
 	t.Helper()
 	ctx := context.Background()
-	eidosStore, err := eidos.Open(ctx, filepath.Join(t.TempDir(), "test.db"), 0o600, &eidos.Options{Password: "test-password"})
+	tempestStore, err := tempest.Open(ctx, filepath.Join(t.TempDir(), "test.db"), 0o600, &tempest.Options{Password: "test-password"})
 	if err != nil {
-		t.Fatalf("eidos.Open: %v", err)
+		t.Fatalf("tempest.Open: %v", err)
 	}
-	t.Cleanup(func() { _ = eidosStore.Close() })
+	t.Cleanup(func() { _ = tempestStore.Close() })
 
-	return New(eidosStore.Objects(), bucket)
+	return New(tempestStore.Objects(), bucket)
 }
 
 func readAll(t *testing.T, s *Store, key string) (string, error) {

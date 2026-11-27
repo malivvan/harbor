@@ -41,7 +41,7 @@ import (
 	"encoding/binary"
 	"sync"
 
-	"github.com/malivvan/eidos-db/internal/argon2/blake2b"
+	"github.com/malivvan/tempest/internal/argon2/blake2b"
 )
 
 // The Argon2 version implemented by this package.

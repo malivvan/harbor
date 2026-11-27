@@ -8,8 +8,14 @@ on:
 permissions:
   contents: read
 
+# Everything builds and tests without a C toolchain. The one exception is the
+# race detector, which needs cgo (linux/amd64 only) and is enabled per step.
+env:
+  CGO_ENABLED: "0"
+
 jobs:
   test:
+    name: test linux/amd64
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,17 +34,129 @@ jobs:
       - name: build
         run: go build ./...
 
-      - name: test
-        run: go test -count=1 -timeout 180s ./...
+      - name: test (CGO disabled)
+        run: go test -count=1 -timeout 300s ./...
 
       - name: test -race
-        run: go test -race -count=1 -timeout 300s ./...
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race -count=1 -timeout 600s ./...
 
+      # Cross-package coverage: every test binary instruments every package, so
+      # the number covers code that is only reached through the root package.
       - name: coverage
-        run: go test -count=1 -timeout 180s -covermode=atomic -coverprofile=coverage.out ./...
+        run: |
+          go test -count=1 -timeout 600s -coverpkg=./... \
+            -covermode=atomic -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out > coverage.txt
+          tail -1 coverage.txt
 
-      - name: coverage summary
-        run: go tool cover -func=coverage.out > coverage.txt
+      - name: coverage gate
+        run: |
+          total=$(sed -n 's/^total:.*statements)[[:space:]]*\([0-9.]*\)%$/\1/p' coverage.txt)
+          if [ -z "$total" ]; then
+            echo "could not read the total coverage from coverage.txt" >&2
+            cat coverage.txt >&2
+            exit 1
+          fi
+          echo "total statement coverage: ${total}%"
+          floor=84
+          awk -v t="$total" -v f="$floor" 'BEGIN {
+            if (t + 0 < f + 0) {
+              printf "coverage %.2f%% is below the %d%% floor\n", t, f
+              exit 1
+            }
+          }'
+
+      # Only the pull-request/push refs are uploaded: a fork PR has no token and
+      # must not fail the build.
+      - name: coveralls
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          COVERALLS_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          go run github.com/mattn/goveralls@v0.0.12 \
+            -coverprofile=coverage.out \
+            -service=github \
+            -flags=unittests
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage.out
+            coverage.txt
+
+  test-386:
+    # 32-bit is verified natively: the ubuntu runner executes linux/386
+    # binaries, so the tests really run (not just compile) on a 32-bit word
+    # size. `go vet` under GOARCH=386 also flags unaligned 64-bit atomics,
+    # which are a hard fault on 386/arm.
+    name: test linux/386 (CGO off)
+    runs-on: ubuntu-latest
+    env:
+      GOOS: linux
+      GOARCH: 386
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: vet (32-bit alignment)
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      - name: test
+        run: go test -count=1 -timeout 600s ./...
+
+  test-qemu:
+    # 32- and 64-bit targets that the runner cannot execute natively are run
+    # under qemu-user. The arm entry carries GOARM so the v7 instruction set is
+    # what gets tested; 386, mips and mipsle are build-only targets below.
+    name: test ${{ matrix.goarch }} (qemu)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: arm
+            goarm: "7"
+            emulator: /usr/bin/qemu-arm-static
+          - goarch: arm64
+            emulator: /usr/bin/qemu-aarch64-static
+          - goarch: ppc64le
+            emulator: /usr/bin/qemu-ppc64le-static
+          - goarch: riscv64
+            emulator: /usr/bin/qemu-riscv64-static
+          - goarch: s390x
+            emulator: /usr/bin/qemu-s390x-static
+    env:
+      GOOS: linux
+      GOARCH: ${{ matrix.goarch }}
+      GOARM: ${{ matrix.goarm }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: install qemu-user
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-user-static
+
+      - name: test
+        # qemu is roughly an order of magnitude slower than the host, so the
+        # per-binary timeout is raised; it still catches a hang.
+        run: go test -exec "${{ matrix.emulator }}" -count=1 -timeout 900s ./...
 
   bench:
     runs-on: ubuntu-latest
@@ -89,7 +207,10 @@ jobs:
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
   compat:
-    name: compat ${{ matrix.goos }}/${{ matrix.goarch }}
+    # Cross-build matrix. 32-bit targets get GOARCH=386/arm/mips (GOARM for the
+    # arm entries) and are built, not run; execution happens in test-386 and
+    # test-qemu above.
+    name: compat ${{ matrix.goos }}/${{ matrix.goarch }}${{ matrix.goarm && format('/v{0}', matrix.goarm) || '' }} (${{ matrix.cgo }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -97,21 +218,72 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
+            cgo: "0"
             run_tests: true
           - goos: linux
             goarch: arm64
+            cgo: "0"
           - goos: linux
             goarch: loong64
+            cgo: "0"
+          - goos: linux
+            goarch: 386
+            cgo: "0"
+          - goos: linux
+            goarch: arm
+            goarm: "5"
+            cgo: "0"
+          - goos: linux
+            goarch: arm
+            goarm: "7"
+            cgo: "0"
+          - goos: linux
+            goarch: mips
+            cgo: "0"
+          - goos: linux
+            goarch: mipsle
+            cgo: "0"
           - goos: darwin
             goarch: arm64
+            cgo: "0"
+          - goos: darwin
+            goarch: amd64
+            cgo: "0"
           - goos: windows
             goarch: amd64
+            cgo: "0"
           - goos: windows
             goarch: arm64
+            cgo: "0"
+          - goos: windows
+            goarch: 386
+            cgo: "0"
+          - goos: freebsd
+            goarch: arm
+            cgo: "0"
+          - goos: netbsd
+            goarch: 386
+            cgo: "0"
+          - goos: netbsd
+            goarch: arm
+            cgo: "0"
+          - goos: openbsd
+            goarch: arm
+            cgo: "0"
+          - goos: freebsd
+            goarch: 386
+            cgo: "0"
+          - goos: freebsd
+            goarch: amd64
+            cgo: "0"
+          - goos: openbsd
+            goarch: 386
+            cgo: "0"
     env:
-      CGO_ENABLED: "0"
+      CGO_ENABLED: ${{ matrix.cgo }}
       GOOS: ${{ matrix.goos }}
       GOARCH: ${{ matrix.goarch }}
+      GOARM: ${{ matrix.goarm }}
     steps:
       - uses: actions/checkout@v4
 
@@ -120,9 +292,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: vet
+        if: matrix.goarch == 'amd64' && matrix.goos == 'linux'
+        run: go vet ./...
+
       - name: build
         run: go build ./...
 
       - name: test (linux/amd64)
         if: matrix.run_tests == true
-        run: go test -count=1 -timeout 180s ./...
+        run: go test -count=1 -timeout 300s ./...

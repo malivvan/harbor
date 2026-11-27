@@ -8,7 +8,7 @@ import (
 	"encoding/binary"
 	"hash"
 
-	"github.com/malivvan/eidos-db/internal/argon2/blake2b"
+	"github.com/malivvan/tempest/internal/argon2/blake2b"
 )
 
 // blake2bHash computes an arbitrary long hash value of in

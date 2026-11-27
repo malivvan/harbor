@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	hstore "github.com/malivvan/eidos-db/store"
+	hstore "github.com/malivvan/tempest/store"
 	bolt "go.etcd.io/bbolt"
 )
 

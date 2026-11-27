@@ -1,6 +1,6 @@
 # series — time series on BoltDB
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/eidos-db/store/series.svg)](https://pkg.go.dev/github.com/malivvan/eidos-db/store/series)
+[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/tempest/store/series.svg)](https://pkg.go.dev/github.com/malivvan/tempest/store/series)
 
 `series` stores named series of timestamped `float64` points in bbolt. Point keys are
 chronological, so range scans and aggregations stream in time order without a
@@ -235,7 +235,7 @@ Use `errors.Is`:
   readers proceed concurrently.
 - The store borrows the caller's `*bolt.DB`. Closing the wrapper does not close
   the database.
-- Inside the root `eidos` store, `eidos.Store.Close` closes the shared handle;
+- Inside the root `tempest` store, `tempest.Store.Close` closes the shared handle;
   do not close the `series` store separately.
 - A nil context returns `ErrNilContext`. Cancellation is checked between
   operations and during iteration, but cannot interrupt a bbolt lock wait.

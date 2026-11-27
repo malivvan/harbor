@@ -6,7 +6,7 @@
 
 package blake2b
 
-import "github.com/malivvan/eidos-db/internal/cpu"
+import "github.com/malivvan/tempest/internal/cpu"
 
 //go:noescape
 func hashBlocksVX(h *[8]uint64, c *[2]uint64, flag uint64, blocks []byte)

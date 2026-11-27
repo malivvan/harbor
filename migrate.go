@@ -1,4 +1,4 @@
-package eidos
+package tempest
 
 import (
 	"context"
@@ -12,15 +12,15 @@ import (
 // ErrSchemaTooNew reports a store whose application schema version is newer
 // than the binary's. It was written by a later build and must not be
 // downgraded.
-var ErrSchemaTooNew = errors.New("eidos: store schema is newer than this build")
+var ErrSchemaTooNew = errors.New("tempest: store schema is newer than this build")
 
 // ErrInvalidSchema reports a malformed migration plan.
-var ErrInvalidSchema = errors.New("eidos: invalid schema")
+var ErrInvalidSchema = errors.New("tempest: invalid schema")
 
 // Reserved bucket and key for the application schema version. It is separate
 // from the system header so existing stores keep opening.
 const (
-	schemaBucket = "eidos.schema"
+	schemaBucket = "tempest.schema"
 	schemaKey    = "version"
 )
 
@@ -93,7 +93,7 @@ func (s *Store) Migrate(ctx context.Context, schema Schema) error {
 				return err
 			}
 			if err := step.Apply(ctx, tx); err != nil {
-				return fmt.Errorf("eidos: migrate %d -> %d: %w", step.From, step.To, err)
+				return fmt.Errorf("tempest: migrate %d -> %d: %w", step.From, step.To, err)
 			}
 			version = step.To
 			if err := writeSchemaVersion(tx.btx, version); err != nil {

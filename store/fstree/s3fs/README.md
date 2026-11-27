@@ -1,7 +1,7 @@
 # s3fs — an S3-backed `absfs.Filer`
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/eidos-db/store/fstree/s3fs.svg)](https://pkg.go.dev/github.com/malivvan/eidos-db/store/fstree/s3fs)
-[![CI](https://github.com/malivvan/eidos-db/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/eidos-db/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/malivvan/tempest/store/fstree/s3fs.svg)](https://pkg.go.dev/github.com/malivvan/tempest/store/fstree/s3fs)
+[![CI](https://github.com/malivvan/tempest/actions/workflows/ci.yml/badge.svg)](https://github.com/malivvan/tempest/actions/workflows/ci.yml)
 
 `s3fs` implements the module's `absfs.Filer` interface on top of
 S3-compatible object storage. It signs requests locally with AWS Signature
@@ -58,7 +58,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/malivvan/eidos-db/store/fstree/s3fs"
+	"github.com/malivvan/tempest/store/fstree/s3fs"
 )
 
 func main() {

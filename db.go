@@ -1,4 +1,4 @@
-// Package eidos exposes a single bbolt-backed store that combines the record,
+// Package tempest exposes a single bbolt-backed store that combines the record,
 // fstree, series, vector and other sub-stores behind one password.
 //
 // The password is stretched with Argon2id using the salt and cost parameters
@@ -11,7 +11,7 @@
 // Graphs and Objects. Flags reports the persisted encryption flags and Meta
 // reports the KDF parameters. Use EncryptNone/Plaintext to create an
 // unencrypted store.
-package eidos
+package tempest
 
 import (
 	"context"
@@ -23,17 +23,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/malivvan/eidos-db/pkg/metrics"
-	"github.com/malivvan/eidos-db/store"
-	"github.com/malivvan/eidos-db/store/fstree"
-	"github.com/malivvan/eidos-db/store/graphs"
-	"github.com/malivvan/eidos-db/store/ledger"
-	"github.com/malivvan/eidos-db/store/object"
-	"github.com/malivvan/eidos-db/store/record"
-	"github.com/malivvan/eidos-db/store/search"
-	"github.com/malivvan/eidos-db/store/series"
-	"github.com/malivvan/eidos-db/store/system"
-	"github.com/malivvan/eidos-db/store/vector"
+	"github.com/malivvan/tempest/pkg/metrics"
+	"github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/store/fstree"
+	"github.com/malivvan/tempest/store/graphs"
+	"github.com/malivvan/tempest/store/ledger"
+	"github.com/malivvan/tempest/store/object"
+	"github.com/malivvan/tempest/store/record"
+	"github.com/malivvan/tempest/store/search"
+	"github.com/malivvan/tempest/store/series"
+	"github.com/malivvan/tempest/store/system"
+	"github.com/malivvan/tempest/store/vector"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -45,7 +45,7 @@ func namedRoot(name string) [][]byte {
 // Errors returned by the package.
 var (
 	// ErrClosed is returned by operations on a closed Store.
-	ErrClosed = errors.New("eidos: store is closed")
+	ErrClosed = errors.New("tempest: store is closed")
 
 	// ErrInvalidOptions reports a nil Options value or an unusable
 	// configuration.
@@ -184,7 +184,7 @@ type Options struct {
 	// and tracing spans from every sub-store. A nil Observer disables
 	// instrumentation and costs only a nil check per operation.
 	//
-	// eidos-db does not depend on a metrics library: implement
+	// tempest does not depend on a metrics library: implement
 	// metrics.Observer to forward to Prometheus, OpenTelemetry or anything
 	// else. See the metrics package for the metric names and labels.
 	Metrics metrics.Observer
@@ -195,7 +195,7 @@ type Options struct {
 // hang the opening process instead of reporting a second instance.
 const defaultBoltLockTimeout = 2 * time.Second
 
-// DefaultBoltOptions returns the complete bbolt.Options eidos-db applies to the
+// DefaultBoltOptions returns the complete bbolt.Options tempest applies to the
 // fields a caller leaves unset in Options.Options.
 //
 // Every field is set explicitly, including the ones that keep bbolt's zero
@@ -240,7 +240,7 @@ func DefaultBoltOptions() bolt.Options {
 		// changes nothing about crash safety.
 		FreelistType: bolt.FreelistMapType,
 
-		// ReadOnly: eidos-db has to create and migrate its system header, so the
+		// ReadOnly: tempest has to create and migrate its system header, so the
 		// handle is always writable. A read-only handle fails once
 		// LoadOrCreate needs to write and is not a supported Open mode.
 		ReadOnly: false,
@@ -284,7 +284,7 @@ func DefaultBoltOptions() bolt.Options {
 		// killed; callers that can afford the RSS opt in.
 		Mlock: false,
 
-		// Logger: nil selects bbolt's discard logger. eidos-db must not emit
+		// Logger: nil selects bbolt's discard logger. tempest must not emit
 		// database paths, keys or contents by default; a caller that wants
 		// bbolt's internal diagnostics injects a logger explicitly.
 		Logger: nil,
@@ -297,7 +297,7 @@ func DefaultBoltOptions() bolt.Options {
 	}
 }
 
-// applyBoltDefaults fills the fields whose eidos-db default differs from bbolt's
+// applyBoltDefaults fills the fields whose tempest default differs from bbolt's
 // zero value: the lock Timeout, the freelist type and PreLoadFreelist. Every
 // other field in DefaultBoltOptions is the zero value, so an unset field
 // already carries the default and an explicit caller value is preserved.
@@ -482,7 +482,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Audit:           auditSink(AuditRecord),
 		Metrics:         options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("eidos: open record store: %w", err)
+		return nil, fmt.Errorf("tempest: open record store: %w", err)
 	}
 	if s.fstree, err = fstree.Open(ctx, bdb, fstree.Config{
 		Root:            namedRoot(store.FSTREE),
@@ -492,7 +492,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Audit:           auditSink(AuditFile),
 		Metrics:         options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("eidos: open file store: %w", err)
+		return nil, fmt.Errorf("tempest: open file store: %w", err)
 	}
 	if s.series, err = series.Open(ctx, bdb, series.Config{
 		Root:               namedRoot(store.SERIES),
@@ -502,7 +502,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Audit:              auditSink(AuditSeries),
 		Metrics:            options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("eidos: open series store: %w", err)
+		return nil, fmt.Errorf("tempest: open series store: %w", err)
 	}
 	if s.search, err = search.Open(ctx, bdb, search.Config{
 		Root:          namedRoot(store.SEARCH),
@@ -510,7 +510,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		EncryptValues: system.HasFlag(md.Flags, EncryptRecordValues),
 		Metrics:       options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("eidos: open search store: %w", err)
+		return nil, fmt.Errorf("tempest: open search store: %w", err)
 	}
 	if s.graphs, err = graphs.Open(ctx, bdb, graphs.Config{
 		Root:   namedRoot(store.GRAPHS),
@@ -521,7 +521,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Audit:         auditSink(AuditGraphs),
 		Metrics:       options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("eidos: open graphs store: %w", err)
+		return nil, fmt.Errorf("tempest: open graphs store: %w", err)
 	}
 	if s.object, err = object.Open(ctx, bdb, object.Config{
 		Root:          namedRoot(store.OBJECT),
@@ -530,7 +530,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Audit:         auditSink(AuditObject),
 		Metrics:       options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("eidos: open object store: %w", err)
+		return nil, fmt.Errorf("tempest: open object store: %w", err)
 	}
 	if s.vector, err = vector.Open(ctx, bdb, vector.Config{
 		Root:                   namedRoot(store.VECTOR),
@@ -546,7 +546,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		// flush its buffers and never close the handle.
 		SharedDB: true,
 	}); err != nil {
-		return nil, fmt.Errorf("eidos: open vector store: %w", err)
+		return nil, fmt.Errorf("tempest: open vector store: %w", err)
 	}
 
 	opened = true
@@ -814,7 +814,7 @@ func (s *Store) View(fn func(*bolt.Tx) error) error {
 // fstree destination.
 func (s *Store) Backup(ctx context.Context, w io.Writer) error {
 	if w == nil {
-		return fmt.Errorf("eidos: backup: %w: writer is required", ErrInvalidOptions)
+		return fmt.Errorf("tempest: backup: %w: writer is required", ErrInvalidOptions)
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -836,7 +836,7 @@ func (s *Store) Backup(ctx context.Context, w io.Writer) error {
 	// consistent with what the store has accepted.
 	if s.vector != nil {
 		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
-			return fmt.Errorf("eidos: backup: flush vec store: %w", err)
+			return fmt.Errorf("tempest: backup: flush vec store: %w", err)
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -848,7 +848,7 @@ func (s *Store) Backup(ctx context.Context, w io.Writer) error {
 			return err
 		}
 		if _, err := tx.WriteTo(ctxWriter{ctx: ctx, w: w}); err != nil {
-			return fmt.Errorf("eidos: backup: %w", err)
+			return fmt.Errorf("tempest: backup: %w", err)
 		}
 		return nil
 	})
@@ -914,7 +914,7 @@ func (s *Store) CompactTo(ctx context.Context, path string, mode os.FileMode) er
 		return err
 	}
 	if path == "" {
-		return fmt.Errorf("eidos: compact: %w: path is required", ErrInvalidOptions)
+		return fmt.Errorf("tempest: compact: %w: path is required", ErrInvalidOptions)
 	}
 	if s == nil {
 		return ErrClosed
@@ -930,14 +930,14 @@ func (s *Store) CompactTo(ctx context.Context, path string, mode os.FileMode) er
 	// copy is complete.
 	if s.vector != nil {
 		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
-			return fmt.Errorf("eidos: compact: flush vec store: %w", err)
+			return fmt.Errorf("tempest: compact: flush vec store: %w", err)
 		}
 	}
 
 	if _, err := os.Stat(path); err == nil {
 		return &os.PathError{Op: "compact", Path: path, Err: os.ErrExist}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("eidos: compact: %w", err)
+		return fmt.Errorf("tempest: compact: %w", err)
 	}
 
 	if mode == 0 {
@@ -945,7 +945,7 @@ func (s *Store) CompactTo(ctx context.Context, path string, mode os.FileMode) er
 	}
 	dst, err := bolt.Open(path, mode, &bolt.Options{Timeout: time.Second})
 	if err != nil {
-		return fmt.Errorf("eidos: compact: %w", err)
+		return fmt.Errorf("tempest: compact: %w", err)
 	}
 	compactErr := bolt.Compact(dst, s.bs, compactTxMaxSize)
 	closeErr := dst.Close()
@@ -954,7 +954,7 @@ func (s *Store) CompactTo(ctx context.Context, path string, mode os.FileMode) er
 	}
 	if compactErr != nil {
 		_ = os.Remove(path)
-		return fmt.Errorf("eidos: compact: %w", compactErr)
+		return fmt.Errorf("tempest: compact: %w", compactErr)
 	}
 	return nil
 }
@@ -979,7 +979,7 @@ func (s *Store) Close() error {
 	var flushErr error
 	if s.vector != nil {
 		if err := s.vector.Flush(); err != nil && !errors.Is(err, vector.ErrClosed) {
-			flushErr = fmt.Errorf("eidos: flush vec store: %w", err)
+			flushErr = fmt.Errorf("tempest: flush vec store: %w", err)
 		}
 	}
 	closeErr := s.bs.Close()

@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/malivvan/eidos-db/pkg/metrics"
+	"github.com/malivvan/tempest/pkg/metrics"
 )
 
 // fallbackCounter records how many times the exact-scan fallback fired.

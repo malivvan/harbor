@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/eidos-db/pkg/sign/canonical"
+	"github.com/malivvan/tempest/pkg/sign/canonical"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )

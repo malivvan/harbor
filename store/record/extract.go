@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/malivvan/eidos-db/store/record/index"
+	"github.com/malivvan/tempest/store/record/index"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -18,7 +18,7 @@ const (
 	tagUniqueIdx = "unique"
 	tagInline    = "inline"
 	tagIncrement = "increment"
-	indexPrefix  = "__eidos_index_"
+	indexPrefix  = "__tempest_index_"
 )
 
 type fieldConfig struct {
@@ -53,7 +53,7 @@ func bucketName(data interface{}) string {
 	v := reflect.ValueOf(data)
 	if v.IsValid() {
 		if bn, ok := data.(BucketNamer); ok {
-			return bn.EidosBucketName()
+			return bn.TempestBucketName()
 		}
 		if v.Kind() == reflect.Pointer && !v.IsNil() {
 			return bucketNameFromValue(&v)
@@ -67,7 +67,7 @@ func bucketNameFromValue(v *reflect.Value) string {
 	if v.Kind() == reflect.Pointer {
 		if !v.IsNil() && v.CanInterface() {
 			if bn, ok := v.Interface().(BucketNamer); ok {
-				return bn.EidosBucketName()
+				return bn.TempestBucketName()
 			}
 		}
 		e := v.Elem()
@@ -75,12 +75,12 @@ func bucketNameFromValue(v *reflect.Value) string {
 	}
 	if v.CanInterface() {
 		if bn, ok := v.Interface().(BucketNamer); ok {
-			return bn.EidosBucketName()
+			return bn.TempestBucketName()
 		}
 	}
 	if v.CanAddr() {
 		if bn, ok := v.Addr().Interface().(BucketNamer); ok {
-			return bn.EidosBucketName()
+			return bn.TempestBucketName()
 		}
 	}
 	return v.Type().Name()

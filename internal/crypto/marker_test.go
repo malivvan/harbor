@@ -113,18 +113,18 @@ func TestVerifyCanary(t *testing.T) {
 	kc, err := NewKeychain([][]byte{testKey(30)})
 	require.NoError(t, err)
 
-	sealed, err := kc.Seal([]byte("eidos/test/aead/v1"))
+	sealed, err := kc.Seal([]byte("tempest/test/aead/v1"))
 	require.NoError(t, err)
-	require.NoError(t, VerifyCanary(kc, sealed, "eidos/test/aead/v1"))
+	require.NoError(t, VerifyCanary(kc, sealed, "tempest/test/aead/v1"))
 
 	// A different expectation is a mismatch.
-	require.ErrorIs(t, VerifyCanary(kc, sealed, "eidos/test/aead/v2"), ErrAuthFailed)
+	require.ErrorIs(t, VerifyCanary(kc, sealed, "tempest/test/aead/v2"), ErrAuthFailed)
 
 	// A different key cannot open the canary.
 	other, err := NewKeychain([][]byte{testKey(31)})
 	require.NoError(t, err)
-	require.ErrorIs(t, VerifyCanary(other, sealed, "eidos/test/aead/v1"), ErrAuthFailed)
+	require.ErrorIs(t, VerifyCanary(other, sealed, "tempest/test/aead/v1"), ErrAuthFailed)
 
 	// A plaintext keychain cannot verify anything.
-	require.ErrorIs(t, VerifyCanary(nil, sealed, "eidos/test/aead/v1"), ErrInvalidConfig)
+	require.ErrorIs(t, VerifyCanary(nil, sealed, "tempest/test/aead/v1"), ErrInvalidConfig)
 }

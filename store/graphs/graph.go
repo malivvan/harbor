@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	hdb "github.com/malivvan/eidos-db/store/record"
+	hdb "github.com/malivvan/tempest/store/record"
 )
 
 var (
@@ -205,7 +205,7 @@ type Statistics struct {
 }
 
 // ValueCodec encodes and decodes a record's dynamic properties. The default is
-// JSON; a caller that already stores properties in another encoding (eidos's
+// JSON; a caller that already stores properties in another encoding (tempest's
 // binco value union, for instance) supplies it here so an existing file keeps
 // reading and writing the same bytes.
 type ValueCodec interface {
