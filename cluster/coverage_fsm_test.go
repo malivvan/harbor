@@ -107,26 +107,26 @@ func TestFsmApplyAllCommands(t *testing.T) {
 
 	// fstree
 	at := time.Unix(2000, 0)
-	ok(opFileMkdir, filePathArg{File: "data", Name: "/d", Perm: 0o755, Atime: at, Mtime: at})
-	ok(opFileMkdirAll, filePathArg{File: "data", Name: "/a/b/c", Perm: 0o755, Atime: at, Mtime: at})
-	ok(opFileWrite, filePathArg{File: "data", Name: "/d/f", Perm: 0o644, Atime: at, Mtime: at, Data: []byte("hello")})
-	ok(opFileTruncate, filePathArg{File: "data", Name: "/d/f", Size: 2})
-	ok(opFileChmod, filePathArg{File: "data", Name: "/d/f", Perm: 0o600})
-	ok(opFileChtimes, filePathArg{File: "data", Name: "/d/f", Atime: at, Mtime: at})
-	ok(opFileChown, filePathArg{File: "data", Name: "/d/f", Uid: 1, Gid: 1})
-	ok(opFileSymlink, filePathArg{File: "data", Name: "/d/f", New: "/link"})
-	ok(opFileRemove, filePathArg{File: "data", Name: "/link"})
-	ok(opFileRename, filePathArg{File: "data", Name: "/d/f", New: "/d/g"})
-	ok(opFileRemoveAll, filePathArg{File: "data", Name: "/a"})
+	ok(opFstreeMkdir, fstreePathArg{Fstree: "data", Name: "/d", Perm: 0o755, Atime: at, Mtime: at})
+	ok(opFstreeMkdirAll, fstreePathArg{Fstree: "data", Name: "/a/b/c", Perm: 0o755, Atime: at, Mtime: at})
+	ok(opFstreeWrite, fstreePathArg{Fstree: "data", Name: "/d/f", Perm: 0o644, Atime: at, Mtime: at, Data: []byte("hello")})
+	ok(opFstreeTruncate, fstreePathArg{Fstree: "data", Name: "/d/f", Size: 2})
+	ok(opFstreeChmod, fstreePathArg{Fstree: "data", Name: "/d/f", Perm: 0o600})
+	ok(opFstreeChtimes, fstreePathArg{Fstree: "data", Name: "/d/f", Atime: at, Mtime: at})
+	ok(opFstreeChown, fstreePathArg{Fstree: "data", Name: "/d/f", Uid: 1, Gid: 1})
+	ok(opFstreeSymlink, fstreePathArg{Fstree: "data", Name: "/d/f", New: "/link"})
+	ok(opFstreeRemove, fstreePathArg{Fstree: "data", Name: "/link"})
+	ok(opFstreeRename, fstreePathArg{Fstree: "data", Name: "/d/f", New: "/d/g"})
+	ok(opFstreeRemoveAll, fstreePathArg{Fstree: "data", Name: "/a"})
 
 	// Verify a representative effect before tearing the file system down.
-	fsys, err := n.Store().File().Open("data")
+	fsys, err := n.Store().Fstree().Open("data")
 	require.NoError(t, err)
 	info, err := fsys.Stat("/d/g")
 	require.NoError(t, err)
 	require.Equal(t, int64(2), info.Size())
 
-	ok(opFileDeleteFileSystem, filePathArg{File: "data"})
+	ok(opFstreeDeleteFileSystem, fstreePathArg{Fstree: "data"})
 }
 
 // TestFsmApplyRejectsBadArgs locks in that malformed arguments and unknown
@@ -157,7 +157,7 @@ func TestFsmApplyRejectsBadArgs(t *testing.T) {
 		{opRecordSave, `{"type":42}`},
 		{opSeriesInsert, `{"series":42}`},
 		{opVectorUpsert, `{"collection":42}`},
-		{opFileMkdir, `{"file":42}`},
+		{opFstreeMkdir, `{"fstree":42}`},
 	} {
 		data := mustJSON(t, Command{Op: tc.op, Arg: json.RawMessage(tc.raw)})
 		resp := f.Apply(&raft.Log{Index: uint64(10 + i), Data: data})
@@ -178,8 +178,8 @@ func TestFsmApplyClosedStore(t *testing.T) {
 		{opRecordSave, recordChange{Type: "x", Data: json.RawMessage(`{}`)}},
 		{opSeriesInsert, seriesInsertArg{Series: "s"}},
 		{opVectorCreateCollection, vectorCreateArg{Name: "v", VectorLen: 1}},
-		{opFileMkdir, filePathArg{File: "data", Name: "/d"}},
-		{opFileDeleteFileSystem, filePathArg{File: "data"}},
+		{opFstreeMkdir, fstreePathArg{Fstree: "data", Name: "/d"}},
+		{opFstreeDeleteFileSystem, fstreePathArg{Fstree: "data"}},
 		{opVectorFlush, nil},
 	} {
 		resp := applyLog(t, f, 1, tc.op, tc.arg)
@@ -282,19 +282,19 @@ func TestFsmFileErrorPaths(t *testing.T) {
 	f := &fsm{node: n}
 	at := time.Unix(1000, 0)
 
-	require.NoError(t, asError(applyLog(t, f, 1, opFileWrite, filePathArg{
-		File: "data", Name: "/f", Perm: 0o644, Atime: at, Mtime: at, Data: []byte("x"),
+	require.NoError(t, asError(applyLog(t, f, 1, opFstreeWrite, fstreePathArg{
+		Fstree: "data", Name: "/f", Perm: 0o644, Atime: at, Mtime: at, Data: []byte("x"),
 	})))
 
 	// A path component that is a file cannot be traversed to make a directory.
-	resp := applyLog(t, f, 2, opFileMkdirAll, filePathArg{
-		File: "data", Name: "/f/sub", Perm: 0o755, Atime: at, Mtime: at,
+	resp := applyLog(t, f, 2, opFstreeMkdirAll, fstreePathArg{
+		Fstree: "data", Name: "/f/sub", Perm: 0o755, Atime: at, Mtime: at,
 	})
 	require.Error(t, resp.(error))
 
 	// Opening a file below a plain file fails inside the store.
-	resp = applyLog(t, f, 3, opFileWrite, filePathArg{
-		File: "data", Name: "/f/sub/x", Perm: 0o644, Atime: at, Mtime: at, Data: []byte("y"),
+	resp = applyLog(t, f, 3, opFstreeWrite, fstreePathArg{
+		Fstree: "data", Name: "/f/sub/x", Perm: 0o644, Atime: at, Mtime: at, Data: []byte("y"),
 	})
 	require.Error(t, resp.(error))
 }

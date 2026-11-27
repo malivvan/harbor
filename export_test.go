@@ -31,7 +31,7 @@ func seedExportStore(t *testing.T, store *Store) {
 	require.NoError(t, store.Record().Save(ctx, &exportTestRecord{Name: "alice"}))
 	require.NoError(t, store.Record().Save(ctx, &exportTestRecord{Name: "bob"}))
 
-	vfs, err := store.File().Open("docs")
+	vfs, err := store.Fstree().Open("docs")
 	require.NoError(t, err)
 	require.NoError(t, vfs.MkdirAll("/reports/2026", 0o750))
 	file, err := vfs.OpenFile("/reports/2026/q1.txt", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
@@ -67,7 +67,7 @@ func verifyExportStore(t *testing.T, store *Store) {
 	var rec exportTestRecord
 	require.NoError(t, store.Record().Select(q.Eq("Name", "alice")).First(ctx, &rec))
 
-	vfs, err := store.File().Open("docs")
+	vfs, err := store.Fstree().Open("docs")
 	require.NoError(t, err)
 	data, err := vfs.ReadFile("/reports/2026/q1.txt")
 	require.NoError(t, err)

@@ -269,7 +269,7 @@ func TestMigrateMissingBucket(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
-	fsys, err := store.File().Open("objects")
+	fsys, err := store.Fstree().Open("objects")
 	require.NoError(t, err)
 
 	// A source bucket that does not exist migrates nothing and is not an error.

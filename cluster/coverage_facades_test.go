@@ -119,7 +119,7 @@ func TestNodeFacades(t *testing.T) {
 	})
 
 	t.Run("file", func(t *testing.T) {
-		f := node.File().Open("data")
+		f := node.Fstree().Open("data")
 		require.NoError(t, f.Mkdir(ctx, "/dir", 0o755))
 		require.NoError(t, f.WriteFile(ctx, "/dir/a.txt", []byte("hello"), 0o644))
 
@@ -132,7 +132,7 @@ func TestNodeFacades(t *testing.T) {
 		require.NoError(t, f.Rename(ctx, "/dir/a.txt", "/dir/c.txt"))
 		require.NoError(t, node.Barrier(5*time.Second))
 
-		fsys, err := node.Store().File().Open("data")
+		fsys, err := node.Store().Fstree().Open("data")
 		require.NoError(t, err)
 		data, err := fsys.ReadFile("/dir/c.txt")
 		require.NoError(t, err)
@@ -163,7 +163,7 @@ func TestNodeFacades(t *testing.T) {
 func TestFacadeNilReceivers(t *testing.T) {
 	ctx := context.Background()
 
-	var f *File
+	var f *Fstree
 	require.Nil(t, f.Open("x"))
 	for _, err := range []error{
 		f.Mkdir(ctx, "/d", 0o755),
@@ -215,7 +215,7 @@ func TestFacadeCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	var f *File
+	var f *Fstree
 	for _, err := range []error{
 		f.Mkdir(ctx, "/d", 0o755),
 		f.Remove(ctx, "/x"),

@@ -68,8 +68,8 @@ const (
 	EncryptRecordKeys            = system.EncryptRecordKeys
 	EncryptRecordValues          = system.EncryptRecordValues
 	EncryptRecordMetadata        = system.EncryptRecordMetadata
-	EncryptFileContent           = system.EncryptFileContent
-	EncryptFileMetadata          = system.EncryptFileMetadata
+	EncryptFSTreeContent         = system.EncryptFSTreeContent
+	EncryptFSTreeMetadata        = system.EncryptFSTreeMetadata
 	EncryptSeriesValues          = system.EncryptSeriesValues
 	EncryptSeriesNames           = system.EncryptSeriesNames
 	EncryptVectorPointIDs        = system.EncryptVectorPointIDs
@@ -78,7 +78,7 @@ const (
 	EncryptGraphValues           = system.EncryptGraphValues
 	EncryptObjectValues          = system.EncryptObjectValues
 	EncryptRecord                = system.EncryptRecord
-	EncryptFile                  = system.EncryptFile
+	EncryptFSTree                = system.EncryptFSTree
 	EncryptSeries                = system.EncryptSeries
 	EncryptVector                = system.EncryptVector
 	EncryptGraph                 = system.EncryptGraph
@@ -86,7 +86,7 @@ const (
 	EncryptAll                   = system.EncryptAll
 	TraceNone                    = system.TraceNone
 	TraceRecord                  = system.TraceRecord
-	TraceFile                    = system.TraceFile
+	TraceFSTree                  = system.TraceFSTree
 	TraceSeries                  = system.TraceSeries
 	TraceVector                  = system.TraceVector
 	TraceGraphs                  = system.TraceGraphs
@@ -146,10 +146,10 @@ type Compression struct {
 
 // Dedup selects content-addressed deduplication for the stores that support it.
 type Dedup struct {
-	// Files deduplicates file-store chunks by content hash. It implies chunked
+	// FSTree deduplicates fstree chunks by content hash. It implies chunked
 	// content and therefore content encryption, so it requires a store whose
-	// file content is encrypted.
-	Files bool
+	// fstree content is encrypted.
+	FSTree bool
 	// Objects deduplicates object-store content by hash, across keys and
 	// buckets.
 	Objects bool
@@ -510,11 +510,11 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	}
 	defer keys.Wipe()
 
-	// File dedup stores chunks content-addressed under the file store's marker,
+	// FSTree dedup stores chunks content-addressed under the fstree store's marker,
 	// which implies content encryption. A store whose persisted flags do not
 	// encrypt file content cannot host it; fail closed instead of creating an
 	// encrypted filesystem inside a plaintext store.
-	if options.Dedup.Files && !system.HasFlag(md.Flags, EncryptFileContent) {
+	if options.Dedup.FSTree && !system.HasFlag(md.Flags, EncryptFSTreeContent) {
 		return nil, fmt.Errorf("%w: file dedup requires encrypted file content", ErrInvalidOptions)
 	}
 
@@ -527,8 +527,8 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		if system.HasFlag(options.Trace, TraceRecord) {
 			recKeys[ledger.StoreRecord] = append(ed25519.PrivateKey(nil), keys.TraceRecord...)
 		}
-		if system.HasFlag(options.Trace, TraceFile) {
-			recKeys[ledger.StoreFile] = append(ed25519.PrivateKey(nil), keys.TraceFile...)
+		if system.HasFlag(options.Trace, TraceFSTree) {
+			recKeys[ledger.StoreFSTree] = append(ed25519.PrivateKey(nil), keys.TraceFSTree...)
 		}
 		if system.HasFlag(options.Trace, TraceSeries) {
 			recKeys[ledger.StoreSeries] = append(ed25519.PrivateKey(nil), keys.TraceSeries...)
@@ -549,7 +549,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		s.traceFlags = options.Trace
 		s.tracePubs = tracePublicKeys{
 			traceRecord: publicOf(keys.TraceRecord),
-			traceFSTree: publicOf(keys.TraceFile),
+			traceFSTree: publicOf(keys.TraceFSTree),
 			traceSeries: publicOf(keys.TraceSeries),
 			traceVector: publicOf(keys.TraceVector),
 			traceGraphs: publicOf(keys.TraceGraphs),
@@ -584,17 +584,17 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	}
 	if s.fstree, err = fstree.Open(ctx, bdb, fstree.Config{
 		Root:            namedRoot(bucket.FSTREE),
-		Secret:          keys.File,
-		EncryptMetadata: system.HasFlag(md.Flags, EncryptFileMetadata),
-		EncryptContent:  system.HasFlag(md.Flags, EncryptFileContent),
-		Dedup:           options.Dedup.Files,
+		Secret:          keys.FSTree,
+		EncryptMetadata: system.HasFlag(md.Flags, EncryptFSTreeMetadata),
+		EncryptContent:  system.HasFlag(md.Flags, EncryptFSTreeContent),
+		Dedup:           options.Dedup.FSTree,
 		Compress:        options.Compression.Enable,
 		CompressLevel:   options.Compression.Level,
 		MinCompress:     options.Compression.MinSize,
-		Trace:           traceSink(TraceFile),
+		Trace:           traceSink(TraceFSTree),
 		Metrics:         options.Metrics,
 	}); err != nil {
-		return nil, fmt.Errorf("tempest: open file store: %w", err)
+		return nil, fmt.Errorf("tempest: open fstree store: %w", err)
 	}
 	if s.series, err = series.Open(ctx, bdb, series.Config{
 		Root:               namedRoot(bucket.SERIES),
@@ -701,7 +701,7 @@ func (s *Store) Record(path ...string) *record.Store {
 
 // File returns the fstree sub-store. Extra path segments select a rooted view
 // instead of the conventional root (bucket.FSTREE).
-func (s *Store) File(path ...string) *fstree.Store {
+func (s *Store) Fstree(path ...string) *fstree.Store {
 	if s == nil {
 		return nil
 	}
@@ -872,8 +872,8 @@ func (s *Store) VerifyTrace() (ledger.Result, error) {
 	if system.HasFlag(s.traceFlags, TraceRecord) {
 		keys[ledger.StoreRecord] = s.tracePubs.traceRecord
 	}
-	if system.HasFlag(s.traceFlags, TraceFile) {
-		keys[ledger.StoreFile] = s.tracePubs.traceFSTree
+	if system.HasFlag(s.traceFlags, TraceFSTree) {
+		keys[ledger.StoreFSTree] = s.tracePubs.traceFSTree
 	}
 	if system.HasFlag(s.traceFlags, TraceSeries) {
 		keys[ledger.StoreSeries] = s.tracePubs.traceSeries

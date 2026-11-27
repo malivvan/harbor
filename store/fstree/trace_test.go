@@ -26,7 +26,7 @@ func openTraceedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	rec := ledger.NewRecorder(db, map[string]ed25519.PrivateKey{ledger.StoreFile: priv})
+	rec := ledger.NewRecorder(db, map[string]ed25519.PrivateKey{ledger.StoreFSTree: priv})
 	store, err := Open(context.Background(), db, Config{Root: [][]byte{[]byte(bucket.FSTREE)}, Trace: rec})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
@@ -49,7 +49,7 @@ func TestTraceRecordsFSWrites(t *testing.T) {
 	require.NoError(t, fsys.RemoveAll("/dir"))
 	require.NoError(t, store.DeleteFS("fs"))
 
-	res, err := ledger.Verify(db, map[string]ed25519.PublicKey{ledger.StoreFile: pub})
+	res, err := ledger.Verify(db, map[string]ed25519.PublicKey{ledger.StoreFSTree: pub})
 	require.NoError(t, err)
 	require.Equal(t, uint64(11), res.Count)
 }
@@ -60,7 +60,7 @@ func TestTraceDisabledRecordsNothing(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, fsys.Mkdir("/dir", 0o755))
 
-	_, err = ledger.Verify(db, map[string]ed25519.PublicKey{ledger.StoreFile: nil})
+	_, err = ledger.Verify(db, map[string]ed25519.PublicKey{ledger.StoreFSTree: nil})
 	require.ErrorIs(t, err, ledger.ErrNoLog)
 }
 
@@ -89,7 +89,7 @@ func TestTraceRecordsCopy(t *testing.T) {
 	require.NoError(t, writeFile(t, fsys, "/src.txt", "hello"))
 	require.NoError(t, fsys.Copy("/src.txt", "/dst.txt"))
 
-	res, err := ledger.Verify(db, map[string]ed25519.PublicKey{ledger.StoreFile: pub})
+	res, err := ledger.Verify(db, map[string]ed25519.PublicKey{ledger.StoreFSTree: pub})
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), res.Count, "write, close and copy must be recorded")
 

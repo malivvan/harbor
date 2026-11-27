@@ -327,74 +327,74 @@ func (f *fsm) applyCommand(index uint64, c Command) any {
 		return f.applyObjectDrop(ctx, a)
 
 	// fs
-	case opFileMkdir:
-		var a filePathArg
+	case opFstreeMkdir:
+		var a fstreePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
 		return f.applyFileMkdir(a)
-	case opFileMkdirAll:
-		var a filePathArg
+	case opFstreeMkdirAll:
+		var a fstreePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
 		return f.applyFileMkdirAll(a)
-	case opFileTruncate:
-		var a filePathArg
+	case opFstreeTruncate:
+		var a fstreePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
 		return f.applyFileTruncate(a)
-	case opFileChmod:
-		var a filePathArg
+	case opFstreeChmod:
+		var a fstreePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
 		return f.applyFileChmod(a)
-	case opFileChtimes:
-		var a filePathArg
+	case opFstreeChtimes:
+		var a fstreePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
 		return f.applyFileChtimes(a)
-	case opFileChown:
-		var a filePathArg
+	case opFstreeChown:
+		var a fstreePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
 		return f.applyFileChown(a)
-	case opFileSymlink:
-		var a filePathArg
+	case opFstreeSymlink:
+		var a fstreePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
 		return f.applyFileSymlink(a)
-	case opFileRemove:
-		var a filePathArg
+	case opFstreeRemove:
+		var a fstreePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
 		return f.applyFileRemove(a)
-	case opFileRename:
-		var a filePathArg
+	case opFstreeRename:
+		var a fstreePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
 		return f.applyFileRename(a)
-	case opFileRemoveAll:
-		var a filePathArg
+	case opFstreeRemoveAll:
+		var a fstreePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
 		return f.applyFileRemoveAll(a)
-	case opFileWrite:
-		var a filePathArg
+	case opFstreeWrite:
+		var a fstreePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}
 		return f.applyFileWrite(a)
-	case opFileDeleteFileSystem:
-		var a filePathArg
+	case opFstreeDeleteFileSystem:
+		var a fstreePathArg
 		if err := decodeArg(index, c, &a); err != nil {
 			return err
 		}

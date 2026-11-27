@@ -66,18 +66,18 @@ const (
 	opObjectDrop   = "object.drop"
 
 	// fstree store
-	opFileMkdir            = "file.mkdir"
-	opFileMkdirAll         = "file.mkdir_all"
-	opFileRemove           = "file.remove"
-	opFileRename           = "file.rename"
-	opFileRemoveAll        = "file.remove_all"
-	opFileWrite            = "file.write"
-	opFileTruncate         = "file.truncate"
-	opFileChmod            = "file.chmod"
-	opFileChtimes          = "file.chtimes"
-	opFileChown            = "file.chown"
-	opFileSymlink          = "file.symlink"
-	opFileDeleteFileSystem = "file.delete_fs"
+	opFstreeMkdir            = "fstree.mkdir"
+	opFstreeMkdirAll         = "fstree.mkdir_all"
+	opFstreeRemove           = "fstree.remove"
+	opFstreeRename           = "fstree.rename"
+	opFstreeRemoveAll        = "fstree.remove_all"
+	opFstreeWrite            = "fstree.write"
+	opFstreeTruncate         = "fstree.truncate"
+	opFstreeChmod            = "fstree.chmod"
+	opFstreeChtimes          = "fstree.chtimes"
+	opFstreeChown            = "fstree.chown"
+	opFstreeSymlink          = "fstree.symlink"
+	opFstreeDeleteFileSystem = "fstree.delete_fs"
 )
 
 func encodeCommand(op string, arg any) ([]byte, error) {

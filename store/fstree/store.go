@@ -388,7 +388,7 @@ func (s *Store) DeleteFS(name string) error {
 	}
 	if s.trace != nil {
 		return s.trace.Record(ledger.Entry{
-			Store:  ledger.StoreFile,
+			Store:  ledger.StoreFSTree,
 			Op:     "delete_fs",
 			Entity: name,
 		})

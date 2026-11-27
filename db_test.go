@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	file "github.com/malivvan/tempest/store/fstree"
+	"github.com/malivvan/tempest/store/fstree"
 	"github.com/malivvan/tempest/store/graphs"
 	"github.com/malivvan/tempest/store/record"
 	"github.com/malivvan/tempest/store/search"
@@ -67,7 +67,7 @@ func TestStoreRoundTrip(t *testing.T) {
 
 	s := mustOpen(t, path, password)
 
-	if s.Record() == nil || s.File() == nil || s.Series() == nil || s.Vector() == nil {
+	if s.Record() == nil || s.Fstree() == nil || s.Series() == nil || s.Vector() == nil {
 		t.Fatal("one or more sub-stores are nil")
 	}
 
@@ -123,7 +123,7 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatalf("db save: %v", err)
 	}
 
-	vfs, err := s.File().Open("test_fs")
+	vfs, err := s.Fstree().Open("test_fs")
 	if err != nil {
 		t.Fatalf("fs open: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatalf("db one after reopen: %v", err)
 	}
 
-	vfs, err = s.File().Open("test_fs")
+	vfs, err = s.Fstree().Open("test_fs")
 	if err != nil {
 		t.Fatalf("fs open after reopen: %v", err)
 	}
@@ -492,7 +492,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
 	}
-	if s.Record() != nil || s.File() != nil || s.Series() != nil || s.Vector() != nil {
+	if s.Record() != nil || s.Fstree() != nil || s.Series() != nil || s.Vector() != nil {
 		t.Fatal("sub-store accessors must return nil after Close")
 	}
 	if _, _, _, _, _, err := s.Meta(); !errors.Is(err, ErrClosed) {
@@ -640,7 +640,7 @@ func TestDeriveKeys(t *testing.T) {
 	keys := map[string][]byte{
 		"canary": first.Canary,
 		"db":     first.Record,
-		"fs":     first.File,
+		"fs":     first.FSTree,
 		"ts":     first.Series,
 		"vec":    first.Vector,
 	}
@@ -692,7 +692,7 @@ func TestStoreKeysWipe(t *testing.T) {
 	for name, key := range map[string][]byte{
 		"canary": keys.Canary,
 		"db":     keys.Record,
-		"fs":     keys.File,
+		"fs":     keys.FSTree,
 		"ts":     keys.Series,
 		"vec":    keys.Vector,
 	} {
@@ -972,7 +972,7 @@ func TestOpenNilReceiverHelpers(t *testing.T) {
 	}
 	_, _, _, _, _, err := s.Meta()
 	require.ErrorIs(t, err, ErrClosed)
-	if s.Record() != nil || s.File() != nil || s.Series() != nil || s.Vector() != nil {
+	if s.Record() != nil || s.Fstree() != nil || s.Series() != nil || s.Vector() != nil {
 		t.Fatal("nil sub-store accessors must return nil")
 	}
 }
@@ -1000,7 +1000,7 @@ func TestTraceTrailEndToEnd(t *testing.T) {
 	require.NoError(t, col.Upsert([]vector.PointStruct{{ID: "a", Vector: []float32{1, 2, 3}}}))
 	require.NoError(t, col.Flush())
 
-	vfs, err := s.File().Open("trace_fs")
+	vfs, err := s.Fstree().Open("trace_fs")
 	require.NoError(t, err)
 	f, err := vfs.Create("blob.txt")
 	require.NoError(t, err)
@@ -1079,7 +1079,7 @@ func TestRootedViewsAreIsolatedAndPersist(t *testing.T) {
 	require.NoError(t, s.Record().One(ctx, "ID", "r2", &row))
 
 	// File.
-	tenantFS, err := s.File("tenant").Open("app")
+	tenantFS, err := s.Fstree("tenant").Open("app")
 	require.NoError(t, err)
 	f, err := tenantFS.Create("/note.txt")
 	require.NoError(t, err)
@@ -1087,7 +1087,7 @@ func TestRootedViewsAreIsolatedAndPersist(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	defaultFS, err := s.File().Open("app")
+	defaultFS, err := s.Fstree().Open("app")
 	require.NoError(t, err)
 	_, err = defaultFS.ReadFile("/note.txt")
 	require.Error(t, err, "the default root must not see a custom-root fstree")
@@ -1164,7 +1164,7 @@ func TestAccessorPathsDoNotChangeDefaults(t *testing.T) {
 // test fail until that change is deliberate and documented.
 func TestSingleVersionOnePolicy(t *testing.T) {
 	require.Equal(t, "1.0.0", record.Version)
-	require.Equal(t, uint64(1), file.FormatVersion)
+	require.Equal(t, uint64(1), fstree.FormatVersion)
 	require.Equal(t, uint64(1), series.FormatVersion)
 	require.Equal(t, uint32(1), vector.CollectionFormatVersion)
 	require.Equal(t, 1, ledger.FormatVersion)
@@ -1245,7 +1245,7 @@ func TestFSSessionSurvivesReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "app.db")
 
 	s := mustOpen(t, path, "session-password")
-	fsys, err := s.File().Open("app")
+	fsys, err := s.Fstree().Open("app")
 	require.NoError(t, err)
 	require.NoError(t, fsys.MkdirAll("/sessions", 0o755))
 
@@ -1262,7 +1262,7 @@ func TestFSSessionSurvivesReopen(t *testing.T) {
 	reopened := mustOpen(t, path, "session-password")
 	defer mustClose(t, reopened)
 
-	app, err := reopened.File().Open("app")
+	app, err := reopened.Fstree().Open("app")
 	require.NoError(t, err)
 	body, err := app.ReadFile("/sessions/alice.json")
 	require.NoError(t, err)
@@ -1340,7 +1340,7 @@ func TestTraceAllCoversEveryStore(t *testing.T) {
 
 	require.NoError(t, s.Record().Save(ctx, &tempestRecord{Name: "alice"}))
 
-	vfs, err := s.File().Open("data")
+	vfs, err := s.Fstree().Open("data")
 	require.NoError(t, err)
 	f, err := vfs.Create("/note.txt")
 	require.NoError(t, err)
@@ -1373,7 +1373,7 @@ func TestTraceAllCoversEveryStore(t *testing.T) {
 	stores := traceEventStores(t, s)
 	require.Equal(t, int(res.Count), len(stores))
 	for _, want := range []string{
-		ledger.StoreRecord, ledger.StoreFile, ledger.StoreSeries, ledger.StoreVector,
+		ledger.StoreRecord, ledger.StoreFSTree, ledger.StoreSeries, ledger.StoreVector,
 		ledger.StoreGraphs, ledger.StoreObject, ledger.StoreSearch,
 	} {
 		require.Contains(t, stores, want, "no trace event for store %q", want)

@@ -22,7 +22,7 @@ stores you can use together or on their own:
 - **`object`** — an independent flat object store with buckets and atomic puts.
 
 The root `tempest` package opens a single bbolt file behind one password, derives
-a separate key for each store, and exposes them through `Record()`, `File()`, `Series()`, `Vector()`,
+a separate key for each store, and exposes them through `Record()`, `Fstree()`, `Series()`, `Vector()`,
 `Search()`, `Graphs()` and `Objects()`. Each accessor accepts optional
 bucket-path segments that select a rooted view of the already-open store. Every store can also be used directly with its own `*bolt.DB`.
 
@@ -166,7 +166,7 @@ func main() {
 	}
 
 	// A file system inside the same database.
-	vfs, err := store.File().Open("documents")
+	vfs, err := store.Fstree().Open("documents")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func main() {
 ```
 
 `tempest.Open` takes ownership of the bbolt handle it opens: `Store.Close` flushes
-pending vector writes and closes it. The sub-store packages (`record.Open`, `file.Open`,
+pending vector writes and closes it. The sub-store packages (`record.Open`, `fstree.Open`,
 `series.Open`, `vector.Open`) borrow a caller-owned `*bolt.DB` instead and never close
 it. See [Database lifecycle](#database-lifecycle).
 
@@ -257,7 +257,7 @@ Important properties:
 - `Store.Close` flushes buffered vector writes and closes the database that
   `Open` created. It is safe to call twice, and the sub-store accessors return
   `nil` afterwards.
-- The accessors are `Record`, `File`, `Series`, `Vector`, `Search`, `Graphs`
+- The accessors are `Record`, `Fstree`, `Series`, `Vector`, `Search`, `Graphs`
   and `Objects`. Each takes optional bucket-path segments:
   `store.Record("tenant", "records")` returns a rooted view of the already-open
   store, while `store.Record()` keeps the conventional `record` root so existing
@@ -489,7 +489,7 @@ An `absfs`-compatible file system stored in the same bbolt file. File systems
 are named, so one store can hold many independent roots.
 
 ```go
-vfs, err := store.File().Open("documents")
+vfs, err := store.Fstree().Open("documents")
 if err != nil {
 	return err
 }
@@ -524,7 +524,7 @@ info, err := vfs.Stat("/latest.txt")
 link, err := vfs.Readlink("/latest.txt")
 ```
 
-`file` supports symbolic links, `filepath.Walk`-style traversal, concurrent
+`fstree` supports symbolic links, `filepath.Walk`-style traversal, concurrent
 `FastWalk`, read-only snapshots, an inode cache, external content back ends, and
 chunked encrypted content.
 
@@ -535,7 +535,7 @@ file: JSON sessions, uploaded documents, generated reports. Keep the meaning of
 those files in the application; tempest only stores them.
 
 ```go
-app, err := store.File().Open("app")
+app, err := store.Fstree().Open("app")
 err = app.MkdirAll("/sessions", 0o755)
 
 f, err := app.Create("/sessions/alice.json")
@@ -547,7 +547,7 @@ body, err := app.ReadFile("/sessions/alice.json")
 ```
 
 The files live in the same encrypted database, participate in cross-store
-transactions, and are included in `Backup`/`Export` and fs snapshots. A session
+transactions, and are included in `Backup`/`Export` and fstree snapshots. A session
 file is not a security boundary: anything holding the password can read it, so
 do not put a bearer token there that the application would not otherwise trust.
 
@@ -600,22 +600,22 @@ database file.
 
 ### Encryption and content storage
 
-`file.Config` enables encryption per store; `Config.ChunkSize` stores encrypted
+`fstree.Config` enables encryption per store; `Config.ChunkSize` stores encrypted
 content as independently sealed chunks. When using the root package, encryption
 is selected at `tempest.Open` time instead:
 
 ```go
 store, err := tempest.Open(ctx, "encrypted.db", 0o600, &tempest.Options{
 	Password: password,
-	Encrypt:  tempest.EncryptFile,
+	Encrypt:  tempest.EncryptFSTree,
 })
 ```
 
-Opening `file` directly with a caller-owned `*bolt.DB` gives full control over
+Opening `fstree` directly with a caller-owned `*bolt.DB` gives full control over
 the key and chunk size:
 
 ```go
-fsStore, err := file.Open(ctx, bdb, file.Config{
+fsStore, err := fstree.Open(ctx, bdb, fstree.Config{
 	Root:            [][]byte{[]byte("fstree")},
 	Secret:          key, // 32 bytes
 	EncryptMetadata: true,
@@ -628,7 +628,7 @@ vfs, err := fsStore.Open("vault")
 
 ### The `absfs` interface and paths
 
-`file` implements the module's internal `absfs` interfaces (`Filer`,
+`fstree` implements the module's internal `absfs` interfaces (`Filer`,
 `FileSystem` and `SymlinkFileSystem`). The in-tree `store/fstree/s3fs` adapter implements
 the `Filer` subset, and the interfaces make file systems work with standard
 `io/fs` functions. The interface package itself is internal and cannot be
@@ -919,7 +919,7 @@ err = snap.Restore(ctx, idx.ID)                      // roll back
 ```
 
 Data written by the previous file-backed blob implementation is not abandoned:
-it remains in the file store, and `object.Store.MigrateFromFile` copies a bucket
+it remains in the fstree store, and `object.Store.MigrateFromFile` copies a bucket
 into the independent store explicitly. See
 [store/object/README.md](store/object/README.md) and
 [backup/README.md](backup/README.md).
@@ -999,8 +999,8 @@ flags:
 | `EncryptRecordKeys` | db primary keys, index values, key/value keys |
 | `EncryptRecordValues` | db record and key/value values |
 | `EncryptRecordMetadata` | db auto-increment counters |
-| `EncryptFileContent` | fs file content and symlink targets |
-| `EncryptFileMetadata` | fs inode blobs (names, modes, sizes, times) |
+| `EncryptFSTreeContent` | fstree content and symlink targets |
+| `EncryptFSTreeMetadata` | fstree inode blobs (names, modes, sizes, times) |
 | `EncryptSeriesValues` | ts point values and series metadata |
 | `EncryptSeriesNames` | ts series and metadata names |
 | `EncryptVectorPointIDs` | vec point IDs; also the stored point value |
@@ -1009,7 +1009,7 @@ flags:
 | `EncryptGraphValues` | graph records |
 | `EncryptObjectValues` | object records |
 
-Aggregates (`EncryptRecord`, `EncryptFile`, `EncryptSeries`, `EncryptVector`,
+Aggregates (`EncryptRecord`, `EncryptFSTree`, `EncryptSeries`, `EncryptVector`,
 `EncryptGraph`, `EncryptObject`) and `EncryptAll` combine these bits. The encryption and KDF fields of `Options`
 only apply when creating a store; an existing store always uses its persisted
 settings.
@@ -1043,7 +1043,7 @@ Full rotation uses the whole-store methods:
 | Store | Method |
 |-------|--------|
 | `record` | `ReEncrypt` or `RotateAll` (aliases) |
-| `file` | `RotateAll` |
+| `fstree` | `RotateAll` |
 | `series` | `RotateAll` |
 | `vector` | `RotateAll` |
 | `search` | `RotateAll` |
@@ -1145,7 +1145,7 @@ store, err := tempest.Open(ctx, "app.db", 0o600, &tempest.Options{
 		Level:   3,   // Zstandard level; 0 selects the default
 		MinSize: 512, // skip tiny values (CPU bound only)
 	},
-	Dedup: tempest.Dedup{Files: true, Objects: true},
+	Dedup: tempest.Dedup{FSTree: true, Objects: true},
 })
 ```
 
@@ -1164,7 +1164,7 @@ store, err := tempest.Open(ctx, "app.db", 0o600, &tempest.Options{
 
 **Deduplication** is opt-in and content-addressed (SHA-256 of the plaintext):
 
-- `Dedup.Files` stores file chunks once by content hash and reference-counts
+- `Dedup.FSTree` stores file chunks once by content hash and reference-counts
   them, so identical chunks within a file, across files and across file systems
   share storage. It implies chunked content (default 64 KiB) and therefore
   content encryption; it is recorded in the filesystem marker.
@@ -1211,7 +1211,7 @@ log.Printf("trace: %d events, tip %x", res.Count, res.Tip)
 |------|---------|
 | `TraceNone` | nothing (default) |
 | `TraceRecord` | `record` writes |
-| `TraceFile` | `file` writes |
+| `TraceFSTree` | `fstree` writes |
 | `TraceSeries` | `series` writes |
 | `TraceVector` | `vector` writes |
 | `TraceGraphs` | `graphs` writes |
@@ -1246,7 +1246,7 @@ err := store.WriteTransaction(ctx, func(tx *tempest.Tx) error {
 		return err
 	}
 
-	fsys, err := tx.File().Open("app")
+	fsys, err := tx.Fstree().Open("app")
 	if err != nil {
 		return err
 	}
@@ -1312,7 +1312,7 @@ The two entry points differ in who owns the bbolt handle:
 - `tempest.Open` opens the file itself; `Store.Close` flushes buffered vector
   writes and closes the database. It is safe to call more than once, and the
   sub-store accessors return `nil` afterwards.
-- `record.Open`, `file.Open`, `series.Open` and `vector.Open` wrap an already-open
+- `record.Open`, `fstree.Open`, `series.Open` and `vector.Open` wrap an already-open
   `*bolt.DB`. Their `Close` methods release the wrapper only; the caller keeps
   ownership of the database. If several stores share one handle, close the
   handle after all wrappers are closed.
@@ -1498,7 +1498,7 @@ The defaults favor portability and safety. For throughput-sensitive workloads:
   commit is an fsync.
 - For encrypted time series, set `series.Config.BlockDuration` so blocks are sealed
   and opened once instead of once per point.
-- Use `file.Config.ChunkSize` for large files so writes and truncations touch only
+- Use `fstree.Config.ChunkSize` for large files so writes and truncations touch only
   the affected chunks, and `Compression` to shrink repetitive content at the
   cost of CPU on write and read. Compression is skipped for values below
   `MinSize`; `Dedup` trades some hashing on write for much smaller storage when

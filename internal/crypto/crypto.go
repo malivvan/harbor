@@ -1,5 +1,5 @@
 // Package crypto provides the authenticated-encryption primitives shared
-// by the ts time-series store, the fs filesystem package and the db and vec
+// by the ts time-series store, the fstree package and the db and vec
 // stores.
 //
 // Every encrypted store uses AES-256-GCM; keys are always raw 32-byte (256-bit)

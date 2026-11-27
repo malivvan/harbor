@@ -98,8 +98,8 @@ func TestDeriveSeed(t *testing.T) {
 }
 
 func TestHasFlag(t *testing.T) {
-	flags := EncryptRecordKeys | EncryptFileContent
-	if !HasFlag(flags, EncryptRecordKeys) || !HasFlag(flags, EncryptFileContent) || !HasFlag(flags, EncryptRecordKeys|EncryptFileContent) {
+	flags := EncryptRecordKeys | EncryptFSTreeContent
+	if !HasFlag(flags, EncryptRecordKeys) || !HasFlag(flags, EncryptFSTreeContent) || !HasFlag(flags, EncryptRecordKeys|EncryptFSTreeContent) {
 		t.Fatal("Has did not report set flags")
 	}
 	if HasFlag(flags, EncryptRecordValues) {
@@ -114,7 +114,7 @@ func TestMetadataEncodingRoundTrip(t *testing.T) {
 	md := Metadata{
 		Salt:    []byte("0123456789abcdef"),
 		Time:    DefaultKDFTime,
-		Flags:   EncryptRecordKeys | EncryptFileContent,
+		Flags:   EncryptRecordKeys | EncryptFSTreeContent,
 		Memory:  DefaultKDFMemory,
 		Threads: DefaultKDFThreads,
 		Canary:  []byte("canary-ciphertext"),

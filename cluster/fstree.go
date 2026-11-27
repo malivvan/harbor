@@ -14,45 +14,45 @@ import (
 	"github.com/malivvan/tempest/store/fstree"
 )
 
-// File is the replicated write view of a named file system in the fstree sub-store.
-type File struct {
-	n        *Node
-	fileName string
+// Fstree is the replicated write view of a named file system in the fstree sub-store.
+type Fstree struct {
+	n          *Node
+	fstreeName string
 }
 
-type filePathArg struct {
-	File  string      `json:"file"`
-	Name  string      `json:"name"`
-	New   string      `json:"new,omitempty"`
-	Perm  os.FileMode `json:"perm"`
-	Atime time.Time   `json:"atime"`
-	Mtime time.Time   `json:"mtime"`
-	Data  []byte      `json:"data,omitempty"`
-	Size  int64       `json:"size,omitempty"`
-	Uid   int         `json:"uid,omitempty"`
-	Gid   int         `json:"gid,omitempty"`
+type fstreePathArg struct {
+	Fstree string      `json:"fstree"`
+	Name   string      `json:"name"`
+	New    string      `json:"new,omitempty"`
+	Perm   os.FileMode `json:"perm"`
+	Atime  time.Time   `json:"atime"`
+	Mtime  time.Time   `json:"mtime"`
+	Data   []byte      `json:"data,omitempty"`
+	Size   int64       `json:"size,omitempty"`
+	Uid    int         `json:"uid,omitempty"`
+	Gid    int         `json:"gid,omitempty"`
 }
 
-// File returns the replicated fstree sub-store root.
-func (n *Node) File() *File {
+// Fstree returns the replicated fstree sub-store root.
+func (n *Node) Fstree() *Fstree {
 	if n == nil {
 		return nil
 	}
-	return &File{n: n}
+	return &Fstree{n: n}
 }
 
 // Open returns a replicated view of the named file system, creating it on
 // demand.
-func (f *File) Open(name string) *File {
+func (f *Fstree) Open(name string) *Fstree {
 	if f == nil || f.n == nil {
 		return nil
 	}
-	return &File{n: f.n, fileName: name}
+	return &Fstree{n: f.n, fstreeName: name}
 }
 
-// Mkdir replicates fs.File.Mkdir. Times are pinned at proposal time so every
+// Mkdir replicates fstree.FS.Mkdir. Times are pinned at proposal time so every
 // replica records the same directory metadata.
-func (f *File) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
+func (f *Fstree) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -60,49 +60,49 @@ func (f *File) Mkdir(ctx context.Context, name string, perm os.FileMode) error {
 		return ErrClosed
 	}
 	now := time.Now()
-	_, err := f.n.apply(opFileMkdir, filePathArg{File: f.fileName, Name: name, Perm: perm, Atime: now, Mtime: now})
+	_, err := f.n.apply(opFstreeMkdir, fstreePathArg{Fstree: f.fstreeName, Name: name, Perm: perm, Atime: now, Mtime: now})
 	return err
 }
 
-// Remove replicates fs.File.Remove.
-func (f *File) Remove(ctx context.Context, name string) error {
+// Remove replicates fstree.FS.Remove.
+func (f *Fstree) Remove(ctx context.Context, name string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFileRemove, filePathArg{File: f.fileName, Name: name})
+	_, err := f.n.apply(opFstreeRemove, fstreePathArg{Fstree: f.fstreeName, Name: name})
 	return err
 }
 
-// RemoveAll replicates fs.File.RemoveAll.
-func (f *File) RemoveAll(ctx context.Context, path string) error {
+// RemoveAll replicates fstree.FS.RemoveAll.
+func (f *Fstree) RemoveAll(ctx context.Context, path string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFileRemoveAll, filePathArg{File: f.fileName, Name: path})
+	_, err := f.n.apply(opFstreeRemoveAll, fstreePathArg{Fstree: f.fstreeName, Name: path})
 	return err
 }
 
-// Rename replicates fs.File.Rename.
-func (f *File) Rename(ctx context.Context, oldpath, newpath string) error {
+// Rename replicates fstree.FS.Rename.
+func (f *Fstree) Rename(ctx context.Context, oldpath, newpath string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFileRename, filePathArg{File: f.fileName, Name: oldpath, New: newpath})
+	_, err := f.n.apply(opFstreeRename, fstreePathArg{Fstree: f.fstreeName, Name: oldpath, New: newpath})
 	return err
 }
 
 // WriteFile replicates a create-and-write of a whole file. Times are pinned at
 // proposal time.
-func (f *File) WriteFile(ctx context.Context, name string, data []byte, perm os.FileMode) error {
+func (f *Fstree) WriteFile(ctx context.Context, name string, data []byte, perm os.FileMode) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -110,14 +110,14 @@ func (f *File) WriteFile(ctx context.Context, name string, data []byte, perm os.
 		return ErrClosed
 	}
 	now := time.Now()
-	_, err := f.n.apply(opFileWrite, filePathArg{File: f.fileName, Name: name, Perm: perm, Atime: now, Mtime: now, Data: data})
+	_, err := f.n.apply(opFstreeWrite, fstreePathArg{Fstree: f.fstreeName, Name: name, Perm: perm, Atime: now, Mtime: now, Data: data})
 	return err
 }
 
-// MkdirAll replicates fs.File.MkdirAll. Every component missing on the replicas
+// MkdirAll replicates fstree.FS.MkdirAll. Every component missing on the replicas
 // is created with the times pinned here, so directory metadata matches even
 // though MkdirAll would otherwise stamp each replica's own clock.
-func (f *File) MkdirAll(ctx context.Context, name string, perm os.FileMode) error {
+func (f *Fstree) MkdirAll(ctx context.Context, name string, perm os.FileMode) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -125,69 +125,69 @@ func (f *File) MkdirAll(ctx context.Context, name string, perm os.FileMode) erro
 		return ErrClosed
 	}
 	now := time.Now()
-	_, err := f.n.apply(opFileMkdirAll, filePathArg{File: f.fileName, Name: name, Perm: perm, Atime: now, Mtime: now})
+	_, err := f.n.apply(opFstreeMkdirAll, fstreePathArg{Fstree: f.fstreeName, Name: name, Perm: perm, Atime: now, Mtime: now})
 	return err
 }
 
-// Truncate replicates fs.File.Truncate.
-func (f *File) Truncate(ctx context.Context, name string, size int64) error {
+// Truncate replicates fstree.FS.Truncate.
+func (f *Fstree) Truncate(ctx context.Context, name string, size int64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFileTruncate, filePathArg{File: f.fileName, Name: name, Size: size})
+	_, err := f.n.apply(opFstreeTruncate, fstreePathArg{Fstree: f.fstreeName, Name: name, Size: size})
 	return err
 }
 
-// Chmod replicates fs.File.Chmod.
-func (f *File) Chmod(ctx context.Context, name string, mode os.FileMode) error {
+// Chmod replicates fstree.FS.Chmod.
+func (f *Fstree) Chmod(ctx context.Context, name string, mode os.FileMode) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFileChmod, filePathArg{File: f.fileName, Name: name, Perm: mode})
+	_, err := f.n.apply(opFstreeChmod, fstreePathArg{Fstree: f.fstreeName, Name: name, Perm: mode})
 	return err
 }
 
-// Chtimes replicates fs.File.Chtimes. Both times are explicit, so replicas store
+// Chtimes replicates fstree.FS.Chtimes. Both times are explicit, so replicas store
 // exactly the values the caller supplied.
-func (f *File) Chtimes(ctx context.Context, name string, atime, mtime time.Time) error {
+func (f *Fstree) Chtimes(ctx context.Context, name string, atime, mtime time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFileChtimes, filePathArg{File: f.fileName, Name: name, Atime: atime, Mtime: mtime})
+	_, err := f.n.apply(opFstreeChtimes, fstreePathArg{Fstree: f.fstreeName, Name: name, Atime: atime, Mtime: mtime})
 	return err
 }
 
-// Chown replicates fs.File.Chown. Pass -1 to leave a value unchanged, as the
+// Chown replicates fstree.FS.Chown. Pass -1 to leave a value unchanged, as the
 // direct API does.
-func (f *File) Chown(ctx context.Context, name string, uid, gid int) error {
+func (f *Fstree) Chown(ctx context.Context, name string, uid, gid int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFileChown, filePathArg{File: f.fileName, Name: name, Uid: uid, Gid: gid})
+	_, err := f.n.apply(opFstreeChown, fstreePathArg{Fstree: f.fstreeName, Name: name, Uid: uid, Gid: gid})
 	return err
 }
 
-// Symlink replicates fs.File.Symlink.
-func (f *File) Symlink(ctx context.Context, source, destination string) error {
+// Symlink replicates fstree.FS.Symlink.
+func (f *Fstree) Symlink(ctx context.Context, source, destination string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if f == nil || f.n == nil {
 		return ErrClosed
 	}
-	_, err := f.n.apply(opFileSymlink, filePathArg{File: f.fileName, Name: source, New: destination})
+	_, err := f.n.apply(opFstreeSymlink, fstreePathArg{Fstree: f.fstreeName, Name: source, New: destination})
 	return err
 }
 
@@ -195,7 +195,7 @@ func (f *File) Symlink(ctx context.Context, source, destination string) error {
 // Writes buffer in memory and one command replicates the complete content, so
 // a partial file never enters the raft log. Use WriteFile for small content
 // that is already in memory.
-func (f *File) Create(ctx context.Context, name string, perm os.FileMode) (*FileHandle, error) {
+func (f *Fstree) Create(ctx context.Context, name string, perm os.FileMode) (*FileHandle, error) {
 	return f.newFile(ctx, name, perm, false)
 }
 
@@ -205,11 +205,11 @@ func (f *File) Create(ctx context.Context, name string, perm os.FileMode) (*File
 //
 // Writes made through another replica or a direct store between OpenWriter and
 // Close are not observed; Close replaces the content with this handle's buffer.
-func (f *File) OpenWriter(ctx context.Context, name string, perm os.FileMode) (*FileHandle, error) {
+func (f *Fstree) OpenWriter(ctx context.Context, name string, perm os.FileMode) (*FileHandle, error) {
 	return f.newFile(ctx, name, perm, true)
 }
 
-func (f *File) newFile(ctx context.Context, name string, perm os.FileMode, appendMode bool) (*FileHandle, error) {
+func (f *Fstree) newFile(ctx context.Context, name string, perm os.FileMode, appendMode bool) (*FileHandle, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -220,9 +220,9 @@ func (f *File) newFile(ctx context.Context, name string, perm os.FileMode, appen
 	if st == nil {
 		return nil, ErrClosed
 	}
-	file := &FileHandle{n: f.n, fileName: f.fileName, name: name, perm: perm}
+	file := &FileHandle{n: f.n, fstreeName: f.fstreeName, name: name, perm: perm}
 	if appendMode {
-		fsys, err := st.File().Open(f.fileName)
+		fsys, err := st.Fstree().Open(f.fstreeName)
 		if err != nil {
 			return nil, err
 		}
@@ -239,14 +239,14 @@ func (f *File) newFile(ctx context.Context, name string, perm os.FileMode, appen
 // FileHandle is a replicated file handle. Writes are buffered in memory; Close
 // replicates the whole content in one command. It is safe for concurrent use.
 type FileHandle struct {
-	mu       sync.Mutex
-	n        *Node
-	fileName string
-	name     string
-	perm     os.FileMode
-	data     []byte
-	off      int64
-	closed   bool
+	mu         sync.Mutex
+	n          *Node
+	fstreeName string
+	name       string
+	perm       os.FileMode
+	data       []byte
+	off        int64
+	closed     bool
 }
 
 // Write appends p at the current offset, like writing to an open file.
@@ -322,13 +322,13 @@ func (f *FileHandle) Close() error {
 		return ErrClosed
 	}
 	now := time.Now()
-	_, err := f.n.apply(opFileWrite, filePathArg{
-		File:  f.fileName,
-		Name:  f.name,
-		Perm:  f.perm,
-		Atime: now,
-		Mtime: now,
-		Data:  f.data,
+	_, err := f.n.apply(opFstreeWrite, fstreePathArg{
+		Fstree: f.fstreeName,
+		Name:   f.name,
+		Perm:   f.perm,
+		Atime:  now,
+		Mtime:  now,
+		Data:   f.data,
 	})
 	if err != nil {
 		return err
@@ -352,23 +352,23 @@ func (n *Node) DeleteFileSystem(ctx context.Context, name string) error {
 	if n == nil {
 		return ErrClosed
 	}
-	_, err := n.apply(opFileDeleteFileSystem, filePathArg{File: name})
+	_, err := n.apply(opFstreeDeleteFileSystem, fstreePathArg{Fstree: name})
 	return err
 }
 
-func (f *fsm) openFileSystem(a filePathArg) (*fstree.FS, error) {
+func (f *fsm) openFileSystem(a fstreePathArg) (*fstree.FS, error) {
 	st := f.node.storeHandle()
 	if st == nil {
 		return nil, ErrClosed
 	}
-	fsys, err := st.File().Open(a.File)
+	fsys, err := st.Fstree().Open(a.Fstree)
 	if err != nil {
 		return nil, err
 	}
 	return fsys, nil
 }
 
-func (f *fsm) applyFileMkdir(a filePathArg) any {
+func (f *fsm) applyFileMkdir(a fstreePathArg) any {
 	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
@@ -382,7 +382,7 @@ func (f *fsm) applyFileMkdir(a filePathArg) any {
 // applyFileMkdirAll creates missing components one at a time so the pinned times
 // apply to every directory this command creates. fs.MkdirAll would stamp each
 // intermediate directory with the replica's own clock instead.
-func (f *fsm) applyFileMkdirAll(a filePathArg) any {
+func (f *fsm) applyFileMkdirAll(a fstreePathArg) any {
 	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
@@ -417,7 +417,7 @@ func (f *fsm) applyFileMkdirAll(a filePathArg) any {
 	return nil
 }
 
-func (f *fsm) applyFileTruncate(a filePathArg) any {
+func (f *fsm) applyFileTruncate(a fstreePathArg) any {
 	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
@@ -425,7 +425,7 @@ func (f *fsm) applyFileTruncate(a filePathArg) any {
 	return fsys.Truncate(a.Name, a.Size)
 }
 
-func (f *fsm) applyFileChmod(a filePathArg) any {
+func (f *fsm) applyFileChmod(a fstreePathArg) any {
 	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
@@ -433,7 +433,7 @@ func (f *fsm) applyFileChmod(a filePathArg) any {
 	return fsys.Chmod(a.Name, a.Perm)
 }
 
-func (f *fsm) applyFileChtimes(a filePathArg) any {
+func (f *fsm) applyFileChtimes(a fstreePathArg) any {
 	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
@@ -441,7 +441,7 @@ func (f *fsm) applyFileChtimes(a filePathArg) any {
 	return fsys.Chtimes(a.Name, a.Atime, a.Mtime)
 }
 
-func (f *fsm) applyFileChown(a filePathArg) any {
+func (f *fsm) applyFileChown(a fstreePathArg) any {
 	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
@@ -449,7 +449,7 @@ func (f *fsm) applyFileChown(a filePathArg) any {
 	return fsys.Chown(a.Name, a.Uid, a.Gid)
 }
 
-func (f *fsm) applyFileSymlink(a filePathArg) any {
+func (f *fsm) applyFileSymlink(a fstreePathArg) any {
 	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
@@ -457,7 +457,7 @@ func (f *fsm) applyFileSymlink(a filePathArg) any {
 	return fsys.Symlink(a.Name, a.New)
 }
 
-func (f *fsm) applyFileRemove(a filePathArg) any {
+func (f *fsm) applyFileRemove(a fstreePathArg) any {
 	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
@@ -465,7 +465,7 @@ func (f *fsm) applyFileRemove(a filePathArg) any {
 	return fsys.Remove(a.Name)
 }
 
-func (f *fsm) applyFileRemoveAll(a filePathArg) any {
+func (f *fsm) applyFileRemoveAll(a fstreePathArg) any {
 	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
@@ -473,7 +473,7 @@ func (f *fsm) applyFileRemoveAll(a filePathArg) any {
 	return fsys.RemoveAll(a.Name)
 }
 
-func (f *fsm) applyFileRename(a filePathArg) any {
+func (f *fsm) applyFileRename(a fstreePathArg) any {
 	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
@@ -481,7 +481,7 @@ func (f *fsm) applyFileRename(a filePathArg) any {
 	return fsys.Rename(a.Name, a.New)
 }
 
-func (f *fsm) applyFileWrite(a filePathArg) any {
+func (f *fsm) applyFileWrite(a fstreePathArg) any {
 	fsys, err := f.openFileSystem(a)
 	if err != nil {
 		return err
@@ -500,10 +500,10 @@ func (f *fsm) applyFileWrite(a filePathArg) any {
 	return fsys.Chtimes(a.Name, a.Atime, a.Mtime)
 }
 
-func (f *fsm) applyFileDeleteFileSystem(a filePathArg) any {
+func (f *fsm) applyFileDeleteFileSystem(a fstreePathArg) any {
 	st := f.node.storeHandle()
 	if st == nil {
 		return ErrClosed
 	}
-	return st.File().DeleteFS(a.File)
+	return st.Fstree().DeleteFS(a.Fstree)
 }

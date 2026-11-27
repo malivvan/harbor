@@ -27,7 +27,7 @@ func seedEveryStore(t *testing.T, s *Store) {
 
 	require.NoError(t, s.Record().Save(ctx, &tempestRecord{Name: "alice"}))
 
-	fsys, err := s.File().Open("data")
+	fsys, err := s.Fstree().Open("data")
 	require.NoError(t, err)
 	f, err := fsys.Create("/note.txt")
 	require.NoError(t, err)
@@ -63,7 +63,7 @@ func verifyEveryStore(t *testing.T, s *Store) {
 	var rec tempestRecord
 	require.NoError(t, s.Record().Select().First(ctx, &rec))
 
-	fsys, err := s.File().Open("data")
+	fsys, err := s.Fstree().Open("data")
 	require.NoError(t, err)
 	data, err := fsys.ReadFile("/note.txt")
 	require.NoError(t, err)
@@ -127,11 +127,11 @@ func TestOpenWithDedup(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tempest.db")
 
 	opts := testOptions("pw")
-	opts.Dedup = Dedup{Files: true, Objects: true}
+	opts.Dedup = Dedup{FSTree: true, Objects: true}
 	s, err := Open(ctx, path, 0o600, opts)
 	require.NoError(t, err)
 
-	fsys, err := s.File().Open("data")
+	fsys, err := s.Fstree().Open("data")
 	require.NoError(t, err)
 	for _, name := range []string{"/a.txt", "/b.txt"} {
 		f, err := fsys.Create(name)
@@ -149,7 +149,7 @@ func TestOpenWithDedup(t *testing.T) {
 	// The matching configuration reopens and reads every duplicate.
 	s, err = Open(ctx, path, 0o600, opts)
 	require.NoError(t, err)
-	fsys, err = s.File().Open("data")
+	fsys, err = s.Fstree().Open("data")
 	require.NoError(t, err)
 	for _, name := range []string{"/a.txt", "/b.txt"} {
 		data, err := fsys.ReadFile(name)
@@ -172,7 +172,7 @@ func TestDedupFilesRequiresEncryptedFiles(t *testing.T) {
 	ctx := context.Background()
 	opts := testOptions("pw")
 	opts.Plaintext = true
-	opts.Dedup = Dedup{Files: true}
+	opts.Dedup = Dedup{FSTree: true}
 	_, err := Open(ctx, filepath.Join(t.TempDir(), "tempest.db"), 0o600, opts)
 	require.True(t, errors.Is(err, ErrInvalidOptions), "want ErrInvalidOptions, got %v", err)
 }

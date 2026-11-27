@@ -340,7 +340,7 @@ func (e *exporter) exportDB() error {
 }
 
 func (e *exporter) exportFS() error {
-	names, err := e.src.File().FileSystems()
+	names, err := e.src.Fstree().FileSystems()
 	if err != nil {
 		return fmt.Errorf("tempest: export fs: %w", err)
 	}
@@ -349,7 +349,7 @@ func (e *exporter) exportFS() error {
 		if err := e.ctx.Err(); err != nil {
 			return err
 		}
-		vfs, err := e.src.File().Open(name)
+		vfs, err := e.src.Fstree().Open(name)
 		if err != nil {
 			return fmt.Errorf("tempest: export fs %q: %w", name, err)
 		}

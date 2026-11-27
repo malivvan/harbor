@@ -220,13 +220,13 @@ func TestReplicateFS(t *testing.T) {
 	defer closeAll(nodes...)
 
 	leader := waitLeader(t, nodes...)
-	fs := leader.File().Open("data")
+	fs := leader.Fstree().Open("data")
 	require.NoError(t, fs.Mkdir(ctx, "/docs", 0o755))
 	require.NoError(t, fs.WriteFile(ctx, "/docs/readme.txt", []byte("hello tempest"), 0o644))
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
-		fsys, err := n.Store().File().Open("data")
+		fsys, err := n.Store().Fstree().Open("data")
 		require.NoError(t, err)
 		data, err := fsys.ReadFile("/docs/readme.txt")
 		require.NoError(t, err)

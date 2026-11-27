@@ -63,7 +63,7 @@ func TestReplicateFSMetadata(t *testing.T) {
 	defer closeAll(nodes...)
 
 	leader := waitLeader(t, nodes...)
-	fsys := leader.File().Open("data")
+	fsys := leader.Fstree().Open("data")
 	require.NoError(t, fsys.MkdirAll(ctx, "/a/b/c", 0o750))
 	require.NoError(t, fsys.WriteFile(ctx, "/a/b/file.txt", []byte("0123456789"), 0o644))
 	require.NoError(t, fsys.Truncate(ctx, "/a/b/file.txt", 4))
@@ -75,7 +75,7 @@ func TestReplicateFSMetadata(t *testing.T) {
 	waitApplied(t, leader, nodes...)
 
 	for _, n := range nodes {
-		local, err := n.Store().File().Open("data")
+		local, err := n.Store().Fstree().Open("data")
 		require.NoError(t, err)
 
 		data, err := local.ReadFile("/a/b/file.txt")
@@ -107,7 +107,7 @@ func TestReplicateFSStreamingWrite(t *testing.T) {
 	defer closeAll(nodes...)
 
 	leader := waitLeader(t, nodes...)
-	fsys := leader.File().Open("data")
+	fsys := leader.Fstree().Open("data")
 
 	file, err := fsys.Create(ctx, "/stream.bin", 0o644)
 	require.NoError(t, err)
@@ -120,7 +120,7 @@ func TestReplicateFSStreamingWrite(t *testing.T) {
 	// Buffered writes must not reach the log before Close.
 	waitApplied(t, leader, nodes...)
 	for _, n := range nodes {
-		local, err := n.Store().File().Open("data")
+		local, err := n.Store().Fstree().Open("data")
 		require.NoError(t, err)
 		_, err = local.Stat("/stream.bin")
 		require.True(t, os.IsNotExist(err), "buffered file visible on %s before Close", n.cfg.NodeID)
@@ -129,7 +129,7 @@ func TestReplicateFSStreamingWrite(t *testing.T) {
 	require.NoError(t, file.Close())
 	waitApplied(t, leader, nodes...)
 	for _, n := range nodes {
-		local, err := n.Store().File().Open("data")
+		local, err := n.Store().Fstree().Open("data")
 		require.NoError(t, err)
 		data, err := local.ReadFile("/stream.bin")
 		require.NoError(t, err)
@@ -143,7 +143,7 @@ func TestReplicateFSStreamingWrite(t *testing.T) {
 	require.NoError(t, app.Close())
 	waitApplied(t, leader, nodes...)
 	for _, n := range nodes {
-		local, err := n.Store().File().Open("data")
+		local, err := n.Store().Fstree().Open("data")
 		require.NoError(t, err)
 		data, err := local.ReadFile("/stream.bin")
 		require.NoError(t, err)

@@ -208,11 +208,11 @@ func (m *Manager) Record(path ...string) *record.Store {
 	return nil
 }
 
-// File returns the in-database filesystem store, or nil before Open. Extra path
+// Fstree returns the in-database filesystem store, or nil before Open. Extra path
 // segments select a rooted view.
-func (m *Manager) File(path ...string) *fstree.Store {
+func (m *Manager) Fstree(path ...string) *fstree.Store {
 	if st := m.Store(); st != nil {
-		return st.File(path...)
+		return st.Fstree(path...)
 	}
 	return nil
 }
@@ -322,11 +322,11 @@ func Record(path ...string) *record.Store {
 	return nil
 }
 
-// File returns the process-wide filesystem store, or nil before Open. Extra
+// Fstree returns the process-wide filesystem store, or nil before Open. Extra
 // path segments select a rooted view.
-func File(path ...string) *fstree.Store {
+func Fstree(path ...string) *fstree.Store {
 	if m := Default(); m != nil {
-		return m.File(path...)
+		return m.Fstree(path...)
 	}
 	return nil
 }

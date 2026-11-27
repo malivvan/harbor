@@ -10,7 +10,7 @@ separate `docs/` tree.
 
 | Package | Responsibility |
 |---------|----------------|
-| `github.com/malivvan/tempest` | Opens one bbolt file, derives per-store keys from a password, and exposes `Record()`, `File()`, `Series()`, `Vector()`, `Search()`, `Graphs()`, `Objects()`, `Flags()` and `Meta()`. Each accessor takes optional bucket-path segments. |
+| `github.com/malivvan/tempest` | Opens one bbolt file, derives per-store keys from a password, and exposes `Record()`, `Fstree()`, `Series()`, `Vector()`, `Search()`, `Graphs()`, `Objects()`, `Flags()` and `Meta()`. Each accessor takes optional bucket-path segments. |
 | `.../store/record` | Struct-to-bucket mapping, indexes, matchers, managed transactions, key/value access, codecs. |
 | `.../store/fstree` | Named file systems implementing the `absfs` interfaces, with symlinks, snapshots, inode cache and chunked content. |
 | `.../store/series` | Named time series with ordered scans, aggregation, labels and retention. |
@@ -26,7 +26,7 @@ separate `docs/` tree.
 | `.../metrics` | Dependency-free observer interface and nil-safe metric helpers used by every store; a nil observer means no instrumentation. |
 | `.../store/ledger` | Tamper-evident, append-only trace log: signed, hash-linked events for every store write (record, file, series, vector, graphs, object, search), encoded with the package's deterministic JSON encoder. |
 | `.../cluster` | Raft-backed cluster replication of a whole store: replicated command facades, snapshots, and the bolt-backed raft log/stable store it persists with (no raft-boltdb dependency). |
-| `.../store/object` | Independent flat object store with buckets, path containment and atomic `Put`; works without the file store and migrates file-backed blobs explicitly. |
+| `.../store/object` | Independent flat object store with buckets, path containment and atomic `Put`; works without the fstree store and migrates file-backed blobs explicitly. |
 | `.../backup` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore, and snapshot ids are time-sortable ULIDs generated in the package. |
 | `.../backup/blobstore` | Adapter from `backup.ObjectStore` to one bucket of the object store. |
 | `.../ranking` | Reciprocal rank fusion for combining full-text and vector result lists. |
@@ -47,7 +47,7 @@ The root package creates one bbolt database with this top-level shape:
 ```text
 system/                    unencrypted configuration record
 record/                    record store root bucket
-fstree/                    file store root bucket
+fstree/                    fstree store root bucket
 series/                    series store root bucket
 vector/                    vector store root bucket
 search/                    full-text store root bucket
@@ -263,7 +263,7 @@ Every sub-store can compress the values it writes. The codec lives in
 Deduplication is opt-in, content-addressed (SHA-256 of the plaintext) and gated
 by the store's marker:
 
-- `fstree` (`Config.Dedup`, root `Options.Dedup.Files`) implies chunked content
+- `fstree` (`Config.Dedup`, root `Options.Dedup.FSTree`) implies chunked content
   and content encryption. Layout:
 
   ```text
@@ -296,7 +296,7 @@ bbolt provides one writer and many readers, and tempest follows that model:
 - `record.TransactionManager`, `fstree.Walk`, `series.Store`, and `vector.Collection` all use
   the same bbolt handle and therefore share the single-writer constraint.
 - `Store.WriteTransaction`/`ReadTransaction` bind every sub-store to one
-  caller-owned bbolt transaction. `file`, `series`, `vector` and `search` carry an
+  caller-owned bbolt transaction. `fstree`, `series`, `vector` and `search` carry an
   optional `tx` field: when set, their `view`/`update` helpers execute against it instead of
   opening a managed transaction, and `WithTransaction` builds the bound view
   without tracking it in the parent. Rotation is rejected on a bound store
@@ -593,7 +593,7 @@ Platform summary:
 - Permissions are advisory: enforcement depends on the backend. Do not rely on
   `Chmod` for isolation.
 - The abstraction layer does not encrypt data and does not trace operations.
-  Encryption belongs to the tempest stores (`record`, `file`, `series`, `vector`); the
+  Encryption belongs to the tempest stores (`record`, `fstree`, `series`, `vector`); the
   `internal/absfs` layer must remain a transparent pass-through.
 - Apply resource limits where untrusted paths or sizes are accepted; do not log
   file contents, credentials or keys.
@@ -671,7 +671,7 @@ password
 master key
    ├── tempest/canary/v1  → canary key
    ├── tempest/db/v1      → record store key
-   ├── tempest/fs/v1      → file store key
+   ├── tempest/fs/v1      → fstree store key
    ├── tempest/ts/v1      → series store key
    ├── tempest/vec/v1     → vector store key
    └── tempest/fts/v1     → search store key
@@ -829,7 +829,7 @@ returns `BackupInfo` and can write a JSON sidecar
 sub-store's marker and version through the normal `record.Open`/`fstree.Open`/`series.Open`/
 `vector.Open` paths. Those paths therefore must not write when the data is intact:
 `series.ensureFormatVersion` reads before it writes, `fstree.OpenReadOnly` and
-`search.OpenReadOnly` exist for read-only traversal, and fs filesystems are opened
+`search.OpenReadOnly` exist for read-only traversal, and fstree filesystems are opened
 with `OpenReadOnly` per name. The manifest is a sidecar, so the backup bytes are
 unchanged. Verification never mutates the copy.
 

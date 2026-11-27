@@ -301,9 +301,9 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 
 	fsStore, err := fstree.Open(ctx, bdb, fstree.Config{
 		Root:            namedRoot(bucket.FSTREE),
-		Secret:          keys.File,
-		EncryptMetadata: system.HasFlag(md.Flags, EncryptFileMetadata),
-		EncryptContent:  system.HasFlag(md.Flags, EncryptFileContent),
+		Secret:          keys.FSTree,
+		EncryptMetadata: system.HasFlag(md.Flags, EncryptFSTreeMetadata),
+		EncryptContent:  system.HasFlag(md.Flags, EncryptFSTreeContent),
 	})
 	if err != nil {
 		return info, fmt.Errorf("tempest: verify backup: fstree: %w", err)

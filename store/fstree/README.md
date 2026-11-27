@@ -12,11 +12,11 @@ A `Store` manages any number of named file systems under one root bucket:
 
 ```go
 // Through the root package.
-vfs, err := store.File().Open("documents")
+vfs, err := store.Fstree().Open("documents")
 
 // Or directly, with a caller-owned bbolt handle.
-fsStore, err := file.Open(ctx, bdb, file.Config{
-	Root: [][]byte{[]byte("fs")},
+fsStore, err := fstree.Open(ctx, bdb, fstree.Config{
+	Root: [][]byte{[]byte("fstree")},
 })
 defer fsStore.Close() // does not close bdb
 
@@ -27,8 +27,8 @@ defer vfs.Close() // does not close bdb
 `Store.Close` and `FS.Close` release wrappers only. The caller owns the bbolt
 handle and must keep it open while the file systems are in use.
 
-`file.Config` exposes `Validate()` and `Normalize()`. They check the same
-invariants as `file.Open`: `ChunkSize` must be non-negative, and any encryption
+`fstree.Config` exposes `Validate()` and `Normalize()`. They check the same
+invariants as `fstree.Open`: `ChunkSize` must be non-negative, and any encryption
 mode requires a 32-byte `Secret`.
 
 A store can list and remove the file systems it manages:
@@ -181,13 +181,13 @@ Named file systems are a natural fit for application state that is already
 file-shaped: session JSON, documents, generated reports.
 
 ```go
-vfs, err := store.File().Open("app")
+vfs, err := store.Fstree().Open("app")
 err = vfs.MkdirAll("/sessions", 0o755)
 err = writeFile(vfs, "/sessions/alice.json", sessionJSON)
 ```
 
 The files share the encrypted database, are covered by backups, exports and fs
-snapshots, and take part in cross-store transactions through `tx.File()`. Keep
+snapshots, and take part in cross-store transactions through `tx.Fstree()`. Keep
 session semantics (expiry, invalidation, which fields are secret) in the
 application: a session file is only as protected as the store password.
 
@@ -267,7 +267,7 @@ if err != nil {
 	return err
 }
 
-vfs, err := fsStore.OpenWithContentFS("documents", content.AsContentFile())
+vfs, err := fsStore.OpenWithContentFS("documents", content.AsContentFstree())
 if err != nil {
 	return err
 }
@@ -303,7 +303,7 @@ Encryption is opt-in and per file system. A plaintext file system keeps the
 existing on-disk format.
 
 ```go
-fsStore, err := file.Open(ctx, bdb, file.Config{
+fsStore, err := fstree.Open(ctx, bdb, fstree.Config{
 	Root:            [][]byte{[]byte("fs")},
 	Secret:          key, // exactly 32 bytes
 	EncryptMetadata: true,

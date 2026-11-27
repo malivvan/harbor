@@ -24,7 +24,7 @@ func main() {
     defer store.Close()
 
     _ = st.Record()
-    _ = st.File()
+    _ = st.Fstree()
     _ = st.Series()
     _ = st.Vector()
     _ = st.Search()
@@ -60,7 +60,7 @@ genuinely fresh database instead of a stale handle.
 
 | Use | API |
 |---|---|
-| One default store for the process | `store.Open(ctx, cfg)`, `store.Store()`, `store.Record()`, `store.File()`, `store.Series()`, `store.Vector()`, `store.Search()`, `store.Graphs()`, `store.Objects()`, `store.Close()` |
+| One default store for the process | `store.Open(ctx, cfg)`, `store.Store()`, `store.Record()`, `store.Fstree()`, `store.Series()`, `store.Vector()`, `store.Search()`, `store.Graphs()`, `store.Objects()`, `store.Close()` |
 | Independent stores (tests, multiple tenants in one process) | `store.NewManager(cfg)` then `Manager.Open` and the same accessors |
 
 ## Config

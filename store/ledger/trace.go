@@ -47,7 +47,7 @@ const (
 // never renamed.
 const (
 	StoreRecord = bucket.RECORD
-	StoreFile   = bucket.FSTREE
+	StoreFSTree = bucket.FSTREE
 	StoreSeries = bucket.SERIES
 	StoreVector = bucket.VECTOR
 	StoreGraphs = bucket.GRAPHS

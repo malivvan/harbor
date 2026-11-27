@@ -186,7 +186,7 @@ func TestNodeNilSafety(t *testing.T) {
 	require.ErrorIs(t, n.Leave("x"), ErrClosed)
 	require.NoError(t, n.Close())
 
-	require.Nil(t, n.File())
+	require.Nil(t, n.Fstree())
 	require.Nil(t, n.Record())
 	require.Nil(t, n.Series())
 	require.Nil(t, n.Vector())

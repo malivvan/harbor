@@ -113,7 +113,7 @@ func TestObjectCompressMigrateFromFile(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = st.Close() })
 
-	fsys, err := st.File().Open("blobs")
+	fsys, err := st.Fstree().Open("blobs")
 	require.NoError(t, err)
 	require.NoError(t, fsys.MkdirAll("/bucket", 0o755))
 	f, err := fsys.Create("/bucket/note.txt")

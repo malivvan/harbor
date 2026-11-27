@@ -286,7 +286,7 @@ func (im *importer) fsFor(name string) (*fstree.FS, error) {
 	if filesystem, ok := im.fsystems[name]; ok {
 		return filesystem, nil
 	}
-	filesystem, err := im.dest.File().Open(name)
+	filesystem, err := im.dest.Fstree().Open(name)
 	if err != nil {
 		return nil, fmt.Errorf("tempest: import fs %q: %w", name, err)
 	}

@@ -21,7 +21,7 @@ func TestOpenCreatesOneStoreAndKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if st.Record() == nil || st.File() == nil || st.Vector() == nil {
+	if st.Record() == nil || st.Fstree() == nil || st.Vector() == nil {
 		t.Fatal("Open returned a store with a nil sub-store")
 	}
 	if _, err := os.Stat(filepath.Join(dir, DefaultDBFile)); err != nil {
@@ -249,7 +249,7 @@ func TestProcessWideDefault(t *testing.T) {
 	if Store() != st {
 		t.Fatal("Store did not return the process-wide store")
 	}
-	if Record() == nil || File() == nil || Vector() == nil {
+	if Record() == nil || Fstree() == nil || Vector() == nil {
 		t.Fatal("a process-wide accessor returned nil")
 	}
 
@@ -342,9 +342,9 @@ func TestAllFourStoresAreExposed(t *testing.T) {
 	if _, err := m.Open(context.Background()); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if m.Record() == nil || m.File() == nil || m.Series() == nil || m.Vector() == nil {
+	if m.Record() == nil || m.Fstree() == nil || m.Series() == nil || m.Vector() == nil {
 		t.Fatalf("manager accessors: DB=%v FS=%v TS=%v Vec=%v",
-			m.Record() != nil, m.File() != nil, m.Series() != nil, m.Vector() != nil)
+			m.Record() != nil, m.Fstree() != nil, m.Series() != nil, m.Vector() != nil)
 	}
 	if m.Series() != m.Store().Series() {
 		t.Fatal("Manager.TS does not return the store's series store")
@@ -355,7 +355,7 @@ func TestAllFourStoresAreExposed(t *testing.T) {
 		t.Fatalf("store.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = Close() })
-	if Series() == nil || Record() == nil || File() == nil || Vector() == nil {
+	if Series() == nil || Record() == nil || Fstree() == nil || Vector() == nil {
 		t.Fatal("process-wide accessors returned a nil store")
 	}
 }

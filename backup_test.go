@@ -24,7 +24,7 @@ func seedBackup(t *testing.T, s *Store) {
 	ctx := context.Background()
 
 	require.NoError(t, s.Record().Save(ctx, &txRecord{ID: "b1", Name: "backup"}))
-	fsys, err := s.File().Open("data")
+	fsys, err := s.Fstree().Open("data")
 	require.NoError(t, err)
 	f, err := fsys.Create("/note.txt")
 	require.NoError(t, err)
@@ -78,7 +78,7 @@ func TestBackupFileVerifyAndRestore(t *testing.T) {
 	require.NoError(t, restored.Record().One(ctx, "ID", "b1", &rec))
 	require.Equal(t, "backup", rec.Name)
 
-	fsys, err := restored.File().Open("data")
+	fsys, err := restored.Fstree().Open("data")
 	require.NoError(t, err)
 	body, err := fsys.ReadFile("/note.txt")
 	require.NoError(t, err)

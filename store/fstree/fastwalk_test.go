@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	file "github.com/malivvan/tempest/store/fstree"
+	"github.com/malivvan/tempest/store/fstree"
 	bolt "go.etcd.io/bbolt"
 )
 
 // newFastWalkTestFS returns the in-repo filesystem used to exercise FastWalk.
-func newFastWalkTestFS(t *testing.T) *file.FS {
+func newFastWalkTestFS(t *testing.T) *fstree.FS {
 	t.Helper()
 
 	db, err := bolt.Open(filepath.Join(t.TempDir(), "fastwalk.db"), 0600, &bolt.Options{Timeout: time.Second})
@@ -25,7 +25,7 @@ func newFastWalkTestFS(t *testing.T) *file.FS {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	store, err := file.Open(context.Background(), db, file.Config{})
+	store, err := fstree.Open(context.Background(), db, fstree.Config{})
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestFastWalk(t *testing.T) {
 	// Walk and collect all paths
 	var walked []string
 	var mu sync.Mutex
-	err := file.FastWalk(mfs, "/", func(path string, d gofs.DirEntry, err error) error {
+	err := fstree.FastWalk(mfs, "/", func(path string, d gofs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -127,18 +127,18 @@ func TestFastWalkSkipDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f, _ := mfs.Create("/skip/file.txt")
+	f, _ := mfs.Create("/skip/fstree.txt")
 	f.Write([]byte("test"))
 	f.Close()
 
-	f, _ = mfs.Create("/keep/file.txt")
+	f, _ = mfs.Create("/keep/fstree.txt")
 	f.Write([]byte("test"))
 	f.Close()
 
 	// Walk and skip "skip" directory
 	var walked []string
 	var mu sync.Mutex
-	err := file.FastWalk(mfs, "/", func(path string, d gofs.DirEntry, err error) error {
+	err := fstree.FastWalk(mfs, "/", func(path string, d gofs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -184,17 +184,17 @@ func TestFastWalkConfig(t *testing.T) {
 	if err := mfs.Mkdir("/dir", 0755); err != nil {
 		t.Fatal(err)
 	}
-	f, _ := mfs.Create("/file.txt")
+	f, _ := mfs.Create("/fstree.txt")
 	f.Write([]byte("test"))
 	f.Close()
 
 	// Test with custom worker count
-	config := &file.FastWalkConfig{
+	config := &fstree.FastWalkConfig{
 		NumWorkers: 2,
 	}
 
 	count := 0
-	err := file.FastWalkWithConfig(mfs, "/", config, func(path string, d gofs.DirEntry, err error) error {
+	err := fstree.FastWalkWithConfig(mfs, "/", config, func(path string, d gofs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -220,7 +220,7 @@ func TestFastWalkEmptyDir(t *testing.T) {
 	}
 
 	count := 0
-	err := file.FastWalk(mfs, "/empty", func(path string, d gofs.DirEntry, err error) error {
+	err := fstree.FastWalk(mfs, "/empty", func(path string, d gofs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -247,7 +247,7 @@ func TestFastWalkSingleFile(t *testing.T) {
 	f.Close()
 
 	var walked []string
-	err := file.FastWalk(mfs, "/single.txt", func(path string, d gofs.DirEntry, err error) error {
+	err := fstree.FastWalk(mfs, "/single.txt", func(path string, d gofs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -275,7 +275,7 @@ func TestFastWalkCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := file.FastWalkContext(ctx, mfs, "/", func(string, gofs.DirEntry, error) error {
+	err := fstree.FastWalkContext(ctx, mfs, "/", func(string, gofs.DirEntry, error) error {
 		return nil
 	})
 	if !errors.Is(err, context.Canceled) {
@@ -294,7 +294,7 @@ func TestFastWalkCancelledDuringCallback(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	err := file.FastWalkWithConfig(mfs, "/", &file.FastWalkConfig{
+	err := fstree.FastWalkWithConfig(mfs, "/", &fstree.FastWalkConfig{
 		Ctx:        ctx,
 		NumWorkers: 1,
 		QueueSize:  1,

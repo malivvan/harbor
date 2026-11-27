@@ -112,7 +112,7 @@ func (fs *FS) traceEntry(op, entity string, digest []byte) error {
 		return nil
 	}
 	return fs.trace.Record(ledger.Entry{
-		Store:  ledger.StoreFile,
+		Store:  ledger.StoreFSTree,
 		Op:     op,
 		Entity: entity,
 		Digest: digest,

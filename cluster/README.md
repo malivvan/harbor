@@ -122,8 +122,8 @@ err = node.Objects().Move("tenant-a", "docs/q3.pdf", "reports/q3.pdf")
 err = node.Objects().Delete("tenant-a", "reports/q3.pdf")
 err = node.Objects().DropBucket("tenant-a")
 
-// fs (files)
-fsys := node.File().Open("data")
+// fstree (files)
+fsys := node.Fstree().Open("data")
 err = fsys.Mkdir(ctx, "/docs", 0o755)
 err = fsys.MkdirAll(ctx, "/docs/2026/q1", 0o755)
 err = fsys.WriteFile(ctx, "/docs/readme.txt", []byte("hello"), 0o644)
@@ -180,7 +180,7 @@ err := node.Store().Record().One(ctx, "ID", "u1", &u)
 
 p, err := node.Store().Series().Series("cpu").Get(ctx, ts)
 
-fsys, _ := node.Store().File().Open("data")
+fsys, _ := node.Store().Fstree().Open("data")
 b, err := fsys.ReadFile("/docs/README.txt")
 ```
 

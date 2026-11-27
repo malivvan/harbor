@@ -1,7 +1,7 @@
 # ledger
 
 Tamper-evident, append-only trace log for tempest. Every mutating operation in
-the `record`, `file`, `series` and `vector` stores can be recorded as a signed, hash-linked
+the `record`, `fstree`, `series` and `vector` stores can be recorded as a signed, hash-linked
 event, so the trail proves *what* changed and *in which order* — and cannot be
 forged, altered, reordered or spliced without the store's key material.
 
@@ -56,7 +56,7 @@ log.Printf("trace: %d events, tip %x", res.Count, res.Tip)
 |------|---------|
 | `TraceNone` | nothing (default) |
 | `TraceRecord` | `record` writes |
-| `TraceFile` | `file` writes |
+| `TraceFSTree` | `fstree` writes |
 | `TraceSeries` | `series` writes |
 | `TraceVector` | `vector` writes |
 | `TraceGraphs` | `graphs` writes |

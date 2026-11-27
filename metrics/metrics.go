@@ -87,11 +87,11 @@ const (
 	// and result.
 	MetricChunkOps = "tempest.fs.chunk.ops"
 
-	// MetricCacheHits counts fs inode-cache lookups, labelled by result
+	// MetricCacheHits counts fstree inode-cache lookups, labelled by result
 	// (hit or miss).
 	MetricCacheHits = "tempest.fs.cache.lookups"
 
-	// MetricCacheSize is the current number of entries in the fs inode cache.
+	// MetricCacheSize is the current number of entries in the fstree inode cache.
 	MetricCacheSize = "tempest.fs.cache.size"
 
 	// MetricSeriesDecodedPoints counts time-series points decoded from blocks.

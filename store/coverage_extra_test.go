@@ -25,7 +25,7 @@ func TestManagerAccessorsBeforeAndAfterOpen(t *testing.T) {
 	}
 	// Compare each accessor directly: a nil *record.Store held in an `any` is not
 	// itself nil, so a table of `any` values cannot be used for this check.
-	if m.Record() != nil || m.File() != nil || m.Series() != nil || m.Vector() != nil {
+	if m.Record() != nil || m.Fstree() != nil || m.Series() != nil || m.Vector() != nil {
 		t.Fatal("a store accessor is non-nil before Open")
 	}
 	if m.Search() != nil || m.Graphs() != nil || m.Objects() != nil {
@@ -43,7 +43,7 @@ func TestManagerAccessorsBeforeAndAfterOpen(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 
-	if m.Record() == nil || m.File() == nil || m.Series() == nil || m.Vector() == nil {
+	if m.Record() == nil || m.Fstree() == nil || m.Series() == nil || m.Vector() == nil {
 		t.Fatal("a store accessor is nil after Open")
 	}
 	if m.Search() == nil || m.Graphs() == nil || m.Objects() == nil {
@@ -51,7 +51,7 @@ func TestManagerAccessorsBeforeAndAfterOpen(t *testing.T) {
 	}
 
 	// The same accessors accept path segments and return a rooted view.
-	if m.Record("tenant", "records") == nil || m.File("tenant") == nil || m.Series("tenant") == nil {
+	if m.Record("tenant", "records") == nil || m.Fstree("tenant") == nil || m.Series("tenant") == nil {
 		t.Fatal("a rooted accessor is nil")
 	}
 	if m.Vector("tenant") == nil || m.Search("tenant") == nil || m.Graphs("tenant") == nil || m.Objects("tenant") == nil {
@@ -67,13 +67,13 @@ func TestProcessWideAccessorsCoverEveryStore(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = Close() })
 
-	if Record() == nil || File() == nil || Series() == nil || Vector() == nil {
+	if Record() == nil || Fstree() == nil || Series() == nil || Vector() == nil {
 		t.Fatal("a process-wide accessor returned nil")
 	}
 	if Search() == nil || Graphs() == nil || Objects() == nil {
 		t.Fatal("a process-wide accessor returned nil")
 	}
-	if Record("tenant") == nil || File("tenant") == nil || Series("tenant") == nil {
+	if Record("tenant") == nil || Fstree("tenant") == nil || Series("tenant") == nil {
 		t.Fatal("a rooted process-wide accessor returned nil")
 	}
 	if Vector("tenant") == nil || Search("tenant") == nil || Graphs("tenant") == nil || Objects("tenant") == nil {

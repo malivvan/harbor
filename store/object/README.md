@@ -73,14 +73,14 @@ system. Those bytes are untouched and remain readable through `fstree`. To copy
 a bucket into the independent store explicitly:
 
 ```go
-fsys, err := store.File().Open("objects")
+fsys, err := store.Fstree().Open("objects")
 if err != nil {
     return err
 }
 err = store.Objects().MigrateFromFile(ctx, fsys, "tenant-a")
 ```
 
-The copy is idempotent. Nothing is deleted from the file store, and no old data
+The copy is idempotent. Nothing is deleted from the fstree store, and no old data
 is silently interpreted as the new layout. The snapshot adapter
 (`backup/blobstore`) accepts the independent `*object.Store`; a snapshot
 taken over a file-backed bucket can be migrated the same way before it is used

@@ -92,10 +92,10 @@ func (tx *Tx) Record() record.Tx {
 	return tx.record
 }
 
-// File returns the fstree sub-store bound to this transaction, or nil after the
+// Fstree returns the fstree sub-store bound to this transaction, or nil after the
 // transaction ended. File systems opened through it are bound to the same
 // transaction.
-func (tx *Tx) File() *fstree.Store {
+func (tx *Tx) Fstree() *fstree.Store {
 	if tx == nil {
 		return nil
 	}

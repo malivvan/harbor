@@ -2,15 +2,15 @@
 //
 // A bucket is a namespace and a key is a slash-separated name inside it. The
 // pair maps to exactly one record in the object store's own root bucket, so the
-// object store works without a file system and never touches the file store's
+// object store works without a file system and never touches the fstree store's
 // buckets. Keys containing a ".." segment are rejected rather than rewritten,
 // so a key can never address a sibling bucket.
 //
-// The API is the blob API the earlier file store shipped before this store
+// The API is the blob API the earlier fstree store shipped before this store
 // existed: Put
 // installs a complete object atomically, Get returns a reader, Delete is a
 // no-op for a missing key, Move relocates one key, and Stat/List report the
-// size and ETag. Existing file-backed blobs are not abandoned: the file store
+// size and ETag. Existing file-backed blobs are not abandoned: the fstree store
 // still holds them and MigrateFromFile copies a bucket into this store.
 package object
 
@@ -916,7 +916,7 @@ func (s *Store) replay(entries []ledger.Entry) error {
 }
 
 // MigrateFromFile copies every object in a file-backed blob bucket into this
-// store. The file store continues to hold the originals; nothing is deleted.
+// store. The fstree store continues to hold the originals; nothing is deleted.
 // It is the explicit migration path for data written by the previous blob
 // implementation.
 func (s *Store) MigrateFromFile(ctx context.Context, fsys *fstree.FS, bucket string) error {

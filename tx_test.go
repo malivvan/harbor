@@ -27,7 +27,7 @@ func txSeed(t *testing.T, s *Store) {
 	ctx := context.Background()
 	require.NoError(t, s.Record().Save(ctx, &txRecord{ID: "keep", Name: "seed"}))
 
-	fsys, err := s.File().Open("txfs")
+	fsys, err := s.Fstree().Open("txfs")
 	require.NoError(t, err)
 	f, err := fsys.Create("/keep.txt")
 	require.NoError(t, err)
@@ -50,7 +50,7 @@ func TestWriteTransactionCommitsAcrossStores(t *testing.T) {
 			return err
 		}
 
-		fsys, err := tx.File().Open("txfs")
+		fsys, err := tx.Fstree().Open("txfs")
 		if err != nil {
 			return err
 		}
@@ -80,7 +80,7 @@ func TestWriteTransactionCommitsAcrossStores(t *testing.T) {
 	require.NoError(t, s.Record().One(ctx, "ID", "r1", &rec))
 	require.Equal(t, "one", rec.Name)
 
-	fsys, err := s.File().Open("txfs")
+	fsys, err := s.Fstree().Open("txfs")
 	require.NoError(t, err)
 	body, err := fsys.ReadFile("/a.txt")
 	require.NoError(t, err)
@@ -123,7 +123,7 @@ func TestWriteTransactionAbortLeavesNoTrace(t *testing.T) {
 			return err
 		}
 
-		fsys, err := tx.File().Open("txfs")
+		fsys, err := tx.Fstree().Open("txfs")
 		if err != nil {
 			return err
 		}
@@ -158,7 +158,7 @@ func TestWriteTransactionAbortLeavesNoTrace(t *testing.T) {
 	require.NoError(t, s.Record().One(ctx, "ID", "keep", &rec))
 	require.Equal(t, "seed", rec.Name, "an aborted update must not change the record")
 
-	fsys, err := s.File().Open("txfs")
+	fsys, err := s.Fstree().Open("txfs")
 	require.NoError(t, err)
 	if _, err := fsys.Stat("/new.txt"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("Stat(/new.txt) err = %v, want not exist", err)
@@ -287,7 +287,7 @@ func TestWriteTransactionTracesAfterCommit(t *testing.T) {
 		if err := tx.Record().Save(ctx, &txRecord{ID: "traced"}); err != nil {
 			return err
 		}
-		fsys, err := tx.File().Open("txfs")
+		fsys, err := tx.Fstree().Open("txfs")
 		if err != nil {
 			return err
 		}
@@ -333,7 +333,7 @@ func TestWriteTransactionReadsOwnWrites(t *testing.T) {
 
 		// The fs write is visible to a second handle opened on the same
 		// transaction, before the commit.
-		fsys, err := tx.File().Open("txfs")
+		fsys, err := tx.Fstree().Open("txfs")
 		if err != nil {
 			return err
 		}

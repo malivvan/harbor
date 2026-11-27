@@ -160,7 +160,7 @@ func TestIsolationFromFileStore(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
-	fsys, err := store.File().Open("objects")
+	fsys, err := store.Fstree().Open("objects")
 	require.NoError(t, err)
 	require.NoError(t, fsys.MkdirAll("/bucket", 0o755))
 	f, err := fsys.Create("/bucket/file.txt")
@@ -175,7 +175,7 @@ func TestIsolationFromFileStore(t *testing.T) {
 	_, err = store.Objects().Put(ctx, "bucket", "object.txt", strings.NewReader("object-backed"), 13, "")
 	require.NoError(t, err)
 	if _, err := fsys.ReadFile("/bucket/object.txt"); err == nil {
-		t.Fatal("the file store sees an object-store key")
+		t.Fatal("the fstree store sees an object-store key")
 	}
 
 	// The object store lives under its own root.
@@ -236,7 +236,7 @@ func TestMigrateFromFile(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
-	fsys, err := store.File().Open("objects")
+	fsys, err := store.Fstree().Open("objects")
 	require.NoError(t, err)
 	require.NoError(t, fsys.MkdirAll("/bucket/dir", 0o755))
 	for name, body := range map[string]string{

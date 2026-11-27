@@ -37,10 +37,10 @@ const (
 	EncryptRecordValues
 	// EncryptRecordMetadata encrypts db auto-increment counters.
 	EncryptRecordMetadata
-	// EncryptFileContent encrypts fs file content and symlink targets.
-	EncryptFileContent
-	// EncryptFileMetadata encrypts fs inode blobs.
-	EncryptFileMetadata
+	// EncryptFSTreeContent encrypts fstree content and symlink targets.
+	EncryptFSTreeContent
+	// EncryptFSTreeMetadata encrypts fstree inode blobs.
+	EncryptFSTreeMetadata
 	// EncryptSeriesValues encrypts ts point values and series metadata.
 	EncryptSeriesValues
 	// EncryptSeriesNames encrypts ts series bucket and metadata names.
@@ -58,8 +58,8 @@ const (
 	EncryptObjectValues
 	// EncryptRecord combines every db encryption flag.
 	EncryptRecord = EncryptRecordKeys | EncryptRecordValues | EncryptRecordMetadata
-	// EncryptFile combines every fs encryption flag.
-	EncryptFile = EncryptFileContent | EncryptFileMetadata
+	// EncryptFSTree combines every fs encryption flag.
+	EncryptFSTree = EncryptFSTreeContent | EncryptFSTreeMetadata
 	// EncryptSeries combines every ts encryption flag.
 	EncryptSeries = EncryptSeriesValues | EncryptSeriesNames
 	// EncryptVector combines every vec encryption flag.
@@ -70,7 +70,7 @@ const (
 	EncryptObject = EncryptObjectValues
 	// EncryptAll enables encryption for every sub-store and is the default for
 	// a new store that does not set Config.Encrypt.
-	EncryptAll = EncryptRecord | EncryptFile | EncryptSeries | EncryptVector | EncryptGraph | EncryptObject
+	EncryptAll = EncryptRecord | EncryptFSTree | EncryptSeries | EncryptVector | EncryptGraph | EncryptObject
 )
 
 // Trace flags. Every bit enables the trace log for one sub-store. Unlike
@@ -81,8 +81,8 @@ const (
 
 	// TraceRecord records db writes.
 	TraceRecord uint16 = 1 << iota
-	// TraceFile records fs writes.
-	TraceFile
+	// TraceFSTree records fs writes.
+	TraceFSTree
 	// TraceSeries records ts writes.
 	TraceSeries
 	// TraceVector records vec writes.
@@ -95,7 +95,7 @@ const (
 	TraceSearch
 
 	// TraceAll records writes for every sub-store.
-	TraceAll = TraceRecord | TraceFile | TraceSeries | TraceVector | TraceGraphs | TraceObject | TraceSearch
+	TraceAll = TraceRecord | TraceFSTree | TraceSeries | TraceVector | TraceGraphs | TraceObject | TraceSearch
 )
 
 // HasFlag reports whether all bits in other are set in flags.
@@ -426,7 +426,7 @@ func cryptoVerifyCanary(keychain *crypto.Keychain, sealed []byte, want string) e
 const (
 	LabelCanary = "tempest/canary/v1"
 	LabelRecord = "tempest/db/v1"
-	LabelFile   = "tempest/fs/v1"
+	LabelFSTree = "tempest/fs/v1"
 	LabelSeries = "tempest/ts/v1"
 	LabelVector = "tempest/vec/v1"
 	LabelSearch = "tempest/fts/v1"
@@ -437,7 +437,7 @@ const (
 // SLIP-10 hardened paths for the per-store trace signing keys.
 const (
 	TracePathRecord = "m/0'"
-	TracePathFile   = "m/1'"
+	TracePathFSTree = "m/1'"
 	TracePathSeries = "m/2'"
 	TracePathVector = "m/3'"
 	TracePathGraphs = "m/4'"
@@ -450,7 +450,7 @@ const (
 type Keys struct {
 	Canary []byte
 	Record []byte
-	File   []byte
+	FSTree []byte
 	Series []byte
 	Vector []byte
 	Search []byte
@@ -458,7 +458,7 @@ type Keys struct {
 	Object []byte
 
 	TraceRecord ed25519.PrivateKey
-	TraceFile   ed25519.PrivateKey
+	TraceFSTree ed25519.PrivateKey
 	TraceSeries ed25519.PrivateKey
 	TraceVector ed25519.PrivateKey
 	TraceGraphs ed25519.PrivateKey
@@ -471,8 +471,8 @@ func (k *Keys) Wipe() {
 	if k == nil {
 		return
 	}
-	for _, b := range [][]byte{k.Canary, k.Record, k.File, k.Series, k.Vector, k.Search, k.Graphs, k.Object,
-		k.TraceRecord, k.TraceFile, k.TraceSeries, k.TraceVector, k.TraceGraphs, k.TraceObject, k.TraceSearch} {
+	for _, b := range [][]byte{k.Canary, k.Record, k.FSTree, k.Series, k.Vector, k.Search, k.Graphs, k.Object,
+		k.TraceRecord, k.TraceFSTree, k.TraceSeries, k.TraceVector, k.TraceGraphs, k.TraceObject, k.TraceSearch} {
 		wipe(b)
 	}
 }
@@ -518,7 +518,7 @@ func Derive(password string, salt []byte, time, memory uint32, threads uint8) (*
 	}{
 		{LabelCanary, &keys.Canary},
 		{LabelRecord, &keys.Record},
-		{LabelFile, &keys.File},
+		{LabelFSTree, &keys.FSTree},
 		{LabelSeries, &keys.Series},
 		{LabelVector, &keys.Vector},
 		{LabelSearch, &keys.Search},
@@ -538,7 +538,7 @@ func Derive(password string, salt []byte, time, memory uint32, threads uint8) (*
 		dst  *ed25519.PrivateKey
 	}{
 		{TracePathRecord, &keys.TraceRecord},
-		{TracePathFile, &keys.TraceFile},
+		{TracePathFSTree, &keys.TraceFSTree},
 		{TracePathSeries, &keys.TraceSeries},
 		{TracePathVector, &keys.TraceVector},
 		{TracePathGraphs, &keys.TraceGraphs},
