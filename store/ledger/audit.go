@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/malivvan/tempest/canonical"
+	"github.com/malivvan/tempest/compact"
 	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/internal/slip10"
 	bolt "go.etcd.io/bbolt"
@@ -166,7 +166,7 @@ func (r *Recorder) recordTx(tx *bolt.Tx, key ed25519.PrivateKey, entry Entry) er
 	// Sign the canonical encoding, not encoding/json's struct order: an event
 	// that later grows a map field must still produce one signature for one
 	// logical value. The bytes stored are the bytes signed.
-	encoded, err := canonical.Bytes(ev)
+	encoded, err := compact.Bytes(ev)
 	if err != nil {
 		return fmt.Errorf("audit: encode event: %w", err)
 	}

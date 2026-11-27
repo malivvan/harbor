@@ -1,4 +1,4 @@
-package canonical
+package compact
 
 import (
 	"encoding/json"

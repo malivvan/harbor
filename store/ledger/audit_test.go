@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/malivvan/tempest/canonical"
+	"github.com/malivvan/tempest/compact"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -218,7 +218,7 @@ func TestEventEncodingIsCanonical(t *testing.T) {
 
 	var ev Event
 	require.NoError(t, json.Unmarshal(stored, &ev))
-	want, err := canonical.Bytes(ev)
+	want, err := compact.Bytes(ev)
 	require.NoError(t, err)
 	require.Equal(t, want, stored, "stored event bytes are not canonical")
 }
@@ -240,9 +240,9 @@ func TestCanonicalEncodingIsStableForMapFields(t *testing.T) {
 	second.Extra["a"] = "1"
 	second.Extra["b"] = "2"
 
-	a, err := canonical.Bytes(first)
+	a, err := compact.Bytes(first)
 	require.NoError(t, err)
-	c, err := canonical.Bytes(second)
+	c, err := compact.Bytes(second)
 	require.NoError(t, err)
 	require.Equal(t, a, c)
 	require.Equal(t, ed25519.Sign(priv, a), ed25519.Sign(priv, c))

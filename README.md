@@ -935,7 +935,7 @@ Small packages shared by applications and by tempest itself:
 - **`metrics`** defines the dependency-free `Observer` interface the stores
   report counters, histograms, gauges and spans to. A nil observer disables
   instrumentation, and `tempest.Options{Observer: ...}` installs one.
-- **`canonical`** serialises a Go value to byte-stable JSON: keys
+- **`compact`** serialises a Go value to byte-stable JSON: keys
   sorted at every depth, no insignificant whitespace, numbers passed through
   unchanged. It is the encoding to sign or hash when a struct may later carry a
   map.
@@ -1479,7 +1479,7 @@ Generated API documentation is published on pkg.go.dev:
 - [github.com/malivvan/tempest/ulid](https://pkg.go.dev/github.com/malivvan/tempest/ulid)
 - [github.com/malivvan/tempest/ranking](https://pkg.go.dev/github.com/malivvan/tempest/ranking)
 - [github.com/malivvan/tempest/metrics](https://pkg.go.dev/github.com/malivvan/tempest/metrics)
-- [github.com/malivvan/tempest/canonical](https://pkg.go.dev/github.com/malivvan/tempest/canonical)
+- [github.com/malivvan/tempest/compact](https://pkg.go.dev/github.com/malivvan/tempest/compact)
 - [github.com/malivvan/tempest/backup](https://pkg.go.dev/github.com/malivvan/tempest/backup)
 - [github.com/malivvan/tempest/backup/blobstore](https://pkg.go.dev/github.com/malivvan/tempest/backup/blobstore)
 - [github.com/malivvan/tempest/store](https://pkg.go.dev/github.com/malivvan/tempest/store)

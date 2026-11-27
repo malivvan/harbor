@@ -1,4 +1,4 @@
-// Package canonical serialises Go values to deterministic JSON.
+// Package compact serialises Go values to deterministic JSON.
 //
 // The output is byte-stable across runs and processes: object keys are sorted
 // lexicographically at every level of nesting, there is no insignificant
@@ -23,7 +23,7 @@
 // Input may be any JSON-marshallable value. A value that is already encoded
 // (a json.RawMessage or []byte holding JSON) is re-encoded through the canonical
 // path, so pre-encoded input cannot smuggle in unsorted keys.
-package canonical
+package compact
 
 import (
 	"bytes"
@@ -36,7 +36,7 @@ import (
 func Bytes(v any) ([]byte, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
-		return nil, fmt.Errorf("canonical: marshal: %w", err)
+		return nil, fmt.Errorf("compact: marshal: %w", err)
 	}
 	return fromRaw(json.RawMessage(raw))
 }
@@ -47,7 +47,7 @@ func fromRaw(raw json.RawMessage) ([]byte, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber() // keep the literal numeric text instead of float64
 	if err := dec.Decode(&v); err != nil {
-		return nil, fmt.Errorf("canonical: decode: %w", err)
+		return nil, fmt.Errorf("compact: decode: %w", err)
 	}
 	return encode(v)
 }
@@ -87,13 +87,13 @@ func encodeObject(m map[string]any) ([]byte, error) {
 		}
 		keyBytes, err := json.Marshal(k)
 		if err != nil {
-			return nil, fmt.Errorf("canonical: marshal key %q: %w", k, err)
+			return nil, fmt.Errorf("compact: marshal key %q: %w", k, err)
 		}
 		buf.Write(keyBytes)
 		buf.WriteByte(':')
 		valBytes, err := encode(m[k])
 		if err != nil {
-			return nil, fmt.Errorf("canonical: marshal value for key %q: %w", k, err)
+			return nil, fmt.Errorf("compact: marshal value for key %q: %w", k, err)
 		}
 		buf.Write(valBytes)
 	}
@@ -110,7 +110,7 @@ func encodeArray(a []any) ([]byte, error) {
 		}
 		b, err := encode(elem)
 		if err != nil {
-			return nil, fmt.Errorf("canonical: marshal array element %d: %w", i, err)
+			return nil, fmt.Errorf("compact: marshal array element %d: %w", i, err)
 		}
 		buf.Write(b)
 	}
