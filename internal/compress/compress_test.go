@@ -2,8 +2,8 @@ package compress
 
 import (
 	"bytes"
+	"crypto/rand"
 	"errors"
-	"math/rand"
 	"strings"
 	"sync"
 	"testing"
@@ -43,10 +43,9 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 
 func TestEncodeNeverGrows(t *testing.T) {
 	codec := newTestCodec(t, Config{Level: 1})
-	rng := rand.New(rand.NewSource(1))
 	for _, size := range []int{1, 8, 15, 16, 17, 64, 1024} {
 		src := make([]byte, size)
-		if _, err := rng.Read(src); err != nil {
+		if _, err := rand.Read(src); err != nil {
 			t.Fatalf("read random: %v", err)
 		}
 		encoded, err := codec.Encode(nil, src)
@@ -173,5 +172,3 @@ func TestConcurrentCodec(t *testing.T) {
 	}
 	wg.Wait()
 }
-
-var _ = rand.Read
