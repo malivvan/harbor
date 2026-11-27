@@ -35,6 +35,23 @@ dependency. It will be deleted in the next step.
 
 ---
 
+## Progress
+
+- [x] Phase 0 — internal/compress (Zstd codec + envelope)
+- [x] Phase 1 — record store compression
+- [ ] Phase 2 — fstree compression
+- [ ] Phase 3 — series compression
+- [ ] Phase 4 — vector compression
+- [ ] Phase 5 — search compression
+- [ ] Phase 6 — graphs compression
+- [ ] Phase 7 — object compression
+- [ ] Phase 8 — fstree content-addressed chunk deduplication
+- [ ] Phase 9 — object blob deduplication
+- [ ] Phase 10 — root package wiring
+- [ ] Documentation updates
+
+---
+
 ## Scope and goals
 
 Add **Zstd compression** and **deduplication** to tempest, applied to every

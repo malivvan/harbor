@@ -23,19 +23,24 @@ const listIndexIDsBucket = "tempest__ids"
 // current cipher and flags.
 func (s *Store) withKey(newKey []byte) (*encState, error) {
 	cur := s.encState()
-	if cur == nil {
+	if !cur.encrypted() {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 	if len(newKey) != KeySize {
 		return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, KeySize, len(newKey))
 	}
 
-	return resolveConfig(Config{
+	next, err := resolveConfig(Config{
 		Secret:          append([]byte(nil), newKey...),
 		EncryptValues:   cur.encValues,
 		EncryptMetadata: cur.encMetadata,
 		EncryptKeys:     cur.encKeys,
 	})
+	if err != nil {
+		return nil, err
+	}
+	next.comp = cur.comp
+	return next, nil
 }
 
 // adoptEnc installs next as the encryption state of the store. Every node
@@ -138,7 +143,7 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 	defer s.rotMuOf().RUnlock()
 
 	enc := s.encState()
-	if enc == nil {
+	if !enc.encrypted() {
 		return wrapError("verify all", fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig))
 	}
 

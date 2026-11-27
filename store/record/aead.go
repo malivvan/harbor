@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/malivvan/tempest/internal/compress"
 	"github.com/malivvan/tempest/internal/crypto"
 	"github.com/malivvan/tempest/metrics"
 	"github.com/malivvan/tempest/store/ledger"
@@ -44,6 +45,18 @@ type Config struct {
 	// stored keys no longer reveal the indexed data. Ordered and prefix
 	// lookups that rely on index ordering return ErrEncryptedOrdering.
 	EncryptKeys bool
+
+	// Compress Zstd-compresses record values and key/value values on the
+	// plaintext side of encryption. It is a write-time preference: reads
+	// auto-detect the envelope, so a store written compressed stays readable
+	// with Compress disabled. It does not require encryption.
+	Compress bool
+
+	// CompressLevel selects the Zstandard level (0 selects the default).
+	CompressLevel int
+
+	// MinCompress skips compressing values smaller than this many bytes.
+	MinCompress int
 
 	// Audit, when non-nil, receives an entry for every committed write.
 	Audit ledger.Sink
@@ -108,11 +121,21 @@ type encState struct {
 	// sivs holds the per-domain deterministic name ciphers, derived from the
 	// primary key. Read-only after construction.
 	sivs map[string]*crypto.SIVNameCipher
+
+	// comp compresses values before sealing and is nil when compression is off.
+	// It is immutable and shared across rotation states.
+	comp *compress.Codec
+}
+
+// encrypted reports whether a real cipher is configured. A state can exist for
+// compression alone, with no keychain.
+func (e *encState) encrypted() bool {
+	return e != nil && e.kc != nil
 }
 
 // seal encrypts plain with the primary engine, prefixing a fresh random nonce.
 func (e *encState) seal(plain []byte) ([]byte, error) {
-	if e == nil {
+	if !e.encrypted() {
 		return plain, nil
 	}
 	return e.kc.Seal(plain)
@@ -120,26 +143,38 @@ func (e *encState) seal(plain []byte) ([]byte, error) {
 
 // open decrypts raw with the primary engine and any rotation fallbacks.
 func (e *encState) open(raw []byte) ([]byte, error) {
-	if e == nil {
+	if !e.encrypted() {
 		return raw, nil
 	}
 	return e.kc.Open(raw)
 }
 
-// sealValues seals a marshaled value when EncryptValues is enabled.
+// sealValues compresses a marshaled value when compression is enabled, then
+// seals it when EncryptValues is enabled.
 func (e *encState) sealValues(plain []byte) ([]byte, error) {
-	if e == nil || !e.encValues {
+	if e != nil && e.comp != nil {
+		var err error
+		if plain, err = e.comp.Encode(nil, plain); err != nil {
+			return nil, err
+		}
+	}
+	if e == nil || !e.encValues || !e.encrypted() {
 		return plain, nil
 	}
 	return e.seal(plain)
 }
 
-// openValues reverses sealValues.
+// openValues reverses sealValues. The compressed envelope is detected and
+// decoded even when this store was opened with compression disabled.
 func (e *encState) openValues(raw []byte) ([]byte, error) {
-	if e == nil || !e.encValues {
-		return raw, nil
+	if e == nil || !e.encValues || !e.encrypted() {
+		return compress.Decode(nil, raw)
 	}
-	return e.open(raw)
+	plain, err := e.open(raw)
+	if err != nil {
+		return nil, err
+	}
+	return compress.Decode(nil, plain)
 }
 
 // sealMetadata seals a metadata blob when EncryptMetadata is enabled.
@@ -390,8 +425,22 @@ func (n *node) hasUserData(ctx context.Context) (bool, error) {
 // resolveConfig turns a Config into an encryption state. It returns nil for a
 // zero Config and for a Config that enables no encryption feature.
 func resolveConfig(cfg Config) (*encState, error) {
-	if !cfg.encryptionEnabled() {
+	if !cfg.encryptionEnabled() && !cfg.Compress {
 		return nil, nil
+	}
+
+	state := &encState{}
+
+	if cfg.Compress {
+		codec, err := compress.NewCodec(compress.Config{Level: cfg.CompressLevel, MinSize: cfg.MinCompress})
+		if err != nil {
+			return nil, err
+		}
+		state.comp = codec
+	}
+
+	if !cfg.encryptionEnabled() {
+		return state, nil
 	}
 
 	key, err := crypto.ResolveKey(cfg.Secret)
@@ -404,12 +453,10 @@ func resolveConfig(cfg Config) (*encState, error) {
 		return nil, err
 	}
 
-	state := &encState{
-		kc:          kc,
-		encValues:   cfg.EncryptValues,
-		encMetadata: cfg.EncryptMetadata,
-		encKeys:     cfg.EncryptKeys,
-	}
+	state.kc = kc
+	state.encValues = cfg.EncryptValues
+	state.encMetadata = cfg.EncryptMetadata
+	state.encKeys = cfg.EncryptKeys
 
 	if state.encKeys {
 		state.sivs = make(map[string]*crypto.SIVNameCipher, 3)
