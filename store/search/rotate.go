@@ -14,17 +14,22 @@ import (
 // term keys are written with newKey, and no previous key is kept.
 func (s *Store) withKey(newKey []byte) (*encState, error) {
 	cur := s.encState()
-	if cur == nil {
+	if !cur.encrypted() {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 	if len(newKey) != crypto.KeySize {
 		return nil, fmt.Errorf("%w: key must be %d bytes, got %d", ErrInvalidKey, crypto.KeySize, len(newKey))
 	}
-	return resolveEnc(Config{
+	next, err := resolveEnc(Config{
 		Secret:        append([]byte(nil), newKey...),
 		EncryptValues: cur.encValues,
 		EncryptTokens: cur.encTokens,
 	})
+	if err != nil {
+		return nil, err
+	}
+	next.comp = cur.comp
+	return next, nil
 }
 
 // withRotationKey returns the state a single-index rotation moves onto: the
@@ -32,7 +37,7 @@ func (s *Store) withKey(newKey []byte) (*encState, error) {
 // rewritten keep working until RotateAll.
 func (s *Store) withRotationKey(newKey []byte) (*encState, error) {
 	cur := s.encState()
-	if cur == nil {
+	if !cur.encrypted() {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 	if len(newKey) != crypto.KeySize {
@@ -46,7 +51,7 @@ func (s *Store) withRotationKey(newKey []byte) (*encState, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &encState{kc: kc, siv: siv, encValues: cur.encValues, encTokens: cur.encTokens}, nil
+	return &encState{kc: kc, siv: siv, encValues: cur.encValues, encTokens: cur.encTokens, comp: cur.comp}, nil
 }
 
 // adoptEnc installs next as the encryption state of the store.
@@ -118,7 +123,7 @@ func (s *Store) VerifyAll(ctx context.Context) error {
 	}
 	return s.view(func(tx *bolt.Tx) error {
 		enc := s.encState()
-		if enc == nil {
+		if !enc.encrypted() {
 			return fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 		}
 		r := &rotation{ctx: ctx, store: s, old: enc}

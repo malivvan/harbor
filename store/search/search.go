@@ -19,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/malivvan/tempest/internal/compress"
 	"github.com/malivvan/tempest/internal/crypto"
 	"github.com/malivvan/tempest/metrics"
 	"github.com/malivvan/tempest/store/ledger"
@@ -95,6 +96,18 @@ type Config struct {
 	// Audit, when non-nil, receives one entry per committed index write.
 	Audit ledger.Sink
 
+	// Compress Zstd-compresses documents, posting lists and index metadata on
+	// the plaintext side of encryption. Term keys are never compressed. It is a
+	// write-time preference: reads auto-detect the envelope, so an index written
+	// compressed stays readable with Compress disabled.
+	Compress bool
+
+	// CompressLevel selects the Zstandard level (0 selects the default).
+	CompressLevel int
+
+	// MinCompress skips compressing values smaller than this many bytes.
+	MinCompress int
+
 	// Metrics, when non-nil, receives operation counters.
 	Metrics metrics.Observer
 }
@@ -128,7 +141,12 @@ type encState struct {
 	siv       *crypto.SIVNameCipher
 	encValues bool
 	encTokens bool
+	comp      *compress.Codec
 }
+
+// encrypted reports whether a real cipher is configured. A state can exist for
+// compression alone, with no keychain.
+func (e *encState) encrypted() bool { return e != nil && e.kc != nil }
 
 // Open creates a Store over an already-open bbolt database. The caller owns db
 // and must keep it open for the lifetime of the Store; the Store never closes
@@ -164,8 +182,19 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 
 // resolveEnc builds the encryption state.
 func resolveEnc(cfg Config) (*encState, error) {
-	if !cfg.EncryptValues && !cfg.EncryptTokens {
+	if !cfg.EncryptValues && !cfg.EncryptTokens && !cfg.Compress {
 		return nil, nil
+	}
+	state := &encState{}
+	if cfg.Compress {
+		codec, err := compress.NewCodec(compress.Config{Level: cfg.CompressLevel, MinSize: cfg.MinCompress})
+		if err != nil {
+			return nil, err
+		}
+		state.comp = codec
+	}
+	if !cfg.EncryptValues && !cfg.EncryptTokens {
+		return state, nil
 	}
 	key, err := crypto.ResolveKey(cfg.Secret)
 	if err != nil {
@@ -179,7 +208,11 @@ func resolveEnc(cfg Config) (*encState, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &encState{kc: kc, siv: siv, encValues: cfg.EncryptValues, encTokens: cfg.EncryptTokens}, nil
+	state.kc = kc
+	state.siv = siv
+	state.encValues = cfg.EncryptValues
+	state.encTokens = cfg.EncryptTokens
+	return state, nil
 }
 
 // cloneRoot copies a bucket path.
@@ -378,22 +411,34 @@ func (s *Store) createIndexBucket(tx *bolt.Tx, name string) (*bolt.Bucket, error
 	return tx.CreateBucketIfNotExists([]byte(name))
 }
 
-// seal seals plain when value encryption is enabled.
+// seal compresses plain when compression is enabled, then seals it when value
+// encryption is enabled.
 func (s *Store) seal(plain []byte) ([]byte, error) {
 	enc := s.encState()
-	if enc == nil || !enc.encValues {
+	if enc != nil && enc.comp != nil {
+		var err error
+		if plain, err = enc.comp.Encode(nil, plain); err != nil {
+			return nil, err
+		}
+	}
+	if enc == nil || !enc.encValues || !enc.encrypted() {
 		return plain, nil
 	}
 	return enc.kc.Seal(plain)
 }
 
-// openValue opens raw when value encryption is enabled.
+// openValue opens raw when value encryption is enabled and always decodes a
+// compressed envelope.
 func (s *Store) openValue(raw []byte) ([]byte, error) {
 	enc := s.encState()
-	if enc == nil || !enc.encValues {
-		return raw, nil
+	if enc == nil || !enc.encValues || !enc.encrypted() {
+		return compress.Decode(nil, raw)
 	}
-	return enc.kc.Open(raw)
+	plain, err := enc.kc.Open(raw)
+	if err != nil {
+		return nil, err
+	}
+	return compress.Decode(nil, plain)
 }
 
 // SetAuditSink replaces the sink that receives committed-write entries and
