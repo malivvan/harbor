@@ -48,6 +48,12 @@ const (
 	modeKey    = "__mode__"
 	canaryKey  = "__canary__"
 
+	// modeDedup records that objects are stored content-addressed.
+	modeDedup byte = 1 << 1
+
+	blobsBucketName    = "__blobs__"
+	blobRefsBucketName = "__blobs_refs__"
+
 	canaryPlaintext = "tempest/object/v1"
 )
 
@@ -94,6 +100,11 @@ type Config struct {
 	// MinCompress skips compressing records smaller than this many bytes.
 	MinCompress int
 
+	// Dedup stores object content by its SHA-256, so identical objects across
+	// keys and buckets are stored once and reference-counted. The layout is
+	// recorded in the store's mode byte and a mismatch fails closed.
+	Dedup bool
+
 	// Audit, when non-nil, receives one entry per committed object write.
 	Audit ledger.Sink
 
@@ -126,6 +137,8 @@ type Store struct {
 
 	closed   atomic.Bool
 	readOnly bool
+	// dedup stores object content content-addressed and reference-counted.
+	dedup bool
 
 	// rotMu serializes rotation against normal operations.
 	rotMu sync.RWMutex
@@ -141,10 +154,12 @@ type Info struct {
 	ETag string
 }
 
-// record is the persisted object.
+// record is the persisted object. In dedup mode Data is empty and Size carries
+// the content length; the bytes live under __blobs__ keyed by SHA256.
 type record struct {
 	SHA256 string `json:"sha256"`
-	Data   []byte `json:"data"`
+	Size   int64  `json:"size,omitempty"`
+	Data   []byte `json:"data,omitempty"`
 }
 
 // Open creates a Store over an already-open bbolt database. The caller owns db
@@ -184,6 +199,7 @@ func open(ctx context.Context, bdb *bolt.DB, cfg Config, readOnly bool) (*Store,
 		audit:    cfg.Audit,
 		obs:      cfg.Metrics,
 		readOnly: readOnly,
+		dedup:    cfg.Dedup,
 	}
 	s.enc.Store(enc)
 	if err := s.ensureMeta(ctx); err != nil {
@@ -277,6 +293,7 @@ func (s *Store) WithRoot(parts ...string) *Store {
 		audit:    s.audit,
 		obs:      s.obs,
 		readOnly: s.readOnly,
+		dedup:    s.dedup,
 	}
 }
 
@@ -293,6 +310,7 @@ func (s *Store) WithTransaction(tx *bolt.Tx) *Store {
 		audit:    s.audit,
 		obs:      s.obs,
 		readOnly: s.readOnly,
+		dedup:    s.dedup,
 	}
 }
 
@@ -444,7 +462,10 @@ func (s *Store) checkMeta(root *bolt.Bucket, readOnly bool) error {
 	want := byte(0)
 	enc := s.encState()
 	if enc.encrypted() {
-		want = 1
+		want |= 1
+	}
+	if s.dedup {
+		want |= modeDedup
 	}
 	mode := root.Get([]byte(modeKey))
 	if mode == nil {
@@ -589,7 +610,13 @@ func (s *Store) Put(ctx context.Context, bucket, key string, r io.Reader, size i
 		return "", fmt.Errorf("object: put %q: %w", key, err)
 	}
 	sum := sha256.Sum256(data)
-	rec := record{SHA256: hex.EncodeToString(sum[:]), Data: data}
+	hashHex := hex.EncodeToString(sum[:])
+	rec := record{SHA256: hashHex}
+	if s.dedupEnabled() {
+		rec.Size = int64(len(data))
+	} else {
+		rec.Data = data
+	}
 	raw, err := json.Marshal(rec)
 	if err != nil {
 		return "", err
@@ -603,6 +630,11 @@ func (s *Store) Put(ctx context.Context, bucket, key string, r io.Reader, size i
 		b, err := s.bucket(tx, bucket, true)
 		if err != nil {
 			return err
+		}
+		if s.dedupEnabled() {
+			if err := s.acquireBlob(tx, hashHex, data); err != nil {
+				return err
+			}
 		}
 		if err := b.Put([]byte(okey), sealed); err != nil {
 			return err
@@ -630,7 +662,10 @@ func (s *Store) Get(ctx context.Context, bucket, key string) (io.ReadCloser, int
 	if err != nil {
 		return nil, 0, err
 	}
-	var rec record
+	var (
+		rec  record
+		data []byte
+	)
 	err = s.view(ctx, func(tx *bolt.Tx) error {
 		b, err := s.bucket(tx, bucket, false)
 		if err != nil {
@@ -639,7 +674,15 @@ func (s *Store) Get(ctx context.Context, bucket, key string) (io.ReadCloser, int
 		if b == nil {
 			return os.ErrNotExist
 		}
-		return s.getRecord(b, okey, &rec)
+		if err := s.getRecord(b, okey, &rec); err != nil {
+			return err
+		}
+		if s.dedupEnabled() {
+			data, err = s.readBlob(tx, rec.SHA256)
+			return err
+		}
+		data = rec.Data
+		return nil
 	})
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -647,7 +690,7 @@ func (s *Store) Get(ctx context.Context, bucket, key string) (io.ReadCloser, int
 		}
 		return nil, 0, fmt.Errorf("object: get %q: %w", key, err)
 	}
-	return io.NopCloser(bytes.NewReader(rec.Data)), int64(len(rec.Data)), nil
+	return io.NopCloser(bytes.NewReader(data)), int64(len(data)), nil
 }
 
 // ReadAll reads a whole object.
@@ -678,11 +721,23 @@ func (s *Store) Delete(ctx context.Context, bucket, key string) error {
 		if err != nil || b == nil {
 			return err
 		}
-		if b.Get([]byte(okey)) == nil {
+		raw := b.Get([]byte(okey))
+		if raw == nil {
 			return nil
+		}
+		var rec record
+		if s.dedupEnabled() {
+			if err := s.recordFromRaw(raw, &rec); err != nil {
+				return err
+			}
 		}
 		if err := b.Delete([]byte(okey)); err != nil {
 			return err
+		}
+		if s.dedupEnabled() {
+			if err := s.releaseBlob(tx, rec.SHA256); err != nil {
+				return err
+			}
 		}
 		if s.audit != nil {
 			entries = append(entries, ledger.Entry{Store: ledger.StoreObject, Op: "delete", Entity: bucket + ":" + okey})
@@ -771,7 +826,7 @@ func (s *Store) Stat(ctx context.Context, bucket, key string) (Info, bool, error
 		}
 		return Info{}, false, fmt.Errorf("object: stat %q: %w", key, err)
 	}
-	return Info{Key: okey, Size: int64(len(rec.Data)), ETag: rec.SHA256}, true, nil
+	return s.infoOf(okey, rec), true, nil
 }
 
 // Exists reports whether bucket/key holds bytes.
@@ -818,7 +873,7 @@ func (s *Store) List(ctx context.Context, bucket, prefix string) ([]Info, error)
 			if err := s.recordFromRaw(v, &rec); err != nil {
 				return err
 			}
-			out = append(out, Info{Key: key, Size: int64(len(rec.Data)), ETag: rec.SHA256})
+			out = append(out, s.infoOf(key, rec))
 			return nil
 		})
 	})
