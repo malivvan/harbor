@@ -161,6 +161,17 @@ transaction and is idempotent. The legacy data is left untouched.
 - `VerifyBackup` validates the graph store's version and mode, and lists every
   graph in the copy. `BackupFile` records the graph format version in its
   manifest.
+- `Store.Drop` removes a named graph and every node, edge and closed version in
+  it; a missing graph is a no-op and the removal is audited.
+- `Store.RotateAll` re-seals every live and closed record plus the canary under a
+  new key, and `Store.VerifyAll` re-reads them, reporting
+  `crypto.ErrAuthFailed` on a value that does not authenticate.
+  `Store.ReEncryptGraph` rotates one graph and keeps the previous key as a
+  fallback until `RotateAll`; graph names and record keys are plaintext, so the
+  other graphs stay readable meanwhile.
+- Logical export (`tempest.Export`) carries the live graph only: nodes and
+  edges, not the closed bitemporal version history. Use `Copy` or
+  `MigrateFromRecord` for in-process history migration.
 
 ## Not in this package (yet)
 

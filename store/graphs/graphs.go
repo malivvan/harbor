@@ -45,6 +45,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/malivvan/tempest/internal/crypto"
@@ -76,6 +77,9 @@ var (
 	ErrWrongMode           = errors.New("graphs: store encryption mode does not match")
 	ErrReadOnly            = errors.New("graphs: store is read-only")
 	ErrInTransaction       = errors.New("graphs: operation is not available inside an explicit transaction")
+
+	// ErrInvalidKey is returned for a missing or malformed encryption key.
+	ErrInvalidKey = crypto.ErrInvalidKey
 )
 
 // Config configures a Store.
@@ -117,6 +121,9 @@ type Store struct {
 
 	closed   atomic.Bool
 	readOnly bool
+
+	// rotMu serializes rotation against normal operations.
+	rotMu sync.RWMutex
 }
 
 // Open creates a Store over an already-open bbolt database. The caller owns db
@@ -313,6 +320,9 @@ func (s *Store) view(ctx context.Context, fn func(*bolt.Tx) error) error {
 	if err := s.checkOpen(); err != nil {
 		return err
 	}
+	root := s.rootStore()
+	root.rotMu.RLock()
+	defer root.rotMu.RUnlock()
 	if s.tx != nil {
 		return fn(s.tx)
 	}
@@ -327,6 +337,9 @@ func (s *Store) update(ctx context.Context, fn func(*bolt.Tx) error) error {
 	if s.readOnly && s.tx == nil {
 		return ErrReadOnly
 	}
+	root := s.rootStore()
+	root.rotMu.RLock()
+	defer root.rotMu.RUnlock()
 	if s.tx != nil {
 		return fn(s.tx)
 	}
@@ -543,6 +556,49 @@ func (s *Store) Names(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	return names, nil
+}
+
+// Drop removes a named graph and every node, edge and version record in it. A
+// missing graph is a no-op. One "drop" entry is audited when auditing is
+// enabled.
+func (s *Store) Drop(ctx context.Context, name string) error {
+	if ctx == nil {
+		return ErrNilContext
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.checkOpen(); err != nil {
+		return err
+	}
+	if err := validateName(name); err != nil {
+		return err
+	}
+	var entries []ledger.Entry
+	err := s.update(ctx, func(tx *bolt.Tx) error {
+		root := s.rootBucket(tx)
+		if root == nil || root.Bucket([]byte(name)) == nil {
+			return nil
+		}
+		if err := root.DeleteBucket([]byte(name)); err != nil {
+			return err
+		}
+		if s.audit != nil {
+			entries = append(entries, ledger.Entry{Store: ledger.StoreGraphs, Op: "drop", Entity: name})
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("graphs: drop %q: %w", name, err)
+	}
+	if s.audit != nil {
+		for _, entry := range entries {
+			if err := s.audit.Record(entry); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // MigrateFromRecord copies a graph that was stored in the legacy record-backed

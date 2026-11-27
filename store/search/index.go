@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -91,6 +92,7 @@ func (s *Store) Open(name string, cfg Config) (*Index, error) {
 	if readOnly {
 		run = s.view
 	}
+	created := false
 	err := run(func(tx *bolt.Tx) error {
 		var b *bolt.Bucket
 		var err error
@@ -134,12 +136,27 @@ func (s *Store) Open(name string, cfg Config) (*Index, error) {
 				B:         idx.b,
 				Tokenizer: tokenizerName(cfg.Tokenizer),
 			}
+			created = true
 			return s.saveMeta(b, meta)
+		}
+		// A caller that did not ask for a tokenizer gets the persisted built-in
+		// one, so opening an index for export or verification does not need to
+		// know how it was created. A custom tokenizer cannot be reconstructed
+		// by name and keeps the default until the caller supplies it.
+		if cfg.Tokenizer == nil {
+			if tok, ok := tokenizerByName(meta.Tokenizer); ok {
+				idx.tokenizer = tok
+			}
 		}
 		return idx.adoptMeta(meta)
 	})
 	if err != nil {
 		return nil, err
+	}
+	if created {
+		if err := s.auditEntry("create_index", name, nil); err != nil {
+			return nil, err
+		}
 	}
 	return idx, nil
 }
@@ -411,7 +428,7 @@ func (idx *Index) Upsert(ctx context.Context, id, text string) error {
 		tf[term]++
 	}
 
-	return idx.store.update(func(tx *bolt.Tx) error {
+	if err := idx.store.update(func(tx *bolt.Tx) error {
 		b, docs, terms, err := idx.bucket(tx)
 		if err != nil {
 			return err
@@ -449,7 +466,10 @@ func (idx *Index) Upsert(ctx context.Context, id, text string) error {
 		meta.DocCount++
 		meta.TotalLen += int64(len(tokens))
 		return idx.store.saveMeta(b, meta)
-	})
+	}); err != nil {
+		return err
+	}
+	return idx.store.auditEntry("upsert", idx.name+":"+id, digestEvent(id, text))
 }
 
 // Delete removes documents from the index. Unknown ids are ignored.
@@ -464,7 +484,7 @@ func (idx *Index) Delete(ctx context.Context, ids ...string) error {
 		return nil
 	}
 
-	return idx.store.update(func(tx *bolt.Tx) error {
+	if err := idx.store.update(func(tx *bolt.Tx) error {
 		b, docs, terms, err := idx.bucket(tx)
 		if err != nil {
 			return err
@@ -506,7 +526,10 @@ func (idx *Index) Delete(ctx context.Context, ids ...string) error {
 			return nil
 		}
 		return idx.store.saveMeta(b, meta)
-	})
+	}); err != nil {
+		return err
+	}
+	return idx.store.auditEntry("delete", idx.name, nil)
 }
 
 // Hit is one search result.
@@ -718,4 +741,305 @@ func (s *Store) Close() error {
 	}
 	s.closed.Store(true)
 	return nil
+}
+
+// DocEntry is one indexed document's logical record: its length in tokens and
+// its term frequencies. The original text is never stored, so it cannot be
+// recovered from an index or an export.
+type DocEntry struct {
+	ID     string         `json:"id"`
+	Length int            `json:"len"`
+	TF     map[string]int `json:"tf"`
+}
+
+// TermEntry is one posting list, sorted by term.
+type TermEntry struct {
+	Term string   `json:"term"`
+	Docs []string `json:"docs"`
+}
+
+// IndexMeta is the persisted index configuration plus its corpus statistics.
+type IndexMeta struct {
+	K1        float64 `json:"k1"`
+	B         float64 `json:"b"`
+	Tokenizer string  `json:"tokenizer"`
+	DocCount  int64   `json:"docs"`
+	TotalLen  int64   `json:"total_len"`
+}
+
+// Meta returns the persisted index metadata.
+func (idx *Index) Meta(ctx context.Context) (IndexMeta, error) {
+	if ctx == nil {
+		return IndexMeta{}, ErrNilContext
+	}
+	if err := ctx.Err(); err != nil {
+		return IndexMeta{}, err
+	}
+	var out IndexMeta
+	err := idx.store.view(func(tx *bolt.Tx) error {
+		b, err := idx.store.indexBucket(tx, idx.name)
+		if err != nil {
+			return err
+		}
+		if b == nil {
+			return fmt.Errorf("%w: %q", ErrIndexNotFound, idx.name)
+		}
+		meta, found, err := idx.store.loadMeta(b)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("%w: %q", ErrIndexNotFound, idx.name)
+		}
+		out = IndexMeta{
+			K1:        meta.K1,
+			B:         meta.B,
+			Tokenizer: meta.Tokenizer,
+			DocCount:  meta.DocCount,
+			TotalLen:  meta.TotalLen,
+		}
+		return nil
+	})
+	if err != nil {
+		return IndexMeta{}, err
+	}
+	return out, nil
+}
+
+// Docs returns every indexed document, sorted by id.
+func (idx *Index) Docs(ctx context.Context) ([]DocEntry, error) {
+	if ctx == nil {
+		return nil, ErrNilContext
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var out []DocEntry
+	err := idx.store.view(func(tx *bolt.Tx) error {
+		_, docs, _, err := idx.bucket(tx)
+		if err != nil {
+			return err
+		}
+		return docs.ForEach(func(k, v []byte) error {
+			doc, found, err := idx.loadDoc(docs, string(k))
+			if err != nil {
+				return err
+			}
+			if !found {
+				return nil
+			}
+			out = append(out, DocEntry{ID: string(k), Length: doc.Length, TF: doc.TF})
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// Terms returns every posting list, sorted by term. When term keys are
+// encrypted they are decrypted through the store's name cipher.
+func (idx *Index) Terms(ctx context.Context) ([]TermEntry, error) {
+	if ctx == nil {
+		return nil, ErrNilContext
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var out []TermEntry
+	err := idx.store.view(func(tx *bolt.Tx) error {
+		_, _, terms, err := idx.bucket(tx)
+		if err != nil {
+			return err
+		}
+		return terms.ForEach(func(k, v []byte) error {
+			if v == nil {
+				return nil
+			}
+			term, err := idx.store.termName(k)
+			if err != nil {
+				return err
+			}
+			rec, found, err := idx.loadTerm(terms, term)
+			if err != nil {
+				return err
+			}
+			if !found || len(rec.Docs) == 0 {
+				return nil
+			}
+			out = append(out, TermEntry{Term: term, Docs: rec.Docs})
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Term < out[j].Term })
+	return out, nil
+}
+
+// RestoreIndex creates or replaces the named index from a logical snapshot in
+// one write transaction: the version and mode records, the metadata, every
+// document and every posting list. cfg supplies the tokenizer when the snapshot
+// was taken from an index with a custom tokenizer; built-in tokenizers are
+// resolved by name and a conflicting custom tokenizer is rejected. K1 and B in
+// meta always win. Everything is written under the store's current encryption.
+func (s *Store) RestoreIndex(ctx context.Context, name string, cfg Config, meta IndexMeta, docs []DocEntry, terms []TermEntry) error {
+	if ctx == nil {
+		return ErrNilContext
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil {
+		return ErrNilParam
+	}
+	if name == "" {
+		return fmt.Errorf("%w: empty", ErrInvalidName)
+	}
+	if err := validateName(name); err != nil {
+		return err
+	}
+	if err := validateBM25(meta.K1, meta.B); err != nil {
+		return err
+	}
+	tokenizer, err := restoreTokenizer(cfg.Tokenizer, meta.Tokenizer)
+	if err != nil {
+		return err
+	}
+	idx := &Index{store: s, name: name, tokenizer: tokenizer, k1: meta.K1, b: meta.B}
+	if idx.k1 == 0 {
+		idx.k1 = DefaultK1
+	}
+	if idx.b == 0 {
+		idx.b = DefaultB
+	}
+	return s.update(func(tx *bolt.Tx) error {
+		b, err := s.createIndexBucket(tx, name)
+		if err != nil {
+			return err
+		}
+		if _, err := b.CreateBucketIfNotExists([]byte(docsBucket)); err != nil {
+			return err
+		}
+		if _, err := b.CreateBucketIfNotExists([]byte(termsBucket)); err != nil {
+			return err
+		}
+		if err := s.checkVersion(b, false); err != nil {
+			return err
+		}
+		if err := s.checkMode(b, false); err != nil {
+			return err
+		}
+		if err := s.saveMeta(b, indexMeta{
+			DocCount:  meta.DocCount,
+			TotalLen:  meta.TotalLen,
+			K1:        idx.k1,
+			B:         idx.b,
+			Tokenizer: tokenizerName(tokenizer),
+		}); err != nil {
+			return err
+		}
+		docsB := b.Bucket([]byte(docsBucket))
+		termsB := b.Bucket([]byte(termsBucket))
+		for _, doc := range docs {
+			if doc.ID == "" {
+				return fmt.Errorf("%w: document id is required", ErrNilParam)
+			}
+			tf := doc.TF
+			if tf == nil {
+				tf = map[string]int{}
+			}
+			if err := idx.saveDoc(docsB, doc.ID, docRecord{Length: doc.Length, TF: tf}); err != nil {
+				return err
+			}
+		}
+		for _, term := range terms {
+			if term.Term == "" {
+				continue
+			}
+			if err := idx.saveTerm(termsB, term.Term, termRecord{Docs: term.Docs}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// Drop removes a named index and every document and posting list in it. A
+// missing index is a no-op.
+func (s *Store) Drop(ctx context.Context, name string) error {
+	if ctx == nil {
+		return ErrNilContext
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil {
+		return ErrNilParam
+	}
+	if name == "" {
+		return fmt.Errorf("%w: empty", ErrInvalidName)
+	}
+	if err := validateName(name); err != nil {
+		return err
+	}
+	dropped := false
+	if err := s.update(func(tx *bolt.Tx) error {
+		b, err := s.indexBucket(tx, name)
+		if err != nil {
+			return err
+		}
+		if b == nil {
+			return nil
+		}
+		dropped = true
+		if len(s.root) > 0 {
+			root := s.rootBucket(tx)
+			if root == nil {
+				return nil
+			}
+			return root.DeleteBucket([]byte(name))
+		}
+		return tx.DeleteBucket([]byte(name))
+	}); err != nil {
+		return err
+	}
+	if !dropped {
+		return nil
+	}
+	return s.auditEntry("drop_index", name, nil)
+}
+
+// digestEvent is the SHA-256 of the document as it was written. The separator
+// keeps ("ab", "c") and ("a", "bc") distinct.
+func digestEvent(id, text string) []byte {
+	sum := sha256.Sum256([]byte(id + "\x00" + text))
+	return sum[:]
+}
+
+// restoreTokenizer resolves the tokenizer for a restored index. Built-in
+// tokenizers round-trip by name; "custom" requires the caller to supply one.
+func restoreTokenizer(supplied Tokenizer, name string) (Tokenizer, error) {
+	switch name {
+	case "", "words":
+		if supplied != nil && tokenizerName(supplied) == "custom" {
+			return nil, fmt.Errorf("%w: index uses the built-in words tokenizer, not a custom one", ErrInvalidConfig)
+		}
+		return Words(), nil
+	case "words+cjk":
+		if supplied != nil && tokenizerName(supplied) == "custom" {
+			return nil, fmt.Errorf("%w: index uses the built-in words+cjk tokenizer, not a custom one", ErrInvalidConfig)
+		}
+		return WordsWithCJK(), nil
+	case "custom":
+		if supplied == nil {
+			return nil, fmt.Errorf("%w: index uses a custom tokenizer; supply Tokenizer to restore it", ErrInvalidConfig)
+		}
+		return supplied, nil
+	default:
+		return nil, fmt.Errorf("%w: unknown tokenizer %q", ErrInvalidConfig, name)
+	}
 }

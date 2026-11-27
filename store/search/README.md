@@ -45,6 +45,31 @@ non-zero `K1`/`B` that differs, returns `search.ErrInvalidConfig`. A custom
 `Tokenizer` has no persisted identity; the caller is responsible for using the
 same one.
 
+## Export, restore and rotation
+
+- `Index.Meta`, `Index.Docs` and `Index.Terms` read the persisted index as data:
+  the corpus statistics, one record per document (id, length, term frequencies)
+  and one posting list per term. The original text is never stored, so it is not
+  recoverable.
+- `Store.RestoreIndex` creates or replaces an index from those three pieces in
+  one write transaction, under the destination store's own encryption. Built-in
+  tokenizers round-trip by name; an index created with a custom tokenizer needs
+  the caller to supply it (`ImportOptions.SearchTokenizer` in the root package)
+  and fails with `ErrInvalidConfig` otherwise.
+- `Store.Drop` removes an index and all its data; a missing index is a no-op.
+- `Store.RotateAll` re-encrypts the metadata, every document, every posting list
+  and any SIV-encrypted term key under a new 32-byte key, then adopts it.
+  `Store.VerifyAll` re-reads them and reports `crypto.ErrAuthFailed` on any value
+  that does not authenticate. `Store.ReEncryptIndex` rotates one index and keeps
+  the previous key as a fallback, but it is rejected when `EncryptTokens` is
+  enabled: the deterministic term keys are derived from one master key, so the
+  indexes that were not rewritten could no longer be found.
+- `Config.Audit` receives one event per committed index write (`create_index`,
+  `upsert`, `delete`, `drop_index`) under the `search` store identifier.
+- Opening an index without supplying a tokenizer adopts the persisted built-in
+  tokenizer, so export and verification do not need to know how the index was
+  created.
+
 ## Errors and format
 
 - The format version is `search.FormatVersion` (1). An index written by another

@@ -43,6 +43,15 @@ the same bbolt transaction as the other stores.
   `BackupFile` records the format version in its manifest.
 - The store writes its own format version, encryption-mode marker and canary.
   Unknown versions and wrong modes fail closed.
+- `Buckets` lists the object bucket names (sorted) and `DropBucket` removes one
+  bucket and all its keys; a missing bucket is a no-op and the removal is
+  audited.
+- `RotateAll` re-seals every object record and the canary under a new key, and
+  `VerifyAll` re-reads them, reporting `crypto.ErrAuthFailed` on a value that
+  does not authenticate. `ReEncryptBucket` rotates one bucket and keeps the
+  previous key as a fallback until `RotateAll`.
+- Logical export (`tempest.Export`) writes one `object.put` record per object,
+  across every bucket.
 
 ## Migrating file-backed blobs
 

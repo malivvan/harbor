@@ -16,10 +16,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/malivvan/tempest/internal/crypto"
 	"github.com/malivvan/tempest/metrics"
+	"github.com/malivvan/tempest/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -59,6 +61,9 @@ var (
 
 	// ErrIndexNotFound reports a missing index.
 	ErrIndexNotFound = errors.New("search: index not found")
+
+	// ErrInvalidKey is returned for a missing or malformed encryption key.
+	ErrInvalidKey = crypto.ErrInvalidKey
 )
 
 // Config configures a Store or an Index.
@@ -87,6 +92,9 @@ type Config struct {
 	// default.
 	EncryptTokens bool
 
+	// Audit, when non-nil, receives one entry per committed index write.
+	Audit ledger.Sink
+
 	// Metrics, when non-nil, receives operation counters.
 	Metrics metrics.Observer
 }
@@ -100,10 +108,16 @@ type Store struct {
 	tx *bolt.Tx
 	// base points at the store this value is a rooted view of, or nil for a
 	// store returned by Open. Views share the handle and encryption state.
-	base     *Store
-	root     [][]byte
-	enc      atomic.Pointer[encState]
-	obs      metrics.Observer
+	base  *Store
+	root  [][]byte
+	enc   atomic.Pointer[encState]
+	audit ledger.Sink
+	obs   metrics.Observer
+
+	// rotMu serializes rotation against normal operations. Reads and writes take
+	// RLock; a rotation takes Lock across the rewrite and the adoption of the new
+	// key state.
+	rotMu    sync.RWMutex
 	closed   atomic.Bool
 	readOnly bool
 }
@@ -139,9 +153,10 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		return nil, err
 	}
 	store := &Store{
-		db:   bdb,
-		root: cloneRoot(cfg.Root),
-		obs:  cfg.Metrics,
+		db:    bdb,
+		root:  cloneRoot(cfg.Root),
+		audit: cfg.Audit,
+		obs:   cfg.Metrics,
 	}
 	store.enc.Store(enc)
 	return store, nil
@@ -201,6 +216,9 @@ func (s *Store) view(fn func(*bolt.Tx) error) error {
 	if s == nil {
 		return ErrNilParam
 	}
+	root := s.rootStore()
+	root.rotMu.RLock()
+	defer root.rotMu.RUnlock()
 	if s.tx != nil {
 		return fn(s.tx)
 	}
@@ -212,6 +230,9 @@ func (s *Store) update(fn func(*bolt.Tx) error) error {
 	if s == nil {
 		return ErrNilParam
 	}
+	root := s.rootStore()
+	root.rotMu.RLock()
+	defer root.rotMu.RUnlock()
 	if s.tx != nil {
 		return fn(s.tx)
 	}
@@ -242,6 +263,7 @@ func (s *Store) WithTransaction(tx *bolt.Tx) *Store {
 		tx:       tx,
 		base:     s.rootStore(),
 		root:     cloneRoot(s.root),
+		audit:    s.audit,
 		obs:      s.obs,
 		readOnly: s.readOnly,
 	}
@@ -283,6 +305,7 @@ func (s *Store) WithRoot(parts ...string) *Store {
 		tx:       s.tx,
 		base:     s.rootStore(),
 		root:     root,
+		audit:    s.audit,
 		obs:      s.obs,
 		readOnly: s.readOnly,
 	}
@@ -371,6 +394,43 @@ func (s *Store) openValue(raw []byte) ([]byte, error) {
 		return raw, nil
 	}
 	return enc.kc.Open(raw)
+}
+
+// SetAuditSink replaces the sink that receives committed-write entries and
+// returns the receiver. It is intended for a transaction-bound view.
+func (s *Store) SetAuditSink(sink ledger.Sink) *Store {
+	if s != nil {
+		s.audit = sink
+	}
+	return s
+}
+
+// auditEntry records one committed index write in the store's audit trail. It
+// is a no-op when the store has no audit sink.
+func (s *Store) auditEntry(op, entity string, digest []byte) error {
+	if s == nil || s.audit == nil {
+		return nil
+	}
+	return s.audit.Record(ledger.Entry{
+		Store:  ledger.StoreSearch,
+		Op:     op,
+		Entity: entity,
+		Digest: digest,
+	})
+}
+
+// termName maps a bucket key back to its term, decrypting a deterministically
+// encrypted key when token encryption is enabled.
+func (s *Store) termName(key []byte) (string, error) {
+	enc := s.encState()
+	if enc == nil || !enc.encTokens {
+		return string(key), nil
+	}
+	plain, err := enc.siv.OpenName(key)
+	if err != nil {
+		return "", fmt.Errorf("search: open term key: %w", err)
+	}
+	return string(plain), nil
 }
 
 // termKey maps a term to its bucket key, encrypting it deterministically when

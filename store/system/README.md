@@ -53,7 +53,8 @@ change because they determine persisted key material.
 `Encrypt*` bits select what a new store protects; `Audit*` bits select which
 stores append to the audit trail at runtime. New flags are always appended, so
 existing bit assignments stay stable. `EncryptAll` includes graph and object
-values; `AuditAll` includes their writes.
+values; `AuditAll` includes every store, including the appended
+`AuditSearch` bit (derived at `m/6'`).
 
 ## Canary
 

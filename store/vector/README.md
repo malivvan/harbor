@@ -261,6 +261,14 @@ A non-empty `points` slice takes precedence; otherwise `filter` is used. If
 both are empty, `Delete` returns an error. Storage is updated first, then the
 in-memory index, keeping both consistent.
 
+## The live collection
+
+`Store.Collection(name)` returns the live, in-memory collection for a name,
+loading it from its persisted metadata and points when the store has not tracked
+it yet. The result is the same `*Collection` the store keeps for searches and
+flushes, so a write through it updates the index every reader sees instead of a
+detached copy. Cluster replication uses it for exactly that reason.
+
 ## Store-level APIs
 
 The `Collection` API is the usual entry point. The `Store` also exposes the

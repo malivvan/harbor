@@ -91,9 +91,11 @@ const (
 	AuditGraphs
 	// AuditObject records object-store writes.
 	AuditObject
+	// AuditSearch records full-text writes.
+	AuditSearch
 
 	// AuditAll records writes for every sub-store.
-	AuditAll = AuditRecord | AuditFile | AuditSeries | AuditVector | AuditGraphs | AuditObject
+	AuditAll = AuditRecord | AuditFile | AuditSeries | AuditVector | AuditGraphs | AuditObject | AuditSearch
 )
 
 // HasFlag reports whether all bits in other are set in flags.
@@ -440,6 +442,7 @@ const (
 	AuditPathVector = "m/3'"
 	AuditPathGraphs = "m/4'"
 	AuditPathObject = "m/5'"
+	AuditPathSearch = "m/6'"
 )
 
 // Keys holds the per-component keys derived for one open call. Wipe it when the
@@ -460,6 +463,7 @@ type Keys struct {
 	AuditVector ed25519.PrivateKey
 	AuditGraphs ed25519.PrivateKey
 	AuditObject ed25519.PrivateKey
+	AuditSearch ed25519.PrivateKey
 }
 
 // Wipe overwrites the byte key material.
@@ -468,7 +472,7 @@ func (k *Keys) Wipe() {
 		return
 	}
 	for _, b := range [][]byte{k.Canary, k.Record, k.File, k.Series, k.Vector, k.Search, k.Graphs, k.Object,
-		k.AuditRecord, k.AuditFile, k.AuditSeries, k.AuditVector, k.AuditGraphs, k.AuditObject} {
+		k.AuditRecord, k.AuditFile, k.AuditSeries, k.AuditVector, k.AuditGraphs, k.AuditObject, k.AuditSearch} {
 		wipe(b)
 	}
 }
@@ -539,6 +543,7 @@ func Derive(password string, salt []byte, time, memory uint32, threads uint8) (*
 		{AuditPathVector, &keys.AuditVector},
 		{AuditPathGraphs, &keys.AuditGraphs},
 		{AuditPathObject, &keys.AuditObject},
+		{AuditPathSearch, &keys.AuditSearch},
 	}
 	for _, item := range auditPaths {
 		_, priv, err := ledger.DeriveKey(seed, item.path)

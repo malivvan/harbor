@@ -110,6 +110,12 @@ func isCJK(r rune) bool {
 	return false
 }
 
+// TokenizerName returns the persisted identifier for t: "words", "words+cjk"
+// or "custom". A caller that must carry a tokenizer through a serialized
+// command (for example cluster replication) can persist the name instead of the
+// value.
+func TokenizerName(t Tokenizer) string { return tokenizerName(t) }
+
 // tokenizerName returns the persisted identifier for t.
 func tokenizerName(t Tokenizer) string {
 	if t == nil {
@@ -119,6 +125,19 @@ func tokenizerName(t Tokenizer) string {
 		return named.Name()
 	}
 	return "custom"
+}
+
+// tokenizerByName resolves one of the built-in tokenizers from its persisted
+// identifier. It reports false for an unknown name or for "custom", which only
+// the caller can supply.
+func tokenizerByName(name string) (Tokenizer, bool) {
+	switch name {
+	case "words":
+		return Words(), true
+	case "words+cjk":
+		return WordsWithCJK(), true
+	}
+	return nil, false
 }
 
 // resolveTokenizer returns t, or Words when t is nil.

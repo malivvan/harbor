@@ -134,6 +134,9 @@ and therefore the derived audit keys, is correct.
 | file (`fstree`) | `mkdir`, `write`, `truncate`, `remove`, `remove_all`, `rename`, `copy`, `chmod`, `chtimes`, `chown`, `symlink`, `delete_fs` |
 | series (`series`) | `insert`, `insert_many`, `delete_range`, `set_labels`, `set_retention`, `delete_series` |
 | vector (`vector`) | `create_collection`, `upsert`, `delete`, `drop_collection` |
+| search (`search`) | `create_index`, `upsert`, `delete`, `drop_index` |
+| graphs (`graphs`) | `upsert`, `delete`, `drop` |
+| object (`object`) | `put`, `delete`, `move`, `drop_bucket` |
 
 Each event carries a SHA-256 `Digest` of the written payload (nil for deletes),
 so re-hashing current data against the recorded digest detects content changes.

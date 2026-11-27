@@ -27,6 +27,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -63,6 +64,9 @@ var (
 	ErrWrongMode = errors.New("object: store encryption mode does not match")
 	// ErrReadOnly reports a write on a read-only verification store.
 	ErrReadOnly = errors.New("object: store is read-only")
+	// ErrInvalidConfig reports an unusable configuration, such as a rotation
+	// key of the wrong length.
+	ErrInvalidConfig = errors.New("object: invalid configuration")
 )
 
 // Config configures a Store.
@@ -104,6 +108,9 @@ type Store struct {
 
 	closed   atomic.Bool
 	readOnly bool
+
+	// rotMu serializes rotation against normal operations.
+	rotMu sync.RWMutex
 }
 
 // Info is the metadata reported by Stat and List.
@@ -294,6 +301,9 @@ func (s *Store) view(ctx context.Context, fn func(*bolt.Tx) error) error {
 	if err := s.checkOpen(); err != nil {
 		return err
 	}
+	root := s.rootStore()
+	root.rotMu.RLock()
+	defer root.rotMu.RUnlock()
 	if s.tx != nil {
 		return fn(s.tx)
 	}
@@ -307,6 +317,9 @@ func (s *Store) update(ctx context.Context, fn func(*bolt.Tx) error) error {
 	if s.readOnly && s.tx == nil {
 		return ErrReadOnly
 	}
+	root := s.rootStore()
+	root.rotMu.RLock()
+	defer root.rotMu.RUnlock()
 	if s.tx != nil {
 		return fn(s.tx)
 	}
@@ -909,3 +922,66 @@ func (m *Minter) Mint(bucket, key, method string, ttl time.Duration) Grant {
 
 // TTL reports the minter's default grant lifetime.
 func (m *Minter) TTL() time.Duration { return m.ttl }
+
+// Buckets lists the object bucket names under the store's root, sorted. The
+// store's own metadata records live as plain keys under the root, so only real
+// child buckets (and never a name starting with "__") are reported.
+func (s *Store) Buckets(ctx context.Context) ([]string, error) {
+	if err := ctxErr(ctx); err != nil {
+		return nil, err
+	}
+	if s == nil || s.db == nil {
+		return nil, ErrNoStore
+	}
+	var names []string
+	err := s.view(ctx, func(tx *bolt.Tx) error {
+		root := s.rootBucket(tx)
+		if root == nil {
+			return nil
+		}
+		return root.ForEach(func(k, v []byte) error {
+			if v == nil && !strings.HasPrefix(string(k), "__") {
+				names = append(names, string(k))
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, fmt.Errorf("object: list buckets: %w", err)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// DropBucket removes an entire object bucket and every key in it. A missing
+// bucket is a no-op. One "drop_bucket" entry is audited when auditing is
+// enabled.
+func (s *Store) DropBucket(ctx context.Context, bucket string) error {
+	if err := ctxErr(ctx); err != nil {
+		return err
+	}
+	if s == nil || s.db == nil {
+		return ErrNoStore
+	}
+	if err := validateBucket(bucket); err != nil {
+		return err
+	}
+	var entries []ledger.Entry
+	err := s.update(ctx, func(tx *bolt.Tx) error {
+		root := s.rootBucket(tx)
+		if root == nil || root.Bucket([]byte(bucket)) == nil {
+			return nil
+		}
+		if err := root.DeleteBucket([]byte(bucket)); err != nil {
+			return err
+		}
+		if s.audit != nil {
+			entries = append(entries, ledger.Entry{Store: ledger.StoreObject, Op: "drop_bucket", Entity: bucket})
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("object: drop bucket %q: %w", bucket, err)
+	}
+	return s.replay(entries)
+}

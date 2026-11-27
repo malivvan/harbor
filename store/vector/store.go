@@ -965,6 +965,40 @@ func (s *Store) UpsertPoints(colName string, points []PointStruct) error {
 	return s.auditEntry("upsert", colName, digestOf(encodePointsDigest(points)))
 }
 
+// Collection returns the live, in-memory collection for name, loading it from
+// its persisted metadata and points if it is not already tracked. The returned
+// *Collection is the one the store keeps for searches and flushes, so a write
+// through it refreshes the live index instead of creating a detached copy.
+func (s *Store) Collection(name string) (*Collection, error) {
+	if err := s.checkOpen(); err != nil {
+		return nil, err
+	}
+	if name == "" {
+		return nil, fmt.Errorf("%w: collection name is required", ErrInvalidConfig)
+	}
+	root := s.rootStore()
+	root.mu.Lock()
+	existing := root.collections[name]
+	root.mu.Unlock()
+	if existing != nil {
+		return existing, nil
+	}
+	meta, err := s.LoadCollectionMeta(name)
+	if err != nil {
+		if errors.Is(err, ErrMetadataNotFound) {
+			return nil, fmt.Errorf("%w: %s", ErrCollectionNotFound, name)
+		}
+		return nil, err
+	}
+	return s.NewCollectionWithOptions(CollectionOptions{
+		Name:       name,
+		VectorLen:  meta.VectorLen,
+		Metric:     meta.Metric,
+		UseHNSW:    meta.UseHNSW,
+		HNSWParams: meta.HNSWParams,
+	})
+}
+
 // LoadCollection loads all points for a collection from disk into memory.
 // Returns a map of point IDs to PointStruct pointers.
 // If quantization is enabled, compressed vectors are decompressed during loading.

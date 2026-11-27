@@ -52,6 +52,7 @@ const (
 	StoreVector = bucket.VECTOR
 	StoreGraphs = bucket.GRAPHS
 	StoreObject = bucket.OBJECT
+	StoreSearch = bucket.SEARCH
 )
 
 var (

@@ -225,3 +225,14 @@ func TestKDFParametersAreCapped(t *testing.T) {
 		})
 	}
 }
+
+// TestAuditAllIncludesSearch pins the appended audit bit: it must follow
+// AuditObject so existing flag values are never renumbered.
+func TestAuditAllIncludesSearch(t *testing.T) {
+	if AuditSearch != AuditObject<<1 {
+		t.Fatalf("AuditSearch = %#x, want the next bit after AuditObject (%#x)", AuditSearch, AuditObject<<1)
+	}
+	if AuditAll&AuditSearch == 0 {
+		t.Fatal("AuditAll must include AuditSearch")
+	}
+}
