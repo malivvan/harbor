@@ -427,7 +427,7 @@ func (s *Store) checkMode(name string) error {
 
 	enc := s.encState()
 	if found {
-		if enc == nil {
+		if !enc.encrypted() {
 			return fmt.Errorf("%w: filesystem is encrypted", ErrWrongMode)
 		}
 		if !m.matches(enc) {
@@ -436,7 +436,7 @@ func (s *Store) checkMode(name string) error {
 		return enc.verifyCanary(canary, m)
 	}
 
-	if enc == nil {
+	if !enc.encrypted() {
 		return nil
 	}
 

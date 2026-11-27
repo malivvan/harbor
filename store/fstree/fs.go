@@ -196,7 +196,7 @@ func initFS(db *bolt.DB, bound *bolt.Tx, forceReadOnly bool, bucketpath string, 
 		if err := checkFormatVersion(b); err != nil {
 			return err
 		}
-		if !readOnly && enc != nil && b.state.Get([]byte(markerKey)) == nil {
+		if !readOnly && enc.encrypted() && b.state.Get([]byte(markerKey)) == nil {
 			raw, err := enc.encodeMarker()
 			if err != nil {
 				return err

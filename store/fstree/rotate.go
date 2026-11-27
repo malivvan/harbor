@@ -25,7 +25,7 @@ func (s *Store) withKeyKeepingFallbacks(newKey []byte) (*encState, error) {
 
 func (s *Store) newKeyState(newKey []byte, keepFallbacks bool) (*encState, error) {
 	cur := s.encState()
-	if cur == nil {
+	if !cur.encrypted() {
 		return nil, fmt.Errorf("%w: store is not encrypted", ErrInvalidConfig)
 	}
 	if len(newKey) != KeySize {
@@ -50,6 +50,7 @@ func (s *Store) newKeyState(newKey []byte, keepFallbacks bool) (*encState, error
 		encContent:  cur.encContent,
 		encMetadata: cur.encMetadata,
 		chunkSize:   cur.chunkSize,
+		comp:        cur.comp,
 	}, nil
 }
 
@@ -304,7 +305,7 @@ func (s *Store) verifyFS(name string) error {
 		enc := s.encState()
 		b.enc = enc
 
-		if enc != nil {
+		if enc.encrypted() {
 			m, canary, found, err := readMarker(b)
 			if err != nil {
 				return err

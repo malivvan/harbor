@@ -3,6 +3,7 @@ package fstree
 import (
 	"fmt"
 
+	"github.com/malivvan/tempest/internal/compress"
 	"github.com/malivvan/tempest/internal/crypto"
 	"github.com/malivvan/tempest/metrics"
 	"github.com/malivvan/tempest/store/ledger"
@@ -33,6 +34,19 @@ type Config struct {
 	// ChunkSize enables chunked content encryption with chunks of this many
 	// plaintext bytes. A positive value implies EncryptContent.
 	ChunkSize int
+
+	// Compress Zstd-compresses file content and symlink targets on the
+	// plaintext side of encryption. It is a write-time preference: reads
+	// auto-detect the envelope, so a filesystem written compressed stays
+	// readable with Compress disabled. It works with or without encryption and
+	// with whole-blob or chunked content.
+	Compress bool
+
+	// CompressLevel selects the Zstandard level (0 selects the default).
+	CompressLevel int
+
+	// MinCompress skips compressing content smaller than this many bytes.
+	MinCompress int
 
 	// Audit, when non-nil, receives an entry for every committed write.
 	Audit ledger.Sink
@@ -78,21 +92,26 @@ type encState struct {
 	encContent  bool
 	encMetadata bool
 	chunkSize   int
+	comp        *compress.Codec
 }
+
+// encrypted reports whether a real cipher is configured. A state can exist for
+// compression alone, with no keychain.
+func (e *encState) encrypted() bool { return e != nil && e.kc != nil }
 
 func (e *encState) enabled() bool {
 	return e != nil
 }
 
 func (e *encState) seal(plain []byte) ([]byte, error) {
-	if e == nil {
+	if !e.encrypted() {
 		return plain, nil
 	}
 	return e.kc.Seal(plain)
 }
 
 func (e *encState) open(raw []byte) ([]byte, error) {
-	if e == nil {
+	if !e.encrypted() {
 		return raw, nil
 	}
 	return e.kc.Open(raw)
@@ -113,17 +132,27 @@ func (e *encState) openMetadata(raw []byte) ([]byte, error) {
 }
 
 func (e *encState) sealContent(plain []byte) ([]byte, error) {
-	if e == nil || !e.encContent {
+	if e != nil && e.comp != nil {
+		var err error
+		if plain, err = e.comp.Encode(nil, plain); err != nil {
+			return nil, err
+		}
+	}
+	if e == nil || !e.encContent || !e.encrypted() {
 		return plain, nil
 	}
 	return e.seal(plain)
 }
 
 func (e *encState) openContent(raw []byte) ([]byte, error) {
-	if e == nil || !e.encContent {
-		return raw, nil
+	if e == nil || !e.encContent || !e.encrypted() {
+		return compress.Decode(nil, raw)
 	}
-	return e.open(raw)
+	plain, err := e.open(raw)
+	if err != nil {
+		return nil, err
+	}
+	return compress.Decode(nil, plain)
 }
 
 // Marker constants. The marker lives (unencrypted) in each filesystem's state
@@ -222,11 +251,22 @@ func (e *encState) verifyCanary(canary []byte, m marker) error {
 const DefaultChunkSize = 64 * 1024
 
 func resolveConfig(cfg Config) (*encState, error) {
-	if !cfg.encryptionEnabled() {
+	if !cfg.encryptionEnabled() && !cfg.Compress {
 		return nil, nil
 	}
 	if cfg.ChunkSize < 0 {
 		return nil, fmt.Errorf("%w: chunk size cannot be negative", ErrInvalidConfig)
+	}
+	state := &encState{}
+	if cfg.Compress {
+		codec, err := compress.NewCodec(compress.Config{Level: cfg.CompressLevel, MinSize: cfg.MinCompress})
+		if err != nil {
+			return nil, err
+		}
+		state.comp = codec
+	}
+	if !cfg.encryptionEnabled() {
+		return state, nil
 	}
 	chunkSize := cfg.ChunkSize
 
@@ -240,10 +280,9 @@ func resolveConfig(cfg Config) (*encState, error) {
 		return nil, err
 	}
 
-	return &encState{
-		kc:          kc,
-		encContent:  cfg.EncryptContent || chunkSize > 0,
-		encMetadata: cfg.EncryptMetadata,
-		chunkSize:   chunkSize,
-	}, nil
+	state.kc = kc
+	state.encContent = cfg.EncryptContent || chunkSize > 0
+	state.encMetadata = cfg.EncryptMetadata
+	state.chunkSize = chunkSize
+	return state, nil
 }
