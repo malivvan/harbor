@@ -1,9 +1,9 @@
 // Package ranking combines ranked result lists.
 //
 // It is intentionally small: ranking policy, weights and which lists to trust
-// stay in the caller. The one helper here is reciprocal rank fusion, which is
-// the usual way to merge a full-text result list with a vector result list
-// without comparing their incomparable scores.
+// stay in the caller. The helpers here are reciprocal rank fusion, which merges
+// lists by rank without comparing incomparable scores, and weighted fusion,
+// which normalizes each list before combining it with a weight.
 package ranking
 
 import "sort"

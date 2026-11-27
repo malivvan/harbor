@@ -909,6 +909,29 @@ Values are sealed when value encryption is enabled, following the
 set; encrypting them hides the vocabulary but still leaks equality and result
 sizes. See [store/search/README.md](store/search/README.md) for the layout, errors and limits.
 
+### Hybrid retrieval
+
+`Store.HybridSearch` runs the lexical arm (BM25) and the dense arm (vector) and
+fuses them in one call. Both arms share an ID namespace; a payload filter is
+evaluated against the vector collection and also removes lexical hits that have
+no matching point. RRF is the default fusion; weighted fusion normalizes each
+arm first. A cursor makes the fused list pageable.
+
+```go
+hits, next, err := store.HybridSearch(ctx, tempest.HybridRequest{
+	Text:      "quiet evenings",
+	TextIndex: "memories",
+	Vector:    queryEmbedding,
+	VectorCol: "memories",
+	Filter:    &vector.Filter{ /* ... */ },
+	TopK:      10,
+})
+```
+
+Each hit reports its lexical and dense contributions and a `Why` list, so the
+caller can explain or rerank without running the arms again. Ranking policy
+(decay, importance, prompt budgeting) stays in the caller.
+
 ## Object storage: `object` and `backup`
 
 tempest has an independent flat object store and a `backup` package built on it:

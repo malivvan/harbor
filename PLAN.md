@@ -33,7 +33,7 @@ is `done` only when its acceptance tests pass and the tree is green.
 | GAP-07 | done | record revisions, `UpdateIf`/`DeleteIf`/`Revision`, `ErrConflict` |
 | GAP-08 | pending | |
 | GAP-09 | pending | |
-| GAP-10 | pending | |
+| GAP-10 | done | `Store.HybridSearch`, RRF + weighted fusion, filters, cursor, `Why` |
 | GAP-11 | pending | |
 | GAP-12 | pending | |
 | GAP-13 | pending | |
