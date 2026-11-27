@@ -27,9 +27,8 @@ separate `docs/` tree.
 | `.../store/ledger` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write, encoded with the package's deterministic JSON encoder. |
 | `.../cluster` | Raft-backed cluster replication of a whole store: replicated command facades, snapshots, and the bolt-backed raft log/stable store it persists with (no raft-boltdb dependency). |
 | `.../store/object` | Independent flat object store with buckets, path containment and atomic `Put`; works without the file store and migrates file-backed blobs explicitly. |
-| `.../backup` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore. |
+| `.../backup` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore, and snapshot ids are time-sortable ULIDs generated in the package. |
 | `.../backup/blobstore` | Adapter from `backup.ObjectStore` to one bucket of the object store. |
-| `.../ulid` | ULID generation: 26-character Crockford base32, time-sortable. |
 | `.../ranking` | Reciprocal rank fusion for combining full-text and vector result lists. |
 | `.../internal/bucket` | The root bucket name registry for the sub-stores (`RECORD`, `SERIES`, `VECTOR`, `FSTREE`, `SEARCH`, `GRAPHS`, `OBJECT`, `SYSTEM`, `LEDGER`). Append a name for a new store; never rename an existing one. Not public API. |
 | `.../internal/...` | Shared bbolt helpers, AEAD primitives, Argon2id/BLAKE2b, SLIP-0010/0021 and CPU detection. Not public API. |
@@ -910,7 +909,6 @@ Generated API documentation:
 - [github.com/malivvan/tempest/store/graphs](https://pkg.go.dev/github.com/malivvan/tempest/store/graphs)
 - [github.com/malivvan/tempest/store/system](https://pkg.go.dev/github.com/malivvan/tempest/store/system)
 - [github.com/malivvan/tempest/cluster](https://pkg.go.dev/github.com/malivvan/tempest/cluster)
-- [github.com/malivvan/tempest/ulid](https://pkg.go.dev/github.com/malivvan/tempest/ulid)
 - [github.com/malivvan/tempest/metrics](https://pkg.go.dev/github.com/malivvan/tempest/metrics)
 - [github.com/malivvan/tempest/backup](https://pkg.go.dev/github.com/malivvan/tempest/backup)
 - [github.com/malivvan/tempest/backup/blobstore](https://pkg.go.dev/github.com/malivvan/tempest/backup/blobstore)

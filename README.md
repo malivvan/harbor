@@ -928,10 +928,6 @@ into the independent store explicitly. See
 
 Small packages shared by applications and by tempest itself:
 
-- **`ulid`** generates ULIDs: 26-character Crockford-base32 strings with a
-  48-bit millisecond timestamp followed by 80 random bits, so they sort
-  lexicographically by creation time. `ulid.New` uses the clock; `ulid.NewAt` pins
-  the time. Use them where a time-ordered, collision-resistant record key helps.
 - **`metrics`** defines the dependency-free `Observer` interface the stores
   report counters, histograms, gauges and spans to. A nil observer disables
   instrumentation, and `tempest.Options{Observer: ...}` installs one.
@@ -1472,7 +1468,6 @@ Generated API documentation is published on pkg.go.dev:
 - [github.com/malivvan/tempest/store/graphs](https://pkg.go.dev/github.com/malivvan/tempest/store/graphs)
 - [github.com/malivvan/tempest/store/system](https://pkg.go.dev/github.com/malivvan/tempest/store/system)
 - [github.com/malivvan/tempest/cluster](https://pkg.go.dev/github.com/malivvan/tempest/cluster)
-- [github.com/malivvan/tempest/ulid](https://pkg.go.dev/github.com/malivvan/tempest/ulid)
 - [github.com/malivvan/tempest/ranking](https://pkg.go.dev/github.com/malivvan/tempest/ranking)
 - [github.com/malivvan/tempest/metrics](https://pkg.go.dev/github.com/malivvan/tempest/metrics)
 - [github.com/malivvan/tempest/backup](https://pkg.go.dev/github.com/malivvan/tempest/backup)

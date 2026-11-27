@@ -24,7 +24,8 @@ err      = snap.Restore(ctx, idx.ID)                    // roll back
 
 - **Capture** walks every live object under `DataPrefix`, hashes the content, and
   uploads only blobs that are not already present — so a snapshot is incremental
-  and deduplicated, and unchanged objects cost no bytes.
+  and deduplicated, and unchanged objects cost no bytes. Each snapshot gets a
+  time-sortable ULID id, so the index lists in creation order.
 - Artifacts live under `DataPrefix + "_snapshots/"`, which is **excluded from
   capture**, so snapshots never snapshot themselves.
 - Each snapshot carries a complete, gzip-compressed manifest of its objects, so it
