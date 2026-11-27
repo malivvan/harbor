@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/bbolt"
 )
@@ -43,7 +43,7 @@ func TestListCollectionsSkipsForeignTempestBuckets(t *testing.T) {
 
 	// Another sub-store joins the same database after the vector store was opened.
 	require.NoError(t, bdb.Update(func(tx *bbolt.Tx) error {
-		for _, name := range []string{hstore.RECORD, hstore.FSTREE, hstore.SERIES} {
+		for _, name := range []string{bucket.RECORD, bucket.FSTREE, bucket.SERIES} {
 			if _, err := tx.CreateBucket([]byte(name)); err != nil {
 				return err
 			}

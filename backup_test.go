@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/store/graphs"
 	"github.com/malivvan/tempest/store/search"
 	"github.com/malivvan/tempest/store/series"
@@ -67,8 +67,8 @@ func TestBackupFileVerifyAndRestore(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, info.SHA256, manifest.SHA256)
-	require.Equal(t, "1", manifest.Formats[hstore.FSTREE])
-	require.Equal(t, "1", manifest.Formats[hstore.SEARCH])
+	require.Equal(t, "1", manifest.Formats[bucket.FSTREE])
+	require.Equal(t, "1", manifest.Formats[bucket.SEARCH])
 
 	// The backup opens and holds every store's data.
 	restored := mustOpen(t, path, "backup-password")

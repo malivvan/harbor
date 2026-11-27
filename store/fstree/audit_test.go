@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/store/ledger"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
@@ -27,7 +27,7 @@ func openAuditedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	rec := ledger.NewRecorder(db, map[string]ed25519.PrivateKey{ledger.StoreFile: priv})
-	store, err := Open(context.Background(), db, Config{Root: [][]byte{[]byte(hstore.FSTREE)}, Audit: rec})
+	store, err := Open(context.Background(), db, Config{Root: [][]byte{[]byte(bucket.FSTREE)}, Audit: rec})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return store, db, pub
@@ -55,7 +55,7 @@ func TestAuditRecordsFSWrites(t *testing.T) {
 }
 
 func TestAuditDisabledRecordsNothing(t *testing.T) {
-	store, db := openEncStore(t, []byte(hstore.FSTREE), Config{})
+	store, db := openEncStore(t, []byte(bucket.FSTREE), Config{})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	require.NoError(t, fsys.Mkdir("/dir", 0o755))

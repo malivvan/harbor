@@ -16,8 +16,8 @@ import (
 	bolt "go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
 
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/internal/crypto"
-	hstore "github.com/malivvan/tempest/store"
 	"github.com/malivvan/tempest/store/ledger"
 	"github.com/malivvan/tempest/store/series"
 	"github.com/malivvan/tempest/store/system"
@@ -513,7 +513,7 @@ func TestOpenRejectsBadMetadata(t *testing.T) {
 			t.Fatalf("bolt.Open: %v", err)
 		}
 		if err := bdb.Update(func(tx *bolt.Tx) error {
-			_, err := tx.CreateBucket([]byte(hstore.SYSTEM))
+			_, err := tx.CreateBucket([]byte(bucket.SYSTEM))
 			return err
 		}); err != nil {
 			t.Fatalf("create meta bucket: %v", err)
@@ -532,7 +532,7 @@ func TestOpenRejectsBadMetadata(t *testing.T) {
 			t.Fatalf("bolt.Open: %v", err)
 		}
 		if err := bdb.Update(func(tx *bolt.Tx) error {
-			meta, err := tx.CreateBucket([]byte(hstore.SYSTEM))
+			meta, err := tx.CreateBucket([]byte(bucket.SYSTEM))
 			if err != nil {
 				return err
 			}
@@ -569,7 +569,7 @@ func TestCanaryBindsEncryptionFlags(t *testing.T) {
 		t.Fatalf("bolt.Open: %v", err)
 	}
 	if err := bdb.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(hstore.SYSTEM))
+		b := tx.Bucket([]byte(bucket.SYSTEM))
 		md, err := system.DecodeMetadata(append([]byte(nil), b.Get([]byte("Metadata"))...))
 		if err != nil {
 			return err
@@ -597,7 +597,7 @@ func TestCanaryBindsEncryptionFlags(t *testing.T) {
 // Metadata is not silently re-initialized.
 func TestMissingMetadataBucketIsCorrupt(t *testing.T) {
 	for name, buckets := range map[string][][]byte{
-		"sub-store root":   {[]byte(hstore.RECORD)},
+		"sub-store root":   {[]byte(bucket.RECORD)},
 		"unrelated bucket": {[]byte("something-else")},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -796,7 +796,7 @@ func TestLoadOrCreateStateRejectsTampering(t *testing.T) {
 			}
 		}()
 		require.NoError(t, db.Update(func(tx *bolt.Tx) error {
-			b := tx.Bucket([]byte(hstore.SYSTEM))
+			b := tx.Bucket([]byte(bucket.SYSTEM))
 			raw := b.Get([]byte("Metadata"))
 			parsed, err := system.DecodeMetadata(raw)
 			if err != nil {
@@ -850,7 +850,7 @@ func TestReadMetadataMissingRecord(t *testing.T) {
 	require.True(t, creating)
 
 	require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucket([]byte(hstore.SYSTEM))
+		_, err := tx.CreateBucket([]byte(bucket.SYSTEM))
 		return err
 	}))
 	_, _, err = system.ReadMetadata(bdb)
@@ -871,7 +871,7 @@ func TestOpenFailsWhenSubstoreIsCorrupt(t *testing.T) {
 	raw, err := bolt.Open(path, 0600, nil)
 	require.NoError(t, err)
 	require.NoError(t, raw.Update(func(tx *bolt.Tx) error {
-		sub := tx.Bucket([]byte(hstore.RECORD))
+		sub := tx.Bucket([]byte(bucket.RECORD))
 		require.NotNil(t, sub)
 		info := sub.Bucket([]byte("__database"))
 		require.NotNil(t, info)
@@ -947,7 +947,7 @@ func TestOpenRejectsCorruptCanaryAndFlags(t *testing.T) {
 	raw, err := bolt.Open(path, 0600, nil)
 	require.NoError(t, err)
 	require.NoError(t, raw.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(hstore.SYSTEM))
+		b := tx.Bucket([]byte(bucket.SYSTEM))
 		value := b.Get([]byte("Metadata"))
 		md, err := system.DecodeMetadata(append([]byte(nil), value...))
 		if err != nil {

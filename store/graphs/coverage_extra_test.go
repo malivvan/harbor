@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/store/ledger"
 )
 
@@ -29,7 +29,7 @@ func openBoltStore(t *testing.T, cfg Config) (*Store, *bolt.DB) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bdb.Close() })
 	if cfg.Root == nil {
-		cfg.Root = [][]byte{[]byte(store.GRAPHS)}
+		cfg.Root = [][]byte{[]byte(bucket.GRAPHS)}
 	}
 	s, err := Open(context.Background(), bdb, cfg)
 	require.NoError(t, err)
@@ -351,7 +351,7 @@ func TestBoltStorageDecodeError(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, g.UpsertNode(ctx, node("a", "person")))
 	require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-		gb := tx.Bucket([]byte(store.GRAPHS)).Bucket([]byte("g"))
+		gb := tx.Bucket([]byte(bucket.GRAPHS)).Bucket([]byte("g"))
 		return gb.Bucket([]byte(nodesBucket)).Put([]byte("bad"), []byte("{not json"))
 	}))
 	_, err := g.GetNode(ctx, "bad")
@@ -429,7 +429,7 @@ func TestRecordStorageNodeEdgeHistoryAndPurge(t *testing.T) {
 func TestStoreAccessorsAndLifecycle(t *testing.T) {
 	ctx := context.Background()
 	s, _ := openBoltStore(t, Config{})
-	require.Equal(t, [][]byte{[]byte(store.GRAPHS)}, s.Root())
+	require.Equal(t, [][]byte{[]byte(bucket.GRAPHS)}, s.Root())
 	require.NoError(t, s.Flush())
 
 	g, err := s.Open("g")
@@ -479,7 +479,7 @@ func TestOpenReadOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, g.UpsertNode(ctx, node("a", "person")))
 
-	ro, err := OpenReadOnly(ctx, bdb, Config{Root: [][]byte{[]byte(store.GRAPHS)}})
+	ro, err := OpenReadOnly(ctx, bdb, Config{Root: [][]byte{[]byte(bucket.GRAPHS)}})
 	require.NoError(t, err)
 	rg, err := ro.Open("g")
 	require.NoError(t, err)
@@ -554,9 +554,9 @@ func TestStoreMetaMalformed(t *testing.T) {
 		s, bdb := openBoltStore(t, Config{})
 		_ = s
 		require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-			return tx.Bucket([]byte(store.GRAPHS)).Put([]byte(versionKey), []byte{1, 2, 3})
+			return tx.Bucket([]byte(bucket.GRAPHS)).Put([]byte(versionKey), []byte{1, 2, 3})
 		}))
-		_, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(store.GRAPHS)}})
+		_, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(bucket.GRAPHS)}})
 		require.ErrorIs(t, err, ErrIncompatibleVersion)
 	})
 
@@ -564,9 +564,9 @@ func TestStoreMetaMalformed(t *testing.T) {
 		s, bdb := openBoltStore(t, Config{})
 		_ = s
 		require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-			return tx.Bucket([]byte(store.GRAPHS)).Put([]byte(modeKey), []byte{0, 0})
+			return tx.Bucket([]byte(bucket.GRAPHS)).Put([]byte(modeKey), []byte{0, 0})
 		}))
-		_, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(store.GRAPHS)}})
+		_, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(bucket.GRAPHS)}})
 		require.ErrorIs(t, err, ErrWrongMode)
 	})
 }
@@ -575,7 +575,7 @@ func TestStoreMetaMalformed(t *testing.T) {
 // unmoded file.
 func TestOpenReadOnlyMeta(t *testing.T) {
 	ctx := context.Background()
-	root := [][]byte{[]byte(store.GRAPHS)}
+	root := [][]byte{[]byte(bucket.GRAPHS)}
 
 	t.Run("missing root", func(t *testing.T) {
 		bdb, err := bolt.Open(filepath.Join(t.TempDir(), "ro.db"), 0o600, &bolt.Options{Timeout: time.Second})
@@ -590,7 +590,7 @@ func TestOpenReadOnlyMeta(t *testing.T) {
 		require.NoError(t, err)
 		defer bdb.Close()
 		require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-			_, e := tx.CreateBucketIfNotExists([]byte(store.GRAPHS))
+			_, e := tx.CreateBucketIfNotExists([]byte(bucket.GRAPHS))
 			return e
 		}))
 		_, err = OpenReadOnly(ctx, bdb, Config{Root: root})
@@ -606,7 +606,7 @@ func TestOpenReadOnlyMeta(t *testing.T) {
 			buf[i] = byte(FormatVersion >> (8 * i))
 		}
 		require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-			b, e := tx.CreateBucketIfNotExists([]byte(store.GRAPHS))
+			b, e := tx.CreateBucketIfNotExists([]byte(bucket.GRAPHS))
 			if e != nil {
 				return e
 			}
@@ -714,7 +714,7 @@ func TestEncryptionBadSecret(t *testing.T) {
 	require.NoError(t, err)
 	defer bdb.Close()
 	_, err = Open(context.Background(), bdb, Config{
-		Root:          [][]byte{[]byte(store.GRAPHS)},
+		Root:          [][]byte{[]byte(bucket.GRAPHS)},
 		EncryptValues: true,
 		Secret:        []byte("too-short"),
 	})
@@ -994,7 +994,7 @@ func TestDeleteCorruptEdgeErrorPassthrough(t *testing.T) {
 	require.NoError(t, g.UpsertNode(ctx, node("a", "person")))
 	require.NoError(t, g.UpsertNode(ctx, node("b", "person")))
 	require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-		gb := tx.Bucket([]byte(store.GRAPHS)).Bucket([]byte("g"))
+		gb := tx.Bucket([]byte(bucket.GRAPHS)).Bucket([]byte("g"))
 		return gb.Bucket([]byte(edgesBucket)).Put([]byte("bad"), []byte("{not json"))
 	}))
 	err := g.DeleteEdge(ctx, "bad")

@@ -18,15 +18,15 @@ import (
 	"time"
 
 	"github.com/malivvan/tempest/canonical"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/internal/slip10"
-	"github.com/malivvan/tempest/store"
 	bolt "go.etcd.io/bbolt"
 )
 
 // Reserved bucket and record names under the database root. The audit trail
-// lives in its own top-level bucket, named by the store registry.
+// lives in its own top-level bucket, named by the internal/bucket registry.
 const (
-	auditBucket  = store.LEDGER
+	auditBucket  = bucket.LEDGER
 	eventsBucket = "events"
 	headKey      = "head"
 
@@ -38,15 +38,15 @@ const (
 )
 
 // Store names used by the sub-stores. They are the root bucket names from the
-// store registry and are persisted in event records, so existing values are
+// internal/bucket registry and are persisted in event records, so existing values are
 // never renamed.
 const (
-	StoreRecord = store.RECORD
-	StoreFile   = store.FSTREE
-	StoreSeries = store.SERIES
-	StoreVector = store.VECTOR
-	StoreGraphs = store.GRAPHS
-	StoreObject = store.OBJECT
+	StoreRecord = bucket.RECORD
+	StoreFile   = bucket.FSTREE
+	StoreSeries = bucket.SERIES
+	StoreVector = bucket.VECTOR
+	StoreGraphs = bucket.GRAPHS
+	StoreObject = bucket.OBJECT
 )
 
 var (

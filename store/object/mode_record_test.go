@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/store/object"
 )
 
@@ -19,12 +19,12 @@ func TestOpenRejectsEmptyModeRecord(t *testing.T) {
 	require.NoError(t, err)
 	defer bdb.Close()
 
-	root := [][]byte{[]byte(hstore.OBJECT)}
+	root := [][]byte{[]byte(bucket.OBJECT)}
 	_, err = object.Open(context.Background(), bdb, object.Config{Root: root})
 	require.NoError(t, err)
 
 	require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(hstore.OBJECT)).Put([]byte("__mode__"), []byte{})
+		return tx.Bucket([]byte(bucket.OBJECT)).Put([]byte("__mode__"), []byte{})
 	}))
 
 	_, err = object.Open(context.Background(), bdb, object.Config{Root: root})

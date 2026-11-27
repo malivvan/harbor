@@ -11,7 +11,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/malivvan/tempest"
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/store/graphs"
 	hrecord "github.com/malivvan/tempest/store/record"
 )
@@ -21,7 +21,7 @@ func openDirect(t *testing.T, cfg graphs.Config) (*graphs.Store, *bolt.DB) {
 	bdb, err := bolt.Open(filepath.Join(t.TempDir(), "graphs.db"), 0o600, &bolt.Options{Timeout: time.Second})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bdb.Close() })
-	cfg.Root = [][]byte{[]byte(hstore.GRAPHS)}
+	cfg.Root = [][]byte{[]byte(bucket.GRAPHS)}
 	s, err := graphs.Open(context.Background(), bdb, cfg)
 	require.NoError(t, err)
 	return s, bdb
@@ -51,7 +51,7 @@ func TestIndependentOpenAndPersistence(t *testing.T) {
 	require.Len(t, edges, 1)
 
 	// Reopen over the same file with a fresh Store wrapper.
-	reopened, err := graphs.Open(ctx, bdb, graphs.Config{Root: [][]byte{[]byte(hstore.GRAPHS)}})
+	reopened, err := graphs.Open(ctx, bdb, graphs.Config{Root: [][]byte{[]byte(bucket.GRAPHS)}})
 	require.NoError(t, err)
 	g2, err := reopened.Open("social")
 	require.NoError(t, err)
@@ -69,13 +69,13 @@ func TestIsolationFromRecordStore(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bdb.Close() })
 
-	gs, err := graphs.Open(ctx, bdb, graphs.Config{Root: [][]byte{[]byte(hstore.GRAPHS)}})
+	gs, err := graphs.Open(ctx, bdb, graphs.Config{Root: [][]byte{[]byte(bucket.GRAPHS)}})
 	require.NoError(t, err)
 	g, err := gs.Open("social")
 	require.NoError(t, err)
 	seedGraph(t, g)
 
-	rec, err := hrecord.Open(ctx, bdb, hrecord.Config{Root: [][]byte{[]byte(hstore.RECORD)}})
+	rec, err := hrecord.Open(ctx, bdb, hrecord.Config{Root: [][]byte{[]byte(bucket.RECORD)}})
 	require.NoError(t, err)
 	// The graph layout does not create the record-backed graph buckets.
 	var nodes []*graphs.NodeRecord
@@ -94,7 +94,7 @@ func TestIsolationFromRecordStore(t *testing.T) {
 
 	// The graph lives under its own root.
 	require.NoError(t, bdb.View(func(tx *bolt.Tx) error {
-		require.NotNil(t, tx.Bucket([]byte(hstore.GRAPHS)))
+		require.NotNil(t, tx.Bucket([]byte(bucket.GRAPHS)))
 		require.Nil(t, tx.Bucket([]byte("tempestNodeRecord")))
 		return nil
 	}))
@@ -160,7 +160,7 @@ func TestGraphStoreEncryption(t *testing.T) {
 	require.NoError(t, err)
 	seedGraph(t, g)
 
-	again, err := graphs.Open(ctx, bdb, graphs.Config{Root: [][]byte{[]byte(hstore.GRAPHS)}, Secret: secret, EncryptValues: true})
+	again, err := graphs.Open(ctx, bdb, graphs.Config{Root: [][]byte{[]byte(bucket.GRAPHS)}, Secret: secret, EncryptValues: true})
 	require.NoError(t, err)
 	g2, err := again.Open("secret")
 	require.NoError(t, err)
@@ -170,11 +170,11 @@ func TestGraphStoreEncryption(t *testing.T) {
 
 	// A wrong key fails the canary at open instead of decoding garbage.
 	wrong := []byte("fedcba9876543210fedcba9876543210")
-	_, err = graphs.Open(ctx, bdb, graphs.Config{Root: [][]byte{[]byte(hstore.GRAPHS)}, Secret: wrong, EncryptValues: true})
+	_, err = graphs.Open(ctx, bdb, graphs.Config{Root: [][]byte{[]byte(bucket.GRAPHS)}, Secret: wrong, EncryptValues: true})
 	require.Error(t, err)
 
 	// Opening with the wrong mode fails closed.
-	_, err = graphs.Open(ctx, bdb, graphs.Config{Root: [][]byte{[]byte(hstore.GRAPHS)}})
+	_, err = graphs.Open(ctx, bdb, graphs.Config{Root: [][]byte{[]byte(bucket.GRAPHS)}})
 	require.ErrorIs(t, err, graphs.ErrWrongMode)
 }
 
@@ -184,7 +184,7 @@ func TestMigrateFromRecordPreservesHistory(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bdb.Close() })
 
-	rec, err := hrecord.Open(ctx, bdb, hrecord.Config{Root: [][]byte{[]byte(hstore.RECORD)}})
+	rec, err := hrecord.Open(ctx, bdb, hrecord.Config{Root: [][]byte{[]byte(bucket.RECORD)}})
 	require.NoError(t, err)
 	clock := func() time.Time { return time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC) }
 	legacy := graphs.New(rec, graphs.WithClock(clock))
@@ -196,7 +196,7 @@ func TestMigrateFromRecordPreservesHistory(t *testing.T) {
 	legacy.SetClock(later)
 	require.NoError(t, legacy.UpsertNode(ctx, &graphs.Node{ID: "a", Type: "person", Content: "v2"}))
 
-	gs, err := graphs.Open(ctx, bdb, graphs.Config{Root: [][]byte{[]byte(hstore.GRAPHS)}})
+	gs, err := graphs.Open(ctx, bdb, graphs.Config{Root: [][]byte{[]byte(bucket.GRAPHS)}})
 	require.NoError(t, err)
 	require.NoError(t, gs.MigrateFromRecord(ctx, "migrated", rec))
 
@@ -225,8 +225,8 @@ func TestFormatVersionFailsClosed(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(hstore.GRAPHS)).Put([]byte("__version__"), []byte{9, 0, 0, 0, 0, 0, 0, 0})
+		return tx.Bucket([]byte(bucket.GRAPHS)).Put([]byte("__version__"), []byte{9, 0, 0, 0, 0, 0, 0, 0})
 	}))
-	_, err = graphs.Open(ctx, bdb, graphs.Config{Root: [][]byte{[]byte(hstore.GRAPHS)}})
+	_, err = graphs.Open(ctx, bdb, graphs.Config{Root: [][]byte{[]byte(bucket.GRAPHS)}})
 	require.ErrorIs(t, err, graphs.ErrIncompatibleVersion)
 }

@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"unicode/utf8"
 
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/metrics"
-	"github.com/malivvan/tempest/store"
 	"github.com/malivvan/tempest/store/ledger"
 	"go.etcd.io/bbolt"
 	bolterrors "go.etcd.io/bbolt/errors"
@@ -29,15 +29,15 @@ const collectionsMetaBucket = "__collections_meta__"
 // opened at the database root.
 var reservedTopLevelBuckets = map[string]bool{
 	collectionsMetaBucket: true,
-	store.SYSTEM:          true,
-	store.LEDGER:          true,
-	store.RECORD:          true,
-	store.SERIES:          true,
-	store.VECTOR:          true,
-	store.SEARCH:          true,
-	store.GRAPHS:          true,
-	store.FSTREE:          true,
-	store.OBJECT:          true,
+	bucket.SYSTEM:         true,
+	bucket.LEDGER:         true,
+	bucket.RECORD:         true,
+	bucket.SERIES:         true,
+	bucket.VECTOR:         true,
+	bucket.SEARCH:         true,
+	bucket.GRAPHS:         true,
+	bucket.FSTREE:         true,
+	bucket.OBJECT:         true,
 }
 
 // Store handles local persistence using BoltDB (bbolt).
@@ -61,7 +61,7 @@ type Store struct {
 	readOnly bool
 
 	// root is the parent bucket path for collections and collection metadata.
-	// The default is the bucket the store registry names (store.VECTOR).
+	// The default is the bucket internal/bucket names (bucket.VECTOR).
 	root [][]byte
 
 	// closed reports whether Close has been called. It is an atomic so that
@@ -183,7 +183,7 @@ func (s *Store) rotMuOf() *sync.RWMutex {
 // view shares the handle, encryption state, quantization settings and flush
 // registry with the receiver; collections opened through it are kept apart.
 // Repeated calls with the same path return the same view. No segments means
-// the database root; pass the conventional root explicitly (for example store.VECTOR)
+// the database root; pass the conventional root explicitly (for example bucket.VECTOR)
 // to keep it.
 func (s *Store) WithRoot(parts ...string) *Store {
 	if s == nil {

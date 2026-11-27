@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -143,7 +143,7 @@ func writeTestFile(t *testing.T, fsys *FS, path, content string) {
 
 func TestEncryptionOptionalPlaintextFormat(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	store, db := openEncStore(t, root, Config{})
 
 	fsys, err := store.Open("fs")
@@ -169,7 +169,7 @@ func TestEncryptionOptionalPlaintextFormat(t *testing.T) {
 }
 
 func TestEncryptMetadataAndContentRoundTrip(t *testing.T) {
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	store, db := openEncStore(t, root, Config{
 		Secret:          testEncKey(1),
 		EncryptMetadata: true,
@@ -233,7 +233,7 @@ func TestEncryptMetadataAndContentRoundTrip(t *testing.T) {
 }
 
 func TestEncryptContentOnly(t *testing.T) {
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	store, db := openEncStore(t, root, Config{Secret: testEncKey(2), EncryptContent: true})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -245,7 +245,7 @@ func TestEncryptContentOnly(t *testing.T) {
 }
 
 func TestEncryptMetadataOnly(t *testing.T) {
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	store, db := openEncStore(t, root, Config{Secret: testEncKey(3), EncryptMetadata: true})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -257,7 +257,7 @@ func TestEncryptMetadataOnly(t *testing.T) {
 }
 
 func TestEncryptionWrongKey(t *testing.T) {
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	dbPath := filepath.Join(t.TempDir(), "wrong-key.db")
 
 	store, db, err := openEncStoreAt(t, dbPath, root, Config{Secret: testEncKey(4), EncryptMetadata: true, EncryptContent: true})
@@ -288,7 +288,7 @@ func TestEncryptionWrongKey(t *testing.T) {
 
 func TestEncryptionTamper(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	cfg := Config{Secret: testEncKey(6), EncryptMetadata: true, EncryptContent: true}
 	store, db := openEncStore(t, root, cfg)
 	fsys, err := store.Open("fs")
@@ -336,7 +336,7 @@ func TestEncryptionTamper(t *testing.T) {
 }
 
 func TestEncryptionNonceFreshness(t *testing.T) {
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	store, db := openEncStore(t, root, Config{Secret: testEncKey(7), EncryptContent: true})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -364,7 +364,7 @@ func TestEncryptionNonceFreshness(t *testing.T) {
 
 func TestEncryptionModeDetection(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 
 	// Plaintext data then encrypted open is rejected.
 	plain, db := openEncStore(t, root, Config{})
@@ -397,7 +397,7 @@ func TestEncryptionModeDetection(t *testing.T) {
 
 func TestEncryptionEmptyPlaintextFSMigration(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 
 	plain, db := openEncStore(t, root, Config{})
 	fsys, err := plain.Open("fs")
@@ -416,7 +416,7 @@ func TestEncryptionEmptyPlaintextFSMigration(t *testing.T) {
 
 func TestEncryptionConfigValidation(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	_, db := openEncStore(t, root, Config{})
 
 	tests := []struct {
@@ -437,7 +437,7 @@ func TestEncryptionConfigValidation(t *testing.T) {
 }
 
 func TestEncryptionMarkerFlags(t *testing.T) {
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	store, db := openEncStore(t, root, Config{
 		Secret:          testEncKey(14),
 		EncryptMetadata: true,

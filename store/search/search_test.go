@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -19,7 +19,7 @@ func testStore(t *testing.T, cfg Config) (*Store, *bolt.DB) {
 		t.Fatalf("bolt.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = bdb.Close() })
-	cfg.Root = [][]byte{[]byte(hstore.SEARCH)}
+	cfg.Root = [][]byte{[]byte(bucket.SEARCH)}
 	s, err := Open(context.Background(), bdb, cfg)
 	if err != nil {
 		t.Fatalf("fts.Open: %v", err)
@@ -187,7 +187,7 @@ func TestIndexPersistenceAcrossReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(hstore.SEARCH)}})
+	reopened, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(bucket.SEARCH)}})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestIndexEncryptedValuesAndTokens(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	plain, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(hstore.SEARCH)}})
+	plain, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(bucket.SEARCH)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestIndexEncryptedValuesAndTokens(t *testing.T) {
 		t.Fatalf("opening an encrypted index without encryption: err = %v, want ErrWrongMode", err)
 	}
 
-	again, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(hstore.SEARCH)}, Secret: secret, EncryptValues: true, EncryptTokens: true})
+	again, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(bucket.SEARCH)}, Secret: secret, EncryptValues: true, EncryptTokens: true})
 	if err != nil {
 		t.Fatal(err)
 	}

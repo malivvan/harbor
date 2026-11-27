@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/store/ledger"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
@@ -94,7 +94,7 @@ func TestAuditDigestMatchesPayload(t *testing.T) {
 
 	var ev ledger.Event
 	require.NoError(t, bdb.View(func(tx *bolt.Tx) error {
-		events := tx.Bucket([]byte(hstore.LEDGER)).Bucket([]byte("events"))
+		events := tx.Bucket([]byte(bucket.LEDGER)).Bucket([]byte("events"))
 		v := events.Get([]byte{0, 0, 0, 0, 0, 0, 0, 0})
 		encoded := v[:len(v)-ed25519.SignatureSize]
 		return json.Unmarshal(encoded, &ev)
@@ -121,7 +121,7 @@ func TestAuditSetOperationNames(t *testing.T) {
 
 	var ops []string
 	require.NoError(t, bdb.View(func(tx *bolt.Tx) error {
-		root := tx.Bucket([]byte(hstore.LEDGER))
+		root := tx.Bucket([]byte(bucket.LEDGER))
 		events := root.Bucket([]byte("events"))
 		return events.ForEach(func(_, v []byte) error {
 			var event ledger.Event

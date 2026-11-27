@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/stretchr/testify/require"
 )
 
@@ -13,7 +13,7 @@ import (
 // with options matches the materialized result.
 func TestRangeOptions(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 
 	plain, _ := openAEADTestStore(t, root, Config{})
 	blocked, _ := openAEADTestStore(t, root, Config{

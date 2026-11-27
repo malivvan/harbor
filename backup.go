@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/store/fstree"
 	"github.com/malivvan/tempest/store/graphs"
 	"github.com/malivvan/tempest/store/object"
@@ -140,13 +140,13 @@ func writeBackupManifest(path string, info BackupInfo) error {
 	m := backupManifest{
 		BackupInfo: info,
 		Formats: map[string]string{
-			store.RECORD: record.Version,
-			store.FSTREE: fmt.Sprint(fstree.FormatVersion),
-			store.SERIES: fmt.Sprint(series.FormatVersion),
-			store.VECTOR: fmt.Sprint(vector.CollectionFormatVersion),
-			store.SEARCH: fmt.Sprint(search.FormatVersion),
-			store.GRAPHS: fmt.Sprint(graphs.FormatVersion),
-			store.OBJECT: fmt.Sprint(object.FormatVersion),
+			bucket.RECORD: record.Version,
+			bucket.FSTREE: fmt.Sprint(fstree.FormatVersion),
+			bucket.SERIES: fmt.Sprint(series.FormatVersion),
+			bucket.VECTOR: fmt.Sprint(vector.CollectionFormatVersion),
+			bucket.SEARCH: fmt.Sprint(search.FormatVersion),
+			bucket.GRAPHS: fmt.Sprint(graphs.FormatVersion),
+			bucket.OBJECT: fmt.Sprint(object.FormatVersion),
 		},
 	}
 	raw, err := json.MarshalIndent(m, "", "  ")
@@ -289,7 +289,7 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 	// needs no writes, so a read-only handle succeeds; an incomplete one fails
 	// instead of being "repaired" during verification.
 	if _, err := record.Open(ctx, bdb, record.Config{
-		Root:            namedRoot(store.RECORD),
+		Root:            namedRoot(bucket.RECORD),
 		Codec:           codec,
 		Secret:          keys.Record,
 		EncryptKeys:     system.HasFlag(md.Flags, EncryptRecordKeys),
@@ -300,7 +300,7 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 	}
 
 	fsStore, err := fstree.Open(ctx, bdb, fstree.Config{
-		Root:            namedRoot(store.FSTREE),
+		Root:            namedRoot(bucket.FSTREE),
 		Secret:          keys.File,
 		EncryptMetadata: system.HasFlag(md.Flags, EncryptFileMetadata),
 		EncryptContent:  system.HasFlag(md.Flags, EncryptFileContent),
@@ -319,7 +319,7 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 	}
 
 	if _, err := series.Open(ctx, bdb, series.Config{
-		Root:               namedRoot(store.SERIES),
+		Root:               namedRoot(bucket.SERIES),
 		Secret:             keys.Series,
 		EncryptValues:      system.HasFlag(md.Flags, EncryptSeriesValues),
 		EncryptSeriesNames: system.HasFlag(md.Flags, EncryptSeriesNames),
@@ -328,7 +328,7 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 	}
 
 	vecStore, err := vector.Open(ctx, bdb, vector.Config{
-		Root:                   namedRoot(store.VECTOR),
+		Root:                   namedRoot(bucket.VECTOR),
 		Secret:                 keys.Vector,
 		EncryptPoints:          system.HasFlag(md.Flags, EncryptVectorPoints),
 		EncryptPointIDs:        system.HasFlag(md.Flags, EncryptVectorPointIDs),
@@ -349,7 +349,7 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 	}
 
 	ftsStore, err := search.OpenReadOnly(ctx, bdb, search.Config{
-		Root:          namedRoot(store.SEARCH),
+		Root:          namedRoot(bucket.SEARCH),
 		Secret:        keys.Search,
 		EncryptValues: system.HasFlag(md.Flags, EncryptRecordValues),
 	})
@@ -366,9 +366,9 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		}
 	}
 
-	if bucketExists(bdb, store.GRAPHS) {
+	if bucketExists(bdb, bucket.GRAPHS) {
 		graphStore, err := graphs.OpenReadOnly(ctx, bdb, graphs.Config{
-			Root:          namedRoot(store.GRAPHS),
+			Root:          namedRoot(bucket.GRAPHS),
 			Secret:        keys.Graphs,
 			EncryptValues: system.HasFlag(md.Flags, EncryptGraphValues) || system.HasFlag(md.Flags, EncryptRecordValues),
 		})
@@ -386,9 +386,9 @@ func VerifyBackup(ctx context.Context, path, password string, opts *Options) (Ba
 		}
 	}
 
-	if bucketExists(bdb, store.OBJECT) {
+	if bucketExists(bdb, bucket.OBJECT) {
 		if _, err := object.OpenReadOnly(ctx, bdb, object.Config{
-			Root:          namedRoot(store.OBJECT),
+			Root:          namedRoot(bucket.OBJECT),
 			Secret:        keys.Object,
 			EncryptValues: system.HasFlag(md.Flags, EncryptObjectValues) || system.HasFlag(md.Flags, EncryptRecordValues),
 		}); err != nil {

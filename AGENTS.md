@@ -18,7 +18,7 @@ separate `docs/` tree.
 | `.../store/search` | Full-text indexes: BM25 ranking, word and CJK tokenizers, posting lists and corpus statistics. |
 | `.../store/graphs` | Bitemporal property-graph store and the reusable graph core: `Store` keeps node/edge records and closed versions in its own root bucket, while `Graph` (also runnable over `record` for the legacy layout) provides adjacency, traversal, counts, history/as-of/diff/purge and JSON interchange. |
 | `.../store/system` | Store header manager: metadata record, KDF settings, encryption/audit flags, canary and every per-store key derivation. |
-| `.../store` | The root bucket name registry for the sub-stores (`RECORD`, `SERIES`, `VECTOR`, `FSTREE`, `SEARCH`, `GRAPHS`, `OBJECT`, `SYSTEM`, `LEDGER`). Append a name for a new store; never rename an existing one. |
+| `.../store` | Process-wide database manager: resolves a directory, reads or creates the password file (published atomically by link, `O_EXCL` fallback, mode 0600, never logged), and opens one handle. It sits next to the sub-store packages it opens. |
 | `.../store/fstree/s3fs` | An `absfs.Filer` backed by S3-compatible object storage. |
 | `.../store/vector/hnsw` | The vendored HNSW graph implementation used by `vector`. |
 | `.../store/vector/hnsw/heap` | The heap used on the HNSW search hot path. |
@@ -26,13 +26,13 @@ separate `docs/` tree.
 | `.../metrics` | Dependency-free observer interface and nil-safe metric helpers used by every store; a nil observer means no instrumentation. |
 | `.../store/ledger` | Tamper-evident, append-only audit trail: signed, hash-linked events for every store write. |
 | `.../cluster` | Raft-backed cluster replication of a whole store: replicated command facades, snapshots, and the bolt-backed raft log/stable store it persists with (no raft-boltdb dependency). |
-| `.../pkg/store` | Process-wide database manager: resolves a directory, reads or creates the password file (published atomically by link, `O_EXCL` fallback, mode 0600, never logged), and opens one handle. |
 | `.../store/object` | Independent flat object store with buckets, path containment and atomic `Put`; works without the file store and migrates file-backed blobs explicitly. |
 | `.../backup` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore. |
 | `.../backup/blobstore` | Adapter from `backup.ObjectStore` to one bucket of the object store. |
 | `.../ulid` | ULID generation: 26-character Crockford base32, time-sortable. |
 | `.../canonical` | Deterministic JSON encoding for signatures and content addressing: sorted keys, stable numbers, no whitespace. |
 | `.../ranking` | Reciprocal rank fusion for combining full-text and vector result lists. |
+| `.../internal/bucket` | The root bucket name registry for the sub-stores (`RECORD`, `SERIES`, `VECTOR`, `FSTREE`, `SEARCH`, `GRAPHS`, `OBJECT`, `SYSTEM`, `LEDGER`). Append a name for a new store; never rename an existing one. Not public API. |
 | `.../internal/...` | Shared bbolt helpers, AEAD primitives, Argon2id/BLAKE2b, SLIP-0010/0021 and CPU detection. Not public API. |
 
 The stores are independent. The root package is a convenience composition,
@@ -57,12 +57,14 @@ object/                    flat object store root bucket
 ledger/                    audit trail (created only when auditing is enabled)
 ```
 
-The names come from the `store` package registry (`store.RECORD`,
-`store.FSTREE`, `store.SERIES`, `store.VECTOR`, `store.SEARCH`, `store.GRAPHS`,
-`store.OBJECT`, `store.SYSTEM`, `store.LEDGER`). They are the persisted bucket
-names, so they are part of the on-disk format and do not change; the store
-packages own no root name of their own. The no-argument accessors use these
-buckets; passing explicit path segments selects a different root.
+The names come from the `internal/bucket` registry (`bucket.RECORD`,
+`bucket.FSTREE`, `bucket.SERIES`, `bucket.VECTOR`, `bucket.SEARCH`, `bucket.GRAPHS`,
+`bucket.OBJECT`, `bucket.SYSTEM`, `bucket.LEDGER`). They are the persisted bucket
+names, so they are part of the on-disk format and do not change; the registry is
+internal, but the strings are documented here for tools that read a database
+directly. The store packages own no root name of their own. The no-argument
+accessors use these buckets; passing explicit path segments selects a different
+root.
 
 `system/Metadata` contains the Argon2id salt and cost parameters, the
 encryption flags, and a sealed canary. It is the only record that must be read
@@ -841,7 +843,7 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
   layouts, encryption internals, invariants, development workflow.
 - Per-package guides live in `store/record/README.md`, `store/fstree/README.md`, `store/series/README.md`,
   `store/vector/README.md`, `store/fstree/s3fs/README.md`, `store/ledger/README.md`,
-  `cluster/README.md`, `pkg/store/README.md`, `store/object/README.md`,
+  `cluster/README.md`, `store/README.md`, `store/object/README.md`,
   `store/graphs/README.md`, `store/system/README.md` and
   `backup/README.md`. Package doc comments are the source of truth for
   behavior; package guides are the source of truth for usage.
@@ -892,7 +894,7 @@ See [.github/workflows/ci.yml](.github/workflows/ci.yml).
 - [store/ledger/README.md](store/ledger/README.md)
 - [store/object/README.md](store/object/README.md)
 - [cluster/README.md](cluster/README.md)
-- [pkg/store/README.md](pkg/store/README.md)
+- [store/README.md](store/README.md)
 - [backup/README.md](backup/README.md)
 - [store/system/README.md](store/system/README.md)
 
@@ -914,7 +916,7 @@ Generated API documentation:
 - [github.com/malivvan/tempest/canonical](https://pkg.go.dev/github.com/malivvan/tempest/canonical)
 - [github.com/malivvan/tempest/backup](https://pkg.go.dev/github.com/malivvan/tempest/backup)
 - [github.com/malivvan/tempest/backup/blobstore](https://pkg.go.dev/github.com/malivvan/tempest/backup/blobstore)
-- [github.com/malivvan/tempest/pkg/store](https://pkg.go.dev/github.com/malivvan/tempest/pkg/store)
+- [github.com/malivvan/tempest/store](https://pkg.go.dev/github.com/malivvan/tempest/store)
 
 ## Pre-release checklist
 

@@ -6,8 +6,8 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/metrics"
-	"github.com/malivvan/tempest/store"
 	"github.com/malivvan/tempest/store/vector/hnsw"
 )
 
@@ -291,7 +291,7 @@ func (h *HNSWIndex) observeFallback(scanned int) {
 		return
 	}
 	labels := metrics.Labels{
-		metrics.LabelStore: store.VECTOR,
+		metrics.LabelStore: bucket.VECTOR,
 		metrics.LabelOp:    "search",
 	}
 	metrics.Counter(h.obs, metrics.MetricVectorFallbacks, 1, labels)

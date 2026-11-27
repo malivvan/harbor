@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,7 +41,7 @@ func TestDeleteRangeSeedsCountForMetadataLessSeries(t *testing.T) {
 
 // The block path has the same count bookkeeping.
 func TestDeleteRangeSeedsCountForBlockSeries(t *testing.T) {
-	store := openBlockStore(t, []byte(hstore.SERIES), 7, 10)
+	store := openBlockStore(t, []byte(bucket.SERIES), 7, 10)
 	ctx := context.Background()
 	se := store.Series("cpu")
 

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -66,7 +66,7 @@ func TestStoreOpenErrors(t *testing.T) {
 
 func TestOpenReadOnlyDoesNotMutate(t *testing.T) {
 	ctx := context.Background()
-	root := [][]byte{[]byte(hstore.SEARCH)}
+	root := [][]byte{[]byte(bucket.SEARCH)}
 	path := filepath.Join(t.TempDir(), "ro.db")
 
 	// Create an index and a document with a writable handle.
@@ -239,7 +239,7 @@ func TestWithRootViews(t *testing.T) {
 func TestRootWithEmptySegment(t *testing.T) {
 	ctx := context.Background()
 	bdb, _ := newRawBolt(t)
-	root := [][]byte{[]byte(hstore.SEARCH), {}}
+	root := [][]byte{[]byte(bucket.SEARCH), {}}
 	s, err := Open(ctx, bdb, Config{Root: root})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -305,7 +305,7 @@ func TestIndexNameAndClosed(t *testing.T) {
 
 	// Count on a missing index reports ErrIndexNotFound once its root is gone.
 	if err := s.update(func(tx *bolt.Tx) error {
-		root := tx.Bucket([]byte(hstore.SEARCH))
+		root := tx.Bucket([]byte(bucket.SEARCH))
 		if root == nil {
 			return errors.New("missing root")
 		}
@@ -319,7 +319,7 @@ func TestIndexNameAndClosed(t *testing.T) {
 
 	// And once the whole root is gone the bucket traversal returns not-found.
 	if err := s.update(func(tx *bolt.Tx) error {
-		return tx.DeleteBucket([]byte(hstore.SEARCH))
+		return tx.DeleteBucket([]byte(bucket.SEARCH))
 	}); err != nil {
 		t.Fatalf("delete root bucket: %v", err)
 	}
@@ -417,7 +417,7 @@ func TestIndexesVariants(t *testing.T) {
 
 	// Rooted store whose root bucket was never created lists nothing.
 	bdb2, _ := newRawBolt(t)
-	rooted, err := Open(ctx, bdb2, Config{Root: [][]byte{[]byte(hstore.SEARCH)}})
+	rooted, err := Open(ctx, bdb2, Config{Root: [][]byte{[]byte(bucket.SEARCH)}})
 	if err != nil {
 		t.Fatalf("Open rooted: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestVersionAndModeErrors(t *testing.T) {
 
 	// A malformed (wrong length) version record fails closed.
 	bdb, _ := newRawBolt(t)
-	s, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(hstore.SEARCH)}})
+	s, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(bucket.SEARCH)}})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -461,7 +461,7 @@ func TestVersionAndModeErrors(t *testing.T) {
 		t.Fatalf("Open index: %v", err)
 	}
 	if err := bdb.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(hstore.SEARCH)).Bucket([]byte("docs")).Put([]byte(versionKey), []byte{1, 2, 3})
+		return tx.Bucket([]byte(bucket.SEARCH)).Bucket([]byte("docs")).Put([]byte(versionKey), []byte{1, 2, 3})
 	}); err != nil {
 		t.Fatalf("corrupt version: %v", err)
 	}
@@ -471,7 +471,7 @@ func TestVersionAndModeErrors(t *testing.T) {
 
 	// Missing version under a read-only store is an incompatible version.
 	bdb2, _ := newRawBolt(t)
-	s2, err := Open(ctx, bdb2, Config{Root: [][]byte{[]byte(hstore.SEARCH)}})
+	s2, err := Open(ctx, bdb2, Config{Root: [][]byte{[]byte(bucket.SEARCH)}})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -479,11 +479,11 @@ func TestVersionAndModeErrors(t *testing.T) {
 		t.Fatalf("Open index: %v", err)
 	}
 	if err := bdb2.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(hstore.SEARCH)).Bucket([]byte("docs")).Delete([]byte(versionKey))
+		return tx.Bucket([]byte(bucket.SEARCH)).Bucket([]byte("docs")).Delete([]byte(versionKey))
 	}); err != nil {
 		t.Fatalf("delete version: %v", err)
 	}
-	ro, err := OpenReadOnly(ctx, bdb2, Config{Root: [][]byte{[]byte(hstore.SEARCH)}})
+	ro, err := OpenReadOnly(ctx, bdb2, Config{Root: [][]byte{[]byte(bucket.SEARCH)}})
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
@@ -493,7 +493,7 @@ func TestVersionAndModeErrors(t *testing.T) {
 
 	// Missing mode record under a read-only store is the wrong mode.
 	bdb3, _ := newRawBolt(t)
-	s3, err := Open(ctx, bdb3, Config{Root: [][]byte{[]byte(hstore.SEARCH)}})
+	s3, err := Open(ctx, bdb3, Config{Root: [][]byte{[]byte(bucket.SEARCH)}})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -501,11 +501,11 @@ func TestVersionAndModeErrors(t *testing.T) {
 		t.Fatalf("Open index: %v", err)
 	}
 	if err := bdb3.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(hstore.SEARCH)).Bucket([]byte("docs")).Delete([]byte(modeKey))
+		return tx.Bucket([]byte(bucket.SEARCH)).Bucket([]byte("docs")).Delete([]byte(modeKey))
 	}); err != nil {
 		t.Fatalf("delete mode: %v", err)
 	}
-	ro2, err := OpenReadOnly(ctx, bdb3, Config{Root: [][]byte{[]byte(hstore.SEARCH)}})
+	ro2, err := OpenReadOnly(ctx, bdb3, Config{Root: [][]byte{[]byte(bucket.SEARCH)}})
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
@@ -521,7 +521,7 @@ func TestTermEncryptionRoundTrips(t *testing.T) {
 	// Token encryption without value encryption: term keys are encrypted but
 	// values stay readable.
 	bdb, _ := newRawBolt(t)
-	s, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(hstore.SEARCH)}, Secret: secret, EncryptTokens: true})
+	s, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(bucket.SEARCH)}, Secret: secret, EncryptTokens: true})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -532,7 +532,7 @@ func TestTermEncryptionRoundTrips(t *testing.T) {
 	if err := idx.Upsert(ctx, "a", "encrypted terms here"); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	again, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(hstore.SEARCH)}, Secret: secret, EncryptTokens: true})
+	again, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(bucket.SEARCH)}, Secret: secret, EncryptTokens: true})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -544,7 +544,7 @@ func TestTermEncryptionRoundTrips(t *testing.T) {
 		t.Fatalf("encrypted-token search = %+v, want a", hits)
 	}
 	// Plaintext open of an encrypted-token index is the wrong mode.
-	plain, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(hstore.SEARCH)}})
+	plain, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(bucket.SEARCH)}})
 	if err != nil {
 		t.Fatalf("plain open: %v", err)
 	}
@@ -584,7 +584,7 @@ func TestDeleteUpsertEdges(t *testing.T) {
 
 	// Removing the index bucket makes later writes report not-found.
 	if err := s.update(func(tx *bolt.Tx) error {
-		root := tx.Bucket([]byte(hstore.SEARCH))
+		root := tx.Bucket([]byte(bucket.SEARCH))
 		return root.DeleteBucket([]byte("docs"))
 	}); err != nil {
 		t.Fatalf("delete index bucket: %v", err)
@@ -664,7 +664,7 @@ func TestOpenReadOnlyErrors(t *testing.T) {
 	// A read-only open of an existing index with its metadata removed is not
 	// found (the create path is unavailable).
 	bdb, _ := newRawBolt(t)
-	s, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(hstore.SEARCH)}})
+	s, err := Open(ctx, bdb, Config{Root: [][]byte{[]byte(bucket.SEARCH)}})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -672,11 +672,11 @@ func TestOpenReadOnlyErrors(t *testing.T) {
 		t.Fatalf("Open index: %v", err)
 	}
 	if err := bdb.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(hstore.SEARCH)).Bucket([]byte("docs")).Delete([]byte(metaKey))
+		return tx.Bucket([]byte(bucket.SEARCH)).Bucket([]byte("docs")).Delete([]byte(metaKey))
 	}); err != nil {
 		t.Fatalf("delete meta: %v", err)
 	}
-	ro, err := OpenReadOnly(ctx, bdb, Config{Root: [][]byte{[]byte(hstore.SEARCH)}})
+	ro, err := OpenReadOnly(ctx, bdb, Config{Root: [][]byte{[]byte(bucket.SEARCH)}})
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
@@ -686,7 +686,7 @@ func TestOpenReadOnlyErrors(t *testing.T) {
 
 	// A read-only open of an index missing its docs sub-bucket is not found.
 	bdb2, _ := newRawBolt(t)
-	s2, err := Open(ctx, bdb2, Config{Root: [][]byte{[]byte(hstore.SEARCH)}})
+	s2, err := Open(ctx, bdb2, Config{Root: [][]byte{[]byte(bucket.SEARCH)}})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -694,11 +694,11 @@ func TestOpenReadOnlyErrors(t *testing.T) {
 		t.Fatalf("Open index: %v", err)
 	}
 	if err := bdb2.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(hstore.SEARCH)).Bucket([]byte("docs")).DeleteBucket([]byte(docsBucket))
+		return tx.Bucket([]byte(bucket.SEARCH)).Bucket([]byte("docs")).DeleteBucket([]byte(docsBucket))
 	}); err != nil {
 		t.Fatalf("delete docs bucket: %v", err)
 	}
-	ro2, err := OpenReadOnly(ctx, bdb2, Config{Root: [][]byte{[]byte(hstore.SEARCH)}})
+	ro2, err := OpenReadOnly(ctx, bdb2, Config{Root: [][]byte{[]byte(bucket.SEARCH)}})
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
@@ -717,7 +717,7 @@ func TestCorruptRecords(t *testing.T) {
 			t.Fatalf("Open index: %v", err)
 		}
 		if err := s.update(func(tx *bolt.Tx) error {
-			ib := tx.Bucket([]byte(hstore.SEARCH)).Bucket([]byte("docs"))
+			ib := tx.Bucket([]byte(bucket.SEARCH)).Bucket([]byte("docs"))
 			return ib.Put([]byte(metaKey), []byte("{bad"))
 		}); err != nil {
 			t.Fatalf("corrupt meta: %v", err)
@@ -735,7 +735,7 @@ func TestCorruptRecords(t *testing.T) {
 			t.Fatalf("Upsert: %v", err)
 		}
 		if err := s.update(func(tx *bolt.Tx) error {
-			db := tx.Bucket([]byte(hstore.SEARCH)).Bucket([]byte("docs")).Bucket([]byte(docsBucket))
+			db := tx.Bucket([]byte(bucket.SEARCH)).Bucket([]byte("docs")).Bucket([]byte(docsBucket))
 			return db.Put([]byte("a"), []byte("{bad"))
 		}); err != nil {
 			t.Fatalf("corrupt doc: %v", err)
@@ -753,7 +753,7 @@ func TestCorruptRecords(t *testing.T) {
 			t.Fatalf("Upsert: %v", err)
 		}
 		if err := s.update(func(tx *bolt.Tx) error {
-			tb := tx.Bucket([]byte(hstore.SEARCH)).Bucket([]byte("docs")).Bucket([]byte(termsBucket))
+			tb := tx.Bucket([]byte(bucket.SEARCH)).Bucket([]byte("docs")).Bucket([]byte(termsBucket))
 			return tb.Put([]byte("hello"), []byte("{bad"))
 		}); err != nil {
 			t.Fatalf("corrupt term: %v", err)

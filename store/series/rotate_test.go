@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -38,7 +38,7 @@ func TestReEncryptSeries(t *testing.T) {
 	for _, blockDur := range []int64{0, 10} {
 		t.Run(fmt.Sprintf("block=%d", blockDur), func(t *testing.T) {
 			ctx := context.Background()
-			root := []byte(hstore.SERIES)
+			root := []byte(bucket.SERIES)
 			key1, key2 := testKey(30), testKey(31)
 			path := filepath.Join(t.TempDir(), "rotate.db")
 
@@ -86,7 +86,7 @@ func TestReEncryptSeries(t *testing.T) {
 
 func TestRotateAll(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	key1, key2 := testKey(32), testKey(33)
 	path := filepath.Join(t.TempDir(), "rotate-all.db")
 
@@ -122,7 +122,7 @@ func TestRotateAll(t *testing.T) {
 
 func TestVerifyAll(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	store, db := openAEADTestStore(t, root, Config{Secret: testKey(34), EncryptValues: true})
 	se := store.Series("cpu")
 	require.NoError(t, se.InsertMany(ctx, []Point{{Timestamp: 1, Value: 1}, {Timestamp: 2, Value: 2}}))
@@ -141,7 +141,7 @@ func TestVerifyAll(t *testing.T) {
 
 func TestReEncryptSeriesMetadataOnly(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	key1, key2 := testKey(35), testKey(36)
 	path := filepath.Join(t.TempDir(), "meta.db")
 
@@ -165,7 +165,7 @@ func TestReEncryptSeriesMetadataOnly(t *testing.T) {
 
 func TestRotationWithEncryptedNames(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	key1, key2 := testKey(37), testKey(38)
 	path := filepath.Join(t.TempDir(), "names-rotate.db")
 
@@ -217,7 +217,7 @@ func TestRotationWithEncryptedNames(t *testing.T) {
 
 func TestRotationErrors(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 
 	plain, _ := openAEADTestStore(t, root, Config{})
 	require.ErrorIs(t, plain.ReEncryptSeries(ctx, "cpu", testKey(41)), ErrInvalidConfig)
@@ -243,7 +243,7 @@ func TestRotationErrors(t *testing.T) {
 // neither find nor decrypt the remaining series, so the call is rejected.
 func TestReEncryptSeriesRejectedWithEncryptedNames(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	key1, key2 := testKey(50), testKey(51)
 	path := filepath.Join(t.TempDir(), "rotate-names.db")
 
@@ -271,7 +271,7 @@ func TestReEncryptSeriesRejectedWithEncryptedNames(t *testing.T) {
 // Close; the new key cannot verify the old marker.
 func TestReEncryptSeriesPartialRotation(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	key1, key2 := testKey(40), testKey(41)
 	path := filepath.Join(t.TempDir(), "partial.db")
 

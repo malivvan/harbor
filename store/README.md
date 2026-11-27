@@ -11,7 +11,7 @@ again. This package owns that convention.
 import (
     "context"
 
-    "github.com/malivvan/tempest/pkg/store"
+    "github.com/malivvan/tempest/store"
 )
 
 func main() {

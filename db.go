@@ -23,8 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/metrics"
-	"github.com/malivvan/tempest/store"
 	"github.com/malivvan/tempest/store/fstree"
 	"github.com/malivvan/tempest/store/graphs"
 	"github.com/malivvan/tempest/store/ledger"
@@ -521,7 +521,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 	// The persisted flags decide which features are encrypted, so the on-disk
 	// mode cannot drift between runs.
 	if s.record, err = record.Open(ctx, bdb, record.Config{
-		Root:            namedRoot(store.RECORD),
+		Root:            namedRoot(bucket.RECORD),
 		Codec:           options.Codec,
 		Secret:          keys.Record,
 		EncryptKeys:     system.HasFlag(md.Flags, EncryptRecordKeys),
@@ -533,7 +533,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		return nil, fmt.Errorf("tempest: open record store: %w", err)
 	}
 	if s.fstree, err = fstree.Open(ctx, bdb, fstree.Config{
-		Root:            namedRoot(store.FSTREE),
+		Root:            namedRoot(bucket.FSTREE),
 		Secret:          keys.File,
 		EncryptMetadata: system.HasFlag(md.Flags, EncryptFileMetadata),
 		EncryptContent:  system.HasFlag(md.Flags, EncryptFileContent),
@@ -543,7 +543,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		return nil, fmt.Errorf("tempest: open file store: %w", err)
 	}
 	if s.series, err = series.Open(ctx, bdb, series.Config{
-		Root:               namedRoot(store.SERIES),
+		Root:               namedRoot(bucket.SERIES),
 		Secret:             keys.Series,
 		EncryptValues:      system.HasFlag(md.Flags, EncryptSeriesValues),
 		EncryptSeriesNames: system.HasFlag(md.Flags, EncryptSeriesNames),
@@ -553,7 +553,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		return nil, fmt.Errorf("tempest: open series store: %w", err)
 	}
 	if s.search, err = search.Open(ctx, bdb, search.Config{
-		Root:          namedRoot(store.SEARCH),
+		Root:          namedRoot(bucket.SEARCH),
 		Secret:        keys.Search,
 		EncryptValues: system.HasFlag(md.Flags, EncryptRecordValues),
 		Metrics:       options.Metrics,
@@ -561,7 +561,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		return nil, fmt.Errorf("tempest: open search store: %w", err)
 	}
 	if s.graphs, err = graphs.Open(ctx, bdb, graphs.Config{
-		Root:   namedRoot(store.GRAPHS),
+		Root:   namedRoot(bucket.GRAPHS),
 		Secret: keys.Graphs,
 		// Graph values follow the graph flag for new stores and the db value
 		// flag for stores created before the graph flag existed.
@@ -572,7 +572,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		return nil, fmt.Errorf("tempest: open graphs store: %w", err)
 	}
 	if s.object, err = object.Open(ctx, bdb, object.Config{
-		Root:          namedRoot(store.OBJECT),
+		Root:          namedRoot(bucket.OBJECT),
 		Secret:        keys.Object,
 		EncryptValues: system.HasFlag(md.Flags, EncryptObjectValues) || system.HasFlag(md.Flags, EncryptRecordValues),
 		Audit:         auditSink(AuditObject),
@@ -581,7 +581,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		return nil, fmt.Errorf("tempest: open object store: %w", err)
 	}
 	if s.vector, err = vector.Open(ctx, bdb, vector.Config{
-		Root:                   namedRoot(store.VECTOR),
+		Root:                   namedRoot(bucket.VECTOR),
 		Secret:                 keys.Vector,
 		UseQuant:               options.UseQuant,
 		Quantizer:              options.Quantizer,
@@ -611,7 +611,7 @@ func publicOf(priv ed25519.PrivateKey) ed25519.PublicKey {
 }
 
 // Record returns the record sub-store. Extra path segments select a rooted
-// view of the same store instead of the conventional root (store.RECORD); no
+// view of the same store instead of the conventional root (bucket.RECORD); no
 // segments keeps the conventional root so existing databases stay readable.
 func (s *Store) Record(path ...string) *record.Store {
 	if s == nil {
@@ -629,7 +629,7 @@ func (s *Store) Record(path ...string) *record.Store {
 }
 
 // File returns the fstree sub-store. Extra path segments select a rooted view
-// instead of the conventional root (store.FSTREE).
+// instead of the conventional root (bucket.FSTREE).
 func (s *Store) File(path ...string) *fstree.Store {
 	if s == nil {
 		return nil
@@ -646,7 +646,7 @@ func (s *Store) File(path ...string) *fstree.Store {
 }
 
 // Series returns the time-series sub-store. Extra path segments select a
-// rooted view instead of the conventional root (store.SERIES).
+// rooted view instead of the conventional root (bucket.SERIES).
 func (s *Store) Series(path ...string) *series.Store {
 	if s == nil {
 		return nil
@@ -663,7 +663,7 @@ func (s *Store) Series(path ...string) *series.Store {
 }
 
 // Vector returns the vector sub-store. Extra path segments select a rooted
-// view instead of the conventional root (store.VECTOR).
+// view instead of the conventional root (bucket.VECTOR).
 func (s *Store) Vector(path ...string) *vector.Store {
 	if s == nil {
 		return nil
@@ -680,7 +680,7 @@ func (s *Store) Vector(path ...string) *vector.Store {
 }
 
 // Objects returns the flat object sub-store. Extra path segments select a
-// rooted view instead of the conventional root (store.OBJECT).
+// rooted view instead of the conventional root (bucket.OBJECT).
 func (s *Store) Objects(path ...string) *object.Store {
 	if s == nil {
 		return nil
@@ -697,7 +697,7 @@ func (s *Store) Objects(path ...string) *object.Store {
 }
 
 // Graphs returns the property-graph sub-store. Extra path segments select a
-// rooted view instead of the conventional root (store.GRAPHS).
+// rooted view instead of the conventional root (bucket.GRAPHS).
 func (s *Store) Graphs(path ...string) *graphs.Store {
 	if s == nil {
 		return nil
@@ -714,7 +714,7 @@ func (s *Store) Graphs(path ...string) *graphs.Store {
 }
 
 // Search returns the full-text sub-store. Extra path segments select a rooted
-// view instead of the conventional root (store.SEARCH).
+// view instead of the conventional root (bucket.SEARCH).
 func (s *Store) Search(path ...string) *search.Store {
 	if s == nil {
 		return nil

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -15,7 +15,7 @@ import (
 // boundaries.
 func TestBlockSummaryAggregatesMatchScan(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 
 	plain, _ := openAEADTestStore(t, root, Config{})
 	blocked, _ := openAEADTestStore(t, root, Config{
@@ -54,7 +54,7 @@ func TestBlockSummaryAggregatesMatchScan(t *testing.T) {
 // that matches the points it holds.
 func TestBlockSummaryPersisted(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	store, db := openAEADTestStore(t, root, Config{
 		Secret:        testKey(42),
 		EncryptValues: true,

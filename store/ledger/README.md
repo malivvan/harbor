@@ -25,7 +25,7 @@ store write ──commit──▶ ledger.Record(Entry)
 - **Start anchoring.** The first event links to a fixed genesis hash,
   `SHA-256("tempest/audit/v1/genesis")`, so the beginning of the chain is fixed.
 
-The trail lives in a top-level `ledger/` bucket (`store.LEDGER`) in the same
+The trail lives in a top-level `ledger/` bucket (`bucket.LEDGER`) in the same
 bbolt file as the stores, so it travels with snapshots and backups
 automatically.
 

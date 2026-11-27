@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/metrics"
-	"github.com/malivvan/tempest/store"
 	"github.com/malivvan/tempest/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
@@ -20,7 +20,7 @@ func (s *Store) observeTx(kind string, run func() error) error {
 	start := time.Now()
 	err := run()
 	labels := metrics.Labels{
-		metrics.LabelStore:  store.RECORD,
+		metrics.LabelStore:  bucket.RECORD,
 		metrics.LabelKind:   kind,
 		metrics.LabelResult: resultLabel(err),
 	}
@@ -73,7 +73,7 @@ type node struct {
 	s *Store
 
 	// The root bucket path. An empty path is the database root; the tempest root
-	// package configures [store.RECORD] explicitly.
+	// package configures the `record` root bucket explicitly.
 	root [][]byte
 
 	// Transaction object. Nil if not in transaction

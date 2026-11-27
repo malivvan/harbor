@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/internal/crypto"
 	"github.com/malivvan/tempest/metrics"
-	"github.com/malivvan/tempest/store"
 	"github.com/malivvan/tempest/store/record/index"
 	bolt "go.etcd.io/bbolt"
 )
@@ -88,7 +88,7 @@ func (s *Store) observeRotate(d time.Duration, err error) {
 		return
 	}
 	metrics.Histogram(s.obs, metrics.MetricRotateDuration, float64(d), metrics.Labels{
-		metrics.LabelStore:  store.RECORD,
+		metrics.LabelStore:  bucket.RECORD,
 		metrics.LabelOp:     "rotate",
 		metrics.LabelResult: resultLabel(err),
 	})

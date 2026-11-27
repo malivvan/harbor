@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -65,10 +65,10 @@ func TestDeleteBucketVariants(t *testing.T) {
 	}))
 
 	// Store with a root bucket.
-	rootStore, rootDB := openTestStore(t, []byte(hstore.SERIES))
+	rootStore, rootDB := openTestStore(t, []byte(bucket.SERIES))
 	require.NoError(t, rootDB.Update(func(tx *bolt.Tx) error {
 		require.NoError(t, rootStore.deleteBucket(tx, []byte("missing")))
-		root, err := tx.CreateBucketIfNotExists([]byte(hstore.SERIES))
+		root, err := tx.CreateBucketIfNotExists([]byte(bucket.SERIES))
 		require.NoError(t, err)
 		if _, err := root.CreateBucket([]byte("present")); err != nil {
 			return err
@@ -90,7 +90,7 @@ func TestDeleteBucketVariants(t *testing.T) {
 }
 
 func TestHasData(t *testing.T) {
-	store, db := openTestStore(t, []byte(hstore.SERIES))
+	store, db := openTestStore(t, []byte(bucket.SERIES))
 	has, err := store.hasData(db)
 	require.NoError(t, err)
 	require.False(t, has)

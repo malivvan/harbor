@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 )
 
 // TestOpenIndexRejectsEmptyModeRecord covers a present-but-empty mode record:
@@ -18,14 +18,14 @@ func TestOpenIndexRejectsEmptyModeRecord(t *testing.T) {
 	require.NoError(t, err)
 	defer bdb.Close()
 
-	root := [][]byte{[]byte(store.SEARCH)}
+	root := [][]byte{[]byte(bucket.SEARCH)}
 	st, err := Open(context.Background(), bdb, Config{Root: root})
 	require.NoError(t, err)
 	_, err = st.Open("idx", Config{})
 	require.NoError(t, err)
 
 	require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(store.SEARCH)).Bucket([]byte("idx")).Put([]byte(modeKey), []byte{})
+		return tx.Bucket([]byte(bucket.SEARCH)).Bucket([]byte("idx")).Put([]byte(modeKey), []byte{})
 	}))
 
 	_, err = st.Open("idx", Config{})

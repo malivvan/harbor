@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/internal/crypto"
-	hstore "github.com/malivvan/tempest/store"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -97,7 +97,7 @@ func physicalKeys(t *testing.T, db *bolt.DB, root []byte) (buckets, metaKeys [][
 
 func TestEncryptSeriesNamesStore(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	key := testKey(2)
 	path := filepath.Join(t.TempDir(), "names.db")
 
@@ -156,7 +156,7 @@ func TestEncryptSeriesNamesStore(t *testing.T) {
 
 func TestEncryptSeriesNamesAndValues(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	store, db := openAEADTestStore(t, root, Config{
 		Secret:             testKey(3),
 		EncryptValues:      true,
@@ -188,7 +188,7 @@ func TestEncryptSeriesNamesAndValues(t *testing.T) {
 
 func TestEncryptSeriesNamesModeMismatch(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	store, db := openAEADTestStore(t, root, Config{Secret: testKey(4), EncryptSeriesNames: true})
 	require.NoError(t, store.Series("cpu").Insert(ctx, Point{Timestamp: 1, Value: 1}))
 

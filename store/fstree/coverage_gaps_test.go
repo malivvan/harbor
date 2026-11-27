@@ -14,14 +14,14 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
 
 func openTestFS(t *testing.T) *FS {
 	t.Helper()
-	store, _ := openEncStore(t, []byte(hstore.SERIES), Config{})
+	store, _ := openEncStore(t, []byte(bucket.SERIES), Config{})
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	return fsys
@@ -155,7 +155,7 @@ func TestAEADEnabledHelper(t *testing.T) {
 }
 
 func TestChunkFullFileHelpers(t *testing.T) {
-	store, _ := chunkedStore(t, []byte(hstore.SERIES), 61, 8)
+	store, _ := chunkedStore(t, []byte(bucket.SERIES), 61, 8)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
 	writeTestFile(t, fsys, "/file", "0123456789abc")
@@ -434,7 +434,7 @@ func TestSnapshotCopyAndManager(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	store, err := Open(context.Background(), db, Config{Root: [][]byte{[]byte(hstore.SERIES)}})
+	store, err := Open(context.Background(), db, Config{Root: [][]byte{[]byte(bucket.SERIES)}})
 	require.NoError(t, err)
 	fsys, err := store.Open("fs")
 	require.NoError(t, err)
@@ -606,7 +606,7 @@ func TestFSEncStateAccessor(t *testing.T) {
 	plain := openTestFS(t)
 	require.Nil(t, plain.encState())
 
-	store, _ := openEncStore(t, []byte(hstore.SERIES), Config{Secret: testEncKey(81), EncryptContent: true, Root: [][]byte{[]byte(hstore.SERIES)}})
+	store, _ := openEncStore(t, []byte(bucket.SERIES), Config{Secret: testEncKey(81), EncryptContent: true, Root: [][]byte{[]byte(bucket.SERIES)}})
 	encrypted, err := store.Open("fs")
 	require.NoError(t, err)
 	require.NotNil(t, encrypted.encState())

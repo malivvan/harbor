@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -190,7 +190,7 @@ func TestReadMetadataRejectsMalformedPayloads(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := bdb.Update(func(tx *bolt.Tx) error {
-				b, err := tx.CreateBucketIfNotExists([]byte(hstore.SYSTEM))
+				b, err := tx.CreateBucketIfNotExists([]byte(bucket.SYSTEM))
 				if err != nil {
 					return err
 				}

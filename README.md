@@ -1451,7 +1451,7 @@ go test -run '^$' -bench . -benchmem ./vec ./ts
 - [store/fstree/s3fs/README.md](store/fstree/s3fs/README.md) — the S3-backed `absfs.Filer`.
 - [store/ledger/README.md](store/ledger/README.md) — the tamper-evident audit trail:
   event model, recorded operations, threat model, and direct package use.
-- [pkg/store/README.md](pkg/store/README.md) — the process-wide database
+- [store/README.md](store/README.md) — the process-wide database
   manager, directory layout, and password file.
 - [store/object/README.md](store/object/README.md) — the flat object store, containment,
   and grants.
@@ -1482,7 +1482,7 @@ Generated API documentation is published on pkg.go.dev:
 - [github.com/malivvan/tempest/canonical](https://pkg.go.dev/github.com/malivvan/tempest/canonical)
 - [github.com/malivvan/tempest/backup](https://pkg.go.dev/github.com/malivvan/tempest/backup)
 - [github.com/malivvan/tempest/backup/blobstore](https://pkg.go.dev/github.com/malivvan/tempest/backup/blobstore)
-- [github.com/malivvan/tempest/pkg/store](https://pkg.go.dev/github.com/malivvan/tempest/pkg/store)
+- [github.com/malivvan/tempest/store](https://pkg.go.dev/github.com/malivvan/tempest/store)
 - [github.com/malivvan/tempest/store/vector/doc](https://pkg.go.dev/github.com/malivvan/tempest/store/vector/doc)
 
 Where to start:
@@ -1497,7 +1497,7 @@ Where to start:
 - **Metrics and time series:** [store/series/README.md](store/series/README.md).
 - **Embeddings and similarity search:** [store/vector/README.md](store/vector/README.md).
 - **Process-wide database, blobs or object snapshots:**
-  [pkg/store/README.md](pkg/store/README.md),
+  [store/README.md](store/README.md),
   [store/object/README.md](store/object/README.md) and
   [backup/README.md](backup/README.md).
 - **IDs, metrics or a document vector facade:**

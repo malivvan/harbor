@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -31,7 +31,7 @@ func openTodoStore(t *testing.T, cfg Config) (*Store, *bolt.DB) {
 // and writes. Run this test with -race.
 func TestConcurrentRotationAndAccess(t *testing.T) {
 	ctx := context.Background()
-	store, _ := openTodoStore(t, Config{Secret: testKey(50), EncryptValues: true, Root: [][]byte{[]byte(hstore.SERIES)}})
+	store, _ := openTodoStore(t, Config{Secret: testKey(50), EncryptValues: true, Root: [][]byte{[]byte(bucket.SERIES)}})
 	se := store.Series("cpu")
 	require.NoError(t, se.Insert(ctx, Point{Timestamp: 1, Value: 1}))
 
@@ -82,7 +82,7 @@ func TestConcurrentRotationAndAccess(t *testing.T) {
 // whole store readable with the old key.
 func TestRotateAllRollsBackOnFailure(t *testing.T) {
 	ctx := context.Background()
-	root := [][]byte{[]byte(hstore.SERIES)}
+	root := [][]byte{[]byte(bucket.SERIES)}
 	key1, key2 := testKey(55), testKey(56)
 	path := filepath.Join(t.TempDir(), "rollback.db")
 
@@ -96,7 +96,7 @@ func TestRotateAllRollsBackOnFailure(t *testing.T) {
 
 	// Corrupt the second series so the rotation aborts after rewriting "a".
 	require.NoError(t, db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(hstore.SERIES)).Bucket([]byte("b"))
+		bucket := tx.Bucket([]byte(bucket.SERIES)).Bucket([]byte("b"))
 		key := encodeKey(1)
 		// Copy before mutating: bucket.Get returns a slice into bbolt's mmap,
 		// and writing to it corrupts the mapped file (and faults under a
@@ -135,7 +135,7 @@ func TestRotateAllRollsBackOnFailure(t *testing.T) {
 // decrypt) the bucket.
 func TestZeroRetentionDoesNotScan(t *testing.T) {
 	ctx := context.Background()
-	store, db := openTodoStore(t, Config{Root: [][]byte{[]byte(hstore.SERIES)}})
+	store, db := openTodoStore(t, Config{Root: [][]byte{[]byte(bucket.SERIES)}})
 
 	require.NoError(t, db.Update(func(tx *bolt.Tx) error {
 		bucket, err := tx.CreateBucketIfNotExists([]byte("plain"))
@@ -240,7 +240,7 @@ func TestDeleteSeriesNeverEscapesAMissingRoot(t *testing.T) {
 // TestEncryptValuesOffKeepsValuesPlaintext guards T8.
 func TestEncryptValuesOffKeepsValuesPlaintext(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	store, db := openTodoStore(t, Config{Secret: testKey(62), EncryptSeriesNames: true, Root: [][]byte{root}})
 
 	const ts = int64(42)

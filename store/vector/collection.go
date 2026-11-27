@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/metrics"
-	"github.com/malivvan/tempest/store"
 )
 
 // Collection represents a single logical group of vectors, similar to a table in SQL databases.
@@ -365,7 +365,7 @@ func (c *Collection) observeFlush(d time.Duration, points int, err error) {
 		return
 	}
 	labels := metrics.Labels{
-		metrics.LabelStore:  store.VECTOR,
+		metrics.LabelStore:  bucket.VECTOR,
 		metrics.LabelOp:     "flush",
 		metrics.LabelResult: resultLabel(err),
 	}
@@ -466,7 +466,7 @@ func (c *Collection) observeSearch(d time.Duration, results int, err error) {
 		return
 	}
 	labels := metrics.Labels{
-		metrics.LabelStore:  store.VECTOR,
+		metrics.LabelStore:  bucket.VECTOR,
 		metrics.LabelOp:     "search",
 		metrics.LabelResult: resultLabel(err),
 	}

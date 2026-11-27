@@ -12,7 +12,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/malivvan/tempest"
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/store/ledger"
 	"github.com/malivvan/tempest/store/object"
 )
@@ -61,9 +61,9 @@ func TestOpenReadOnly(t *testing.T) {
 	_, err := s.Put(ctx, "b", "k", strings.NewReader("payload"), 7, "")
 	require.NoError(t, err)
 
-	ro, err := object.OpenReadOnly(ctx, bdb, object.Config{Root: [][]byte{[]byte(hstore.OBJECT)}})
+	ro, err := object.OpenReadOnly(ctx, bdb, object.Config{Root: [][]byte{[]byte(bucket.OBJECT)}})
 	require.NoError(t, err)
-	require.Equal(t, [][]byte{[]byte(hstore.OBJECT)}, ro.Root())
+	require.Equal(t, [][]byte{[]byte(bucket.OBJECT)}, ro.Root())
 
 	got, err := ro.ReadAll(ctx, "b", "k")
 	require.NoError(t, err)
@@ -285,7 +285,7 @@ func TestMigrateMissingBucket(t *testing.T) {
 
 func TestOpenReadOnlyMetaErrors(t *testing.T) {
 	ctx := context.Background()
-	root := [][]byte{[]byte(hstore.OBJECT)}
+	root := [][]byte{[]byte(bucket.OBJECT)}
 	versionBytes := func(v uint64) []byte {
 		var buf [8]byte
 		for i := range buf {
@@ -297,7 +297,7 @@ func TestOpenReadOnlyMetaErrors(t *testing.T) {
 	// Missing version record under a read-only open.
 	bdb := rawObjectBolt(t)
 	require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(hstore.OBJECT))
+		_, err := tx.CreateBucketIfNotExists([]byte(bucket.OBJECT))
 		return err
 	}))
 	_, err := object.OpenReadOnly(ctx, bdb, object.Config{Root: root})
@@ -306,7 +306,7 @@ func TestOpenReadOnlyMetaErrors(t *testing.T) {
 	// Malformed version record.
 	bdb2 := rawObjectBolt(t)
 	require.NoError(t, bdb2.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(hstore.OBJECT))
+		b, err := tx.CreateBucketIfNotExists([]byte(bucket.OBJECT))
 		if err != nil {
 			return err
 		}
@@ -318,7 +318,7 @@ func TestOpenReadOnlyMetaErrors(t *testing.T) {
 	// Missing mode record under a read-only open.
 	bdb3 := rawObjectBolt(t)
 	require.NoError(t, bdb3.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(hstore.OBJECT))
+		b, err := tx.CreateBucketIfNotExists([]byte(bucket.OBJECT))
 		if err != nil {
 			return err
 		}
@@ -434,7 +434,7 @@ func TestListCorruptRecord(t *testing.T) {
 	_, err := s.Put(ctx, "b", "good", strings.NewReader("ok"), 2, "")
 	require.NoError(t, err)
 	require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(hstore.OBJECT)).Bucket([]byte("b")).Put([]byte("bad"), []byte("{not json"))
+		return tx.Bucket([]byte(bucket.OBJECT)).Bucket([]byte("b")).Put([]byte("bad"), []byte("{not json"))
 	}))
 	_, err = s.List(ctx, "b", "")
 	require.Error(t, err)
@@ -444,7 +444,7 @@ func TestOpenReadOnlyMissingRoot(t *testing.T) {
 	ctx := context.Background()
 	bdb := rawObjectBolt(t)
 	// No object root bucket at all: a read-only open cannot create it.
-	_, err := object.OpenReadOnly(ctx, bdb, object.Config{Root: [][]byte{[]byte(hstore.OBJECT)}})
+	_, err := object.OpenReadOnly(ctx, bdb, object.Config{Root: [][]byte{[]byte(bucket.OBJECT)}})
 	require.ErrorIs(t, err, object.ErrIncompatibleVersion)
 }
 
@@ -455,9 +455,9 @@ func TestOpenReadOnlyCanaryMissing(t *testing.T) {
 	// Remove the canary but keep version+mode so the read-only open reaches the
 	// canary check.
 	require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(hstore.OBJECT)).Delete([]byte("__canary__"))
+		return tx.Bucket([]byte(bucket.OBJECT)).Delete([]byte("__canary__"))
 	}))
-	_, err := object.OpenReadOnly(ctx, bdb, object.Config{Root: [][]byte{[]byte(hstore.OBJECT)}, Secret: secret, EncryptValues: true})
+	_, err := object.OpenReadOnly(ctx, bdb, object.Config{Root: [][]byte{[]byte(bucket.OBJECT)}, Secret: secret, EncryptValues: true})
 	require.ErrorIs(t, err, object.ErrWrongMode)
 }
 
@@ -468,7 +468,7 @@ func TestListSkipsSubBuckets(t *testing.T) {
 	require.NoError(t, err)
 	// A nested bucket inside the object bucket is skipped by List.
 	require.NoError(t, bdb.Update(func(tx *bolt.Tx) error {
-		_, err := tx.Bucket([]byte(hstore.OBJECT)).Bucket([]byte("b")).CreateBucketIfNotExists([]byte("sub"))
+		_, err := tx.Bucket([]byte(bucket.OBJECT)).Bucket([]byte("b")).CreateBucketIfNotExists([]byte("sub"))
 		return err
 	}))
 	list, err := s.List(ctx, "b", "")

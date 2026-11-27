@@ -2,7 +2,7 @@ package fstree
 
 import (
 	"fmt"
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"path/filepath"
 	"testing"
 	"time"
@@ -424,7 +424,7 @@ func TestInodeCache_Concurrent(t *testing.T) {
 // not alias the cached children slice in a way that later mutations leak into
 // the previously returned node.
 func TestSharedInodeCacheIsCopyOnWrite(t *testing.T) {
-	store, _ := openEncStore(t, []byte(hstore.SERIES), Config{})
+	store, _ := openEncStore(t, []byte(bucket.SERIES), Config{})
 	fsys, err := store.Open("fs")
 	if err != nil {
 		t.Fatal(err)

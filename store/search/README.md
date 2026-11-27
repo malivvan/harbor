@@ -3,7 +3,7 @@
 `search` is a full-text index for tempest: one document per id, BM25 ranking, and
 tokenizers for word text and CJK scripts. The package was historically named
 `fts`; its key label (`tempest/fts/v1`) keeps that name, so existing indexes stay
-readable. It lives under the `search` root bucket (`store.SEARCH`) in the same
+readable. It lives under the `search` root bucket (`bucket.SEARCH`) in the same
 bbolt file and
 participates in [cross-store transactions](../../README.md#cross-store-transactions).
 

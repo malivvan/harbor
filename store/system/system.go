@@ -16,9 +16,9 @@ import (
 	"runtime"
 
 	"github.com/malivvan/tempest/internal/argon2"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/internal/crypto"
 	"github.com/malivvan/tempest/internal/slip21"
-	"github.com/malivvan/tempest/store"
 	"github.com/malivvan/tempest/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
@@ -148,9 +148,9 @@ var (
 )
 
 // Metadata bucket and record names. The header lives in its own top-level
-// bucket, named by the store registry.
+// bucket, named by the internal/bucket registry.
 var (
-	metadataBucket    = []byte(store.SYSTEM)
+	metadataBucket    = []byte(bucket.SYSTEM)
 	metadataRecordKey = []byte("Metadata")
 )
 

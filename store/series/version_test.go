@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -18,7 +18,7 @@ func TestOpenRejectsUnknownFormatVersion(t *testing.T) {
 	defer bdb.Close()
 
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	_, err = Open(ctx, bdb, Config{Root: [][]byte{root}})
 	require.NoError(t, err)
 

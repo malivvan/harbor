@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/metrics"
-	"github.com/malivvan/tempest/store"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -104,7 +104,7 @@ func (b *fsBucket) observeChunk(op string, n int, err error) {
 		return
 	}
 	labels := metrics.Labels{
-		metrics.LabelStore:  store.FSTREE,
+		metrics.LabelStore:  bucket.FSTREE,
 		metrics.LabelOp:     op,
 		metrics.LabelResult: resultLabel(err),
 	}

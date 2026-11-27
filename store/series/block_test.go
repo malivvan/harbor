@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -68,7 +68,7 @@ func blockPoints() []Point {
 
 func TestBlockModeRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	store, db := openAEADTestStore(t, root, Config{
 		Secret:        testKey(20),
 		EncryptValues: true,
@@ -159,7 +159,7 @@ func blockBucketContents(t *testing.T, db *bolt.DB, root []byte, name string) (k
 
 func TestBlockModeDeleteAndRetention(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	store := openBlockStore(t, root, 21, 10)
 	se := store.Series("cpu")
 	require.NoError(t, se.InsertMany(ctx, blockPoints()))
@@ -210,7 +210,7 @@ func TestBlockModeDeleteAndRetention(t *testing.T) {
 
 func TestBlockModeMatchesPlaintext(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 
 	plain, _ := openAEADTestStore(t, root, Config{})
 	blocked, _ := openAEADTestStore(t, root, Config{
@@ -252,7 +252,7 @@ func TestBlockModeMatchesPlaintext(t *testing.T) {
 
 func TestBlockModeTamper(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	store, db := openAEADTestStore(t, root, Config{
 		Secret:        testKey(25),
 		EncryptValues: true,
@@ -283,7 +283,7 @@ func TestBlockModeTamper(t *testing.T) {
 
 func TestBlockModeConfigMismatch(t *testing.T) {
 	ctx := context.Background()
-	root := []byte(hstore.SERIES)
+	root := []byte(bucket.SERIES)
 	store, db := openAEADTestStore(t, root, Config{
 		Secret:        testKey(26),
 		EncryptValues: true,

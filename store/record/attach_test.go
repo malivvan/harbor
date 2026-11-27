@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/store/record/q"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
@@ -72,7 +72,7 @@ func TestAttach_CommitIsAtomic(t *testing.T) {
 	require.NoError(t, err)
 
 	// Raw bolt write in the same caller-owned transaction.
-	audit, err := tx.CreateBucketIfNotExists([]byte(hstore.LEDGER))
+	audit, err := tx.CreateBucketIfNotExists([]byte(bucket.LEDGER))
 	require.NoError(t, err)
 	require.NoError(t, audit.Put([]byte("event"), []byte("created")))
 
@@ -87,7 +87,7 @@ func TestAttach_CommitIsAtomic(t *testing.T) {
 	// The raw bolt write committed atomically with the tempest write.
 	var raw []byte
 	require.NoError(t, db.bolt.View(func(vtx *bolt.Tx) error {
-		b := vtx.Bucket([]byte(hstore.LEDGER))
+		b := vtx.Bucket([]byte(bucket.LEDGER))
 		if b == nil {
 			return ErrNotFound
 		}
@@ -121,7 +121,7 @@ func TestAttach_RollbackDiscardsEverything(t *testing.T) {
 	// tempest record write plus a raw bolt write in the same transaction.
 	require.NoError(t, txn.Save(ctx, &attachUser{ID: 1, Name: "alice", Tag: "t1"}))
 
-	audit, err := tx.CreateBucketIfNotExists([]byte(hstore.LEDGER))
+	audit, err := tx.CreateBucketIfNotExists([]byte(bucket.LEDGER))
 	require.NoError(t, err)
 	require.NoError(t, audit.Put([]byte("event"), []byte("created")))
 
@@ -139,7 +139,7 @@ func TestAttach_RollbackDiscardsEverything(t *testing.T) {
 
 	// The raw bolt write is gone too.
 	require.NoError(t, db.bolt.View(func(vtx *bolt.Tx) error {
-		require.Nil(t, vtx.Bucket([]byte(hstore.LEDGER)))
+		require.Nil(t, vtx.Bucket([]byte(bucket.LEDGER)))
 		return nil
 	}))
 
@@ -264,14 +264,14 @@ func TestAttach_NeverCommitsOrRollsBackCallerTx(t *testing.T) {
 
 	// The transaction must still be open and writable: a raw bolt write
 	// succeeds only if tempest neither committed nor rolled it back.
-	audit, err := tx.CreateBucketIfNotExists([]byte(hstore.LEDGER))
+	audit, err := tx.CreateBucketIfNotExists([]byte(bucket.LEDGER))
 	require.NoError(t, err)
 	require.NoError(t, audit.Put([]byte("event"), []byte("created")))
 
 	// Nothing was committed in between.
 	require.NoError(t, db.bolt.View(func(vtx *bolt.Tx) error {
 		require.Nil(t, vtx.Bucket([]byte("attachUser")))
-		require.Nil(t, vtx.Bucket([]byte(hstore.LEDGER)))
+		require.Nil(t, vtx.Bucket([]byte(bucket.LEDGER)))
 		return nil
 	}))
 

@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/metrics"
-	"github.com/malivvan/tempest/store"
 	"github.com/malivvan/tempest/store/ledger"
 	bolt "go.etcd.io/bbolt"
 )
@@ -149,7 +149,7 @@ func (s *Store) observeAggregate(d time.Duration, samples int, err error) {
 		return
 	}
 	labels := metrics.Labels{
-		metrics.LabelStore:  store.SERIES,
+		metrics.LabelStore:  bucket.SERIES,
 		metrics.LabelOp:     "aggregate",
 		metrics.LabelResult: resultLabel(err),
 	}
@@ -193,7 +193,7 @@ func (s *Store) nowOf() *nowProvider {
 // WithRoot returns a view of the store rooted at the given bucket path. The
 // view shares the handle, clock and encryption state with the receiver. No
 // segments means the database root; pass the conventional root explicitly
-// (for example store.SERIES) to keep it.
+// (for example bucket.SERIES) to keep it.
 func (s *Store) WithRoot(parts ...string) *Store {
 	if s == nil {
 		return nil

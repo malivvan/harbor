@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/store/ledger"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
@@ -27,7 +27,7 @@ func openAuditedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	rec := ledger.NewRecorder(db, map[string]ed25519.PrivateKey{ledger.StoreSeries: priv})
-	store, err := openStore(context.Background(), db, []byte(hstore.SERIES), Config{Audit: rec})
+	store, err := openStore(context.Background(), db, []byte(bucket.SERIES), Config{Audit: rec})
 	require.NoError(t, err)
 	return store, db, pub
 }
@@ -51,7 +51,7 @@ func TestAuditRecordsSeriesWrites(t *testing.T) {
 }
 
 func TestAuditDisabledRecordsNothing(t *testing.T) {
-	store, db := openTestStore(t, []byte(hstore.SERIES))
+	store, db := openTestStore(t, []byte(bucket.SERIES))
 	require.NoError(t, store.Series("cpu").Insert(context.Background(), Point{Timestamp: 1, Value: 1}))
 
 	_, err := ledger.Verify(db, map[string]ed25519.PublicKey{ledger.StoreSeries: nil})

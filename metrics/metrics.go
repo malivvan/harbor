@@ -48,7 +48,7 @@ type Labels map[string]string
 // series predictable for an exporter.
 const (
 	// LabelStore is the sub-store that produced the metric, named by the
-	// store registry ("record", "fstree", "series", "vector", "search",
+	// internal/bucket registry ("record", "fstree", "series", "vector", "search",
 	// "graphs", "object") or "cluster".
 	LabelStore = "store"
 

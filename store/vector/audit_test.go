@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/malivvan/tempest/store/ledger"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
@@ -27,7 +27,7 @@ func openAuditedStore(t *testing.T) (*Store, *bolt.DB, ed25519.PublicKey) {
 	t.Cleanup(func() { _ = bdb.Close() })
 
 	rec := ledger.NewRecorder(bdb, map[string]ed25519.PrivateKey{ledger.StoreVector: priv})
-	store, err := openStore(context.Background(), bdb, []byte(hstore.VECTOR), Config{Audit: rec})
+	store, err := openStore(context.Background(), bdb, []byte(bucket.VECTOR), Config{Audit: rec})
 	require.NoError(t, err)
 	return store, bdb, pub
 }

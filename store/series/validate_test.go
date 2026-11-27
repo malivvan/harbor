@@ -3,7 +3,7 @@ package series
 import (
 	"testing"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/stretchr/testify/require"
 )
 
@@ -12,7 +12,7 @@ import (
 // a valid key, and Normalize returns the configuration unchanged.
 func TestConfigValidateAndNormalize(t *testing.T) {
 	key := testKey(3)
-	root := [][]byte{[]byte(hstore.SERIES)}
+	root := [][]byte{[]byte(bucket.SERIES)}
 
 	require.NoError(t, Config{}.Validate())
 	require.NoError(t, Config{Root: root, Secret: key, EncryptValues: true}.Validate())

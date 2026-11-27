@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	hstore "github.com/malivvan/tempest/store"
+	"github.com/malivvan/tempest/internal/bucket"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
 )
@@ -27,7 +27,7 @@ func TestConcurrentInsertAndRotate(t *testing.T) {
 	t.Cleanup(func() { _ = bdb.Close() })
 
 	ctx := context.Background()
-	store, err := Open(ctx, bdb, Config{Secret: tsConcurrencyKey(1), EncryptValues: true, Root: [][]byte{[]byte(hstore.SERIES)}})
+	store, err := Open(ctx, bdb, Config{Secret: tsConcurrencyKey(1), EncryptValues: true, Root: [][]byte{[]byte(bucket.SERIES)}})
 	require.NoError(t, err)
 	series := store.Series("cpu")
 	require.NoError(t, series.Insert(ctx, Point{Timestamp: 100, Value: 1}))
@@ -64,7 +64,7 @@ func TestRotateAllSeesConcurrentlyCreatedSeries(t *testing.T) {
 	t.Cleanup(func() { _ = bdb.Close() })
 
 	ctx := context.Background()
-	store, err := Open(ctx, bdb, Config{Secret: tsConcurrencyKey(1), EncryptValues: true, Root: [][]byte{[]byte(hstore.SERIES)}})
+	store, err := Open(ctx, bdb, Config{Secret: tsConcurrencyKey(1), EncryptValues: true, Root: [][]byte{[]byte(bucket.SERIES)}})
 	require.NoError(t, err)
 	require.NoError(t, store.Series("base").Insert(ctx, Point{Timestamp: 1, Value: 1}))
 
