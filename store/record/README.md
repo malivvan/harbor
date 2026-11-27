@@ -606,6 +606,16 @@ records, err := record.Open(ctx, bdb, record.Config{
 
 See [Encryption](../../README.md#encryption) for the complete model, and [AGENTS.md](../../AGENTS.md#encryption-internals) for the implementation details.
 
+## Compression
+
+`Config.Compress` Zstd-compresses record values and key/value values on the
+plaintext side of encryption; `Config.CompressLevel` selects the level and
+`Config.MinCompress` skips small values. Keys, index values and auto-increment
+counters are never compressed. Reads always detect the `ZCMP` envelope, so a
+store written compressed stays readable with `Compress` disabled (and values
+written without compression are readable with it enabled). Compression works
+with or without encryption and survives `ReEncrypt`/`RotateAll`.
+
 ## Errors
 
 Classify with `errors.Is`, not string comparison:

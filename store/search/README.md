@@ -70,6 +70,14 @@ same one.
   tokenizer, so export and verification do not need to know how the index was
   created.
 
+## Compression
+
+`Config.Compress` Zstd-compresses documents, posting lists and index metadata
+before sealing; `CompressLevel` and `MinCompress` tune it. Term keys (plaintext
+or deterministic SIV) are never compressed. Reads auto-detect the envelope, so a
+compressed index stays readable with `Compress` disabled, and import/rotation
+preserve the setting.
+
 ## Errors and format
 
 - The format version is `search.FormatVersion` (1). An index written by another

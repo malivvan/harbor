@@ -211,6 +211,15 @@ unrecoverable. Use `RotateAll`.
 Rotation requires an already encrypted store. There is no in-place plaintext
 migration. See [Encryption](../../README.md#encryption) and [AGENTS.md](../../AGENTS.md#encryption-internals).
 
+## Compression
+
+`Config.Compress` Zstd-compresses point values, block payloads and series
+metadata before sealing (`CompressLevel`, `MinCompress` tune it). Block mode is
+where it pays off: the whole block is compressed once. Single 8-byte points are
+never wrapped, because an envelope would make them larger. Reads auto-detect the
+envelope, so opening the store without compression still works and rotation
+carries the codec.
+
 ## Errors
 
 Use `errors.Is`:

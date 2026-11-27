@@ -48,7 +48,7 @@ dependency. It will be deleted in the next step.
 - [x] Phase 8 — fstree content-addressed chunk deduplication
 - [x] Phase 9 — object blob deduplication
 - [x] Phase 10 — root package wiring
-- [ ] Documentation updates
+- [x] Documentation updates
 
 ---
 

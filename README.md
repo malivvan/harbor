@@ -1106,7 +1106,10 @@ It does **not** protect against:
 - rollback or deletion of whole database pages (values are authenticated, but
   bbolt's page structure is not a globally authenticated log),
 - weak passwords. Use a high-entropy password and consider `StrongKDF*` for
-  high-value data.
+  high-value data,
+- deduplication under encryption, which leaks **plaintext equality**: identical
+  chunks or objects share one stored value, so an observer who can count entries
+  learns which content repeats. Dedup is opt-in for this reason.
 
 Metadata that remains visible includes the salt, KDF parameters, encryption
 flags, the sealed canary, bucket structure, record counts, and the sizes and
@@ -1126,6 +1129,54 @@ responsibility.
 For the key-derivation pipeline, canary design, ciphertext format and
 store-specific encryption internals, see
 [AGENTS.md](AGENTS.md#encryption-internals).
+
+## Compression and deduplication
+
+Every sub-store can compress the values it writes with **Zstandard**. The
+option is write-time only: compressed values carry a self-describing envelope,
+and reads always detect and decode it, so a store written with compression on
+stays readable with compression off (and the reverse).
+
+```go
+store, err := tempest.Open(ctx, "app.db", 0o600, &tempest.Options{
+	Password: "correct horse battery staple",
+	Compression: tempest.Compression{
+		Enable:  true,
+		Level:   3,   // Zstandard level; 0 selects the default
+		MinSize: 512, // skip tiny values (CPU bound only)
+	},
+	Dedup: tempest.Dedup{Files: true, Objects: true},
+})
+```
+
+- **What is compressed:** record values and key/value values, file content and
+  symlink targets, series points/block payloads/metadata, vector point blobs and
+  collection metadata, search documents/posting lists/metadata, graph records,
+  and object records. Keys, deterministic SIV names, auto-increment counters and
+  encryption markers/canaries are never compressed.
+- **No growth:** a value is only stored compressed when the envelope is strictly
+  smaller; small or incompressible values stay raw byte-for-byte.
+- **Order:** compression happens on the plaintext side of encryption
+  (`marshal → compress → seal`), so rotation, `VerifyAll`, canaries and backup
+  verification are unaffected.
+- Each sub-store opened directly exposes `Config.Compress`,
+  `Config.CompressLevel` and `Config.MinCompress`.
+
+**Deduplication** is opt-in and content-addressed (SHA-256 of the plaintext):
+
+- `Dedup.Files` stores file chunks once by content hash and reference-counts
+  them, so identical chunks within a file, across files and across file systems
+  share storage. It implies chunked content (default 64 KiB) and therefore
+  content encryption; it is recorded in the filesystem marker.
+- `Dedup.Objects` stores object content once by hash across keys and buckets,
+  with a reference count; it is recorded in the object store's mode byte.
+- Dedup changes the key layout, so a dedup store must be reopened with the same
+  `Dedup` settings. A mismatch fails closed (`ErrWrongMode`) instead of
+  misreading the layout. Plaintext stores cannot use file dedup
+  (`ErrInvalidOptions`).
+- There is no dedup for records, series, vectors, search or graphs: their values
+  are small and heterogeneous, and reference counting would cost more than it
+  saves.
 
 ## Audit trail
 
@@ -1448,7 +1499,10 @@ The defaults favor portability and safety. For throughput-sensitive workloads:
 - For encrypted time series, set `series.Config.BlockDuration` so blocks are sealed
   and opened once instead of once per point.
 - Use `file.Config.ChunkSize` for large files so writes and truncations touch only
-  the affected chunks.
+  the affected chunks, and `Compression` to shrink repetitive content at the
+  cost of CPU on write and read. Compression is skipped for values below
+  `MinSize`; `Dedup` trades some hashing on write for much smaller storage when
+  content repeats.
 
 The repository ships benchmarks for the hot paths:
 

@@ -291,6 +291,14 @@ returns an empty map for a missing collection. `DeletePoints` silently skips
 IDs that do not exist and succeeds when the collection itself is missing;
 `DropCollection` also succeeds when the collection is already gone.
 
+## Compression
+
+`Config.Compress` Zstd-compresses point blobs (including quantized payloads) and
+collection metadata before sealing; `CompressLevel` and `MinCompress` tune it.
+Point IDs and collection names are deterministic SIV names and are never
+compressed. Reads auto-detect the envelope, so the compression setting can
+change between opens, and rotation carries the codec.
+
 ## Quantization
 
 Scalar quantization shrinks stored vectors from 32-bit floats to 8-bit

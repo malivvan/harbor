@@ -173,6 +173,14 @@ transaction and is idempotent. The legacy data is left untouched.
   edges, not the closed bitemporal version history. Use `Copy` or
   `MigrateFromRecord` for in-process history migration.
 
+## Compression
+
+`Config.Compress` Zstd-compresses node, edge and version records before sealing;
+`CompressLevel` and `MinCompress` tune it. Keys and the canary are never
+compressed (the canary is sealed directly with the keychain). Reads auto-detect
+the envelope, so the setting may change between opens, and rotation carries the
+codec.
+
 ## Not in this package (yet)
 
 The application-facing surfaces of a graph store stay in the application or are

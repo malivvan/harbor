@@ -53,6 +53,19 @@ the same bbolt transaction as the other stores.
 - Logical export (`tempest.Export`) writes one `object.put` record per object,
   across every bucket.
 
+## Compression and deduplication
+
+`Config.Compress` Zstd-compresses the whole object record (content plus its
+size/ETag metadata) before sealing; `CompressLevel` and `MinCompress` tune it.
+Reads auto-detect the envelope, so the setting may change between opens, and
+rotation preserves the data.
+
+`Config.Dedup` stores content once by SHA-256 and reference-counts it: blobs live
+under `__blobs__`, counts under `__blobs_refs__`, and a record keeps only
+`{SHA256, Size}`. `Put`, `Delete` and `Move` update the record and the count in
+one transaction. The mode byte records dedup, so a store must be reopened with
+the same setting or `Open` fails with `ErrWrongMode`.
+
 ## Migrating file-backed blobs
 
 The previous `blob` package stored objects as files in a named `fstree` file

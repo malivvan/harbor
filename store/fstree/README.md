@@ -280,6 +280,23 @@ store, or mount S3 through this package, when content should go to S3.
 never holds plaintext in that mode. External content is stored as one sealed
 blob per file; chunking applies only to the bbolt `data`/`chunks` buckets.
 
+## Compression and deduplication
+
+`Config.Compress` Zstd-compresses file content and symlink targets before
+sealing, in whole-blob and chunked modes alike; `CompressLevel` and `MinCompress`
+tune it. Inode metadata is not compressed. Reads auto-detect the envelope, so
+compression can be toggled between opens, and `RotateAll` re-seals content
+without losing it.
+
+`Config.Dedup` stores chunks by the SHA-256 of their plaintext and
+reference-counts them, so identical chunks (within a file, across files, across
+file systems) are stored once. It implies `ChunkSize` (default 64 KiB) and
+content encryption. The filesystem marker records the dedup bit: reopening with
+a different `Dedup`/`ChunkSize`/encryption combination fails closed with
+`ErrWrongMode`. The layout adds `chunkmap` (ordered content hashes per inode) and
+`chunkrefs` (counts); read, partial write, truncate, whole-file replace and
+delete all maintain the counts in the same transaction as the inode.
+
 ## Encryption
 
 Encryption is opt-in and per file system. A plaintext file system keeps the

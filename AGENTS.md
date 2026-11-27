@@ -30,6 +30,7 @@ separate `docs/` tree.
 | `.../backup` | Content-addressed incremental snapshots, restore, retention and scheduling over an `ObjectStore`; manifests are hashed and verified before restore, and snapshot ids are time-sortable ULIDs generated in the package. |
 | `.../backup/blobstore` | Adapter from `backup.ObjectStore` to one bucket of the object store. |
 | `.../ranking` | Reciprocal rank fusion for combining full-text and vector result lists. |
+| `.../internal/compress` | The Zstandard value codec: pooled encoder/decoder and the self-describing `ZCMP` envelope. Not public API. |
 | `.../internal/bucket` | The root bucket name registry for the sub-stores (`RECORD`, `SERIES`, `VECTOR`, `FSTREE`, `SEARCH`, `GRAPHS`, `OBJECT`, `SYSTEM`, `LEDGER`). Append a name for a new store; never rename an existing one. Not public API. |
 | `.../internal/...` | Shared bbolt helpers, AEAD primitives, Argon2id/BLAKE2b, SLIP-0010/0021 and CPU detection. Not public API. |
 
@@ -235,6 +236,53 @@ Inside the configured root, one bucket per logical object bucket:
 - The store keeps its own format version, mode marker and canary. Existing
   file-backed blobs remain in `fstree`; `MigrateFromFile` copies a bucket.
 
+### Compression and deduplication
+
+Every sub-store can compress the values it writes. The codec lives in
+`internal/compress` and is shared by all stores.
+
+- **Envelope.** A compressed value is `ZCMP` magic, version 1, mode `0x01` (zstd),
+  two reserved bytes, the big-endian original length and a zstd frame, in a
+  16-byte header. Values that do not shrink are stored raw. `compress.Decode`
+  passes a value through unless the magic is present, so the read path never
+  depends on the reader's configuration. An unsupported version/mode or decoded
+  length mismatch fails with `compress.ErrUnsupportedVersion`/`ErrCorrupt`.
+- **Order.** Writers run `marshal → compress → seal`; readers run
+  `open → decompress → unmarshal`. Never compress ciphertext. Keys, index
+  values, deterministic SIV names, auto-increment counters, metadata markers and
+  the canaries are never compressed.
+- **Where the codec lives.** Each store's `encState` carries an immutable
+  `*compress.Codec` (nil when compression is off). A state may exist for
+  compression alone, so every `seal`/`open` helper checks `e.encrypted()`
+  (`kc != nil`) rather than `e != nil`; marker/canary logic uses the same
+  predicate. Rotation copies the codec into the next state.
+- **Config.** `Config.Compress`, `Config.CompressLevel` and `Config.MinCompress`
+  in every store; the root exposes `Options.Compression{Enable, Level, MinSize}`.
+  Compression is write-time only and may be toggled between opens.
+
+Deduplication is opt-in, content-addressed (SHA-256 of the plaintext) and gated
+by the store's marker:
+
+- `fstree` (`Config.Dedup`, root `Options.Dedup.Files`) implies chunked content
+  and content encryption. Layout:
+
+  ```text
+  chunks/<sha256>       sealed chunk content
+  chunkmap/<inode>      ordered hash list, 8-byte count + 32-byte hashes
+                        (sealed when EncryptMetadata; zero hash = empty slot)
+  chunkrefs/<sha256>    8-byte big-endian reference count (plaintext)
+  ```
+
+  A missing chunk-map entry or a truncated list means zero-fill, preserving the
+  existing sparse-file semantics. Acquire/release and the inode update share one
+  bbolt transaction. The layout is recorded in the `FENC` marker (dedup bit);
+  a mismatch fails closed.
+- `object` (`Config.Dedup`, root `Options.Dedup.Objects`) stores content under
+  `__blobs__/<sha256>` with counts in `__blobs_refs__/<sha256>`; the record
+  keeps only `{SHA256, Size}`. The mode byte records the layout.
+- Records, series, vectors, search and graphs get compression only: their values
+  are small and heterogeneous, and refcounting would cost more than it saves.
+
 ### Transactions and concurrency
 
 bbolt provides one writer and many readers, and tempest follows that model:
@@ -367,7 +415,9 @@ Three caveats sit above the bbolt layer and are not fixed by these options:
   not import directly. This is a deliberate break; do not reintroduce the old
   strings.
 - Encryption markers are versioned (`DENC`, `FENC`, `TENC`, `VENC`), and the
-  sealed canary binds the mode flags.
+  sealed canary binds the mode flags. Compression is self-describing and does
+  **not** bump any format or marker; dedup appends a flag to the existing
+  `FENC` marker and the object mode byte and must fail closed on mismatch.
 - Vector schema fingerprints detect a reordered or otherwise incompatible
   point codec.
 - There is no plaintext ↔ encrypted in-place migration; use `Export`/`Import`
