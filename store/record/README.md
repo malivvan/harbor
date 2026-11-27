@@ -416,6 +416,30 @@ err = records.Drop(ctx, &User{})    // or records.Drop(ctx, "User")
 err = records.ReIndex(ctx, &User{}) // rebuild indexes
 ```
 
+### Revisions and conditional writes
+
+Every caller-visible write (`Save`, `Update`, `UpdateField`, `UpdateIf`) bumps a
+per-record revision counter. The counter lives in the bucket's `__metadata`
+child and is sealed when `EncryptMetadata` is enabled. `ReIndex` rebuilds
+indexes without changing it.
+
+```go
+rev, err := records.Revision(ctx, &User{ID: 10})
+
+// Create only: fails with ErrConflict if the key already exists.
+next, err := records.UpdateIf(ctx, &User{ID: 11, Name: "Bob"}, record.Precondition{})
+
+// Compare-and-swap: UpdateIf merges non-zero fields exactly like Update.
+next, err = records.UpdateIf(ctx, &User{ID: 10, Name: "Alice"}, record.Precondition{Revision: rev})
+
+// Delete only if the record is still at the revision the caller saw.
+err = records.DeleteIf(ctx, &User{ID: 10}, record.Precondition{Revision: next})
+```
+
+A mismatch returns `record.ErrConflict`, wrapped with the current and expected
+revisions. `DeleteIf` with a zero revision deletes regardless of revision; a
+missing record returns `record.ErrNotFound`.
+
 ## Transactions
 
 tempest exposes callback-managed transactions only; there is no

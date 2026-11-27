@@ -17,6 +17,47 @@ Conventions used throughout:
 
 ---
 
+## 0. Progress
+
+Last updated: 2026-11-28. Status is `pending`, `in progress`, or `done`. A gap
+is `done` only when its acceptance tests pass and the tree is green.
+
+| Gap | Status | Note |
+|---|---|---|
+| GAP-01 | pending | |
+| GAP-02 | pending | |
+| GAP-03 | pending | |
+| GAP-04 | pending | |
+| GAP-05 | pending | |
+| GAP-06 | pending | |
+| GAP-07 | done | record revisions, `UpdateIf`/`DeleteIf`/`Revision`, `ErrConflict` |
+| GAP-08 | pending | |
+| GAP-09 | pending | |
+| GAP-10 | pending | |
+| GAP-11 | pending | |
+| GAP-12 | pending | |
+| GAP-13 | pending | |
+| GAP-14 | pending | |
+| GAP-15 | pending | |
+| GAP-16 | pending | |
+| GAP-17 | pending | |
+| GAP-18 | pending | |
+| GAP-19 | pending | |
+| GAP-20 | pending | |
+| GAP-21 | pending | |
+| GAP-22 | pending | |
+| GAP-23 | pending | |
+| GAP-24 | pending | |
+| GAP-25 | pending | |
+| GAP-26 | pending | |
+| GAP-27 | pending | |
+| GAP-28 | pending | |
+| GAP-29 | pending | |
+| GAP-30 | pending | |
+| GAP-31 | pending | |
+| GAP-32 | pending | |
+| GAP-33 | pending | |
+
 ## 1. Purpose and how to use this plan
 
 Each gap is written to be landed independently. Every gap section contains:

@@ -115,6 +115,11 @@ var (
 	// that encrypts keys: ciphertext ordering is meaningless, so these queries
 	// fail loud instead of silently returning wrong results.
 	ErrEncryptedOrdering = crypto.ErrEncryptedOrdering
+
+	// ErrConflict is returned by UpdateIf and DeleteIf when the stored record
+	// revision does not satisfy the caller's precondition. The wrapped error
+	// names the current and expected revisions.
+	ErrConflict = errors.New("record: revision conflict")
 )
 
 // wrapError adds operation context to an error while preserving classification.

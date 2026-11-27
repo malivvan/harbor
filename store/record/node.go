@@ -90,6 +90,10 @@ type node struct {
 	// project, when non-empty, limits decode to these top-level fields. It is
 	// set on a query's private node copy by Query.Project.
 	project []string
+
+	// skipRevision suppresses the per-record revision bump for maintenance
+	// rewrites (ReIndex) that do not represent a caller-visible write.
+	skipRevision bool
 }
 
 // cloneBucketPath returns a defensive copy of the given bucket path.

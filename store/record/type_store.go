@@ -34,6 +34,15 @@ type TypeStore interface {
 
 	// DeleteStruct deletes a structure from the associated bucket
 	DeleteStruct(ctx context.Context, data any) error
+
+	// UpdateIf saves a structure only when its stored revision satisfies pre.
+	UpdateIf(ctx context.Context, data any, pre Precondition) (uint64, error)
+
+	// DeleteIf deletes a structure only when its stored revision satisfies pre.
+	DeleteIf(ctx context.Context, data any, pre Precondition) error
+
+	// Revision returns the current revision of the record named by data's ID.
+	Revision(ctx context.Context, data any) (uint64, error)
 }
 
 // Init creates the indexes and buckets for a given structure
@@ -136,6 +145,9 @@ func (n *node) reIndex(ctx context.Context, tx *bolt.Tx, data interface{}, cfg *
 	}
 
 	root := n.withTransaction(tx)
+	// ReIndex rewrites every record to rebuild its indexes. That is not a
+	// caller-visible write, so it must not invalidate a CAS precondition.
+	root.skipRevision = true
 	nodes, err := root.From(cfg.Name).PrefixScan(ctx, indexPrefix)
 	if err != nil {
 		return err
@@ -406,6 +418,11 @@ func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data in
 	}
 	if err := n.registerRefSchema(tx, cfg); err != nil {
 		return err
+	}
+	if !n.skipRevision {
+		if _, err := meta.bumpRevision(id); err != nil {
+			return err
+		}
 	}
 	return checkContext(ctx)
 }
@@ -738,6 +755,13 @@ func (n *node) deleteStruct(ctx context.Context, tx *bolt.Tx, cfg *structConfig,
 	}
 
 	if err := bucket.Delete(id); err != nil {
+		return err
+	}
+	m, err := newMeta(bucket, n)
+	if err != nil {
+		return err
+	}
+	if err := m.deleteRevision(id); err != nil {
 		return err
 	}
 	return checkContext(ctx)
