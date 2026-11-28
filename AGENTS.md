@@ -16,7 +16,7 @@ separate `docs/` tree.
 | `.../store/series` | Named time series with ordered scans, aggregation, labels and retention. |
 | `.../store/vector` | Vector collections with Flat/HNSW indexes, payload filters and quantization. |
 | `.../store/search` | Full-text indexes: BM25 ranking, word and CJK tokenizers, posting lists and corpus statistics. |
-| `.../store/graphs` | Bitemporal property-graph store and the reusable graph core: `Store` keeps node/edge records and closed versions in its own root bucket, while `Graph` (also runnable over `record` for the legacy layout) provides adjacency, traversal, counts, history/as-of/diff/purge and JSON interchange. |
+| `.../store/graphs` | Bitemporal property-graph store and the reusable graph core: `Store` keeps node/edge records and closed versions in its own root bucket, while `Graph` (also runnable over `record` for the legacy layout) provides adjacency, traversal, counts, history/as-of/diff/purge, schema validation, PPR/community/degree/weighted-path analytics and JSON interchange. |
 | `.../store/system` | Store header manager: metadata record, KDF settings, encryption/trace flags, canary and every per-store key derivation. |
 | `.../store` | Process-wide database manager: resolves a directory, reads or creates the password file (published atomically by link, `O_EXCL` fallback, mode 0600, never logged), and opens one handle. It sits next to the sub-store packages it opens. |
 | `.../store/fstree/s3fs` | An `absfs.Filer` backed by S3-compatible object storage. |

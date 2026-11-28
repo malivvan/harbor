@@ -206,11 +206,25 @@ compressed (the canary is sealed directly with the keychain). Reads auto-detect
 the envelope, so the setting may change between opens, and rotation carries the
 codec.
 
+## Analytics
+
+The graph core includes dependency-free, read-only analytics over the same live
+records: `PersonalizedPageRank`, `Communities` (deterministic label
+propagation), `DegreeCentrality`, and `WeightedShortestPath` (Dijkstra over
+edge weights or a numeric property). They read a consistent graph view and do
+not write, so they can run beside writers.
+
+```go
+rank, err := g.PersonalizedPageRank(ctx, []string{"alice"}, graphs.PPROptions{Damping: 0.85})
+communities, err := g.Communities(ctx, graphs.CommunityOptions{})
+path, err := g.WeightedShortestPath(ctx, "alice", "bob", "")
+```
+
 ## Not in this package (yet)
 
 The application-facing surfaces of a graph store stay in the application or are
 later optional packages: RDF/SPARQL and its projections, rule engines, RDFS/OWL
 and SHACL reasoning, Cypher, ontology-driven single-valued supersession,
-PageRank and community detection, merge-entities, and GraphML/GEXF export. The
+merge-entities, and GraphML/GEXF export. The
 core exposes the reads and writes those need; moving one of them into tempest is
 a separate decision, not a side effect of this package.
