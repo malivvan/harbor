@@ -70,6 +70,11 @@ type Config struct {
 	// capability enables it even when this field is false.
 	Tombstone bool
 
+	// History records a revision for every create, update and hard delete.
+	// Opening a store that already carries the history capability enables it
+	// even when this field is false. The zero value leaves the store unchanged.
+	History bool
+
 	// Trace, when non-nil, receives an entry for every committed write.
 	Trace ledger.Sink
 

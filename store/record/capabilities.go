@@ -35,7 +35,7 @@ const (
 // knownCapabilities is the set of bits this build implements. Bits outside it
 // are refused on open, which is what makes the fail-closed guarantee real.
 // Add a bit here only in the same change that implements its read semantics.
-const knownCapabilities = CapExpiry | CapTombstone
+const knownCapabilities = CapExpiry | CapTombstone | CapHistory
 
 const capabilitiesKey = "capabilities"
 

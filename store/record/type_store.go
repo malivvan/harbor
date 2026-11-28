@@ -66,6 +66,18 @@ type TypeStore interface {
 
 	// PurgeDeleted hard-deletes tombstones older than before (zero = all).
 	PurgeDeleted(ctx context.Context, data any, before time.Time) (int, error)
+
+	// History returns every recorded revision of data's primary key.
+	History(ctx context.Context, data any) ([]Revision, error)
+
+	// AsOf returns the record as it stood at at.
+	AsOf(ctx context.Context, data any, at time.Time) (any, error)
+
+	// Diff returns the revisions at or before two instants.
+	Diff(ctx context.Context, data any, from, to time.Time) (*RecordDiff, error)
+
+	// TrimHistory removes revisions older than before.
+	TrimHistory(ctx context.Context, data any, before time.Time) (int, error)
 }
 
 // Init creates the indexes and buckets for a given structure
@@ -173,6 +185,7 @@ func (n *node) reIndex(ctx context.Context, tx *bolt.Tx, data interface{}, cfg *
 	// resurrect a soft-deleted record.
 	root.skipRevision = true
 	root.skipTombstone = true
+	root.skipHistory = true
 	nodes, err := root.From(cfg.Name).PrefixScan(ctx, indexPrefix)
 	if err != nil {
 		return err
@@ -438,10 +451,18 @@ func (n *node) save(ctx context.Context, tx *bolt.Tx, cfg *structConfig, data in
 		return err
 	}
 
+	existed := bucket.Get(id) != nil
 	if err := bucket.Put(id, raw); err != nil {
 		return err
 	}
 	if err := n.registerRefSchema(tx, cfg); err != nil {
+		return err
+	}
+	op := RevisionUpdate
+	if !existed {
+		op = RevisionCreate
+	}
+	if err := n.appendRevision(ctx, tx, bucket, id, op, raw, n.s.now()); err != nil {
 		return err
 	}
 	if !n.skipRevision {
@@ -789,6 +810,9 @@ func (n *node) deleteStruct(ctx context.Context, tx *bolt.Tx, cfg *structConfig,
 	}
 
 	if err := bucket.Delete(id); err != nil {
+		return err
+	}
+	if err := n.appendRevision(ctx, tx, bucket, id, RevisionDelete, nil, n.s.now()); err != nil {
 		return err
 	}
 	m, err := newMeta(bucket, n)

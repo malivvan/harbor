@@ -237,6 +237,11 @@ type Options struct {
 	// hides soft-deleted records.
 	Tombstone bool
 
+	// History records a revision for every record create, update and hard
+	// delete. It is stored with the record store's capability bits, so
+	// reopening without it keeps recording history.
+	History bool
+
 	// Timeout bounds how long Open waits for bbolt's exclusive file lock before
 	// failing. A zero Timeout selects DefaultBoltOptions.Timeout (two seconds),
 	// not bbolt's wait-forever. A negative value is ignored for the same
@@ -594,6 +599,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		MinCompress:     options.Compression.MinSize,
 		Expiry:          options.Expiry,
 		Tombstone:       options.Tombstone,
+		History:         options.History,
 		Trace:           traceSink(TraceRecord),
 		Metrics:         options.Metrics,
 	}); err != nil {

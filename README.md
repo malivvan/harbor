@@ -447,6 +447,10 @@ hides a record without removing its bytes; `Restore` brings it back,
 `record.WithDeleted(ctx)` includes it for audit, and `PurgeDeleted` hard-deletes
 old tombstones. A normal `Save` or `Update` resurrects a soft-deleted record.
 
+With `Options.History`, every create, update and hard delete records a
+revision; `History`, `AsOf`, `Diff` and `TrimHistory` read and prune them
+without changing the live record.
+
 The same TTL shape exists on the other stores: `Collection.SetExpiry` on
 vectors and `Index.UpsertWithExpiry` on full-text documents hide expired entries
 from reads and expose a bounded sweep. Both upgrade the store to format 2 on

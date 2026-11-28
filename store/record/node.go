@@ -98,6 +98,9 @@ type node struct {
 	// skipTombstone suppresses the implicit un-delete performed by a save.
 	// ReIndex must not resurrect a record the caller soft-deleted.
 	skipTombstone bool
+
+	// skipHistory suppresses revision appends for maintenance rewrites.
+	skipHistory bool
 }
 
 // cloneBucketPath returns a defensive copy of the given bucket path.

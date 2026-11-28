@@ -500,6 +500,24 @@ for cursor != nil {
 }
 ```
 
+### Revision history
+
+`Config.History` (root `Options.History`) records a revision for every create,
+update and hard delete in a per-record `__tempest_history__` bucket. `History`
+returns them oldest first, `AsOf` reconstructs the value at an instant, `Diff`
+returns the revisions around a range, and `TrimHistory` prunes older entries.
+The first write sets the `CapHistory` capability bit, so reopening without the
+option keeps recording; `ReIndex` does not append a revision.
+
+```go
+revs, err := records.History(ctx, &User{ID: 10})
+old, err := records.AsOf(ctx, &User{ID: 10}, time.Now().Add(-24*time.Hour))
+n, err := records.TrimHistory(ctx, &User{ID: 10}, time.Now().Add(-30*24*time.Hour))
+```
+
+History values are sealed and rotated with the record store. `Export`/`Import`
+currently export the live records, not their history.
+
 ## Transactions
 
 tempest exposes callback-managed transactions only; there is no
