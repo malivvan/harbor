@@ -144,6 +144,7 @@ Inside the configured root:
 
 ```text
 __ts_meta__/                  series metadata, keyed by series name
+  __rollups__/<target>        persisted rollup specifications
 <series>/                     one bucket per series (name may be AES-SIV encrypted)
   <timestamp key>             point value
 ```

@@ -252,7 +252,10 @@ func (se *Series) InsertAt(ctx context.Context, p Point, now int64) error {
 			}
 		}
 
-		return se.updateMetaAfterInsert(ctx, tx, bucket, added, now)
+		if err := se.updateMetaAfterInsert(ctx, tx, bucket, added, now); err != nil {
+			return err
+		}
+		return se.store.applyRollups(ctx, tx, se.name, []Point{p}, now)
 	}); err != nil {
 		return err
 	}
@@ -322,7 +325,10 @@ func (se *Series) InsertManyAt(ctx context.Context, points []Point, now int64) e
 			}
 		}
 
-		return se.updateMetaAfterInsert(ctx, tx, bucket, added, now)
+		if err := se.updateMetaAfterInsert(ctx, tx, bucket, added, now); err != nil {
+			return err
+		}
+		return se.store.applyRollups(ctx, tx, se.name, points, now)
 	}); err != nil {
 		return err
 	}

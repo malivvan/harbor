@@ -340,6 +340,11 @@ func (s *Store) ListSeries(ctx context.Context) ([]SeriesInfo, error) {
 				if err := checkContext(ctx); err != nil {
 					return err
 				}
+				if raw == nil {
+					// Nested bookkeeping buckets, such as __rollups__, are not
+					// series metadata.
+					return nil
+				}
 				if string(physical) == markerKey || string(physical) == versionKey {
 					return nil
 				}

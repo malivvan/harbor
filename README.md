@@ -760,6 +760,13 @@ Aggregations are `AggMin`, `AggMax`, `AggAvg`, `AggSum`, `AggCount`,
 `AggFirst` and `AggLast`. Each returned sample timestamp is the aligned start
 of its window.
 
+### Rollups
+
+`CreateRollup` materializes an aggregate from a source series into a target at
+fixed windows; `OnInsert` keeps the current window current, and
+`RunRollups` backfills a range. `SeriesMatching` selects series by labels.
+See [store/series/README.md](store/series/README.md#rollups).
+
 ### Labels and retention
 
 ```go

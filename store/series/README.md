@@ -96,6 +96,30 @@ one value per window. Each returned `Sample` carries the aligned window start.
 A non-positive step returns `series.ErrInvalidStep`; `start > end` returns
 `series.ErrInvalidRange`.
 
+## Rollups
+
+`CreateRollup` persists a materialized aggregate from a source series into a
+target at `Step`-sized windows. With `OnInsert`, each source insert folds the
+affected window in the same transaction; `RunRollups` backfills a timestamp
+range after the fact. `DropRollup` removes the spec and, unless
+`SharedTarget` is set, the target series. `SeriesMatching` filters the series
+list by label matchers.
+
+```go
+err := store.CreateRollup(ctx, series.RollupSpec{
+	Source:   "requests",
+	Target:   "requests_5m",
+	Step:     300,
+	Func:     series.AggSum,
+	OnInsert: true,
+})
+n, err := store.RunRollups(ctx, "requests", start, end)
+```
+
+A rollup's target insert carries a skip marker, so a chain of rollups does not
+recurse. `SeriesMatching` scans the persisted series metadata; it is the
+correct path, not an index lookup.
+
 ## Labels
 
 ```go
