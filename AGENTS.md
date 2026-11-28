@@ -10,7 +10,7 @@ separate `docs/` tree.
 
 | Package | Responsibility |
 |---------|----------------|
-| `github.com/malivvan/tempest` | Opens one bbolt file, derives per-store keys from a password, and exposes `Record()`, `Fstree()`, `Series()`, `Vector()`, `Search()`, `Graphs()`, `Objects()`, `Flags()` and `Meta()`. Each accessor takes optional bucket-path segments. `HybridSearch` fuses the full-text and vector arms. |
+| `github.com/malivvan/tempest` | Opens one bbolt file, derives per-store keys from a password, and exposes `Record()`, `Fstree()`, `Series()`, `Vector()`, `Search()`, `Graphs()`, `Objects()`, `Flags()` and `Meta()`. Each accessor takes optional bucket-path segments. `HybridSearch` fuses the full-text and vector arms; `RegisterLink`/`Forget`/`Orphans` erase an entity across linked stores. |
 | `.../store/record` | Struct-to-bucket mapping, indexes, matchers, managed transactions, key/value access, codecs. |
 | `.../store/fstree` | Named file systems implementing the `absfs` interfaces, with symlinks, snapshots, inode cache and chunked content. |
 | `.../store/series` | Named time series with ordered scans, aggregation, labels and retention. |

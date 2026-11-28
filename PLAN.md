@@ -26,7 +26,7 @@ is `done` only when its acceptance tests pass and the tree is green.
 |---|---|---|
 | GAP-01 | pending | |
 | GAP-02 | pending | |
-| GAP-03 | pending | |
+| GAP-03 | done | cross-store `Forget` (record history, vectors, search, graph versions, objects, fstree) and `Orphans` repair |
 | GAP-04 | done | record, vector and search expiry (`SetExpiry`/`Expiry`/`SweepExpired`), fail-closed format/capability markers |
 | GAP-05 | done | per-record revisions, `History`/`AsOf`/`Diff`/`TrimHistory`, history capability bit |
 | GAP-06 | done | soft delete/tombstones, `Restore`, `Deleted`, `PurgeDeleted`, capability bit |

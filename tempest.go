@@ -133,6 +133,10 @@ type Store struct {
 	// retrievalMu guards the optional retrieval-event sink.
 	retrievalMu   sync.RWMutex
 	retrievalSink func(RetrievalEvent)
+
+	// linksMu guards the in-memory entity-link registry used by Forget/Orphans.
+	linksMu sync.RWMutex
+	links   []LinkSpec
 }
 
 // Compression selects Zstd compression across the sub-stores. It is a write-time

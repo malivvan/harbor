@@ -276,6 +276,64 @@ func (n *node) TrimHistory(ctx context.Context, data any, before time.Time) (int
 	return removed, nil
 }
 
+// PurgeHistory deletes every revision of data's primary key and returns the
+// number removed. It is the erasure path used by cross-store Forget.
+func (n *node) PurgeHistory(ctx context.Context, data any) (int, error) {
+	if err := checkContext(ctx); err != nil {
+		return 0, wrapError("purge history", err)
+	}
+	if n == nil || n.s == nil || !n.s.history {
+		return 0, wrapError("purge history", ErrHistoryDisabled)
+	}
+	cfg, err := structConfigOf(data)
+	if err != nil {
+		return 0, wrapError("purge history", err)
+	}
+	if cfg.ID.IsZero {
+		return 0, wrapError("purge history", ErrNoID)
+	}
+	removed := 0
+	err = n.readWriteTx(ctx, func(tx *bolt.Tx) error {
+		id, err := n.keyBytes(cfg.ID.Value.Interface(), keyDomainID)
+		if err != nil {
+			return err
+		}
+		b := n.getBucket(tx, cfg.Name)
+		if b == nil {
+			return nil
+		}
+		parent := b.Bucket([]byte(historyBucketName))
+		if parent == nil {
+			return nil
+		}
+		hb := parent.Bucket(id)
+		if hb == nil {
+			return nil
+		}
+		removed = hb.Stats().KeyN
+		if err := parent.DeleteBucket(id); err != nil {
+			return err
+		}
+		// Drop the parent bucket when it becomes empty.
+		empty := true
+		_ = parent.ForEach(func(k, v []byte) error {
+			if v == nil {
+				empty = false
+				return fmt.Errorf("stop")
+			}
+			return nil
+		})
+		if empty {
+			return b.DeleteBucket([]byte(historyBucketName))
+		}
+		return nil
+	})
+	if err != nil {
+		return removed, wrapError("purge history", err)
+	}
+	return removed, nil
+}
+
 // historyAt is a small helper for maintenance paths.
 func historyAt(n *node, tx *bolt.Tx, cfg *structConfig, id []byte) (*bolt.Bucket, error) {
 	b := n.getBucket(tx, cfg.Name)

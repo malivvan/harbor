@@ -79,6 +79,9 @@ type TypeStore interface {
 	// TrimHistory removes revisions older than before.
 	TrimHistory(ctx context.Context, data any, before time.Time) (int, error)
 
+	// PurgeHistory deletes every revision of data's primary key.
+	PurgeHistory(ctx context.Context, data any) (int, error)
+
 	// Validate checks data against its registered TypeSchema.
 	Validate(ctx context.Context, data any) error
 }

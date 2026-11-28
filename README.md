@@ -1383,6 +1383,26 @@ Behaviour worth knowing:
   instead. A read transaction blocks while a write transaction is open, as
   bbolt's single-writer model requires.
 
+## Forgetting an entity
+
+`RegisterLink` describes how one entity id maps into a store (a record type, a
+vector collection, a search index, a graph, an object bucket or an fstree).
+`Forget` deletes every linked row for that id in one `WriteTransaction`:
+records and their history, the vector point, the search document, graph nodes
+and edges including closed versions, object chunks, and the fstree path.
+Missing rows are reported, not treated as errors.
+
+```go
+store.RegisterLink(ctx, tempest.LinkSpec{Store: "record", Type: &Memory{}})
+store.RegisterLink(ctx, tempest.LinkSpec{Store: "vector", Name: "memories"})
+report, err := store.Forget(ctx, "mem-42", tempest.ForgetOptions{})
+```
+
+`Orphans` lists secondary rows whose id has no live record; pass
+`OrphansOptions{Remove: true}` to delete them. Link metadata is persisted without
+the record sample `Type`, so record links must be registered again after a
+reopen; fstree is not scanned by `Orphans`.
+
 ## Database lifecycle
 
 The two entry points differ in who owns the bbolt handle:
