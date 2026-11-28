@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -274,6 +275,11 @@ type Graph struct {
 	values  ValueCodec
 	// versionSeq keeps two versions recorded in the same nanosecond distinct.
 	versionSeq atomic.Uint64
+
+	// schemaMu guards the lazily loaded schema cache.
+	schemaMu     sync.RWMutex
+	schema       *Schema
+	schemaLoaded bool
 }
 
 // New creates a graph on the legacy record-backed layout. It keeps a file
@@ -347,6 +353,9 @@ func (g *Graph) UpsertNode(ctx context.Context, node *Node) error {
 	}
 	properties, err := g.values.Encode(node.Properties)
 	if err != nil {
+		return err
+	}
+	if err := g.validateNode(ctx, node); err != nil {
 		return err
 	}
 	return g.write(ctx, func(w Writer) error {
@@ -473,6 +482,9 @@ func (g *Graph) UpsertEdge(ctx context.Context, edge *Edge) error {
 	}
 	properties, err := g.values.Encode(edge.Properties)
 	if err != nil {
+		return err
+	}
+	if err := g.validateEdge(ctx, edge); err != nil {
 		return err
 	}
 	return g.write(ctx, func(w Writer) error {

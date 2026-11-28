@@ -245,7 +245,7 @@ func (r *rotation) graph(tx *bolt.Tx, name string) error {
 	if gb == nil {
 		return nil
 	}
-	for _, bucket := range []string{nodesBucket, nodeVersionsBucket, edgesBucket, edgeVersionsBucket} {
+	for _, bucket := range []string{nodesBucket, nodeVersionsBucket, edgesBucket, edgeVersionsBucket, schemaBucket} {
 		if err := r.ctx.Err(); err != nil {
 			return err
 		}

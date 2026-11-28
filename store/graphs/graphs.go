@@ -569,7 +569,7 @@ func (s *Store) ensureGraphBucket(tx *bolt.Tx, name string) error {
 	if err != nil {
 		return err
 	}
-	for _, bucket := range []string{nodesBucket, nodeVersionsBucket, edgesBucket, edgeVersionsBucket} {
+	for _, bucket := range []string{nodesBucket, nodeVersionsBucket, edgesBucket, edgeVersionsBucket, schemaBucket} {
 		if _, err := gb.CreateBucketIfNotExists([]byte(bucket)); err != nil {
 			return err
 		}

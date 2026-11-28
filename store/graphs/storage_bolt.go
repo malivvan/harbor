@@ -14,6 +14,7 @@ const (
 	nodeVersionsBucket = "node_versions"
 	edgesBucket        = "edges"
 	edgeVersionsBucket = "edge_versions"
+	schemaBucket       = "__schema__"
 )
 
 // graphStorage adapts one named graph to Storage.
@@ -64,6 +65,7 @@ type buckets struct {
 	nodeVersions *bolt.Bucket
 	edges        *bolt.Bucket
 	edgeVersions *bolt.Bucket
+	schema       *bolt.Bucket
 }
 
 func (g *graphStorage) buckets(tx *bolt.Tx, create bool) (*buckets, error) {
@@ -105,6 +107,7 @@ func (g *graphStorage) buckets(tx *bolt.Tx, create bool) (*buckets, error) {
 			nodeVersionsBucket: &out.nodeVersions,
 			edgesBucket:        &out.edges,
 			edgeVersionsBucket: &out.edgeVersions,
+			schemaBucket:       &out.schema,
 		} {
 			b, err := gb.CreateBucketIfNotExists([]byte(name))
 			if err != nil {
@@ -119,6 +122,7 @@ func (g *graphStorage) buckets(tx *bolt.Tx, create bool) (*buckets, error) {
 		nodeVersions: get(nodeVersionsBucket),
 		edges:        get(edgesBucket),
 		edgeVersions: get(edgeVersionsBucket),
+		schema:       get(schemaBucket),
 	}, nil
 }
 

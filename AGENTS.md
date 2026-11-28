@@ -229,6 +229,7 @@ Inside the configured root, one bucket per graph:
   node_versions/<version id>    closed node version
   edges/<id>                    live edge record
   edge_versions/<version id>    closed edge version
+  __schema__/schema             optional schema contract (sealed)
 ```
 
 - Records are JSON and are sealed when value encryption is enabled; keys stay

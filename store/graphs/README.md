@@ -86,6 +86,31 @@ supplies it so an adoption does not reinterpret stored properties. `Graph`
 borrows the store it is built on and never closes it; several graphs can share
 one file through `WithPrefix`.
 
+## Schema and validation
+
+`SetSchema` persists an opt-in graph contract in the graph's `__schema__`
+bucket: required properties, property types and enums, unique node properties,
+allowed edge endpoints and a per-pair edge cap. `UpsertNode` and `UpsertEdge`
+reject a write that violates an active schema; `Validate(ctx, dryRun)` reports
+existing violations and never mutates the graph. `Schema` returns the persisted
+value, or nil when validation is off.
+
+The schema is sealed and rotated with the graph records. The legacy
+record-backed layout returns `ErrSchemaUnsupported` from `SetSchema`, because
+that layout has no graph-owned metadata bucket.
+
+```go
+err := g.SetSchema(ctx, graphs.Schema{
+	NodeTypes: map[string]graphs.NodeTypeSpec{
+		"person": {Required: []string{"name"}, Unique: []string{"name"}},
+	},
+	EdgeTypes: map[string]graphs.EdgeTypeSpec{
+		"knows": {From: []string{"person"}, To: []string{"person"}, MaxPerPair: 1},
+	},
+})
+report, err := g.Validate(ctx, true)
+```
+
 ## Time
 
 A live record is one row. A version that ended, was replaced, or was retracted
