@@ -451,6 +451,10 @@ With `Options.History`, every create, update and hard delete records a
 revision; `History`, `AsOf`, `Diff` and `TrimHistory` read and prune them
 without changing the live record.
 
+`Options.RecordSchemas` registers typed validation and migration plans:
+defaults, required fields, enums, and contiguous `TypeStep` chains applied by
+`MigrateTypes` in one transaction with a per-type version.
+
 The same TTL shape exists on the other stores: `Collection.SetExpiry` on
 vectors and `Index.UpsertWithExpiry` on full-text documents hide expired entries
 from reads and expose a bounded sweep. Both upgrade the store to format 2 on

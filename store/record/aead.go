@@ -75,6 +75,10 @@ type Config struct {
 	// even when this field is false. The zero value leaves the store unchanged.
 	History bool
 
+	// Schemas registers typed validation and migration plans. A type without an
+	// entry keeps the permissive default. Use WithSchema to append.
+	Schemas []TypeSchema
+
 	// Trace, when non-nil, receives an entry for every committed write.
 	Trace ledger.Sink
 

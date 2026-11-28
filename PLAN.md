@@ -55,7 +55,7 @@ is `done` only when its acceptance tests pass and the tree is green.
 | GAP-29 | pending | |
 | GAP-30 | pending | |
 | GAP-31 | pending | |
-| GAP-32 | pending | |
+| GAP-32 | done | typed record schemas (required/enums/defaults), `Validate`, transactional `MigrateTypes` |
 | GAP-33 | done | `internal/evals` metrics/corpus and the HNSW recall floor in `store/vector/quality_test.go` |
 
 ## 1. Purpose and how to use this plan

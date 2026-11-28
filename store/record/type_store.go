@@ -78,6 +78,9 @@ type TypeStore interface {
 
 	// TrimHistory removes revisions older than before.
 	TrimHistory(ctx context.Context, data any, before time.Time) (int, error)
+
+	// Validate checks data against its registered TypeSchema.
+	Validate(ctx context.Context, data any) error
 }
 
 // Init creates the indexes and buckets for a given structure
@@ -269,6 +272,15 @@ func (n *node) Save(ctx context.Context, data any) error {
 	cfg, err := extract(&ref)
 	if err != nil {
 		return wrapError("save", err)
+	}
+
+	if schema := n.s.schemaFor(cfg.Name); schema != nil {
+		if err := schema.applyDefaults(data); err != nil {
+			return wrapError("save", err)
+		}
+		if err := schema.validate(data); err != nil {
+			return wrapError("save", err)
+		}
 	}
 
 	if cfg.ID.IsZero {

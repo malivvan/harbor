@@ -242,6 +242,10 @@ type Options struct {
 	// reopening without it keeps recording history.
 	History bool
 
+	// RecordSchemas registers typed validation and migration plans for the
+	// record store. A type without an entry keeps the permissive default.
+	RecordSchemas []record.TypeSchema
+
 	// Timeout bounds how long Open waits for bbolt's exclusive file lock before
 	// failing. A zero Timeout selects DefaultBoltOptions.Timeout (two seconds),
 	// not bbolt's wait-forever. A negative value is ignored for the same
@@ -600,6 +604,7 @@ func Open(ctx context.Context, path string, mode os.FileMode, options *Options) 
 		Expiry:          options.Expiry,
 		Tombstone:       options.Tombstone,
 		History:         options.History,
+		Schemas:         options.RecordSchemas,
 		Trace:           traceSink(TraceRecord),
 		Metrics:         options.Metrics,
 	}); err != nil {

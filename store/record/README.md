@@ -518,6 +518,27 @@ n, err := records.TrimHistory(ctx, &User{ID: 10}, time.Now().Add(-30*24*time.Hou
 History values are sealed and rotated with the record store. `Export`/`Import`
 currently export the live records, not their history.
 
+### Typed schemas and migrations
+
+Register a `TypeSchema` with `Config.WithSchema` (root `Options.RecordSchemas`).
+Saving a record applies zero-valued defaults, then rejects a missing required
+field or a value outside an enum with `ErrSchemaInvalid`. `Validate` checks a
+record without writing. `MigrateTypes` applies each type's contiguous
+`TypeStep` chain inside one write transaction; the per-bucket
+`__metadata/schema_version` record makes a second run a no-op and rolls the
+version back with a failing step.
+
+```go
+cfg := record.Config{}.WithSchema(record.TypeSchema{
+	Type:     &User{},
+	Required: []string{"Name"},
+	Enums:    map[string][]string{"Role": {"admin", "member"}},
+	Defaults: map[string]any{"Role": "member"},
+})
+```
+
+A type without a schema keeps the permissive default.
+
 ## Transactions
 
 tempest exposes callback-managed transactions only; there is no

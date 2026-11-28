@@ -74,8 +74,11 @@ func Open(ctx context.Context, bdb *bolt.DB, cfg Config) (*Store, error) {
 		return nil, wrapError("open", err)
 	}
 
-	s := &Store{bolt: bdb, trace: cfg.Trace, obs: cfg.Metrics}
+	s := &Store{bolt: bdb, trace: cfg.Trace, obs: cfg.Metrics, cfgSchemas: cfg.Schemas}
 	s.enc.Store(enc)
+	if err := s.compileSchemas(); err != nil {
+		return nil, wrapError("open", err)
+	}
 
 	root := cloneBucketPath(cfg.Root)
 	n := node{
@@ -144,10 +147,12 @@ type Store struct {
 
 	// caps is the validated persisted capability bitmask; expiry, tombstone
 	// and history report which features are active. All are set at Open.
-	caps      uint64
-	expiry    bool
-	tombstone bool
-	history   bool
+	caps       uint64
+	expiry     bool
+	tombstone  bool
+	history    bool
+	cfgSchemas []TypeSchema
+	schemas    map[string]*compiledSchema
 
 	// nowMu guards nowFn, the optional clock override used by expiry checks
 	// and sweeps. A nil nowFn selects time.Now.

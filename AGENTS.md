@@ -89,6 +89,7 @@ User/                          one bucket per mapped struct
     revision:<key>             8-byte per-record revision
     expiry:<key>               8-byte per-record expiry (UnixNano, sealed)
     deleted:<key>              8-byte soft-delete tombstone (UnixNano, sealed)
+    schema_version             typed-migration version (8-byte, sealed)
   __tempest_index_<Field>/       list or unique index bucket
   __tempest_history__/<id>/<seq> recorded revisions (sealed)
 __tempest_expiry_/             expiry index: expiry + type + key
