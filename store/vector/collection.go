@@ -38,6 +38,11 @@ type Collection struct {
 	// tombstones prevents a later Flush from resurrecting deleted points.
 	tombMu     sync.Mutex
 	tombstones map[string]struct{}
+
+	// allowMixed and mixed gate Search when points carry different embedding
+	// model stamps. Both are set when the collection is opened.
+	allowMixed bool
+	mixed      bool
 }
 
 // DefaultFlushThreshold is the default write-buffer threshold in points. Once
@@ -67,6 +72,9 @@ type CollectionOptions struct {
 	// FlushThreshold is the number of buffered points that triggers a flush.
 	// Zero selects DefaultFlushThreshold.
 	FlushThreshold int
+	// AllowMixedModels lets Search run when points carry different embedding
+	// model stamps. It is saved with the collection.
+	AllowMixedModels bool
 }
 
 // resolve validates the options and fills in defaults.
@@ -174,6 +182,11 @@ func (s *Store) newCollection(opts CollectionOptions) (*Collection, error) {
 		// with. Silently overwriting it would reinterpret old vectors with a
 		// different metric or index type.
 		formatVersion := uint32(CollectionFormatVersion)
+		var (
+			existingModel   EmbeddingModel
+			existingAllow   bool
+			mixedCollection bool
+		)
 		existing, metaErr := s.LoadCollectionMeta(name)
 		switch {
 		case metaErr == nil:
@@ -189,6 +202,8 @@ func (s *Store) newCollection(opts CollectionOptions) (*Collection, error) {
 			if existing.FormatVersion > 0 {
 				formatVersion = existing.FormatVersion
 			}
+			existingModel = existing.Model
+			existingAllow = existing.AllowMixedModels
 		case errors.Is(metaErr, ErrMetadataNotFound):
 			if s.readOnly {
 				return nil, fmt.Errorf("%w: %s", ErrCollectionNotFound, name)
@@ -219,7 +234,17 @@ func (s *Store) newCollection(opts CollectionOptions) (*Collection, error) {
 			if err := col.index.Upsert(batch); err != nil {
 				return nil, fmt.Errorf("failed to load initial points into index: %w", err)
 			}
+			if !existingAllow && existingModel.ID != "" {
+				for i := range batch {
+					if pointModel(&batch[i], existingModel.ID) != existingModel.ID {
+						mixedCollection = true
+						break
+					}
+				}
+			}
 		}
+		col.allowMixed = existingAllow || opts.AllowMixedModels
+		col.mixed = mixedCollection && !col.allowMixed
 
 		// Save collection metadata last, once the configuration is known to be
 		// consistent with what is stored.
@@ -232,6 +257,8 @@ func (s *Store) newCollection(opts CollectionOptions) (*Collection, error) {
 			UseQuant:          s.useQuant,
 			FormatVersion:     formatVersion,
 			SchemaFingerprint: StoredPointSchemaFingerprint,
+			Model:             existingModel,
+			AllowMixedModels:  existingAllow || opts.AllowMixedModels,
 		}
 		if !s.readOnly {
 			if err := s.SaveCollectionMeta(name, meta); err != nil {
@@ -456,6 +483,9 @@ func (c *Collection) Search(queryVector []float32, filter *Filter, topK int) ([]
 	defer c.mu.RUnlock()
 	if c.closed {
 		return nil, ErrClosed
+	}
+	if c.mixed && !c.allowMixed {
+		return nil, ErrMixedModels
 	}
 
 	started := time.Now()

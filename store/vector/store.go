@@ -997,11 +997,12 @@ func (s *Store) Collection(name string) (*Collection, error) {
 		return nil, err
 	}
 	return s.NewCollectionWithOptions(CollectionOptions{
-		Name:       name,
-		VectorLen:  meta.VectorLen,
-		Metric:     meta.Metric,
-		UseHNSW:    meta.UseHNSW,
-		HNSWParams: meta.HNSWParams,
+		Name:             name,
+		VectorLen:        meta.VectorLen,
+		Metric:           meta.Metric,
+		UseHNSW:          meta.UseHNSW,
+		HNSWParams:       meta.HNSWParams,
+		AllowMixedModels: meta.AllowMixedModels,
 	})
 }
 

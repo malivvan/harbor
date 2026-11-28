@@ -39,6 +39,9 @@ func (c *Collection) RangeSearchN(query []float32, radius float32, filter *Filte
 	if c.closed {
 		return nil, ErrClosed
 	}
+	if c.mixed && !c.allowMixed {
+		return nil, ErrMixedModels
+	}
 
 	points := c.index.GetPointsByFilter(filter)
 	hits := make([]ScoredPoint, 0, len(points))

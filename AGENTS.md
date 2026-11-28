@@ -182,6 +182,9 @@ __collections_meta__/         collection metadata records
 - Point expiry lives in the reserved payload key `__expires_at__` and upgrades
   the collection to format 2. Version 1 collections still open; an older build
   refuses 2.
+- `CollectionMeta.Model` and `AllowMixedModels` record embedding provenance; a
+  re-embedded point carries `payload["__model__"]`. A collection with mixed
+  model stamps refuses search unless it allows them.
 - Search indexes (Flat or HNSW) live in memory. Opening a collection reloads
   its points from disk into the index.
 - `Upsert` updates the in-memory index immediately and appends to a buffer.

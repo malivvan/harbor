@@ -35,7 +35,7 @@ is `done` only when its acceptance tests pass and the tree is green.
 | GAP-09 | pending | |
 | GAP-10 | done | `Store.HybridSearch`, RRF + weighted fusion, filters, cursor, `Why` |
 | GAP-11 | done | `store/rag` splitter, offsets/digests, provenance keys, window filter |
-| GAP-12 | pending | |
+| GAP-12 | done | collection model metadata, mixed-model guard, `StalePoints` and resumable `Reembed` |
 | GAP-13 | pending | |
 | GAP-14 | pending | |
 | GAP-15 | pending | |

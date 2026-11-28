@@ -340,6 +340,29 @@ SQ8 scales each vector to `[0, 255]` using its own min/max. Non-finite
 components (`NaN`, `±Inf`) are stored as the vector minimum, so dequantizing
 always yields finite values.
 
+## Embedding model provenance
+
+`CollectionMeta.Model` records the model id, dimensions, metric, normalization
+and optional revision that produced the vectors. `SetModel` validates those
+against the collection and saves them; `StalePoints` returns points whose
+per-point stamp (`payload["__model__"]`) or inherited collection model differs
+from a target. `Reembed` walks the stale points, writes the new vectors with the
+target stamp, flushes in batches, and is resumable: a canceled pass leaves the
+completed points current, so the next call skips them.
+
+A collection opened with points from more than one model refuses `Search` and
+`RangeSearch` with `ErrMixedModels` unless it was created or opened with
+`CollectionOptions.AllowMixedModels` (persisted in the metadata). This makes a
+half-finished re-embedding visible instead of silently ranking incomparable
+vectors.
+
+```go
+model := vector.EmbeddingModel{ID: "openai:text-embedding-3-small", Dimensions: 1536, Metric: vector.Cosine}
+report, err := col.Reembed(ctx, func(id string, old []float32) ([]float32, error) {
+	return embedder.Embed(ctx, loadText(id))
+}, vector.ReembedOptions{Model: model.ID, BatchSize: 64})
+```
+
 ## Encryption
 
 ```go

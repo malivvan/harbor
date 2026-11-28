@@ -80,6 +80,16 @@ type RangeValue struct {
 
 // CollectionMeta stores the configuration and metadata for a vector collection.
 // It is used for persisting collection settings and reloading them on server restart.
+// EmbeddingModel identifies the model that produced a collection's vectors.
+// It is provenance, not a credential: an empty ID means "unknown".
+type EmbeddingModel struct {
+	ID         string   `json:"id,omitempty"`
+	Dimensions int      `json:"dimensions,omitempty"`
+	Metric     Distance `json:"metric,omitempty"`
+	Normalized bool     `json:"normalized,omitempty"`
+	Revision   string   `json:"revision,omitempty"`
+}
+
 type CollectionMeta struct {
 	Name       string     `json:"name"`
 	VectorLen  int        `json:"vector_size"`
@@ -98,6 +108,15 @@ type CollectionMeta struct {
 	// of silently reinterpreting old blobs.
 	FormatVersion     uint32 `json:"format_version,omitempty"`
 	SchemaFingerprint string `json:"schema_fingerprint,omitempty"`
+
+	// Model is the embedding provenance for the collection. Points re-embedded
+	// under a newer model carry the model in their payload; points without a
+	// stamp inherit this value.
+	Model EmbeddingModel `json:"model,omitempty"`
+
+	// AllowMixedModels lets Search run over a collection whose points carry
+	// different model stamps. It is saved so reopening keeps the choice.
+	AllowMixedModels bool `json:"allow_mixed_models,omitempty"`
 }
 
 // CollectionFormatVersion is the on-disk collection metadata revision this

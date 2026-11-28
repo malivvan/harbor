@@ -29,6 +29,10 @@ var (
 	// ErrPointNotFound is returned when a point ID is not present.
 	ErrPointNotFound = errors.New("vector: point not found")
 
+	// ErrMixedModels reports a collection whose points were embedded with more
+	// than one model and which was not opened with AllowMixedModels.
+	ErrMixedModels = errors.New("vector: collection contains points from mixed embedding models")
+
 	// ErrInTransaction reports an operation that cannot run on a store bound to
 	// a caller-owned transaction (for example key rotation).
 	ErrInTransaction = errors.New("vector: operation is not available inside an explicit transaction")
