@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/malivvan/tempest/ranking"
 	"github.com/malivvan/tempest/store/search"
@@ -117,6 +118,7 @@ func (s *Store) HybridSearch(ctx context.Context, req HybridRequest) ([]HybridHi
 	if req.TopK > 1000 {
 		req.TopK = 1000
 	}
+	started := time.Now()
 	candidate := req.TopK * 4
 	if candidate < 64 {
 		candidate = 64
@@ -246,6 +248,27 @@ func (s *Store) HybridSearch(ctx context.Context, req HybridRequest) ([]HybridHi
 			Why:   why,
 		})
 	}
+
+	ids := make([]string, 0, len(hits))
+	why := make([]string, 0, 4)
+	seenWhy := make(map[string]struct{}, 4)
+	for _, hit := range hits {
+		ids = append(ids, hit.ID)
+		for _, reason := range hit.Why {
+			if _, ok := seenWhy[reason]; ok {
+				continue
+			}
+			seenWhy[reason] = struct{}{}
+			why = append(why, reason)
+		}
+	}
+	s.emitRetrieval(RetrievalEvent{
+		At:      time.Now(),
+		Query:   req.Text,
+		Hits:    ids,
+		Latency: time.Since(started),
+		Why:     why,
+	})
 
 	if end < len(fused) && len(page) > 0 {
 		last := page[len(page)-1]

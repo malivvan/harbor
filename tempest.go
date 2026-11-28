@@ -129,6 +129,10 @@ type Store struct {
 	// tracePubs holds the public keys matching the recorder's private keys, so
 	// VerifyTrace can check the chain without re-deriving from the password.
 	tracePubs tracePublicKeys
+
+	// retrievalMu guards the optional retrieval-event sink.
+	retrievalMu   sync.RWMutex
+	retrievalSink func(RetrievalEvent)
 }
 
 // Compression selects Zstd compression across the sub-stores. It is a write-time

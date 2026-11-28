@@ -89,6 +89,22 @@ err := idx.UpsertWithExpiry(ctx, "doc", text, time.Now().Add(24*time.Hour))
 removed, err := idx.SweepExpired(ctx, time.Now())
 ```
 
+## Explain
+
+`Index.SearchExplain` returns the same hits as `Search` with the BM25 terms
+that produced each score. Each `TermContribution` carries the term, IDF, term
+frequency and its contribution; the contributions sum to `Hit.Score`, so a
+caller can present or log a breakdown without a second scoring implementation.
+
+```go
+hits, err := idx.SearchExplain(ctx, "quiet evenings", 10)
+for _, hit := range hits {
+	for _, term := range hit.Terms {
+		log.Printf("%s: %s contributes %.4f", hit.ID, term.Term, term.Contribution)
+	}
+}
+```
+
 ## Compression
 
 `Config.Compress` Zstd-compresses documents, posting lists and index metadata

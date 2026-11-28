@@ -947,6 +947,12 @@ or rune boundaries with byte offsets and SHA-256 digests; `WithProvenance`
 stamps the chunk's document id, index and offsets into a vector payload, and
 `WindowFilter` fetches a chunk's neighbours.
 
+`Store.SetRetrievalSink` receives a `RetrievalEvent` after each successful
+hybrid call: the query, the returned IDs, the latency and the stages that
+contributed. `search.Index.SearchExplain` and
+`vector.Collection.SearchExplain` return the same hits with their score
+breakdown, so a caller can explain a result without re-running the arms.
+
 ## Object storage: `object` and `backup`
 
 tempest has an independent flat object store and a `backup` package built on it:

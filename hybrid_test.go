@@ -170,3 +170,30 @@ func TestHybridErrors(t *testing.T) {
 	_, _, err = store.HybridSearch(ctx, HybridRequest{Text: "x", TextIndex: "docs"})
 	require.ErrorIs(t, err, ErrClosed)
 }
+
+func TestHybridRetrievalSink(t *testing.T) {
+	store, ctx := openHybridStore(t)
+	var events []RetrievalEvent
+	store.SetRetrievalSink(func(event RetrievalEvent) {
+		events = append(events, event)
+	})
+
+	_, _, err := store.HybridSearch(ctx, HybridRequest{
+		Text:      "banana",
+		TextIndex: "docs",
+		Vector:    []float32{1, 0},
+		VectorCol: "docs",
+		TopK:      10,
+	})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, "banana", events[0].Query)
+	require.NotEmpty(t, events[0].Hits)
+	require.NotZero(t, events[0].Latency)
+	require.Contains(t, events[0].Why, "text")
+
+	store.SetRetrievalSink(nil)
+	_, _, err = store.HybridSearch(ctx, HybridRequest{Text: "apple", TextIndex: "docs"})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+}

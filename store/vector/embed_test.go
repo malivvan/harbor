@@ -170,3 +170,24 @@ func TestMixedModelsRejectedUnlessAllowed(t *testing.T) {
 	_, err = allowed2.Search([]float32{1, 0}, nil, 10)
 	require.NoError(t, err)
 }
+
+func TestVectorSearchExplain(t *testing.T) {
+	_, col := openEmbedStore(t, false)
+	require.NoError(t, col.Upsert([]PointStruct{
+		{ID: "a", Vector: []float32{1, 0}},
+		{ID: "b", Vector: []float32{0, 1}},
+	}))
+	require.NoError(t, col.Flush())
+
+	plain, err := col.Search([]float32{1, 0}, nil, 10)
+	require.NoError(t, err)
+	explained, err := col.SearchExplain([]float32{1, 0}, nil, 10)
+	require.NoError(t, err)
+	require.Len(t, explained, len(plain))
+	for i := range plain {
+		require.Equal(t, plain[i].ID, explained[i].ID)
+		require.Equal(t, plain[i].Score, explained[i].Score)
+		require.Equal(t, Cosine, explained[i].Metric)
+		require.Equal(t, "similarity", explained[i].Formula)
+	}
+}

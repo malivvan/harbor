@@ -210,6 +210,20 @@ for _, f := range facets {
 - Counts cover the filtered collection, not a previous search result. To facet
   a result set, pass a filter that selects it or count the result ids yourself.
 
+## Explain
+
+`Collection.SearchExplain` returns the same points as `Search` with the
+collection metric and its score convention (`similarity` for Cosine and Dot,
+`distance` for Euclid). A vector score is one metric value rather than a
+per-term sum, so the explanation is the metric, not a term breakdown.
+
+```go
+points, err := col.SearchExplain(query, filter, 10)
+for _, point := range points {
+	log.Printf("%s: %s %.4f", point.ID, point.Formula, point.Score)
+}
+```
+
 ## Filters
 
 ```go

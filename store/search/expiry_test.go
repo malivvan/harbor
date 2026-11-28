@@ -177,3 +177,28 @@ func mustHitsFor(t *testing.T, idx *Index, ctx context.Context, query string) []
 	require.NoError(t, err)
 	return hits
 }
+
+func TestSearchExplainContributions(t *testing.T) {
+	store, idx := openSearchExpiryStore(t)
+	ctx := context.Background()
+	store.SetNow(func() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) })
+
+	require.NoError(t, idx.Upsert(ctx, "a", "apple banana"))
+	require.NoError(t, idx.Upsert(ctx, "b", "banana cherry"))
+	require.NoError(t, idx.Upsert(ctx, "c", "cherry"))
+
+	hits, err := idx.SearchExplain(ctx, "apple banana", 10)
+	require.NoError(t, err)
+	require.NotEmpty(t, hits)
+	for _, hit := range hits {
+		sum := 0.0
+		for _, term := range hit.Terms {
+			sum += term.Contribution
+		}
+		require.InDelta(t, hit.Score, sum, 1e-9)
+	}
+
+	again, err := idx.SearchExplain(ctx, "apple banana", 10)
+	require.NoError(t, err)
+	require.Equal(t, hits, again)
+}
