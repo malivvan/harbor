@@ -224,6 +224,18 @@ for _, point := range points {
 }
 ```
 
+## Pagination
+
+`ListPointsPage` returns points in ascending ID order with an opaque cursor.
+The cursor carries the last ID and a fingerprint of the filter, so a cursor
+from another filter is refused with `ErrCursorMismatch` and inserts or deletes
+between pages do not duplicate or skip an ID.
+
+```go
+page, cursor, err := col.ListPointsPage(filter, 100, nil)
+page, cursor, err = col.ListPointsPage(filter, 100, cursor)
+```
+
 ## Filters
 
 ```go

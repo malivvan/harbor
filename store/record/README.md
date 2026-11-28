@@ -483,6 +483,23 @@ purged, err := records.PurgeDeleted(ctx, &Todo{}, time.Now().Add(-30*24*time.Hou
 `DeleteOptions.Cascade` is reserved for the cross-store link registry and has
 no effect on a soft delete.
 
+### Pagination
+
+`AllPage` streams records in primary-key order and returns an opaque key cursor.
+Pass the cursor back to continue; a nil cursor means the page is the end. The
+next page is selected by key, not by offset, so inserting or deleting records
+between calls neither duplicates nor skips a record whose key sorts after the
+cursor.
+
+```go
+var page []User
+cursor, err := records.AllPage(ctx, &page, 100, nil)
+for cursor != nil {
+	// handle page
+	cursor, err = records.AllPage(ctx, &page, 100, cursor)
+}
+```
+
 ## Transactions
 
 tempest exposes callback-managed transactions only; there is no

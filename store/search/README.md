@@ -89,6 +89,19 @@ err := idx.UpsertWithExpiry(ctx, "doc", text, time.Now().Add(24*time.Hour))
 removed, err := idx.SweepExpired(ctx, time.Now())
 ```
 
+## Pagination
+
+`SearchPage` returns a page of hits plus a cursor that encodes the last
+(score, id) pair and a fingerprint of the query. A cursor from another query is
+refused with `ErrCursorMismatch`, and writes between pages do not duplicate or
+skip a hit. The implementation materializes the full hit list before slicing,
+so for very large indexes prefer `Search` and pagination in the caller.
+
+```go
+page, cursor, err := idx.SearchPage(ctx, "quiet evenings", 20, nil)
+page, cursor, err = idx.SearchPage(ctx, "quiet evenings", 20, cursor)
+```
+
 ## Explain
 
 `Index.SearchExplain` returns the same hits as `Search` with the BM25 terms

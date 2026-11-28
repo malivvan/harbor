@@ -45,6 +45,10 @@ type Finder interface {
 
 	// Count counts all the records of a bucket
 	Count(ctx context.Context, data any) (int, error)
+
+	// AllPage returns one stable page of records in primary-key order. after
+	// is the cursor from the previous call; nil starts at the beginning.
+	AllPage(ctx context.Context, to any, limit int, after []byte) ([]byte, error)
 }
 
 // resolveBucketName returns the bucket name, falling back to the

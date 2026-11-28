@@ -41,7 +41,7 @@ is `done` only when its acceptance tests pass and the tree is green.
 | GAP-15 | pending | |
 | GAP-16 | pending | |
 | GAP-17 | done | search/vector explain APIs and the root retrieval-event sink |
-| GAP-18 | pending | |
+| GAP-18 | done | record `AllPage`, search `SearchPage`, vector `ListPointsPage` with shape-checked cursors |
 | GAP-19 | pending | |
 | GAP-20 | pending | |
 | GAP-21 | pending | |
