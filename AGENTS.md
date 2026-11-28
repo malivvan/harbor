@@ -245,12 +245,17 @@ Inside the configured root, one bucket per logical object bucket:
 
 ```text
 <bucket>/
-  <key>                         sealed object record (content, size, SHA-256)
+  <key>                         sealed object record (content/metadata, size, SHA-256)
+__chunks__/<sha256>             sealed chunk content for PutStream objects (format 2)
+__chunk_refs__/<sha256>         8-byte chunk reference count (plaintext)
 ```
 
 - `Put` reads the complete reader before writing, so a failing reader leaves the
-  previous content unchanged. Keys are flat slash-separated names and a `..`
-  segment is rejected.
+  previous content unchanged. `PutStream` chunks a reader in 1 MiB pieces and
+  commits the object record last, so a failed stream also leaves the previous
+  object. Keys are flat slash-separated names and a `..` segment is rejected.
+- A chunked object upgrades the store to format 2. Version 1 still opens; an
+  older build refuses 2 instead of reading a chunked object as empty.
 - Records are sealed when value encryption is enabled; keys stay readable.
 - The store keeps its own format version, mode marker and canary. Existing
   file-backed blobs remain in `fstree`; `MigrateFromFile` copies a bucket.

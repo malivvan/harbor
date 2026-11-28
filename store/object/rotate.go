@@ -217,7 +217,7 @@ func (r *rotation) bucketNames(tx *bolt.Tx) ([]string, error) {
 	if err := root.ForEach(func(k, v []byte) error {
 		// Reference counts are plaintext and are not rotated; chunk/blob
 		// content lives in __blobs__ and is re-sealed like a user bucket.
-		if v == nil && string(k) != blobRefsBucketName {
+		if v == nil && string(k) != blobRefsBucketName && string(k) != chunkRefsBucketName {
 			names = append(names, string(k))
 		}
 		return nil

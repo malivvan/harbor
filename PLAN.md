@@ -48,7 +48,7 @@ is `done` only when its acceptance tests pass and the tree is green.
 | GAP-22 | done | persisted graph schema, write validation, `Validate` report |
 | GAP-23 | pending | |
 | GAP-24 | done | persisted rollups (`OnInsert` + `RunRollups`) and `SeriesMatching` label queries |
-| GAP-25 | pending | |
+| GAP-25 | done | `PutStream` chunking, `GetRange`, object metadata, metadata-filtered `ListWithOptions` |
 | GAP-26 | pending | |
 | GAP-27 | pending | |
 | GAP-28 | pending | |

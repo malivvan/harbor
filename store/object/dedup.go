@@ -140,8 +140,15 @@ func (s *Store) readBlob(tx *bolt.Tx, hashHex string) ([]byte, error) {
 // infoOf builds the public metadata of one record.
 func (s *Store) infoOf(key string, rec record) Info {
 	size := int64(len(rec.Data))
-	if s.dedupEnabled() {
+	if s.dedupEnabled() || rec.ChunkSize > 0 {
 		size = rec.Size
 	}
-	return Info{Key: key, Size: size, ETag: rec.SHA256}
+	return Info{
+		Key:         key,
+		Size:        size,
+		ETag:        rec.SHA256,
+		ContentType: rec.ContentType,
+		Metadata:    rec.Metadata,
+		CreatedAt:   rec.CreatedAt,
+	}
 }

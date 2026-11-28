@@ -26,6 +26,30 @@ infos, err := objects.List(ctx, "tenant-a", "reports/")
 - `Grant`/`Minter` are unchanged from the blob API: a grant records which
   object was authorized, for which method, and until when.
 
+## Streaming, range reads and metadata
+
+`PutStream` consumes a reader in `DefaultChunkSize` (1 MiB) chunks, so memory
+is bounded by one chunk rather than the object size. Chunks are stored by
+SHA-256 under `__chunks__` with reference counts in `__chunk_refs__`; replacing
+or deleting an object releases its chunks. `GetRange` reads only the chunks
+that overlap the requested byte range, and `Get` joins the chunks.
+
+`ObjectMeta` carries a content type, user metadata and a creation time.
+`SetMetadata` updates those without rewriting content, `Stat`/`List` return
+them, and `ListWithOptions` filters by exact metadata pairs.
+
+A chunked object upgrades the store to format 2, which an older build refuses
+rather than reading as an empty blob. The first `PutStream` in a store writes
+that version; whole-object `Put` remains format 1.
+
+```go
+info, err := store.PutStream(ctx, "media", "clip.mp4", r, size, object.ObjectMeta{
+	ContentType: "video/mp4",
+	Metadata:    map[string]string{"owner": "alice"},
+})
+rc, err := store.GetRange(ctx, "media", "clip.mp4", offset, length)
+```
+
 ## Lifecycle and integration
 
 `object.Open` borrows a caller-owned `*bolt.DB` and never closes it. The root

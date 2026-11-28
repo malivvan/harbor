@@ -43,6 +43,13 @@ import (
 // and accepts.
 const FormatVersion uint64 = 1
 
+// FormatVersionChunked is written when objects may be stored as chunks. Older
+// builds refuse it, so they cannot read a chunked object as an empty blob.
+const FormatVersionChunked uint64 = 2
+
+// DefaultChunkSize is the plaintext chunk size used by PutStream.
+const DefaultChunkSize = 1 << 20
+
 const (
 	versionKey = "__version__"
 	modeKey    = "__mode__"
@@ -51,8 +58,10 @@ const (
 	// modeDedup records that objects are stored content-addressed.
 	modeDedup byte = 1 << 1
 
-	blobsBucketName    = "__blobs__"
-	blobRefsBucketName = "__blobs_refs__"
+	blobsBucketName     = "__blobs__"
+	blobRefsBucketName  = "__blobs_refs__"
+	chunksBucketName    = "__chunks__"
+	chunkRefsBucketName = "__chunk_refs__"
 
 	canaryPlaintext = "tempest/object/v1"
 )
@@ -152,14 +161,33 @@ type Info struct {
 	Size int64
 	// ETag is the lowercase hex SHA-256 of the content.
 	ETag string
+	// ContentType and Metadata are caller-supplied metadata.
+	ContentType string
+	Metadata    map[string]string
+	// CreatedAt is when the object record was first written.
+	CreatedAt time.Time
+}
+
+// ObjectMeta is the user metadata carried by PutStream and SetMetadata.
+type ObjectMeta struct {
+	ContentType string
+	Metadata    map[string]string
+	CreatedAt   time.Time
 }
 
 // record is the persisted object. In dedup mode Data is empty and Size carries
-// the content length; the bytes live under __blobs__ keyed by SHA256.
+// the content length; the bytes live under __blobs__ keyed by SHA256. A
+// chunked record stores Size, ChunkSize and the ordered chunk hashes, with the
+// bytes under __chunks__.
 type record struct {
-	SHA256 string `json:"sha256"`
-	Size   int64  `json:"size,omitempty"`
-	Data   []byte `json:"data,omitempty"`
+	SHA256      string            `json:"sha256"`
+	Size        int64             `json:"size,omitempty"`
+	Data        []byte            `json:"data,omitempty"`
+	ContentType string            `json:"content_type,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	CreatedAt   time.Time         `json:"created_at,omitempty"`
+	ChunkSize   int               `json:"chunk_size,omitempty"`
+	Chunks      []string          `json:"chunks,omitempty"`
 }
 
 // Open creates a Store over an already-open bbolt database. The caller owns db
@@ -454,8 +482,8 @@ func (s *Store) checkMeta(root *bolt.Bucket, readOnly bool) error {
 		for i := len(raw) - 1; i >= 0; i-- {
 			v = v<<8 | uint64(raw[i])
 		}
-		if v != FormatVersion {
-			return fmt.Errorf("%w: object format %d, this build supports %d", ErrIncompatibleVersion, v, FormatVersion)
+		if v != FormatVersion && v != FormatVersionChunked {
+			return fmt.Errorf("%w: object format %d, this build supports %d", ErrIncompatibleVersion, v, FormatVersionChunked)
 		}
 	}
 
@@ -611,7 +639,11 @@ func (s *Store) Put(ctx context.Context, bucket, key string, r io.Reader, size i
 	}
 	sum := sha256.Sum256(data)
 	hashHex := hex.EncodeToString(sum[:])
-	rec := record{SHA256: hashHex}
+	rec := record{
+		SHA256:      hashHex,
+		ContentType: contentType,
+		CreatedAt:   time.Now().UTC(),
+	}
 	if s.dedupEnabled() {
 		rec.Size = int64(len(data))
 	} else {
@@ -630,6 +662,15 @@ func (s *Store) Put(ctx context.Context, bucket, key string, r io.Reader, size i
 		b, err := s.bucket(tx, bucket, true)
 		if err != nil {
 			return err
+		}
+		if old := b.Get([]byte(okey)); old != nil {
+			var previous record
+			if err := s.recordFromRaw(old, &previous); err != nil {
+				return err
+			}
+			if err := s.releaseRecord(tx, &previous); err != nil {
+				return err
+			}
 		}
 		if s.dedupEnabled() {
 			if err := s.acquireBlob(tx, hashHex, data); err != nil {
@@ -677,12 +718,8 @@ func (s *Store) Get(ctx context.Context, bucket, key string) (io.ReadCloser, int
 		if err := s.getRecord(b, okey, &rec); err != nil {
 			return err
 		}
-		if s.dedupEnabled() {
-			data, err = s.readBlob(tx, rec.SHA256)
-			return err
-		}
-		data = rec.Data
-		return nil
+		data, err = s.recordData(tx, &rec)
+		return err
 	})
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -726,18 +763,14 @@ func (s *Store) Delete(ctx context.Context, bucket, key string) error {
 			return nil
 		}
 		var rec record
-		if s.dedupEnabled() {
-			if err := s.recordFromRaw(raw, &rec); err != nil {
-				return err
-			}
+		if err := s.recordFromRaw(raw, &rec); err != nil {
+			return err
 		}
 		if err := b.Delete([]byte(okey)); err != nil {
 			return err
 		}
-		if s.dedupEnabled() {
-			if err := s.releaseBlob(tx, rec.SHA256); err != nil {
-				return err
-			}
+		if err := s.releaseRecord(tx, &rec); err != nil {
+			return err
 		}
 		if s.trace != nil {
 			entries = append(entries, ledger.Entry{Store: ledger.StoreObject, Op: "delete", Entity: bucket + ":" + okey})
@@ -835,9 +868,21 @@ func (s *Store) Exists(ctx context.Context, bucket, key string) bool {
 	return err == nil && ok
 }
 
+// ListOptions filters ListWithOptions.
+type ListOptions struct {
+	Prefix   string
+	Metadata map[string]string
+}
+
 // List returns every object under bucket whose key begins with prefix,
 // recursively, sorted by key. An absent bucket or prefix is empty.
 func (s *Store) List(ctx context.Context, bucket, prefix string) ([]Info, error) {
+	return s.ListWithOptions(ctx, bucket, ListOptions{Prefix: prefix})
+}
+
+// ListWithOptions is List with a metadata filter. Every supplied metadata pair
+// must match exactly.
+func (s *Store) ListWithOptions(ctx context.Context, bucket string, opts ListOptions) ([]Info, error) {
 	if err := ctxErr(ctx); err != nil {
 		return nil, err
 	}
@@ -846,8 +891,8 @@ func (s *Store) List(ctx context.Context, bucket, prefix string) ([]Info, error)
 	}
 	cleanPrefix := ""
 	var err error
-	if prefix != "" {
-		cleanPrefix, err = objectKey(prefix)
+	if opts.Prefix != "" {
+		cleanPrefix, err = objectKey(opts.Prefix)
 		if err != nil {
 			return nil, err
 		}
@@ -873,15 +918,27 @@ func (s *Store) List(ctx context.Context, bucket, prefix string) ([]Info, error)
 			if err := s.recordFromRaw(v, &rec); err != nil {
 				return err
 			}
+			if !metadataMatches(rec.Metadata, opts.Metadata) {
+				return nil
+			}
 			out = append(out, s.infoOf(key, rec))
 			return nil
 		})
 	})
 	if err != nil {
-		return nil, fmt.Errorf("object: list %q: %w", prefix, err)
+		return nil, fmt.Errorf("object: list %q: %w", opts.Prefix, err)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out, nil
+}
+
+func metadataMatches(have, want map[string]string) bool {
+	for key, value := range want {
+		if have[key] != value {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Store) getRecord(b *bolt.Bucket, key string, dest *record) error {
@@ -1071,6 +1128,19 @@ func (s *Store) DropBucket(ctx context.Context, bucket string) error {
 		root := s.rootBucket(tx)
 		if root == nil || root.Bucket([]byte(bucket)) == nil {
 			return nil
+		}
+		b := root.Bucket([]byte(bucket))
+		if err := b.ForEach(func(k, v []byte) error {
+			if v == nil {
+				return nil
+			}
+			var rec record
+			if err := s.recordFromRaw(v, &rec); err != nil {
+				return err
+			}
+			return s.releaseRecord(tx, &rec)
+		}); err != nil {
+			return err
 		}
 		if err := root.DeleteBucket([]byte(bucket)); err != nil {
 			return err
